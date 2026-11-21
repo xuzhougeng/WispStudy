@@ -482,6 +482,8 @@ pub enum Cmd {
     ToggleFacing,
     /// Translate the paragraphs not translated yet; this is also how a run stopped halfway goes on.
     FacingRun,
+    /// Translate the paper kept beside (its id), as 翻译全文 does the paper on show.
+    FacingRunPane(String),
     FacingStop,
     // Custom fields
     ManageFields,
@@ -1498,6 +1500,8 @@ pub struct Pinned {
     pub paper: String,
     pub view: Entity<PdfView>,
     _events: Subscription,
+    /// Its translation's paragraphs while 译文 is on (`Workspace::load_pinned_facing`), as `Library::facing_text` is the paper on show's.
+    pub facing: Option<crate::facing::Facing>,
 }
 
 /// The most papers pinned beside the one on show: a layout has at most `MAX_COLUMNS` panes.
@@ -1575,6 +1579,11 @@ pub struct Library {
     pub beside: Option<Beside>,
     /// Papers pinned beside the one on show, in the order of their panes.
     pub pins: Vec<Pinned>,
+    /// How tall each pane's bar is of itself, learned as it is drawn ("main" for the paper on show, else the paper
+    /// kept beside); `pane_bar` is the tallest of those drawn, the height every one of them is drawn at, so that
+    /// their lines run on as one and the pages under them start level. 0 with no pane beside.
+    pub pane_bars: HashMap<String, f32>,
+    pub pane_bar: f32,
     /// The fit PDF pages are drawn at (`Zoom::carried`): it stays from paper to paper, a percentage does not.
     pub zoom: Zoom,
     pub library_chat: Chat,
@@ -1615,6 +1624,8 @@ pub struct Library {
     pub facing_start: bool,
     /// The run translating them.
     pub facing_run: Option<crate::translate::TranslationRun>,
+    /// The file `facing_run` translates: the paper on show's, or one kept beside it.
+    pub facing_for: String,
     pub searches: Vec<SavedSearch>,
     /// The latest import batches, newest first.
     pub batches: Vec<ImportBatch>,
@@ -2005,7 +2016,7 @@ impl Library {
     /// Note where the files on show are read at, here and in the library's database, before they are put
     /// away: another paper opened, the library closed or the app quit (#194).
     pub fn keep_places(&mut self, cx: &App) {
-        let views = self.pdf.iter().chain(self.beside.as_ref().map(|beside| &beside.view));
+        let views = self.pdf.iter().chain(self.beside.as_ref().map(|beside| &beside.view)).chain(self.pins.iter().map(|pin| &pin.view));
         let places: Vec<(String, (usize, f32))> = views.map(|view| { let view = view.read(cx); (view.resource_id().to_string(), view.place()) }).collect();
         for (id, place) in &places { self.file_places.insert(id.clone(), *place); }
         let _ = self.store.save_reading_places(&places);
@@ -3273,6 +3284,7 @@ impl Workspace {
             }
             Cmd::ToggleFacing => self.toggle_facing(cx),
             Cmd::FacingRun => self.run_facing(cx),
+            Cmd::FacingRunPane(paper) => self.run_pinned_facing(&paper, cx),
             Cmd::FacingStop => self.stop_facing(cx),
             Cmd::DismissBatchTranslation => {
                 if let Some(lib) = self.lib.as_mut().filter(|lib| lib.translation_run.as_ref().is_some_and(|run| !run.batch.running())) { lib.translation_run = None }
@@ -4171,6 +4183,8 @@ impl Workspace {
             pdf_events: None,
             beside: None,
             pins: vec![],
+            pane_bars: HashMap::new(),
+            pane_bar: 0.,
             zoom: Zoom::FitWidth,
             library_chat,
             paper_chat,
@@ -4201,6 +4215,7 @@ impl Workspace {
             facing_text: None,
             facing_start: false,
             facing_run: None,
+            facing_for: String::new(),
             searches: vec![],
             batches: vec![],
             trial: None,
@@ -4599,12 +4614,11 @@ impl Workspace {
         let Some(file) = file else { return self.fail(t("这篇文献还没有 PDF，没有可以放在旁边的页面。"), cx) };
         let Some((view, events)) = self.pdf_view(&file, cx) else { return };
         let Some(lib) = self.lib.as_mut() else { return };
-        lib.pins.push(Pinned { paper, view, _events: events });
+        lib.pins.push(Pinned { paper, view, _events: events, facing: None });
         // Pinned from the record of the paper on show: its pane is beside the PDF.
-        if lib.tab == Tab::Info && lib.selected.is_some() {
-            lib.tab = Tab::Pdf;
-            self.ensure_pdf(cx);
-        }
+        if lib.tab == Tab::Info && lib.selected.is_some() { lib.tab = Tab::Pdf }
+        // With 译文 on, its translation is read as well.
+        self.ensure_pdf(cx);
         cx.notify();
     }
 
@@ -4614,7 +4628,9 @@ impl Workspace {
         let Some(at) = lib.pins.iter().position(|pin| pin.paper == paper) else { return };
         let pin = lib.pins.remove(at);
         let view = pin.view.read(cx);
-        lib.file_places.insert(view.resource_id().to_string(), view.place());
+        let place = (view.resource_id().to_string(), view.place());
+        lib.file_places.insert(place.0.clone(), place.1);
+        let _ = lib.store.save_reading_places(&[place]);
         cx.notify();
     }
 

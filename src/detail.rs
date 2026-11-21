@@ -471,27 +471,64 @@ impl Workspace {
             .into_any_element()
     }
 
-    /// The paper on show and those pinned beside it (#194), each in a pane of its own laid out by
-    /// `wisp_core::panes`: side by side while the width has room for them, a pinned paper in the lower half
-    /// of the pane before it where it has not, and said of where it has room for neither.
+    /// The paper on show and those kept beside it (#194), each in a pane of its own laid out by
+    /// `wisp_core::panes`: side by side while the width has room for them, a paper kept beside in the lower
+    /// half of the pane before it where it has not, and said of where it has room for neither. With 译文 on,
+    /// each paper has its translation as a column of the same width next to it where there is room (the
+    /// viewer's two halves side by side: one scale, one scroll), else under it in its own pane.
     pub fn render_paper_area(&mut self, width: f32, cx: &mut Context<Self>) -> AnyElement {
-        let pins = self.lib.as_ref().map_or(0, |lib| lib.pins.len());
-        if pins == 0 { return self.render_pdf_tab(width, cx) }
-        let columns = vec![Column { pane: Pane::Paper, units: 1 }; pins + 1];
+        let Some(lib) = self.lib.as_mut() else { return div().into_any_element() };
+        let pins = lib.pins.len();
+        if pins == 0 {
+            lib.pane_bar = 0.;
+            return self.render_pdf_tab(width, cx);
+        }
+        let lib = self.lib.as_ref().unwrap();
+        // The viewer of each paper: the one on show, then those kept beside.
+        let views: Vec<Option<Entity<crate::pdf::PdfView>>> = std::iter::once(lib.pdf.clone()).chain(lib.pins.iter().map(|pin| Some(pin.view.clone()))).collect();
+        // Each paper's column, its translation's next to it while the viewer shows one; `owner` is the paper of each column.
+        let (mut columns, mut owner) = (vec![], vec![]);
+        for (k, view) in views.iter().enumerate() {
+            columns.push(Column { pane: Pane::Paper, units: 1 });
+            owner.push(k);
+            if view.as_ref().is_some_and(|view| view.read(cx).facing()) {
+                columns.push(Column { pane: Pane::Translation, units: 1 });
+                owner.push(k);
+            }
+        }
         let placed = panes::arrange(&columns, width, 1.);
-        let away: Vec<usize> = (1..placed.len()).filter(|&i| placed[i] == Placement::Away).collect();
-        // The last pinned pane drawn says which pinned papers have no room.
-        let last = (1..placed.len()).rev().find(|&i| placed[i] != Placement::Away);
+        let paper_at = |k: usize| (0..columns.len()).find(|&i| owner[i] == k && columns[i].pane == Pane::Paper).unwrap_or(0);
+        let away: Vec<usize> = (1..=pins).filter(|&k| placed[paper_at(k)] == Placement::Away).collect();
+        // The last pane kept beside that is drawn says which have no room.
+        let last = (1..=pins).rev().find(|&k| placed[paper_at(k)] != Placement::Away);
+        // Every bar drawn is as tall as the tallest of them.
+        let drawn = (0..=pins).filter(|&k| placed[paper_at(k)] != Placement::Away).map(|k| if k == 0 { "main".to_string() } else { lib.pins[k - 1].paper.clone() });
+        let bar = drawn.filter_map(|key| lib.pane_bars.get(&key).copied()).fold(36., f32::max);
+        if let Some(lib) = self.lib.as_mut() { lib.pane_bar = bar }
+        // How wide each paper's pane is drawn, and how its translation stands in it.
         let mut row = div().flex().size_full().overflow_hidden();
+        let mut first = true;
         for (i, placement) in placed.iter().enumerate() {
             let Placement::Shown { width: own, .. } = *placement else { continue };
+            if columns[i].pane != Pane::Paper { continue }
+            // A translation of its own column widens the pane over both; else it stands under the pages.
+            let translation = (i + 1 < columns.len() && columns[i + 1].pane == Pane::Translation && owner[i + 1] == owner[i]).then_some(i + 1);
+            let wide = translation.and_then(|t| match placed[t] { Placement::Shown { width, .. } => Some(width + 1.), _ => None });
+            let own = own + wide.unwrap_or(0.);
             let mut column = div().flex_none().w(px(own)).h_full().flex().flex_col().overflow_hidden();
-            for (n, j) in std::iter::once(i).chain((0..placed.len()).filter(|&j| placed[j] == Placement::Inside(i))).enumerate() {
+            let guests = (0..columns.len()).filter(|&j| placed[j] == Placement::Inside(i) && columns[j].pane == Pane::Paper);
+            for (n, j) in std::iter::once(i).chain(guests).enumerate() {
+                let k = owner[j];
+                if let Some(view) = &views[k] && view.read(cx).facing() {
+                    let split = if j == i && wide.is_some() { Split::Side } else { Split::Stacked };
+                    view.update(cx, |pdf, cx| pdf.set_split(split, cx));
+                }
                 if n > 0 { column = column.child(div().flex_none().h(px(crate::pdf::DIVIDER)).w_full().bg(Theme::line_strong())) }
-                let pane = if j == 0 { self.render_pdf_tab(own, cx) } else { self.render_pinned(j - 1, own, if Some(j) == last { &away } else { &[] }, cx) };
+                let pane = if k == 0 { self.render_pdf_tab(own, cx) } else { self.render_pinned(k - 1, own, if Some(k) == last { &away } else { &[] }, cx) };
                 column = column.child(div().flex_1().min_h_0().overflow_hidden().child(pane));
             }
-            if i > 0 { row = row.child(div().flex_none().w(px(1.)).h_full().bg(Theme::line())) }
+            if !first { row = row.child(div().flex_none().w(px(1.)).h_full().bg(Theme::line())) }
+            first = false;
             row = row.child(column);
         }
         row.into_any_element()
@@ -511,33 +548,60 @@ impl Workspace {
             pdf.library_chat = library_chat;
         });
         let (page, count) = { let view = view.read(cx); (view.current_page(), view.page_count()) };
-        // No bar of its own: a bar here would draw its line at another height than the paper on show's bar, which
-        // wraps with its width. Which paper this is and the way to close it float at the pane's top left, as the
-        // list of marks floats at its top right.
-        let label = div()
-            .absolute()
-            .top(px(8.))
-            .left(px(8.))
-            .max_w(px((width * 0.6).max(120.)))
+        let facing = self.pinned_facing_controls(n, cx);
+        let bar_height = lib.pane_bar;
+        // A bar like the paper on show's, as tall as it (`Library::pane_bar`): which paper this is, its page, its
+        // translation, and the way to close it, over pages that start level with the others.
+        let bar = div()
             .flex()
+            .flex_none()
             .items_center()
-            .gap(px(6.))
-            .pl(px(8.))
-            .pr(px(2.))
-            .h(px(28.))
-            .rounded(px(6.))
-            .bg(Theme::bg_body())
-            .border_1()
-            .border_color(Theme::line_strong())
-            .text_size(text_px(12.))
-            .text_color(Theme::text_tertiary())
-            .occlude()
-            .child(ui::icon("columns-2", 13., Theme::text_tertiary()))
-            .child(div().id(SharedString::from(format!("pin-title-{paper}"))).flex_shrink().min_w_0().truncate().cursor_pointer().text_color(Theme::text_secondary()).hover(|s| s.text_color(Theme::text())).child(ui::one_line(&title)).tooltip(ui::tip(t("和主栏交换：在主栏里读这篇"))).on_click(self.on(Cmd::SwapPane(paper.clone()), cx)))
-            .when(count > 0, |d| d.child(div().flex_none().child(tf!("{page} / {count} 页", "{page} / {count} pages"))))
-            .when(!hidden.is_empty(), |d| d.child(div().id(SharedString::from(format!("pin-away-{paper}"))).flex_none().px(px(5.)).rounded(px(4.)).bg(Theme::bg_sunken()).child(tf!("+{} 栏", "+{} panes", hidden.len())).tooltip(ui::tip(tf!("窗口再宽一些就能并排显示：{}", "Shown side by side when the window is wider: {}", hidden.join("；"))))))
-            .child(ui::ghost_button(SharedString::from(format!("pin-close-{paper}")), Some("x"), None).h(px(22.)).min_w(px(22.)).tooltip(ui::tip(t("关掉这一栏"))).on_click(self.on(Cmd::ClosePane(paper.clone()), cx)));
-        div().relative().size_full().child(view).child(label).into_any_element()
+            .min_h(px(bar_height))
+            .border_b_1()
+            .border_color(Theme::line())
+            .child(
+                div()
+                    .relative()
+                    .flex()
+                    .flex_1()
+                    .min_w_0()
+                    .items_center()
+                    .gap(px(8.))
+                    .flex_wrap()
+                    .min_h(px(36.))
+                    .py(px(4.))
+                    .px(px(12.))
+                    .text_size(text_px(12.))
+                    .text_color(Theme::text_tertiary())
+                    .child(ui::icon("columns-2", 13., Theme::text_tertiary()))
+                    .child(div().id(SharedString::from(format!("pin-title-{paper}"))).flex_shrink().min_w_0().max_w(px(320.)).truncate().cursor_pointer().text_color(Theme::text_secondary()).hover(|s| s.text_color(Theme::text())).child(ui::one_line(&title)).tooltip(ui::tip(t("和主栏交换：在主栏里读这篇"))).on_click(self.on(Cmd::SwapPane(paper.clone()), cx)))
+                    .child(div().flex_1())
+                    .when(count > 0, |d| d.child(div().flex_none().child(tf!("{page} / {count} 页", "{page} / {count} pages"))))
+                    .children(facing)
+                    .when(!hidden.is_empty(), |d| d.child(div().id(SharedString::from(format!("pin-away-{paper}"))).flex_none().px(px(5.)).rounded(px(4.)).bg(Theme::bg_sunken()).child(tf!("+{} 栏", "+{} panes", hidden.len())).tooltip(ui::tip(tf!("窗口再宽一些就能并排显示：{}", "Shown side by side when the window is wider: {}", hidden.join("；"))))))
+                    .child(ui::ghost_button(SharedString::from(format!("pin-close-{paper}")), Some("x"), None).h(text_px(24.)).min_w(px(24.)).tooltip(ui::tip(t("关掉这一栏"))).on_click(self.on(Cmd::ClosePane(paper.clone()), cx)))
+                    .child(self.measure_bar(paper.clone(), cx)),
+            );
+        div().flex().flex_col().size_full().child(bar).child(div().flex_1().min_h_0().child(view)).into_any_element()
+    }
+
+    /// Learns how tall a pane's bar is of itself as it is drawn (`Library::pane_bars`), under `key`.
+    fn measure_bar(&self, key: String, cx: &mut Context<Self>) -> impl IntoElement {
+        let entity = cx.entity();
+        canvas(|_, _, _| (), move |bounds, _, window, cx| {
+            let height = f32::from(bounds.size.height);
+            let key = key.clone();
+            window.defer(cx, move |_, cx| entity.update(cx, |this, cx| {
+                let Some(lib) = this.lib.as_mut() else { return };
+                if lib.pane_bars.get(&key).is_some_and(|known| (known - height).abs() < 0.5) { return }
+                lib.pane_bars.insert(key, height);
+                cx.notify();
+            }));
+        })
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
     }
 
     pub fn render_pdf_tab(&mut self, width: f32, cx: &mut Context<Self>) -> AnyElement {
@@ -605,22 +669,24 @@ impl Workspace {
         let fit = lib.zoom;
         let fit_label = |zoom: Zoom| if zoom == Zoom::FitPage { t("适应整页") } else { t("适应宽度") };
         let tool = |id: &'static str, icon: &'static str| ui::ghost_button(id, Some(icon), None).h(text_px(24.)).min_w(px(24.));
+        let bar = lib.pane_bar;
         div()
             .flex()
             .flex_col()
             .size_full()
-            .child(
+            // The bar is as tall as the tallest of the panes' bars beside it (`Library::pane_bar`): their lines run on as one.
+            .child(div().flex().flex_none().items_center().min_h(px(bar)).border_b_1().border_color(Theme::line()).child(
                 div()
+                    .relative()
                     .flex()
-                    .flex_none()
+                    .flex_1()
+                    .min_w_0()
                     .items_center()
                     .gap(px(8.))
                     .flex_wrap()
                     .min_h(px(36.))
                     .py(px(4.))
                     .px(px(12.))
-                    .border_b_1()
-                    .border_color(Theme::line())
                     .text_size(text_px(12.))
                     .text_color(Theme::text_tertiary())
                     .child(if others {
@@ -673,7 +739,8 @@ impl Workspace {
                     // Where the tools stand; always the bar's last button, so the same click in the same place puts them back.
                     .when(count > 0, |d| d.child(ui::ghost_button("pdf-tools-float", None, None).h(text_px(24.)).min_w(px(24.)).child(ui::icon("panel-right", 16., if floating { Theme::accent() } else { Theme::text_secondary() })).tooltip(ui::tip(if floating { t("把工具放回工具栏") } else { t("工具悬浮在页面右侧") })).on_click(self.on(Cmd::FloatPdfTools(!floating), cx))))
                     // Beside the conversation: put the PDF away again.
-                    .when(beside, |d| d.child(tool("pdf-beside-close", "x").on_click(self.on(Cmd::BesidePdf(false), cx)))),
+                    .when(beside, |d| d.child(tool("pdf-beside-close", "x").on_click(self.on(Cmd::BesidePdf(false), cx))))
+                    .child(self.measure_bar("main".into(), cx))),
             )
             .child(div().flex_1().min_h_0().relative().child(viewer).when(floating && count > 0, |d| d.child(self.pdf_tool_column(file_id, width, pdf_height, cutting, split, pen, marks_open, cx))))
             .into_any_element()

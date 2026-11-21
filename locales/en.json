@@ -233,6 +233,8 @@
   "缩小 PDF": "Zoom out PDF",
   "PDF 适应宽度": "Fit PDF to width",
   "写作：查找候选句": "Writing: find candidate sentences",
+  "旁边那篇的译文还在翻译：先停止它。": "The paper beside is still being translated: stop it first.",
+  "另一篇的译文还在翻译：先停止它。": "Another paper is still being translated: stop it first.",
   "这篇已经在旁边的一栏里了。": "This paper is already in a pane beside.",
   "这篇文献还没有 PDF，没有可以放在旁边的页面。": "This paper has no PDF yet, so there are no pages to keep beside.",
   "朗读和收进图片库只对正在读的那篇：先在列表里选中它。": "Reading aloud and the figure library work on the paper being read: select it in the list first.",
