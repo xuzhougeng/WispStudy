@@ -32,6 +32,7 @@ mod palette;
 mod pdf;
 mod picture;
 mod read_aloud;
+mod reader;
 mod revise;
 mod screen;
 mod screen_confirm;

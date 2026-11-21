@@ -743,6 +743,8 @@ impl Workspace {
                     .when(docked, |d| d.child(self.read_aloud_button(Kind::Aloud, aloud.as_ref(), cx)).child(self.read_aloud_button(Kind::Podcast, aloud.as_ref(), cx)).children(self.podcast_save_button("pdf-podcast-save", &paper_id, 24., cx)))
                     // Keep this paper in a pane of its own, to read the next one beside it (#194).
                     .when(count > 0 && can_pin, |d| d.child(ui::ghost_button("pdf-pin", Some("columns-2"), Some(t("留在旁边").into())).h(text_px(24.)).px(px(6.)).text_size(text_px(12.)).tooltip(ui::tip(t("把这篇留在旁边的一栏里：再选别的文献，两篇并排对照"))).on_click(self.on(Cmd::PanePaper(paper_id.clone()), cx))))
+                    // This paper in a window of its own: the library's window is free for the list (#194).
+                    .when(count > 0, |d| d.child(ui::ghost_button("pdf-window", None, Some(t("新窗口").into())).h(text_px(24.)).px(px(6.)).text_size(text_px(12.)).tooltip(ui::tip(t("在新窗口中阅读：文献库的窗口留给列表和别的文献"))).on_click(self.on(Cmd::PaperWindow(paper_id.clone()), cx))))
                     // The whole window for this paper; in reading mode the way back is at the top.
                     // Its shortcut in the tooltip: the way in from the list without opening the paper first.
                     .when(!reading, |d| {

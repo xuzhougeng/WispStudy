@@ -141,6 +141,12 @@ pub fn rebuild(custom: &BTreeMap<String, String>, cx: &mut App) {
             _ => KeyBinding::new(&key, ToggleDetail, context),
         });
     }
+    // A paper's own window (reader.rs) has the PDF's sizes too.
+    for (id, binding) in [("zoom-in", 0), ("zoom-out", 1), ("zoom-fit", 2)] {
+        let key = key_of(id, custom);
+        if key.is_empty() || Keystroke::parse(&key).is_err() { continue }
+        bindings.push(match binding { 0 => KeyBinding::new(&key, ZoomIn, Some("Reader")), 1 => KeyBinding::new(&key, ZoomOut, Some("Reader")), _ => KeyBinding::new(&key, ZoomFit, Some("Reader")) });
+    }
     // The same key in a PDF with the keyboard looks in the file: the deeper context is heard first.
     let search = key_of("search", custom);
     if !search.is_empty() && Keystroke::parse(&search).is_ok() { bindings.push(KeyBinding::new(&search, crate::pdf::FindInPdf, Some("PdfView"))) }
