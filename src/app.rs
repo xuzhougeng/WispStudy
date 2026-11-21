@@ -196,6 +196,8 @@ pub enum MenuKind {
     PdfZoom,
     /// Whether the PDF is shown twice, side by side or one over the other.
     PdfSplit,
+    /// 版面: how the papers on show are read (#194).
+    Layout,
     /// Which of the paper's PDFs is read: its main text or one of its attachments.
     PdfFiles,
     /// 写作: the library's manuscripts, one section's own, export, and the language.
@@ -440,6 +442,8 @@ pub enum Cmd {
     ClosePane(String),
     /// A paper beside and the paper on show change places.
     SwapPane(String),
+    /// Read the papers on show in this way (版面).
+    Layout(wisp_core::panes::Mode),
     /// Cut a piece out of a page as a picture for a question, or stop doing so.
     PdfCut,
     /// Read the file on show aloud from the page in view, or stop reading it.
@@ -2028,6 +2032,20 @@ impl Library {
         if let Some(pdf) = &self.pdf { pdf.update(cx, |pdf, cx| pdf.follow_spoken(None, cx)) }
     }
 
+    /// How the papers on show are read now, when it is one of the layouts offered (版面): the tab, the PDF beside the
+    /// conversation and 译文 say it.
+    pub fn layout_mode(&self) -> Option<wisp_core::panes::Mode> {
+        use wisp_core::panes::Mode;
+        self.selected.as_ref()?;
+        match (self.tab, self.split, self.facing) {
+            (Tab::Pdf, _, false) => Some(Mode::Read),
+            (Tab::Pdf, _, true) => Some(Mode::Translate),
+            (Tab::Ask, true, false) => Some(Mode::Ask),
+            (Tab::Ask, true, true) => Some(Mode::Study),
+            _ => None,
+        }
+    }
+
     /// Whether the selected paper's PDF is on show: on its tab, or beside (or under) the paper's conversation.
     pub fn pdf_on_show(&self) -> bool {
         self.tab == Tab::Pdf || (self.tab == Tab::Ask && self.split)
@@ -2429,6 +2447,15 @@ impl Workspace {
                 for (label, zoom) in fits.into_iter().chain(sizes) {
                     let note = (zoom == Zoom::FitWidth && !key.is_empty()).then(|| crate::shortcuts::pretty(&key).into());
                     items.push(MenuItem { label: label.into(), checked: current == zoom, note, cmd: Cmd::PdfZoom(ZoomTo::Set(zoom)) });
+                }
+            }
+            MenuKind::Layout => {
+                let Some(lib) = &self.lib else { return };
+                let (current, papers) = (lib.layout_mode(), 1 + lib.pins.len());
+                for mode in wisp_core::panes::Mode::ALL {
+                    // Its units with the papers on show, as the layout is named: 2·2·2·2 is two papers with their translations.
+                    let note = wisp_core::panes::grid(&wisp_core::panes::columns(mode, papers)).map(SharedString::from);
+                    items.push(MenuItem { label: t(mode.label()).into(), checked: current == Some(mode), note, cmd: Cmd::Layout(mode) });
                 }
             }
             MenuKind::PdfSplit => {
@@ -3227,11 +3254,12 @@ impl Workspace {
                     return cx.notify();
                 }
                 // It is for this paper: the next one opens whole.
-                if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.set_split(split, cx)) }
+                if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.choose_split(split, cx)) }
             }
             Cmd::PdfBeside(file) => self.show_beside(file, cx),
             Cmd::PanePaper(paper) => self.pin(paper, cx),
             Cmd::ClosePane(paper) => self.unpin(&paper, cx),
+            Cmd::Layout(mode) => self.set_layout(mode, window, cx),
             Cmd::SwapPane(paper) => {
                 // Each keeps its place: the one on show where it is read, the one beside where it was.
                 let Some(lib) = self.lib.as_mut() else { return };
@@ -4599,6 +4627,32 @@ impl Workspace {
     }
 
     /// The other half's file put away; it keeps its place for when it is shown again.
+    /// Read the papers on show in a layout of 版面 (#194): the tab, the PDF beside the conversation and 译文 as the
+    /// mode says, and the widths of the list and the conversation from its units in this window (they are dragged
+    /// as before afterwards). 提问 has the list at the left and the conversation before the papers; 精读 has the
+    /// window, the papers with their translations, and the conversation at the right.
+    pub(crate) fn set_layout(&mut self, mode: wisp_core::panes::Mode, window: &mut Window, cx: &mut Context<Self>) {
+        use wisp_core::panes::{self, Mode, Pane, Placement};
+        let Some(lib) = self.lib.as_mut() else { return };
+        if lib.selected.is_none() { return }
+        let columns = panes::columns(mode, 1 + lib.pins.len());
+        let placed = panes::arrange(&columns, f32::from(window.viewport_size().width), 1.);
+        let width_of = |pane: Pane| columns.iter().zip(&placed).find(|(c, _)| c.pane == pane).and_then(|(_, p)| if let Placement::Shown { width, .. } = p { Some(*width) } else { None });
+        let (chat, list) = (width_of(Pane::Chat), width_of(Pane::List));
+        let asking = matches!(mode, Mode::Ask | Mode::Study);
+        if asking {
+            lib.split = true;
+            lib.reading = mode == Mode::Study;
+            self.settings.pdf_first = mode == Mode::Study;
+            if let Some(chat) = chat { self.settings.chat_width = chat }
+            if let Some(list) = list { self.settings.ask_list_width = list }
+            self.save_settings(cx);
+        }
+        self.run(Cmd::SetTab(if asking { Tab::Ask } else { Tab::Pdf }), window, cx);
+        if self.lib.as_ref().is_some_and(|lib| lib.facing != mode.translates()) { self.toggle_facing(cx) }
+        cx.notify();
+    }
+
     /// Keep a paper in a pane of its own beside the one on show (#194). Of the paper on show, the file being read
     /// at the place it is read at; of another, the file it opens with, where it was left.
     pub(crate) fn pin(&mut self, paper: String, cx: &mut Context<Self>) {
@@ -7725,6 +7779,7 @@ impl Workspace {
                 "pane" if arg.is_empty() => self.lib.as_ref().and_then(|l| l.selected.clone()).map(Cmd::PanePaper),
                 "pane" => self.lib.as_ref().and_then(|l| l.shown.get(arg.parse::<usize>().unwrap_or(0)).map(|&i| Cmd::PanePaper(l.papers[i].id.clone()))),
                 "paneswap" => self.lib.as_ref().and_then(|l| l.pins.get(arg.parse::<usize>().unwrap_or(0)).map(|pin| Cmd::SwapPane(pin.paper.clone()))),
+                "layout" => wisp_core::panes::Mode::from_key(arg).map(Cmd::Layout),
                 "paneclose" => self.lib.as_ref().and_then(|l| l.pins.get(arg.parse::<usize>().unwrap_or(0)).map(|pin| Cmd::ClosePane(pin.paper.clone()))),
                 "pdfbeside" => self.lib.as_ref().and_then(|lib| lib.selected.as_deref().and_then(|paper| lib.pdf_choices(paper).into_iter().nth(arg.parse::<usize>().unwrap_or(0)))).map(|(id, _)| Cmd::PdfBeside(id)),
                 // `pdfcut:<page>;<x0>;<y0>;<x1>;<y1>` marks a piece of a 1-based page of the PDF on show as cut out, in the page's
@@ -7811,7 +7866,7 @@ impl Workspace {
                     return;
                 }
                 "menu" => {
-                    let kind = match arg { "sort" => MenuKind::Sort, "columns" => MenuKind::Columns, "year" => MenuKind::Filter(FilterKey::Year), "zoom" => MenuKind::PdfZoom, "pdfsplit" => MenuKind::PdfSplit, "pdffiles" => MenuKind::PdfFiles, "fulltext" => MenuKind::Filter(FilterKey::Fulltext), "manuscripts" => MenuKind::Manuscripts, "export" => MenuKind::ManuscriptExport, "retry" => MenuKind::ExtractRetry, "podcasts" => MenuKind::Podcasts, _ => MenuKind::Add };
+                    let kind = match arg { "sort" => MenuKind::Sort, "columns" => MenuKind::Columns, "year" => MenuKind::Filter(FilterKey::Year), "zoom" => MenuKind::PdfZoom, "pdfsplit" => MenuKind::PdfSplit, "layout" => MenuKind::Layout, "pdffiles" => MenuKind::PdfFiles, "fulltext" => MenuKind::Filter(FilterKey::Fulltext), "manuscripts" => MenuKind::Manuscripts, "export" => MenuKind::ManuscriptExport, "retry" => MenuKind::ExtractRetry, "podcasts" => MenuKind::Podcasts, _ => MenuKind::Add };
                     self.open_menu(kind, point(px(if matches!(arg, "zoom" | "manuscripts" | "export" | "retry") { 900. } else { 20. }), px(120.)), cx);
                     return;
                 }
