@@ -63,7 +63,7 @@ impl Workspace {
 
     /// The panel asking about a paper, with the conversation floating over the PDF.
     pub fn render_floating(&mut self, width: f32, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let pdf = self.render_pdf_tab(width, cx);
+        let pdf = self.render_paper_area(width, cx);
         let Some(lib) = self.lib.as_ref() else { return pdf };
         let area = lib.float_area;
         let floating = &self.settings.floating;

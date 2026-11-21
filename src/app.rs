@@ -435,6 +435,11 @@ pub enum Cmd {
     PdfSplit(Split),
     /// Show a file of the paper (its id) in the other half of the viewer; the file worked in is the viewer split on itself.
     PdfBeside(String),
+    /// Keep this paper in a pane of its own beside the paper on show (#194), / let it go again.
+    PanePaper(String),
+    ClosePane(String),
+    /// A paper beside and the paper on show change places.
+    SwapPane(String),
     /// Cut a piece out of a page as a picture for a question, or stop doing so.
     PdfCut,
     /// Read the file on show aloud from the page in view, or stop reading it.
@@ -1487,6 +1492,17 @@ pub enum Modal {
     Headings(Box<crate::comments::HeadingsForm>),
 }
 
+/// A paper kept in a pane of its own beside the paper on show (#194): choosing another paper leaves it
+/// where it is, for reading two side by side. Laid out with the paper on show by `wisp_core::panes`.
+pub struct Pinned {
+    pub paper: String,
+    pub view: Entity<PdfView>,
+    _events: Subscription,
+}
+
+/// The most papers pinned beside the one on show: a layout has at most `MAX_COLUMNS` panes.
+pub const MAX_PINS: usize = wisp_core::panes::MAX_COLUMNS - 1;
+
 /// The other half of a viewer split between two files of a paper (#185): the main text in one half, a
 /// supplement in the other, each a `PdfView` of its own with its own place, marks and selection.
 pub struct Beside {
@@ -1557,6 +1573,8 @@ pub struct Library {
     pdf_events: Option<Subscription>,
     /// Another file of the paper in the other half of the viewer (#185), while there is one.
     pub beside: Option<Beside>,
+    /// Papers pinned beside the one on show, in the order of their panes.
+    pub pins: Vec<Pinned>,
     /// The fit PDF pages are drawn at (`Zoom::carried`): it stays from paper to paper, a percentage does not.
     pub zoom: Zoom,
     pub library_chat: Chat,
@@ -2175,6 +2193,9 @@ impl Library {
         self.fields = self.store.list_fields()?;
         self.files = self.store.list_files()?;
         self.trash = self.store.list_trash()?;
+        // A pinned paper taken away, or its file, goes from its pane.
+        let (papers, files) = (&self.papers, &self.files);
+        self.pins.retain(|pin| papers.iter().any(|p| p.id == pin.paper) && files.iter().any(|f| f.paper_id == pin.paper && f.format == "pdf"));
         self.rounds = self.store.screening_rounds()?;
         self.searches = self.store.list_searches()?;
         self.suggestions = self.store.list_suggestions()?.into_iter().map(|s| (s.paper_id.clone(), s)).collect();
@@ -3198,6 +3219,21 @@ impl Workspace {
                 if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.set_split(split, cx)) }
             }
             Cmd::PdfBeside(file) => self.show_beside(file, cx),
+            Cmd::PanePaper(paper) => self.pin(paper, cx),
+            Cmd::ClosePane(paper) => self.unpin(&paper, cx),
+            Cmd::SwapPane(paper) => {
+                // Each keeps its place: the one on show where it is read, the one beside where it was.
+                let Some(lib) = self.lib.as_mut() else { return };
+                let Some(at) = lib.pins.iter().position(|pin| pin.paper == paper) else { return };
+                let shown = lib.selected.clone().filter(|id| id != &paper && lib.pdf_file(id).is_some());
+                if let Some(view) = lib.pdf.as_ref() { let view = view.read(cx); lib.file_places.insert(view.resource_id().to_string(), view.place()); }
+                self.unpin(&paper, cx);
+                self.select(Some(paper), window, cx);
+                if let Some(shown) = shown {
+                    self.pin(shown, cx);
+                    if let Some(lib) = self.lib.as_mut() && let Some(pin) = lib.pins.pop() { lib.pins.insert(at.min(lib.pins.len()), pin) }
+                }
+            }
             Cmd::BesidePdf(show) => {
                 // Beside the conversation the window is laid out for the two (`asking`); put away, the library is back around it.
                 if let Some(lib) = self.lib.as_mut() { lib.split = show }
@@ -4134,6 +4170,7 @@ impl Workspace {
             aloud_shown: None,
             pdf_events: None,
             beside: None,
+            pins: vec![],
             zoom: Zoom::FitWidth,
             library_chat,
             paper_chat,
@@ -4547,6 +4584,40 @@ impl Workspace {
     }
 
     /// The other half's file put away; it keeps its place for when it is shown again.
+    /// Keep a paper in a pane of its own beside the one on show (#194). Of the paper on show, the file being read
+    /// at the place it is read at; of another, the file it opens with, where it was left.
+    pub(crate) fn pin(&mut self, paper: String, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        if lib.pins.iter().any(|pin| pin.paper == paper) { return self.say(t("这篇已经在旁边的一栏里了。"), cx) }
+        if lib.pins.len() >= MAX_PINS { return self.fail(tf!("最多在旁边留 {MAX_PINS} 篇。先关掉一栏。", "At most {MAX_PINS} papers can stay beside. Close a pane first."), cx) }
+        let shown = lib.pdf.as_ref().filter(|_| lib.selected.as_deref() == Some(paper.as_str())).map(|view| { let view = view.read(cx); (view.resource_id().to_string(), view.place()) });
+        if let Some((file, place)) = &shown { lib.file_places.insert(file.clone(), *place); }
+        let file = match &shown {
+            Some((id, _)) => lib.files.iter().find(|f| &f.id == id).cloned(),
+            None => lib.pdf_file(&paper).cloned(),
+        };
+        let Some(file) = file else { return self.fail(t("这篇文献还没有 PDF，没有可以放在旁边的页面。"), cx) };
+        let Some((view, events)) = self.pdf_view(&file, cx) else { return };
+        let Some(lib) = self.lib.as_mut() else { return };
+        lib.pins.push(Pinned { paper, view, _events: events });
+        // Pinned from the record of the paper on show: its pane is beside the PDF.
+        if lib.tab == Tab::Info && lib.selected.is_some() {
+            lib.tab = Tab::Pdf;
+            self.ensure_pdf(cx);
+        }
+        cx.notify();
+    }
+
+    /// Let a pinned paper go: its pane closes, and its file keeps its place for when it is read again.
+    pub(crate) fn unpin(&mut self, paper: &str, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        let Some(at) = lib.pins.iter().position(|pin| pin.paper == paper) else { return };
+        let pin = lib.pins.remove(at);
+        let view = pin.view.read(cx);
+        lib.file_places.insert(view.resource_id().to_string(), view.place());
+        cx.notify();
+    }
+
     pub(crate) fn close_beside(&mut self, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
         let Some(beside) = lib.beside.take() else { return };
@@ -4603,6 +4674,7 @@ impl Workspace {
             PdfEvent::Worked => self.work_in(&view, cx),
             PdfEvent::Copied => self.say(t("已复制"), cx),
             PdfEvent::Translate(text, profile) => self.translate_passage(text.clone(), profile.clone(), cx),
+            PdfEvent::ReadAloud(..) | PdfEvent::Figure(_) if self.lib.as_ref().is_some_and(|lib| lib.pins.iter().any(|pin| pin.view == view)) => self.say(t("朗读和收进图片库只对正在读的那篇：先在列表里选中它。"), cx),
             PdfEvent::ReadAloud(page, text) => self.read_aloud(Some((*page, text.clone())), cx),
             PdfEvent::Figure(piece) => self.collect_piece(piece, cx),
             PdfEvent::Annotate { paper, resource, page, kind, quote, boxes } => self.change_pdf_annotation(resource, |store| store.add_pdf_annotation(paper, resource, *page, *kind, quote, boxes).map(|_| ()), cx),
@@ -4615,9 +4687,12 @@ impl Workspace {
                 self.attach_images(if *to_library { Talk::Library } else { Talk::Paper }, vec![Picture::Bytes(png.clone())], cx);
                 if *to_library { self.say(t("截图已加到文献库对话的输入框上方。"), cx) } else { self.show_paper_chat(cx) }
             }
+            // A pinned paper is not the one the paper's conversation is about: what is quoted from it goes to the library's.
             PdfEvent::Quote(page, text, to_library) => {
                 let Some(lib) = self.lib.as_mut() else { return };
-                let Some(paper_id) = lib.selected.clone() else { return };
+                let pinned = lib.pins.iter().find(|pin| pin.view == view).map(|pin| pin.paper.clone());
+                let to_library = &(*to_library || pinned.as_ref().is_some_and(|paper| lib.selected.as_ref() != Some(paper)));
+                let Some(paper_id) = pinned.or_else(|| lib.selected.clone()) else { return };
                 let file_id = view.read(cx).resource_id().to_string();
                 let quote = ChatQuote { paper_id, file_id, page: *page, text: text.clone() };
                 let chat = lib.chat_mut(if *to_library { Talk::Library } else { Talk::Paper });
@@ -4636,11 +4711,13 @@ impl Workspace {
 
     fn change_pdf_annotation(&mut self, resource: &str, change: impl FnOnce(&mut Store) -> anyhow::Result<()>, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
-        // An event queued by an old viewer cannot edit the newly selected PDF: the marks go to the half showing their file.
-        let Some(pdf) = lib.pdf.iter().chain(lib.beside.as_ref().map(|beside| &beside.view)).find(|view| view.read(cx).resource_id() == resource).cloned() else { return };
+        // An event queued by an old viewer cannot edit the newly selected PDF: the marks go to the viewers showing their
+        // file, every one of them (a paper pinned beside may be the one on show as well).
+        let views: Vec<Entity<PdfView>> = lib.pdf.iter().chain(lib.beside.as_ref().map(|beside| &beside.view)).chain(lib.pins.iter().map(|pin| &pin.view)).filter(|view| view.read(cx).resource_id() == resource).cloned().collect();
+        if views.is_empty() { return }
         match change(&mut lib.store).and_then(|()| lib.store.pdf_annotations("", resource)) {
             Ok(annotations) => {
-                pdf.update(cx, |pdf, cx| pdf.annotations_saved(annotations, cx));
+                for pdf in views { pdf.update(cx, |pdf, cx| pdf.annotations_saved(annotations.clone(), cx)) }
                 self.say(t("PDF 标注已保存"), cx);
             }
             Err(error) => self.fail(format!("{error:#}"), cx),
@@ -7628,6 +7705,11 @@ impl Workspace {
                     files.get(arg.parse::<usize>().unwrap_or(0)).cloned().map(Cmd::ReadFile)
                 }),
                 // `pdfbeside:<n>` shows the n-th PDF of the selected paper (counted as `readfile:` does) in the other half of the viewer.
+                // `pane` keeps the paper on show in a pane beside it, `pane:<n>` the n-th paper of the list; `paneclose:<n>` closes the n-th such pane, `paneswap:<n>` changes it with the paper on show.
+                "pane" if arg.is_empty() => self.lib.as_ref().and_then(|l| l.selected.clone()).map(Cmd::PanePaper),
+                "pane" => self.lib.as_ref().and_then(|l| l.shown.get(arg.parse::<usize>().unwrap_or(0)).map(|&i| Cmd::PanePaper(l.papers[i].id.clone()))),
+                "paneswap" => self.lib.as_ref().and_then(|l| l.pins.get(arg.parse::<usize>().unwrap_or(0)).map(|pin| Cmd::SwapPane(pin.paper.clone()))),
+                "paneclose" => self.lib.as_ref().and_then(|l| l.pins.get(arg.parse::<usize>().unwrap_or(0)).map(|pin| Cmd::ClosePane(pin.paper.clone()))),
                 "pdfbeside" => self.lib.as_ref().and_then(|lib| lib.selected.as_deref().and_then(|paper| lib.pdf_choices(paper).into_iter().nth(arg.parse::<usize>().unwrap_or(0)))).map(|(id, _)| Cmd::PdfBeside(id)),
                 // `pdfcut:<page>;<x0>;<y0>;<x1>;<y1>` marks a piece of a 1-based page of the PDF on show as cut out, in the page's
                 // points (after a `shot:` has drawn the page); `collect` hands it to the figure library, as 收藏到图片库 does.

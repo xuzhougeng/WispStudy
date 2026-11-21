@@ -145,6 +145,12 @@ impl Workspace {
                 if pdf.is_some() { items.push(item(t("打开 PDF"), Cmd::OpenPaper(id.clone(), Tab::Pdf))) }
                 items.push(item(t("查看信息"), Cmd::OpenPaper(id.clone(), Tab::Info)));
                 items.push(item(t("就这篇提问"), Cmd::OpenPaper(id.clone(), Tab::Ask)));
+                // Beside another paper on show: this one in a pane of its own, to read the two side by side (#194).
+                if lib.pins.iter().any(|pin| &pin.paper == id) {
+                    items.push(item(t("关掉旁边这一栏"), Cmd::ClosePane(id.clone())));
+                } else if pdf.is_some() && lib.selected.as_ref().is_some_and(|shown| shown != id) && lib.pins.len() < crate::app::MAX_PINS {
+                    items.push(item(t("放在旁边一栏对照"), Cmd::PanePaper(id.clone())));
+                }
 
                 breaks.push(items.len());
                 items.push(item(if p.starred { t("取消收藏") } else { t("收藏") }, Cmd::ToggleStar(id.clone())));
