@@ -24,7 +24,8 @@ pub enum Pane {
     List,
     /// One paper: its PDF, or its record when it has none.
     Paper,
-    /// The paper beside it with each paragraph translated (`source`).
+    /// The paper next to it with each paragraph translated (`source`), as wide as that paper: the two are
+    /// read at one scale, side by side.
     Translation,
     /// The conversation about the papers on show.
     Chat,
@@ -93,7 +94,7 @@ pub const PRESETS: [Preset; 6] = [
     Preset { key: "ask", name: "提问", columns: &[column(Pane::List, 2), column(Pane::Chat, 3), column(Pane::Paper, 3)] },
     Preset { key: "translate", name: "对照译文", columns: &[column(Pane::Paper, 4), column(Pane::Translation, 4)] },
     Preset { key: "compare", name: "两篇对照", columns: &[column(Pane::Paper, 4), column(Pane::Paper, 4)] },
-    Preset { key: "study", name: "精读", columns: &[column(Pane::Paper, 4), column(Pane::Translation, 2), column(Pane::Chat, 2)] },
+    Preset { key: "study", name: "精读", columns: &[column(Pane::Paper, 3), column(Pane::Translation, 3), column(Pane::Chat, 2)] },
     Preset { key: "compare-translate", name: "两篇对照带译文", columns: &[column(Pane::Paper, 2), column(Pane::Translation, 2), column(Pane::Paper, 2), column(Pane::Translation, 2)] },
 ];
 
@@ -112,6 +113,13 @@ pub fn refusal(columns: &[Column]) -> Option<String> {
         if columns.iter().filter(|c| c.pane == pane).count() > 1 { return Some(format!("「{}」只能有一栏。", pane.label())) }
     }
     if !columns.iter().any(|c| c.pane == Pane::Paper) { return Some("至少要有一栏「文献」。".into()) }
+    let mut translated = vec![];
+    for (i, c) in columns.iter().enumerate().filter(|(_, c)| c.pane == Pane::Translation) {
+        let Some(paper) = source(columns, i) else { return Some("「译文」要紧挨着它译的那栏「文献」。".into()) };
+        if columns[paper].units != c.units { return Some("「译文」要和它译的那栏「文献」一样宽：两边的页面按同一个比例显示。".into()) }
+        if translated.contains(&paper) { return Some("一栏「文献」只配一栏「译文」。".into()) }
+        translated.push(paper);
+    }
     None
 }
 
@@ -137,10 +145,9 @@ pub fn parse(text: &str) -> Result<Vec<Column>, String> {
     }
 }
 
-/// The paper a translation at `at` translates: the nearest paper at its left, else at its right.
+/// The paper a translation at `at` translates: the column at its left when that is a paper, else the one at its right.
 pub fn source(columns: &[Column], at: usize) -> Option<usize> {
-    let paper = |i: &usize| columns[*i].pane == Pane::Paper;
-    (0..at.min(columns.len())).rev().find(paper).or_else(|| (at + 1..columns.len()).find(paper))
+    [at.checked_sub(1), Some(at + 1)].into_iter().flatten().find(|&i| columns.get(i).is_some_and(|c| c.pane == Pane::Paper))
 }
 
 /// The width at which a layout shows every pane on its own: the narrowest width of each, and the gaps.
@@ -290,22 +297,25 @@ mod tests {
         assert!(parse("chat:4,translation:4").unwrap_err().contains("文献"));
         assert!(parse("paper:0,chat:8").unwrap_err().contains("至少占 1 格"));
         assert!(parse("paper:2,paper:2,paper:2,paper:1,chat:1").unwrap_err().contains("最多分 4 栏"));
-        assert_eq!(parse(" paper : 4 , translation:2,chat:2").unwrap(), preset("study").unwrap().columns);
+        assert_eq!(parse(" paper : 3 , translation:3,chat:2").unwrap(), preset("study").unwrap().columns);
     }
 
     #[test]
-    fn a_translation_translates_the_paper_beside_it() {
-        let columns = parse("translation:2,paper:2,translation:2,paper:2").unwrap();
-        assert_eq!(source(&columns, 0), Some(1));
-        assert_eq!(source(&columns, 2), Some(1));
-        assert_eq!(source(&columns, 1), Some(3));
+    fn a_translation_translates_the_paper_next_to_it() {
+        let columns = parse("paper:2,translation:2,translation:2,paper:2").unwrap();
+        assert_eq!((source(&columns, 1), source(&columns, 2)), (Some(0), Some(3)));
+        assert_eq!(source(&parse("translation:4,paper:4").unwrap(), 0), Some(1));
+        assert!(parse("paper:3,chat:2,translation:3").unwrap_err().contains("紧挨着"));
+        assert!(parse("paper:4,translation:2,chat:2").unwrap_err().contains("一样宽"));
+        assert!(parse("translation:3,paper:2,translation:3").unwrap_err().contains("一样宽"));
+        assert!(parse("translation:2,paper:2,translation:2,chat:2").unwrap_err().contains("只配一栏"));
     }
 
     #[test]
     fn a_wide_window_shows_the_layout_as_written() {
         let study = preset("study").unwrap().columns;
         let placed = arrange(study, 2000., 0.);
-        assert_eq!(placed, vec![Placement::Shown { x: 0., width: 1000. }, Placement::Shown { x: 1000., width: 500. }, Placement::Shown { x: 1500., width: 500. }]);
+        assert_eq!(placed, vec![Placement::Shown { x: 0., width: 750. }, Placement::Shown { x: 750., width: 750. }, Placement::Shown { x: 1500., width: 500. }]);
         // Gaps come out of the room, and the panes fill the rest to the last pixel.
         let four = preset("compare-translate").unwrap().columns;
         let placed = arrange(four, 2563., 1.);
@@ -329,9 +339,9 @@ mod tests {
         assert_eq!(arrange(ask, 700., 0.), vec![Placement::Away, Placement::Shown { x: 0., width: 340. }, Placement::Shown { x: 340., width: 360. }]);
         // Then the conversation floats over the paper.
         assert_eq!(arrange(ask, 500., 0.), vec![Placement::Away, Placement::Over(2), Placement::Shown { x: 0., width: 500. }]);
-        // 4,2,2 at 1000: the translation goes into its paper's pane, the conversation stays beside it.
+        // 3,3,2 at 1000: the translation goes into its paper's pane, the conversation stays beside it.
         let study = preset("study").unwrap().columns;
-        assert_eq!(arrange(study, 1000., 0.), vec![Placement::Shown { x: 0., width: 666. }, Placement::Inside(0), Placement::Shown { x: 666., width: 334. }]);
+        assert_eq!(arrange(study, 1000., 0.), vec![Placement::Shown { x: 0., width: 600. }, Placement::Inside(0), Placement::Shown { x: 600., width: 400. }]);
         // A lone paper narrower than its least width has the whole width: there is nothing left to give.
         assert_eq!(arrange(preset("read").unwrap().columns, 300., 0.), vec![Placement::Shown { x: 0., width: 300. }]);
     }
