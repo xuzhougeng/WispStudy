@@ -23,6 +23,7 @@
 //! - `comment`  批注: remarks on words of a manuscript, the person's, the assistant's and those a Word file came with
 //! - `revise`   改稿: the assistant's changes to a section as blocks of words to find and words to put there
 //! - `markdown` the Markdown of an answer → blocks to draw
+//! - `panes`    分栏: the reading area as columns on an eight-unit grid, and what a window of a given width shows of a layout
 //! - `ai`       context building, request bodies and stream parsing for 文献库提问
 //! - `podcast`  播客: a paper talked over by two hosts, the script asked of a model and its sound kept as WAV
 //! - `speech`   朗读: a paper's text in pieces for DeepSeek's speech service, and the sound it sends
@@ -68,6 +69,7 @@ pub mod model;
 pub mod notes;
 pub mod oauth;
 pub mod openaccess;
+pub mod panes;
 pub mod organise;
 pub mod passage;
 pub mod pptx;
