@@ -708,6 +708,9 @@ pub struct PdfView {
     facing: Option<HashMap<usize, Vec<FacingPiece>>>,
     /// How the viewer was split before the translation took its second half.
     facing_was: Split,
+    /// The translation's half was placed by the viewer's width, not chosen in 分屏: it goes beside the pages or
+    /// under them as the width changes (`fit_facing`).
+    facing_auto: bool,
     /// The half the pointer last worked in: the one the page number, the keys and a citation speak of.
     active: usize,
     /// The half the selection, the piece cut out or the highlight clicked was made in: what is offered for it stands there.
@@ -815,6 +818,7 @@ impl PdfView {
             split: Split::Off,
             facing: None,
             facing_was: Split::Off,
+            facing_auto: false,
             active: 0,
             held: 0,
             requests,
@@ -1218,6 +1222,7 @@ impl PdfView {
         match (self.facing.is_some(), pieces.is_some()) {
             (false, true) => {
                 self.facing_was = self.split;
+                self.facing_auto = self.split == Split::Off;
                 if self.split == Split::Off { self.set_split(if self.width >= crate::facing::FACING_MIN { Split::Side } else { Split::Stacked }, cx) }
                 self.facing = pieces;
             }
@@ -1308,7 +1313,9 @@ impl PdfView {
         });
         change(self);
         let widest = self.sizes.iter().enumerate().map(|(index, (width, _))| width * self.scale_of(index)).fold(0., f32::max);
-        self.max_x = (widest + 2. * MARGIN - self.pane_size().0).max(0.);
+        // A page fitted to the width overflows it by a rounding at most: less than half a pixel is none, and draws no sideways bar.
+        let excess = widest + 2. * MARGIN - self.pane_size().0;
+        self.max_x = if excess > 0.5 { excess } else { 0. };
         for (pane, (top, before, left)) in before.into_iter().enumerate() {
             let anchor = if pane == self.active { anchor } else { (anchor.0, 0.) };
             let page_height = self.sizes.get(top.item_ix).map_or(842., |size| size.1);
@@ -2379,6 +2386,20 @@ impl PdfView {
     /// The viewer, `width` logical pixels wide.
     pub fn set_width(&mut self, width: f32) {
         if (self.width - width).abs() > 0.5 { self.resize((0., 0.), |this| this.width = width) }
+    }
+
+    /// The translation the viewer placed itself stands beside the pages where its width has room for both, else
+    /// under them: the layout changed (版面, a pane beside) since it was placed (#194).
+    pub fn fit_facing(&mut self, cx: &mut Context<Self>) {
+        if self.facing.is_none() || !self.facing_auto { return }
+        let split = if self.width >= crate::facing::FACING_MIN { Split::Side } else { Split::Stacked };
+        if split != self.split { self.set_split(split, cx) }
+    }
+
+    /// How the person split the viewer in 分屏: theirs from now on, the translation's half too.
+    pub fn choose_split(&mut self, split: Split, cx: &mut Context<Self>) {
+        self.facing_auto = false;
+        self.set_split(split, cx);
     }
 
     /// The viewer's height, as it was laid out.
