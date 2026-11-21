@@ -44,6 +44,15 @@ impl Workspace {
                 .tooltip(ui::tip(if pdf_first { t("把 PDF 移回右边") } else { t("把 PDF 移到左边") }))
                 .on_click(self.on(Cmd::SwapPanes, cx))
         });
+        // 版面: how the papers on show are read, named by the layout in force. In the header row the panes share,
+        // like the swap, so it stays where it is whatever it changes.
+        let layout = {
+            let mode = lib.layout_mode();
+            ui::ghost_button("layout", None, None).h(text_px(26.)).px(px(6.)).text_size(text_px(12.)).occlude()
+                .child(div().flex().items_center().gap(px(4.)).child(mode.map_or(t("版面"), |mode| t(mode.label()))).child(ui::icon("chevron-down", 11., Theme::text_tertiary())))
+                .tooltip(ui::tip(t("版面：阅读、对照译文、提问、精读")))
+                .on_click(self.on_menu(MenuKind::Layout, cx))
+        };
         let tab_button = |id: &'static str, label: &'static str, value: Tab, this: &Self, cx: &mut Context<Self>| {
             let active = tab == value;
             div()
@@ -75,6 +84,7 @@ impl Workspace {
                 .child(tab_button("tab-pdf", if has_pdf { "PDF" } else { t("PDF（无）") }, Tab::Pdf, self, cx))
                 .child(tab_button("tab-ask", t("提问"), Tab::Ask, self, cx))
                 .when(tab == Tab::Ask && has_pdf && !(lib.split && width >= SPLIT_MIN), |d| d.child(ui::ghost_button("beside-pdf", Some("file-text"), Some(t("对照 PDF").into())).h(text_px(26.)).text_size(text_px(12.)).occlude().on_click(self.on(Cmd::BesidePdf(true), cx))))
+                .child(layout)
                 .when_some(swap, |d, swap| d.child(swap))
                 .child(if reading {
                     ui::ghost_button("reading-leave", Some("x"), Some(tf!("退出阅读 {}", "Leave reading {}", crate::shortcuts::pretty("escape")).into())).h(text_px(26.)).text_size(text_px(12.)).occlude().on_click(self.on(Cmd::ToggleReading, cx))
@@ -127,9 +137,11 @@ impl Workspace {
                     .child(tab_button("tab-info", t("信息"), Tab::Info, self, cx))
                     .child(tab_button("tab-pdf", if has_pdf { "PDF" } else { t("PDF（无）") }, Tab::Pdf, self, cx))
                     .child(tab_button("tab-ask", t("提问"), Tab::Ask, self, cx))
+                    .child(div().flex_1())
                     // Asking with the PDF put away, or in a panel too narrow for both: one click brings it beside the conversation.
-                    .when(tab == Tab::Ask && has_pdf && !(lib.split && width >= SPLIT_MIN), |d| d.child(div().flex_1()).child(ui::ghost_button("beside-pdf", Some("file-text"), Some(t("对照 PDF").into())).h(text_px(26.)).text_size(text_px(12.)).occlude().on_click(self.on(Cmd::BesidePdf(true), cx))))
-                    .when_some(swap, |d, swap| d.child(div().flex_1()).child(swap)),
+                    .when(tab == Tab::Ask && has_pdf && !(lib.split && width >= SPLIT_MIN), |d| d.child(ui::ghost_button("beside-pdf", Some("file-text"), Some(t("对照 PDF").into())).h(text_px(26.)).text_size(text_px(12.)).occlude().on_click(self.on(Cmd::BesidePdf(true), cx))))
+                    .child(layout)
+                    .when_some(swap, |d, swap| d.child(swap)),
             ) };
         let body = match tab {
             Tab::Ask if split && has_pdf && self.settings.floating.on => self.render_floating(width, window, cx),
@@ -639,11 +651,14 @@ impl Workspace {
         // whichever is worked in.
         let pair = lib.beside.as_ref().map(|beside| (beside.view.clone(), beside.split, beside.first));
         let pdf_height = lib.pdf_area(cx).1;
+        let paned = !lib.pins.is_empty();
         let half_width = match &pair { Some((_, Split::Side, _)) => ((width - crate::pdf::DIVIDER) / 2.).max(0.), _ => width };
         for view in std::iter::once(&pdf).chain(pair.as_ref().map(|(view, ..)| view)) {
-            view.update(cx, |pdf, _| {
+            view.update(cx, |pdf, cx| {
                 pdf.set_width(half_width);
                 pdf.library_chat = library_chat;
+                // Alone in the area, the translation goes beside or under the pages by the width; beside other panes the layout places it (`render_paper_area`).
+                if !paned { pdf.fit_facing(cx) }
             });
         }
         let (page, count, percent, zoom, cutting, split, pen, marks_open) = {

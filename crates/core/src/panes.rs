@@ -102,6 +102,75 @@ pub fn preset(key: &str) -> Option<&'static Preset> {
     PRESETS.iter().find(|preset| preset.key == key)
 }
 
+/// How the papers on show are read, whatever their number: each paper alone (阅读), each with its translation
+/// (对照译文), the list and the conversation beside them (提问), each with its translation and the conversation
+/// (精读). A mode's columns repeat each paper's (`columns`); with one paper they are the `PRESETS` of its key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    Read,
+    Translate,
+    Ask,
+    Study,
+}
+
+impl Mode {
+    pub const ALL: [Mode; 4] = [Mode::Read, Mode::Translate, Mode::Ask, Mode::Study];
+
+    pub fn key(self) -> &'static str {
+        match self {
+            Mode::Read => "read",
+            Mode::Translate => "translate",
+            Mode::Ask => "ask",
+            Mode::Study => "study",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Option<Mode> {
+        Mode::ALL.into_iter().find(|mode| mode.key() == key)
+    }
+
+    /// Its name in the window; translated where it is shown.
+    pub fn label(self) -> &'static str {
+        preset(self.key()).map_or("", |preset| preset.name)
+    }
+
+    /// Whether each paper has its translation beside it.
+    pub fn translates(self) -> bool {
+        matches!(self, Mode::Translate | Mode::Study)
+    }
+}
+
+/// A mode's columns for `papers` papers (one at least), in their order. Each paper's share stays what it
+/// is with one paper, the papers sharing it: 对照译文 is 4·4 with one paper and 2·2·2·2 with two.
+pub fn columns(mode: Mode, papers: usize) -> Vec<Column> {
+    let papers = papers.max(1) as u32;
+    let paper = |units: u32| -> Vec<Column> {
+        let mut out = vec![column(Pane::Paper, units)];
+        if mode.translates() { out.push(column(Pane::Translation, units)) }
+        out
+    };
+    // The share of all papers and their translations on the grid, the rest the list's and the conversation's.
+    let (list, chat, share) = match mode {
+        Mode::Read | Mode::Translate => (0, 0, UNITS),
+        Mode::Ask => (2, 3, 3),
+        Mode::Study => (0, 2, 6),
+    };
+    // Each paper's units, its translation's alike: the share split among them, on a finer grid where it does not divide.
+    let parts = papers * if mode.translates() { 2 } else { 1 };
+    let (scale, each) = if share % parts == 0 { (1, share / parts) } else { (parts, share) };
+    let mut out = vec![];
+    if list > 0 { out.push(column(Pane::List, list * scale)) }
+    if mode == Mode::Ask { out.push(column(Pane::Chat, chat * scale)) }
+    for _ in 0..papers { out.extend(paper(each)) }
+    if mode == Mode::Study { out.push(column(Pane::Chat, chat * scale)) }
+    out
+}
+
+/// The units of columns on the grid of `UNITS`, as the layout's name says them (`2·2·2·2`); none when they are on a finer grid.
+pub fn grid(columns: &[Column]) -> Option<String> {
+    (columns.iter().map(|c| c.units).sum::<u32>() == UNITS).then(|| columns.iter().map(|c| c.units.to_string()).collect::<Vec<_>>().join("·"))
+}
+
 /// Why these columns are no layout, if they are not one: a sentence for the person.
 pub fn refusal(columns: &[Column]) -> Option<String> {
     if columns.is_empty() { return Some("至少要有一栏。".into()) }
@@ -364,6 +433,32 @@ mod tests {
         // The two papers still fit side by side once the conversation floats.
         assert_eq!(arrange(&columns, 750., 0.), vec![Placement::Shown { x: 0., width: 375. }, Placement::Shown { x: 375., width: 375. }, Placement::Over(0)]);
         assert_eq!(arrange(&columns, 700., 0.), vec![Placement::Shown { x: 0., width: 700. }, Placement::Inside(0), Placement::Over(0)]);
+    }
+
+    #[test]
+    fn a_mode_repeats_each_papers_columns() {
+        // One paper: the preset of the mode's key.
+        for mode in Mode::ALL {
+            assert_eq!(columns(mode, 1), preset(mode.key()).unwrap().columns, "{}", mode.key());
+            assert_eq!(refusal(&columns(mode, 1)), None);
+            assert!(!mode.label().is_empty());
+            assert_eq!(Mode::from_key(mode.key()), Some(mode));
+        }
+        assert_eq!(grid(&columns(Mode::Translate, 2)).as_deref(), Some("2·2·2·2"));
+        assert_eq!(grid(&columns(Mode::Read, 2)).as_deref(), Some("4·4"));
+        assert_eq!(grid(&columns(Mode::Read, 4)).as_deref(), Some("2·2·2·2"));
+        assert_eq!(grid(&columns(Mode::Study, 1)).as_deref(), Some("3·3·2"));
+        assert_eq!(grid(&columns(Mode::Ask, 1)).as_deref(), Some("2·3·3"));
+        // Three papers of 提问 share its 3 of 8; two do not divide them, and a finer grid keeps the shares.
+        assert_eq!(grid(&columns(Mode::Ask, 3)).as_deref(), Some("2·3·1·1·1"));
+        let ask = columns(Mode::Ask, 2);
+        assert_eq!(ask.iter().map(|c| c.units).collect::<Vec<_>>(), vec![4, 6, 3, 3]);
+        assert_eq!(grid(&ask), None);
+        let study = columns(Mode::Study, 2);
+        assert_eq!(study.iter().map(|c| (c.pane, c.units)).collect::<Vec<_>>(), vec![(Pane::Paper, 6), (Pane::Translation, 6), (Pane::Paper, 6), (Pane::Translation, 6), (Pane::Chat, 8)]);
+        // Each translation next to its paper and as wide.
+        for papers in 1..=4 { for mode in Mode::ALL { let c = columns(mode, papers); for i in 0..c.len() { if c[i].pane == Pane::Translation { assert_eq!(c[source(&c, i).unwrap()].units, c[i].units) } } } }
+        assert_eq!(columns(Mode::Read, 0), columns(Mode::Read, 1));
     }
 
     #[test]
