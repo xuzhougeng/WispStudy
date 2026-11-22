@@ -665,7 +665,14 @@ impl Workspace {
         let textless = in_scope.iter().filter(|p| p.fulltext == "textless").count();
         let textless_note = if textless > 0 && talk != Talk::Paper { tf!("；其中 {textless} 篇的 PDF 没读出文字，只有记录和摘要", "; {textless} PDFs have no readable text, so only records and abstracts are used") } else { String::new() };
         // What the model has been given, or will be given with the first question.
+        // Several papers side by side: the paper's conversation is about all of them (`Library::talk_papers`).
+        let several = if talk == Talk::Paper { lib.talk_papers().len() } else { 0 };
         let scope = match &chat.ctx {
+            Some(ctx) if talk == Talk::Paper && ctx.full > 1 => {
+                let mut line = tf!("已提供这 {} 篇文献的记录和 {} 页全文", "Provided the records of these {} papers and {} full-text pages", ctx.full, ctx.pages);
+                if ctx.pages_omitted > 0 { line.push_str(&tf!("（另有 {} 页超出长度未提供）", " ({} more pages exceeded the length limit)", ctx.pages_omitted)) }
+                line
+            }
             Some(ctx) if talk == Talk::Paper => {
                 let mut line = if ctx.pages > 0 { tf!("已提供这篇文献的记录和 {} 页全文", "Provided this paper's record and {} full-text pages", ctx.pages) } else { t("这篇文献没有可读取的全文，只提供了记录和摘要").to_string() };
                 if ctx.pages_omitted > 0 { line.push_str(&tf!("（另有 {} 页超出长度未提供）", " ({} more pages exceeded the length limit)", ctx.pages_omitted)) }
@@ -687,6 +694,7 @@ impl Workspace {
             // Beside the manuscript the line is kept to one: the conversation taken up again is the manuscript's last.
             None if !chat.messages.is_empty() && talk == Talk::Write => t("接着这份稿件上次的对话").to_string(),
             None if !chat.messages.is_empty() => t("历史对话：接着提问时，会按文献库现在的内容重新提供材料").to_string(),
+            None if several > 1 => tf!("将提供并排的这 {several} 篇文献的记录和全文", "Will provide the records and full texts of the {several} papers side by side"),
             None if talk == Talk::Paper => {
                 let id = lib.selected.clone().unwrap_or_default();
                 let line = match lib.main_pdf(&id).map(|f| lib.store.fulltext_pages(&f.id)) {
@@ -750,8 +758,13 @@ impl Workspace {
         } else if chat.messages.is_empty() && chat.error.is_empty() && chat.retracted.is_none() && talk == Talk::Library {
             self.render_start(window, cx)
         } else if chat.messages.is_empty() && chat.error.is_empty() && chat.retracted.is_none() {
-            let suggestions: &[&str] = &[t("这篇文献的研究问题、方法和主要结论是什么？"), t("作者的结论有哪些证据支持？有什么局限？"), t("用三句话向同行介绍这篇文章。")];
-            ui::empty_state("sparkle", t("就这篇文献提问"), t("回答依据文献库里的记录、笔记和已存 PDF 的全文，并标出出处。需要时助手会自己检索和翻阅全文。"))
+            // Beside several papers the questions are how they compare.
+            let suggestions: &[&str] = if several > 1 {
+                &[t("这几篇的研究问题和方法有什么不同？"), t("它们的结论一致吗？哪里互相支持，哪里有出入？"), t("用一张表对比这几篇的对象、方法、数据和主要发现。")]
+            } else {
+                &[t("这篇文献的研究问题、方法和主要结论是什么？"), t("作者的结论有哪些证据支持？有什么局限？"), t("用三句话向同行介绍这篇文章。")]
+            };
+            ui::empty_state("sparkle", if several > 1 { t("就这几篇文献提问") } else { t("就这篇文献提问") }, if several > 1 { t("回答依据这几篇的记录和全文，逐篇标出出处；在哪一栏读都是同一段对话。需要时助手会自己检索和翻阅文献库里的其他文献。") } else { t("回答依据文献库里的记录、笔记和已存 PDF 的全文，并标出出处。需要时助手会自己检索和翻阅全文。") })
                 .id(SharedString::from(format!("chat-empty-{side}"))).w_full().min_h_0().overflow_y_scroll().justify_start()
                 .children(suggestions.iter().enumerate().map(|(i, text)| ui::secondary_button(SharedString::from(format!("suggest-{side}-{i}")), "").w_full().h_auto().min_h(px(30.)).py(px(6.)).child(div().flex_1().min_w_0().child(*text)).on_click(self.on(Cmd::Suggest(talk, text.to_string()), cx))))
                 .into_any_element()
@@ -785,11 +798,12 @@ impl Workspace {
                             .when(talk == Talk::Library, |d| d.child(div().truncate().text_size(text_px(ui::HEAD_TITLE)).font_weight(FontWeight::SEMIBOLD).child(if draft { ui::one_line(&lib.info.name) } else if listing { t("助手的历史对话").to_string() } else { t("助手").to_string() })))
                             .when(talk == Talk::Write, |d| d.child(div().truncate().text_size(text_px(ui::HEAD_TITLE)).font_weight(FontWeight::SEMIBOLD).child(if listing { t("这份稿件的历史对话") } else { t("助手写") })))
                             // The paper's panel has its title above; its history says whose it is.
-                            .when(talk == Talk::Paper && listing, |d| d.child(div().font_weight(FontWeight::MEDIUM).child(t("这篇文献的历史对话"))))
+                            .when(talk == Talk::Paper && listing, |d| d.child(div().font_weight(FontWeight::MEDIUM).child(if several > 1 { t("这几篇文献的历史对话") } else { t("这篇文献的历史对话") })))
                             .child(div().id(SharedString::from(format!("chat-scope-{side}"))).truncate().text_size(text_px(12.)).line_height(text_px(17.)).text_color(Theme::text_tertiary())
                                 .when(!listing && brief != scope, |d| { let whole = scope.clone(); d.tooltip(move |_, cx| cx.new(|_| crate::write_assist::Tip(whole.clone())).into()) })
                                 .child(match (listing, talk) {
                                 (true, Talk::Library) => t("和助手就整个文献库有过的对话；点开一次可以接着说。单篇文献的对话在各自的「提问」里").to_string(),
+                                (true, Talk::Paper) if several > 1 => t("并排读这几篇时提过的问题和回答；点开一次对话可以接着问").to_string(),
                                 (true, Talk::Paper) => t("就这篇文献提过的问题和回答；点开一次对话可以接着问").to_string(),
                                 (true, Talk::Write) => t("和助手就这份稿件有过的对话；点开一次可以接着说").to_string(),
                                 (false, _) => brief,

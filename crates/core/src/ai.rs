@@ -121,6 +121,8 @@ pub enum Scope {
     Library,
     /// One paper, read in full.
     Paper(String),
+    /// Several papers read side by side, each in full, in the order they stand in: what is asked is mostly how they compare.
+    Papers(Vec<String>),
 }
 
 /// Everything the model is given for one conversation. Built once, with the
@@ -328,6 +330,39 @@ pub fn build_context(library_name: &str, topic: &str, papers: &[&Paper], fields:
             }
             ctx.sources.retain(|s| &s.paper_id == id);
         }
+        Scope::Papers(ids) => {
+            // Each paper's record and its main text, page by page. One budget, shared out evenly: the last paper is
+            // read as far as the first, whatever their lengths.
+            let each = PAPER_BUDGET / ids.len().max(1);
+            for id in ids {
+                let Some(p) = papers.iter().find(|p| &p.id == id) else { continue };
+                let tag = &labels[p.id.as_str()];
+                documents.push_str(&format!("## 文献 {tag}\n\n"));
+                documents.push_str(&record(tag, p, fields));
+                ctx.full += 1;
+                match fulltext.get(id) {
+                    Some((file, pages)) => {
+                        documents.push_str(&format!("\n### {tag} 的全文（逐页）\n"));
+                        let mut given = GivenFile { file_id: file.id.clone(), title: file.title.clone(), attachment: None, pages: 0, pages_omitted: 0 };
+                        let mut used = 0;
+                        for (i, page) in pages.iter().enumerate() {
+                            if used + page.len() > each {
+                                given.pages_omitted = pages.len() - i;
+                                break;
+                            }
+                            used += page.len();
+                            documents.push_str(&format!("\n[{tag} p.{}]\n{}\n", i + 1, page.trim()));
+                            given.pages += 1;
+                        }
+                        ctx.files.push(given);
+                    }
+                    None => documents.push_str(&format!("\n（{tag} 没有可读取的全文，只有上面的记录。）\n")),
+                }
+                documents.push('\n');
+            }
+            (ctx.pages, ctx.pages_omitted) = ctx.files.iter().fold((0, 0), |(given, left), file| (given + file.pages, left + file.pages_omitted));
+            ctx.sources.retain(|s| ids.contains(&s.paper_id));
+        }
         Scope::Library => {
             // Most relevant first; without any match the list keeps its order.
             let mut order: Vec<(f32, usize)> = papers
@@ -413,6 +448,11 @@ pub fn build_context(library_name: &str, topic: &str, papers: &[&Paper], fields:
         Scope::Paper(id) => {
             let tag = ctx.sources.iter().find(|s| &s.paper_id == id).map_or("P1", |s| s.label.as_str());
             format!("用户正在阅读其中一篇文献，下面是它的记录、正文和 {} 个附件（补充材料）。附件的页面标为 [{tag} S1 p.2]：S1 是第一个附件，页码是附件自己的页码；正文的页面不带 S。回答时把正文和附件一起考虑，引用附件时照这样写出附件编号，例如 [{tag} S1 p.2 \"附件中的一句原文\"]。", attachments.len())
+        }
+        // Several papers side by side: the question is mostly a comparison, and each claim is the claim of one of them.
+        Scope::Papers(_) => {
+            let tags: Vec<&str> = ctx.sources.iter().map(|s| s.label.as_str()).collect();
+            format!("用户正在并排阅读其中 {} 篇文献（{}），下面是每一篇的记录和全文，页面标为带文献标签的页码，例如 [{} p.3]。问题多半是在这几篇之间比较：逐篇给出依据，说清每句话出自哪一篇，不要把一篇的方法或结论安到另一篇上；两篇说法不同或互相矛盾时直接指出来；只问到其中一篇时，就只答那一篇。", tags.len(), tags.join("、"), tags.first().copied().unwrap_or("P1"))
         }
         // The window asks about an empty list only when the library itself has no paper yet (#192).
         Scope::Library if papers.is_empty() => "文献库里还没有文献。".to_string(),
@@ -1935,6 +1975,31 @@ mod tests {
         assert!(!ctx.documents.contains("Root"));
         let none = build_context("L", "", &[&a], &[], &BTreeMap::new(), &[], &Scope::Paper("a".into()), "q", &[]);
         assert!(none.documents.contains("没有可读取的全文"));
+    }
+
+    #[test]
+    fn papers_side_by_side_are_each_read_and_told_apart() {
+        let a = paper("a", "Root", "Abs");
+        let b = paper("b", "Leaf", "Abs");
+        let c = paper("c", "Stem", "Abs");
+        let mut text = fulltext("b", &["leaf one", "leaf two"]);
+        text.extend(fulltext("c", &["stem one"]));
+        let ctx = build_context("L", "", &[&a, &b, &c], &[], &text, &[], &Scope::Papers(vec!["c".into(), "b".into()]), "compare", &[]);
+        assert_eq!((ctx.full, ctx.pages, ctx.pages_omitted, ctx.sources.len(), ctx.files.len()), (2, 3, 0, 2, 2));
+        // In the order they stand in, each page under its own paper's label; a paper not among them is not handed over.
+        let (stem, leaf) = (ctx.documents.find("[P3 p.1]\nstem one").unwrap(), ctx.documents.find("[P2 p.1]\nleaf one").unwrap());
+        assert!(stem < leaf && ctx.documents.contains("[P2 p.2]\nleaf two") && !ctx.documents.contains("Root"));
+        // The model is told they are read side by side, and how their pages are cited.
+        assert!(ctx.instructions.contains("并排阅读其中 2 篇文献（P2、P3）") && ctx.instructions.contains("[P2 p.3]"));
+        // One without a full text is said so under its own label.
+        let none = build_context("L", "", &[&a, &b], &[], &BTreeMap::new(), &[], &Scope::Papers(vec!["a".into(), "b".into()]), "q", &[]);
+        assert!(none.documents.contains("P1 没有可读取的全文") && none.documents.contains("P2 没有可读取的全文"));
+        // One budget shared out evenly: a long paper leaves the short one its share.
+        let long = "x".repeat(PAPER_BUDGET / 3);
+        let mut text = fulltext("a", &[&long, &long]);
+        text.extend(fulltext("b", &["short"]));
+        let ctx = build_context("L", "", &[&a, &b], &[], &text, &[], &Scope::Papers(vec!["a".into(), "b".into()]), "q", &[]);
+        assert_eq!((ctx.files[0].pages, ctx.files[0].pages_omitted, ctx.files[1].pages, ctx.pages_omitted), (1, 1, 1, 1));
     }
 
     #[test]

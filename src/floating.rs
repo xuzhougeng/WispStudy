@@ -63,7 +63,7 @@ impl Workspace {
 
     /// The panel asking about a paper, with the conversation floating over the PDF.
     pub fn render_floating(&mut self, width: f32, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let pdf = self.render_paper_area(width, cx);
+        let pdf = self.render_paper_area(width, window, cx);
         let Some(lib) = self.lib.as_ref() else { return pdf };
         let area = lib.float_area;
         let floating = &self.settings.floating;
@@ -111,7 +111,7 @@ impl Workspace {
             .on_mouse_down(MouseButton::Left, cx.listener(|this, event: &MouseDownEvent, _, cx| this.float_press(Hold::Title, event.position, cx)))
             .on_mouse_up(MouseButton::Left, cx.listener(|this, _, window, cx| this.float_release(window, cx)))
             .child(ui::icon("sparkle", 14., Theme::accent()))
-            .child(div().flex_1().min_w_0().truncate().text_size(text_px(12.)).font_weight(FontWeight::MEDIUM).text_color(Theme::text_secondary()).child(t("就这篇文献提问")))
+            .child(div().flex_1().min_w_0().truncate().text_size(text_px(12.)).font_weight(FontWeight::MEDIUM).text_color(Theme::text_secondary()).child(if self.lib.as_ref().is_some_and(|lib| lib.talk_papers().len() > 1) { t("就这几篇文献提问") } else { t("就这篇文献提问") }))
             .child(
                 div()
                     .flex()

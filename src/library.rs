@@ -238,7 +238,30 @@ impl Workspace {
     /// list is not the papers', nor in a window too narrow for three columns (the paper then has it all).
     pub fn ask_list_width(&self, window: &Window) -> f32 {
         if !self.asking(window) || self.lib.as_ref().is_none_or(|lib| lib.page != Page::Papers) { return 0. }
+        // With papers kept beside, the list is the first to give them its room.
+        if let Some(frame) = self.pane_frame(window) { return frame.list }
         ask_list_width(self.settings.ask_list_width, f32::from(window.viewport_size().width))
+    }
+
+    /// With papers kept beside the one on show and the paper's conversation with them (#194): what the
+    /// window gives the list and the conversation (`panes::frame`). The papers are what such a window is
+    /// for: the list has the width the reader keeps it at only while each paper beside it can still be read,
+    /// and is put away before a paper goes under another; the conversation has a paper's share of the
+    /// rest, or the width it was dragged to here (`Library::pane_chat`). None with one paper on show, whose
+    /// widths are the reader's habit (`Settings::chat_width`, `ask_list_width`).
+    pub fn pane_frame(&self, window: &Window) -> Option<wisp_core::panes::Frame> {
+        use wisp_core::panes::{self, Mode};
+        let lib = self.lib.as_ref().filter(|lib| !lib.pins.is_empty())?;
+        let mode = lib.layout_mode().filter(|mode| matches!(mode, Mode::Ask | Mode::Study))?;
+        // A conversation that floats over the papers takes no width of theirs.
+        let mode = if self.settings.floating.on { if mode.translates() { Mode::Translate } else { Mode::Read } } else { mode };
+        let asking = self.asking(window);
+        let width = if asking { f32::from(window.viewport_size().width) } else { self.detail_width(window) };
+        let list = if !asking || lib.page != Page::Papers { 0. } else if self.settings.ask_list_width > 0. { self.settings.ask_list_width.clamp(ASK_LIST_MIN, ASK_LIST_MAX) } else { ASK_LIST_W };
+        let mut columns = panes::columns(mode, 1 + lib.pins.len());
+        // A translation that stands on the pages themselves takes no column.
+        if self.settings.facing_in_place { columns.retain(|c| c.pane != panes::Pane::Translation) }
+        Some(panes::frame(&columns, width, 1., list, lib.pane_chat))
     }
 
     /// How tall a paper's row is: in the table, or in the narrow list beside a paper that is asked
@@ -293,7 +316,9 @@ impl Workspace {
 
     /// The conversation's width beside the PDF in a detail panel `width` wide: the one the reader
     /// dragged it to, or a good share of the panel; the PDF keeps `SPLIT_PDF_MIN`.
-    pub fn chat_width(&self, width: f32) -> f32 {
+    /// With papers kept beside, what they leave it (`pane_frame`).
+    pub fn chat_width(&self, width: f32, window: &Window) -> f32 {
+        if let Some(frame) = self.pane_frame(window) { return frame.chat.min(width) }
         split_chat_width(self.settings.chat_width, width)
     }
 
@@ -305,6 +330,14 @@ impl Workspace {
         if event.pressed_button != Some(MouseButton::Left) { return self.end_drag(cx) }
         let panel = self.detail_width(window);
         let right = f32::from(window.viewport_size().width);
+        // With papers kept beside, the width is this arrangement's, not the reader's habit for one paper.
+        if self.pane_frame(window).is_some() {
+            let reach = split_chat_reach(f32::from(event.position.x), right - panel, right, self.settings.pdf_first).max(1.);
+            if let Some(lib) = self.lib.as_mut() { lib.pane_chat = reach }
+            let kept = self.pane_frame(window).map_or(0., |frame| frame.chat);
+            if let Some(lib) = self.lib.as_mut() { lib.pane_chat = kept }
+            return cx.notify();
+        }
         let width = split_chat_width(split_chat_reach(f32::from(event.position.x), right - panel, right, self.settings.pdf_first), panel);
         if (width - self.settings.chat_width).abs() < 0.5 { return }
         self.settings.chat_width = width;

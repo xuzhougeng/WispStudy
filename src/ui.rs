@@ -174,6 +174,17 @@ pub fn ghost_button(id: impl Into<ElementId>, icon_name: Option<&str>, label: Op
         .when_some(label, |d, label| d.child(label))
 }
 
+/// The gap between two things on a bar that stays one line (a pane's bar over its pages).
+pub const BAR_GAP: f32 = 8.;
+
+/// How wide a text is on one line at `size`, in the window's font: for a bar that decides what it has room for
+/// before it is drawn.
+pub fn text_width(text: &str, size: Pixels, window: &Window) -> f32 {
+    let text = text.replace('\n', " ");
+    let run = TextRun { len: text.len(), font: window.text_style().font(), color: Theme::text(), background_color: None, underline: None, strikethrough: None };
+    f32::from(window.text_system().shape_line(text.into(), size, &[run], None).width)
+}
+
 /// A small rounded label: statuses, tags, field values.
 pub fn chip(label: impl Into<SharedString>, text: Hsla, fill: Hsla) -> Div {
     div().flex().flex_none().items_center().h(text_px(22.)).px(px(8.)).rounded(px(11.)).bg(fill).text_color(text).text_size(text_px(12.)).whitespace_nowrap().child(label.into())
