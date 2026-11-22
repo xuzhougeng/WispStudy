@@ -362,6 +362,11 @@ pub struct Conversation {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ConversationInfo {
     pub id: String,
+    /// What it is about: empty for the library's, the paper's id, the manuscript's.
+    pub paper_id: String,
+    /// The title of the paper it is about; empty for any other.
+    pub about: String,
+    /// The name it was given (`rename_conversation`), else its first question.
     pub title: String,
     pub questions: usize,
     pub updated_at: String,
@@ -486,6 +491,8 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     ("papers", "volume", "TEXT NOT NULL DEFAULT ''"),
     ("papers", "issue", "TEXT NOT NULL DEFAULT ''"),
     ("papers", "pages", "TEXT NOT NULL DEFAULT ''"),
+    // The name a person gave a conversation (重命名); empty, its first question is its title.
+    ("conversations", "name", "TEXT NOT NULL DEFAULT ''"),
 ];
 
 /// Add the columns added to a table after it was first made: `CREATE TABLE IF NOT
@@ -497,6 +504,11 @@ fn add_columns(db: &Connection) -> Result<()> {
         if !has { db.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {kind}"))? }
     }
     Ok(())
+}
+
+/// A word for `LIKE … ESCAPE '\'`: its `%` and `_` stand for themselves.
+fn like_escaped(word: &str) -> String {
+    word.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
 }
 
 fn json_strings(value: &str) -> Vec<String> {
@@ -1216,8 +1228,42 @@ impl Store {
     /// The conversations with the library (`paper_id` empty) or with one
     /// paper, the latest first, without what was said in them.
     pub fn list_conversations(&self, paper_id: &str) -> Result<Vec<ConversationInfo>> {
-        let mut stmt = self.db.prepare("SELECT id, title, questions, updated_at FROM conversations WHERE paper_id = ?1 ORDER BY updated_at DESC, id DESC LIMIT 200")?;
-        Ok(stmt.query_map([paper_id], |r| Ok(ConversationInfo { id: r.get(0)?, title: r.get(1)?, questions: r.get::<_, i64>(2)? as usize, updated_at: r.get(3)? }))?.collect::<rusqlite::Result<Vec<_>>>()?)
+        self.read_conversations("WHERE c.paper_id = ?1", [paper_id])
+    }
+
+    /// Every conversation with the library and with a paper still in it (not in the trash), the
+    /// latest first: 历史's 全部对话. A manuscript's conversations are not among them.
+    pub fn list_all_conversations(&self) -> Result<Vec<ConversationInfo>> {
+        self.read_conversations("WHERE c.paper_id = '' OR c.paper_id IN (SELECT id FROM papers WHERE id NOT IN (SELECT paper_id FROM trashed_papers))", [])
+    }
+
+    fn read_conversations(&self, filter: &str, values: impl rusqlite::Params) -> Result<Vec<ConversationInfo>> {
+        let sql = format!("SELECT c.id, c.paper_id, coalesce(p.title, ''), CASE WHEN c.name <> '' THEN c.name ELSE c.title END, c.questions, c.updated_at FROM conversations c LEFT JOIN papers p ON p.id = c.paper_id {filter} ORDER BY c.updated_at DESC, c.id DESC LIMIT 500");
+        let mut stmt = self.db.prepare(&sql)?;
+        Ok(stmt.query_map(values, |r| Ok(ConversationInfo { id: r.get(0)?, paper_id: r.get(1)?, about: r.get(2)?, title: r.get(3)?, questions: r.get::<_, i64>(4)? as usize, updated_at: r.get(5)? }))?.collect::<rusqlite::Result<Vec<_>>>()?)
+    }
+
+    /// Give a conversation a name of the person's (重命名), which saving it again leaves alone; an
+    /// empty name makes its first question its title again.
+    pub fn rename_conversation(&mut self, id: &str, name: &str) -> Result<()> {
+        let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
+        self.db.execute("UPDATE conversations SET name = ?2 WHERE id = ?1", params![id, name])?;
+        Ok(())
+    }
+
+    /// The conversations that hold every one of the words (apart by spaces; Latin letters in any case)
+    /// somewhere: in their name or title, the title of the paper they are about, or what was asked and
+    /// answered in them (not what a tool brought back). The bodies are looked through by the database,
+    /// not read into memory.
+    pub fn conversations_saying(&self, words: &str) -> Result<std::collections::HashSet<String>> {
+        let patterns: Vec<String> = words.split_whitespace().map(|word| format!("%{}%", like_escaped(word))).collect();
+        if patterns.is_empty() { return Ok(Default::default()) }
+        let each = (1..=patterns.len())
+            .map(|n| format!("(c.title LIKE ?{n} ESCAPE '\\' OR c.name LIKE ?{n} ESCAPE '\\' OR coalesce(p.title, '') LIKE ?{n} ESCAPE '\\' OR EXISTS (SELECT 1 FROM json_each(c.body, '$.items') said WHERE json_extract(said.value, '$.kind') IN ('user', 'answer') AND json_extract(said.value, '$.text') LIKE ?{n} ESCAPE '\\'))"))
+            .collect::<Vec<_>>()
+            .join(" AND ");
+        let mut stmt = self.db.prepare(&format!("SELECT c.id FROM conversations c LEFT JOIN papers p ON p.id = c.paper_id WHERE json_valid(c.body) AND {each}"))?;
+        Ok(stmt.query_map(rusqlite::params_from_iter(patterns.iter()), |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<_>>()?)
     }
 
     pub fn conversation(&self, id: &str) -> Result<Option<Conversation>> {
@@ -1942,6 +1988,78 @@ mod tests {
         store.trash_paper(&paper.id).unwrap();
         store.delete_paper(&paper.id).unwrap();
         assert!(store.list_conversations(&paper.id).unwrap().is_empty());
+    }
+
+    fn asked(question: &str, answer: &str, tool: &str) -> crate::ai::Transcript {
+        use crate::ai::{Said, Transcript};
+        Transcript { items: vec![Said::User { text: question.into(), images: vec![], files: vec![], prompt: String::new() }, Said::Tool { call: "search".into(), result: tool.into(), failed: false }, Said::Answer { text: answer.into() }], sources: vec![] }
+    }
+
+    #[test]
+    fn every_conversation_of_the_library_is_listed_with_whose_it_is() {
+        let mut store = Store::in_memory(Path::new("/tmp/wisp-all-conversations")).unwrap();
+        let kept = store.add_paper(Paper { title: "Root hairs".into(), ..Default::default() }).unwrap();
+        let trashed = store.add_paper(Paper { title: "Leaves".into(), ..Default::default() }).unwrap();
+        let mut save = |paper_id: &str, question: &str| {
+            let mut conversation = Conversation { paper_id: paper_id.into(), transcript: asked(question, "好", ""), ..Default::default() };
+            store.save_conversation(&mut conversation).unwrap();
+            conversation.id
+        };
+        let library = save("", "综述一下");
+        let of_paper = save(&kept.id, "方法是什么");
+        save(&trashed.id, "结论呢");
+        save("M-1", "写引言");
+        store.trash_paper(&trashed.id).unwrap();
+        // The library's and the papers' still in it, the latest first; a manuscript's and a trashed paper's are not.
+        store.db.execute("UPDATE conversations SET updated_at = '2026-01-01T00:00:00.000Z' WHERE id = ?1", [&library]).unwrap();
+        let all = store.list_all_conversations().unwrap();
+        assert_eq!(all.iter().map(|c| (c.id.as_str(), c.paper_id.as_str(), c.about.as_str())).collect::<Vec<_>>(), [(of_paper.as_str(), kept.id.as_str(), "Root hairs"), (library.as_str(), "", "")]);
+        assert_eq!(store.list_conversations(&kept.id).unwrap()[0].about, "Root hairs");
+    }
+
+    #[test]
+    fn a_renamed_conversation_keeps_its_name() {
+        let mut store = Store::in_memory(Path::new("/tmp/wisp-rename-conversation")).unwrap();
+        let mut conversation = Conversation { transcript: asked("WOX5 在根尖做什么？", "维持干细胞", ""), ..Default::default() };
+        store.save_conversation(&mut conversation).unwrap();
+        store.rename_conversation(&conversation.id, "  WOX5   的笔记 ").unwrap();
+        // Saved again with another question, the name stays; the first question is still kept underneath.
+        conversation.transcript.items.push(crate::ai::Said::User { text: "那 SCR 呢".into(), images: vec![], files: vec![], prompt: String::new() });
+        store.save_conversation(&mut conversation).unwrap();
+        let listed = &store.list_conversations("").unwrap()[0];
+        assert_eq!((listed.title.as_str(), listed.questions), ("WOX5 的笔记", 2));
+        // An empty name gives the first question back.
+        store.rename_conversation(&conversation.id, " ").unwrap();
+        assert_eq!(store.list_conversations("").unwrap()[0].title, "WOX5 在根尖做什么？");
+    }
+
+    #[test]
+    fn conversations_are_found_by_what_was_said() {
+        let mut store = Store::in_memory(Path::new("/tmp/wisp-conversations-saying")).unwrap();
+        let paper = store.add_paper(Paper { title: "Auxin transport in roots".into(), ..Default::default() }).unwrap();
+        let mut save = |paper_id: &str, transcript: crate::ai::Transcript| {
+            let mut conversation = Conversation { paper_id: paper_id.into(), transcript, ..Default::default() };
+            store.save_conversation(&mut conversation).unwrap();
+            conversation.id
+        };
+        let roots = save(&paper.id, asked("这篇的实验设计如何？", "用了拟南芥的突变体", "PIN1 abundance"));
+        let percent = save("", asked("100% 覆盖率可信吗", "要看样本", ""));
+        let underscore = save("", asked("什么是 file_name", "一个名字", ""));
+        let found = |store: &Store, words: &str| { let mut ids: Vec<String> = store.conversations_saying(words).unwrap().into_iter().collect(); ids.sort(); ids };
+        // In the answer, in Chinese; in the paper's title, any case; every word must be somewhere.
+        assert_eq!(found(&store, "拟南芥"), std::slice::from_ref(&roots));
+        assert_eq!(found(&store, "auxin 突变体"), std::slice::from_ref(&roots));
+        assert!(found(&store, "auxin 覆盖率").is_empty());
+        // What a tool brought back is not what was said.
+        assert!(found(&store, "PIN1").is_empty());
+        // % and _ are themselves, not wildcards.
+        assert_eq!(found(&store, "100%"), [percent]);
+        assert_eq!(found(&store, "file_name"), [underscore]);
+        assert!(found(&store, "file%name").is_empty() && found(&store, "e_n").len() == 1);
+        assert!(found(&store, "   ").is_empty());
+        // A name given counts as the title.
+        store.rename_conversation(&roots, "根的笔记").unwrap();
+        assert_eq!(found(&store, "根的笔记"), [roots]);
     }
 
     #[test]

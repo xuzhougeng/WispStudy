@@ -527,6 +527,12 @@ pub enum Cmd {
     OpenChat(Talk, String),
     AskRemoveChat(Talk, String),
     RemoveChat(Talk, String),
+    /// 历史 lists every conversation of the library (true) or only those of this place: the library's, the paper's.
+    HistoryAll(Talk, bool),
+    /// Empty the search over 历史.
+    ClearHistoryFind(Talk),
+    /// The dialog that gives a conversation of 历史 a name of the person's.
+    AskRenameChat(Talk, String),
     /// Take the n-th of the slash commands on offer.
     PickSlash(Talk, usize),
     /// Choose pictures to go with the next question.
@@ -1342,6 +1348,10 @@ pub struct Chat {
     slash_closed: bool,
     /// The past conversations, while their list is on show.
     pub history: Option<Vec<ConversationInfo>>,
+    /// The search over that list, the place's like the box; and the conversations holding what is typed in it
+    /// (`Store::conversations_saying`), None while it is empty.
+    pub history_find: Entity<TextInput>,
+    pub history_hits: Option<HashSet<String>>,
     /// The tool calls waiting for the person's consent.
     pub pending: Option<PendingTools>,
     /// The person allowed every change for the rest of this conversation.
@@ -1387,6 +1397,7 @@ static CHAT_KEYS: AtomicU64 = AtomicU64::new(1);
 fn exchange(place: &mut Chat, other: &mut Chat) {
     std::mem::swap(place, other);
     std::mem::swap(&mut place.input, &mut other.input);
+    std::mem::swap(&mut place.history_find, &mut other.history_find);
 }
 
 /// What 撤回 took out of a conversation, and what the box held before.
@@ -1470,6 +1481,8 @@ pub enum Modal {
     Library { editing: Option<String>, name: Entity<TextInput>, topic: Entity<TextInput>, color: String, proposing: bool },
     /// Another name for a conversation of the home page.
     Rename { id: String, name: Entity<TextInput> },
+    /// Another name for a conversation of a library's 历史, in that place's list.
+    RenameChat { talk: Talk, id: String, name: Entity<TextInput> },
     /// `run` while the identifiers are looked up.
     AddById { input: Entity<TextInput>, run: Option<IdRun> },
     Paper(Box<PaperForm>),
@@ -1571,6 +1584,8 @@ pub struct Library {
     /// The papers of the library that hold those words; `None` while nothing is typed. Kept, since a
     /// frame cannot search every abstract: `scope_refilter` makes it anew when the words or the papers change.
     pub scope_hits: Option<HashSet<String>>,
+    /// 历史 of the library's conversation and of the paper's lists every conversation of the library (全部对话), as last chosen while it is open.
+    pub history_all: bool,
     pub tab: Tab,
     /// The detail panel takes most of the window (reading a PDF).
     pub wide: bool,
@@ -1774,6 +1789,8 @@ impl Chat {
             slash: 0,
             slash_closed: false,
             history: None,
+            history_find: cx.new(|cx| TextInput::new("找对话：标题、文献、说过的话", cx)),
+            history_hits: None,
             pending: None,
             allow_changes: false,
             running: vec![],
@@ -1993,6 +2010,18 @@ impl Library {
     /// of them in the order of their panes. They are read together and the questions are mostly how they compare.
     pub fn talk_papers(&self) -> Vec<String> {
         if self.pins.is_empty() { self.selected.iter().cloned().collect() } else { self.pane_order() }
+    }
+
+    /// Whether 历史 in this place can list every conversation of the library: the library's and a paper's can, a
+    /// manuscript's keeps to its own, and a conversation not yet made a library has its own list (`render_draft_history`).
+    pub fn history_spans(&self, talk: Talk) -> bool {
+        talk != Talk::Write && !self.info.draft
+    }
+
+    /// What 历史 in this place lists: the conversations kept under what it is about, or every one of the library (`history_all`).
+    pub fn list_history(&self, talk: Talk) -> anyhow::Result<Vec<ConversationInfo>> {
+        if self.history_all && self.history_spans(talk) { return self.store.list_all_conversations() }
+        self.store.list_conversations(&self.talk_about(talk).unwrap_or_default())
     }
 
     pub fn paper(&self, id: &str) -> Option<&Paper> {
@@ -3572,13 +3601,66 @@ impl Workspace {
             }
             Cmd::StopChat(paper) => self.stop_chat(paper, cx),
             Cmd::ToggleHistory(paper) => {
+                let Some(lib) = self.lib.as_mut() else { return };
+                let listed = if lib.chat(paper).history.is_none() { lib.list_history(paper).map(Some) } else { Ok(None) };
+                let list = match listed {
+                    Ok(list) => list,
+                    Err(err) => return self.fail(format!("{err:#}"), cx),
+                };
+                // The list opens unsearched, with the keyboard in its search; closed, the keyboard is the box's again.
+                let chat = lib.chat_mut(paper);
+                chat.history = list;
+                chat.history_find.update(cx, |input, cx| input.set_text("", cx));
+                chat.history_hits = None;
+                if chat.history.is_some() { chat.history_find.read(cx).focus(window) } else { chat.input.read(cx).focus(window) }
+            }
+            Cmd::HistoryAll(paper, all) => {
+                let Some(lib) = self.lib.as_mut().filter(|lib| lib.history_spans(paper) && lib.chat(paper).history.is_some()) else { return };
+                lib.history_all = all;
+                match lib.list_history(paper) {
+                    Ok(list) => lib.chat_mut(paper).history = Some(list),
+                    Err(err) => return self.fail(format!("{err:#}"), cx),
+                }
+                lib.chat(paper).history_find.read(cx).focus(window);
+            }
+            Cmd::ClearHistoryFind(paper) => {
                 if let Some(lib) = self.lib.as_mut() {
-                    let about = lib.talk_about(paper).unwrap_or_default();
-                    let listed = if lib.chat(paper).history.is_some() { Ok(None) } else { lib.store.list_conversations(&about).map(Some) };
-                    match listed {
-                        Ok(list) => lib.chat_mut(paper).history = list,
-                        Err(err) => self.fail(format!("{err:#}"), cx),
-                    }
+                    let chat = lib.chat_mut(paper);
+                    chat.history_find.update(cx, |input, cx| input.set_text("", cx));
+                    chat.history_hits = None;
+                    chat.history_find.read(cx).focus(window);
+                }
+            }
+            Cmd::AskRenameChat(paper, id) => {
+                let Some(title) = self.lib.as_ref().and_then(|l| l.chat(paper).history.as_ref()?.iter().find(|c| c.id == id).map(|c| c.title.clone())) else { return };
+                self.modal_subscriptions.clear();
+                self.modal_error.clear();
+                let name = self.modal_input("对话的名称", &title, false, window, cx);
+                name.read(cx).focus(window);
+                self.modal = Some(Modal::RenameChat { talk: paper, id, name });
+            }
+            // A row of 全部对话 that is another's is taken up in its own place: the paper selected with its conversation, or the library's page.
+            Cmd::OpenChat(paper, id) if self.lib.as_ref().is_some_and(|lib| lib.chat(paper).history.as_ref().and_then(|list| list.iter().find(|c| c.id == id)).is_some_and(|c| lib.talk_about(paper).is_none_or(|about| about != c.paper_id))) => {
+                let Some(lib) = self.lib.as_mut() else { return };
+                let owner = lib.chat(paper).history.as_ref().and_then(|list| list.iter().find(|c| c.id == id)).map(|c| c.paper_id.clone()).unwrap_or_default();
+                lib.chat_mut(paper).history = None;
+                if owner.is_empty() {
+                    // Asked about, the paper has the window: out of that first, so the library's page is on show.
+                    if self.asking(window) { self.run(Cmd::LeaveAsk, window, cx) }
+                    self.run(Cmd::SetPage(Page::Ask), window, cx);
+                    self.run(Cmd::OpenChat(Talk::Library, id), window, cx);
+                } else {
+                    // As a click in the list: the paper selected, its PDF or record following; then its conversation, beside the list.
+                    if self.lib.as_ref().is_some_and(|lib| lib.page == Page::Ask) { self.run(Cmd::SetPage(Page::Papers), window, cx) }
+                    // It was a conversation with that paper alone, and papers side by side have one of their own (#194): those kept
+                    // beside are let go, the paper itself staying where it is read when it is one of them.
+                    self.work_in_pane(&owner, cx);
+                    let beside: Vec<String> = self.lib.as_ref().map(|lib| lib.pins.iter().map(|pin| pin.paper.clone()).collect()).unwrap_or_default();
+                    for paper in beside { self.unpin(&paper, cx) }
+                    if let Some(lib) = self.lib.as_mut() { lib.keep = false }
+                    self.select(Some(owner), window, cx);
+                    self.run(Cmd::SetTab(Tab::Ask), window, cx);
+                    self.run(Cmd::OpenChat(Talk::Paper, id), window, cx);
                 }
             }
             Cmd::OpenChat(paper, id) => {
@@ -3603,20 +3685,21 @@ impl Workspace {
             }
             Cmd::RemoveChat(paper, id) => {
                 if let Some(lib) = self.lib.as_mut() {
-                    let about = lib.talk_about(paper).unwrap_or_default();
-                    let result = lib.store.remove_conversation(&id).and_then(|()| lib.store.list_conversations(&about));
+                    let result = lib.store.remove_conversation(&id).and_then(|()| lib.list_history(paper));
                     // The conversation in hand, once removed, would only be saved again with the next answer;
                     // the papers it was kept to go with it, as for any new conversation.
-                    let in_hand = lib.chat(paper).id == id;
-                    // One answering off screen goes with it: what still arrives for it finds nothing.
-                    lib.aside.retain(|chat| chat.id != id);
-                    if in_hand && paper == Talk::Library { lib.scope_reset(cx) }
-                    let chat = lib.chat_mut(paper);
-                    if in_hand {
+                    // Removed from 全部对话, it may be in the other place's hands.
+                    for place in [Talk::Library, Talk::Paper, Talk::Write] {
+                        if lib.chat(place).id != id { continue }
+                        if place == Talk::Library { lib.scope_reset(cx) }
+                        let chat = lib.chat_mut(place);
                         let listed = chat.history.take();
                         chat.reset(cx);
                         chat.history = listed;
                     }
+                    // One answering off screen goes with it: what still arrives for it finds nothing.
+                    lib.aside.retain(|chat| chat.id != id);
+                    let chat = lib.chat_mut(paper);
                     match result {
                         Ok(list) => chat.history = Some(list),
                         Err(err) => self.fail(format!("{err:#}"), cx),
@@ -4082,6 +4165,10 @@ impl Workspace {
         } else if self.lib.as_ref().is_some_and(|l| l.page == Page::Write && l.writing.seek.open) {
             // The search over the manuscript, from its own field or the manuscript: before a paper beside it is closed.
             self.run(Cmd::Seek(crate::write_seek::Do::Close), window, cx);
+        } else if let Some(talk) = self.lib.as_ref().and_then(|lib| [Talk::Library, Talk::Paper, Talk::Write].into_iter().find(|&talk| lib.chat(talk).history.is_some() && lib.chat(talk).history_find.focus_handle(cx).is_focused(window))) {
+            // 历史's search: what is typed goes first, then the list.
+            let typed = self.lib.as_ref().is_some_and(|lib| !lib.chat(talk).history_find.read(cx).text().is_empty());
+            self.run(if typed { Cmd::ClearHistoryFind(talk) } else { Cmd::ToggleHistory(talk) }, window, cx);
         } else if self.picked.take().is_some() || self.lib.as_mut().is_some_and(Library::unpick) {
         } else if self.lib.as_ref().is_some_and(|l| l.materials_shown()) {
             // The panel floating over the conversation is put away first; what it searched for stays.
@@ -4210,7 +4297,7 @@ impl Workspace {
             lib.aside.insert(at.min(lib.aside.len()), aside);
         } else {
             // Kept as it went (`save_chat`): 历史 has it, and lists it anew if it is open.
-            if lib.library_chat.history.is_some() { lib.library_chat.history = lib.store.list_conversations("").ok() }
+            if lib.library_chat.history.is_some() { lib.library_chat.history = lib.list_history(Talk::Library).ok() }
             self.say(t("放到后台的那段对话答完了，在「历史」里可以找到"), cx);
         }
         cx.notify();
@@ -4311,6 +4398,8 @@ impl Workspace {
         let mut subscriptions = subscriptions;
         for (chat, talk) in [(&library_chat, Talk::Library), (&paper_chat, Talk::Paper), (&write_chat, Talk::Write)] {
             subscriptions.push(cx.subscribe(&chat.input, move |this, _, event: &InputEvent, cx| this.chat_input(talk, *event, cx)));
+            // 历史 is narrowed as its search is typed into: the library is asked here, never while drawing.
+            subscriptions.push(cx.subscribe(&chat.history_find, move |this, input, event: &InputEvent, cx| if *event == InputEvent::Changed { this.history_typed(talk, input.read(cx).text().to_string(), cx) }));
         }
         let guide = Guide::new(&info.topic, cx);
         let screen = Screen::new(&info.criteria, cx);
@@ -4402,6 +4491,7 @@ impl Workspace {
             scope_find,
             scope_words: String::new(),
             scope_hits: None,
+            history_all: false,
             table_scroll: UniformListScrollHandle::new(),
             detail_scroll: ScrollHandle::new(),
             extracting: HashSet::new(),
@@ -6498,6 +6588,17 @@ impl Workspace {
         cx.notify();
     }
 
+    /// The search over 历史 was typed into: the conversations holding every word are looked up once, here.
+    pub fn history_typed(&mut self, talk: Talk, words: String, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        let hits = if words.trim().is_empty() { Ok(None) } else { lib.store.conversations_saying(&words).map(Some) };
+        match hits {
+            Ok(hits) => lib.chat_mut(talk).history_hits = hits,
+            Err(err) => self.fail(format!("{err:#}"), cx),
+        }
+        cx.notify();
+    }
+
     /// The panel over the library's conversation changes what the first question is put to.
     fn scope(&mut self, what: ScopeDo, cx: &mut Context<Self>) {
         self.pinning = false;
@@ -7349,6 +7450,17 @@ impl Workspace {
                             window.set_window_title(&format!("{} — Wisp Study", info.name));
                         }
                         self.libraries = libraries::list(&self.root);
+                        self.run(Cmd::CloseModal, window, cx);
+                    }
+                    Err(err) => self.modal_error = format!("{err:#}"),
+                }
+            }
+            Modal::RenameChat { talk, id, name } => {
+                let (talk, id, name) = (*talk, id.clone(), text(name, cx));
+                let Some(lib) = self.lib.as_mut() else { return };
+                match lib.store.rename_conversation(&id, &name).and_then(|()| lib.list_history(talk)) {
+                    Ok(list) => {
+                        if lib.chat(talk).history.is_some() { lib.chat_mut(talk).history = Some(list) }
                         self.run(Cmd::CloseModal, window, cx);
                     }
                     Err(err) => self.modal_error = format!("{err:#}"),
@@ -8274,6 +8386,25 @@ impl Workspace {
                 "history" => Some(Cmd::ToggleHistory(Talk::Library)),
                 // `openchat:<n>` takes up the n-th conversation 历史 lists (it must be open), as a click on its row does.
                 "openchat" => self.lib.as_ref().and_then(|lib| lib.library_chat.history.as_ref()?.get(arg.parse::<usize>().unwrap_or(0)).map(|c| Cmd::OpenChat(Talk::Library, c.id.clone()))),
+                // The steps below act on the 历史 on show: the library's on its page, else the paper's.
+                // `historyall` / `historyall:off` (全部对话 / this place's), `historyfind:<words>` (typed into its search),
+                // `historyrow:<n>` / `renamechat:<n>` (a click on the n-th row it shows, from 0 / 重命名… of its menu).
+                "historyall" | "historyfind" | "historyrow" | "renamechat" => {
+                    let Some(lib) = self.lib.as_ref() else { return };
+                    let talk = if lib.page == Page::Ask && lib.library_chat.history.is_some() { Talk::Library } else { Talk::Paper };
+                    let chat = lib.chat(talk);
+                    let nth = |n: &str| chat.history.as_ref().and_then(|list| list.iter().filter(|c| chat.history_hits.as_ref().is_none_or(|hits| hits.contains(&c.id))).nth(n.parse::<usize>().unwrap_or(0)).map(|c| c.id.clone()));
+                    match name {
+                        "historyall" => Some(Cmd::HistoryAll(talk, arg != "off")),
+                        "historyfind" => {
+                            chat.history_find.clone().update(cx, |input, cx| input.set_text(arg, cx));
+                            self.history_typed(talk, arg.to_string(), cx);
+                            None
+                        }
+                        "historyrow" => nth(arg).map(|id| Cmd::OpenChat(talk, id)),
+                        _ => nth(arg).map(|id| Cmd::AskRenameChat(talk, id)),
+                    }
+                }
                 "settings" => Some(match arg {
                     "ai" | "models" => Cmd::AiTab(AiTab::Models),
                     "tasks" => Cmd::AiTab(AiTab::Tasks),
