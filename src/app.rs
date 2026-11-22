@@ -196,6 +196,10 @@ pub enum MenuKind {
     PdfZoom,
     /// Whether the PDF is shown twice, side by side or one over the other.
     PdfSplit,
+    /// The tools the PDF's bar had no room for on its one line (`Workspace::more_items`).
+    PdfMore,
+    /// The papers kept beside that the window has no room for (`+N` on the last pane's bar): one chosen is shown there.
+    Panes,
     /// 版面: how the papers on show are read (#194).
     Layout,
     /// Which of the paper's PDFs is read: its main text or one of its attachments.
@@ -440,8 +444,10 @@ pub enum Cmd {
     /// Keep this paper in a pane of its own beside the paper on show (#194), / let it go again.
     PanePaper(String),
     ClosePane(String),
-    /// A paper beside and the paper on show change places.
-    SwapPane(String),
+    /// 留在旁边: the paper on show stays in a pane beside when another is chosen, / it does not after all.
+    KeepPane,
+    /// A paper kept beside becomes the paper on show, in the pane where it is (`Workspace::work_in_pane`).
+    WorkInPane(String),
     /// Read the papers on show in this way (版面).
     Layout(wisp_core::panes::Mode),
     /// Cut a piece out of a page as a picture for a question, or stop doing so.
@@ -482,6 +488,8 @@ pub enum Cmd {
     TranslatePapers(Vec<String>, wisp_core::translation::Field),
     StopBatchTranslation,
     DismissBatchTranslation,
+    /// 译文 on the pages themselves (原地替换), or on a second copy of them beside or under the pages (对照): `Settings::facing_in_place`.
+    FacingPlace(bool),
     /// Show the pages again beside themselves with their paragraphs translated in place, or put that away (`src/facing.rs`).
     ToggleFacing,
     /// Translate the paragraphs not translated yet; this is also how a run stopped halfway goes on.
@@ -1583,11 +1591,20 @@ pub struct Library {
     pub beside: Option<Beside>,
     /// Papers pinned beside the one on show, in the order of their panes.
     pub pins: Vec<Pinned>,
-    /// How tall each pane's bar is of itself, learned as it is drawn ("main" for the paper on show, else the paper
-    /// kept beside); `pane_bar` is the tallest of those drawn, the height every one of them is drawn at, so that
-    /// their lines run on as one and the pages under them start level. 0 with no pane beside.
-    pub pane_bars: HashMap<String, f32>,
-    pub pane_bar: f32,
+    /// Where the paper on show stands among them: its pane is before that of `pins[main_at]`, after all of them
+    /// when there is none. The paper worked in changes (`Workspace::work_in_pane`); the panes stay where they are.
+    pub main_at: usize,
+    /// The panes the window had room for when it was last drawn (`render_paper_area`): `panes_shown` of them from
+    /// the `panes_from`-th on, the paper on show among them; the rest are behind `+N` on the last of them.
+    pub panes_from: usize,
+    pub panes_shown: usize,
+    /// The paper on show is to stay in a pane beside when another is chosen (留在旁边, `Cmd::KeepPane`): `select` pins it then.
+    pub keep: bool,
+    /// The conversation's width dragged while papers are kept beside (`Workspace::pane_frame`); 0 is its share.
+    /// It goes with this arrangement: the width beside one paper is the reader's habit (`Settings::chat_width`).
+    pub pane_chat: f32,
+    /// How far the PDF's bar gave way to stay one line (the levels `detail::BAR_ICONS` … `BAR_NO_KEEP`): what its ⋯ menu holds.
+    pub bar_level: usize,
     /// The fit PDF pages are drawn at (`Zoom::carried`): it stays from paper to paper, a percentage does not.
     pub zoom: Zoom,
     pub library_chat: Chat,
@@ -1940,9 +1957,23 @@ impl Library {
     pub fn talk_about(&self, talk: Talk) -> Option<String> {
         match talk {
             Talk::Library => Some(String::new()),
-            Talk::Paper => self.selected.clone(),
+            // Several papers side by side have a conversation of their own, whichever of them is worked in.
+            Talk::Paper => match self.talk_papers().as_mut_slice() {
+                [] => None,
+                [one] => Some(one.clone()),
+                several => {
+                    several.sort();
+                    Some(several.join("+"))
+                }
+            },
             Talk::Write => Some(self.writing.agent.about.clone()).filter(|id| !id.is_empty()),
         }
+    }
+
+    /// The papers the paper's conversation is about (#194): the one on show, or, with others kept beside it, all
+    /// of them in the order of their panes. They are read together and the questions are mostly how they compare.
+    pub fn talk_papers(&self) -> Vec<String> {
+        if self.pins.is_empty() { self.selected.iter().cloned().collect() } else { self.pane_order() }
     }
 
     pub fn paper(&self, id: &str) -> Option<&Paper> {
@@ -2010,6 +2041,28 @@ impl Library {
     /// The paper's PDF attachments, in the order `S1`, `S2`, … count them (`Store::attachment_pages`).
     pub fn attachments(&self, id: &str) -> Vec<&PaperFile> {
         self.paper_files(id).into_iter().filter(|f| f.kind != "fulltext" && f.format == "pdf").collect()
+    }
+
+    /// The papers on show in the order of their panes: those kept beside and, among them, the paper on show.
+    pub fn pane_order(&self) -> Vec<String> {
+        let mut order: Vec<String> = self.pins.iter().map(|pin| pin.paper.clone()).collect();
+        if let Some(id) = &self.selected { order.insert(self.main_at.min(order.len()), id.clone()) }
+        order
+    }
+
+    /// The papers on show that the window has no room for, in the order of their panes (`panes_from`, `panes_shown`).
+    pub fn panes_behind(&self) -> Vec<String> {
+        let drawn = self.panes_from..self.panes_from + self.panes_shown.max(1);
+        self.pane_order().into_iter().enumerate().filter(|(at, _)| !drawn.contains(at)).map(|(_, id)| id).collect()
+    }
+
+    /// Put the panes in `order`: the papers kept beside, and the paper on show where it stands among them.
+    /// A paper the order does not name comes last.
+    pub fn order_panes(&mut self, order: &[String]) {
+        let at = |id: &str| order.iter().position(|named| named == id).unwrap_or(usize::MAX);
+        self.pins.sort_by_key(|pin| at(&pin.paper));
+        let main = self.selected.as_deref().map_or(usize::MAX, at);
+        self.main_at = self.pins.iter().filter(|pin| at(&pin.paper) < main).count();
     }
 
     /// Put the viewer away, both its halves while it shows two files.
@@ -2224,7 +2277,9 @@ impl Library {
         self.trash = self.store.list_trash()?;
         // A pinned paper taken away, or its file, goes from its pane.
         let (papers, files) = (&self.papers, &self.files);
+        let order = self.pane_order();
         self.pins.retain(|pin| papers.iter().any(|p| p.id == pin.paper) && files.iter().any(|f| f.paper_id == pin.paper && f.format == "pdf"));
+        self.order_panes(&order);
         self.rounds = self.store.screening_rounds()?;
         self.searches = self.store.list_searches()?;
         self.suggestions = self.store.list_suggestions()?.into_iter().map(|s| (s.paper_id.clone(), s)).collect();
@@ -2326,6 +2381,85 @@ impl Workspace {
 
     pub fn on(&self, cmd: Cmd, cx: &mut Context<Self>) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
         cx.listener(move |this, _, window, cx| this.run(cmd.clone(), window, cx))
+    }
+
+    /// 分屏's choices: the viewer whole or in two halves, and what the other half shows.
+    fn split_items(&self, items: &mut Vec<MenuItem>, breaks: &mut Vec<usize>, cx: &App) {
+        let Some(lib) = &self.lib else { return };
+        let Some(pdf) = &lib.pdf else { return };
+        let view = pdf.read(cx);
+        let other = lib.beside.as_ref().map(|beside| beside.view.read(cx).resource_id().to_string());
+        let current = lib.beside.as_ref().map_or(view.split(), |beside| beside.split);
+        // With 译文 on, the choice is where the translation stands: beside the pages, under them, or on them.
+        if lib.facing_shown() {
+            let in_place = self.settings.facing_in_place;
+            for (label, split) in [("译文在右边：左右对照", Split::Side), ("译文在下面：上下对照", Split::Stacked)] {
+                items.push(MenuItem { label: t(label).into(), checked: !in_place && current == split, note: None, cmd: Cmd::PdfSplit(split) });
+            }
+            items.push(MenuItem { label: t("译文替换原文：原地替换").into(), checked: in_place, note: None, cmd: Cmd::FacingPlace(true) });
+            return;
+        }
+        for (label, split) in [("不分屏", Split::Off), ("左右分屏", Split::Side), ("上下分屏", Split::Stacked)] {
+            items.push(MenuItem { label: t(label).into(), checked: current == split, note: None, cmd: Cmd::PdfSplit(split) });
+        }
+        // What the other half shows: the same file, or another of the paper's (a supplementary figure beside the text).
+        // The translation has the other half while it is on.
+        let choices = lib.selected.as_deref().map(|paper| lib.pdf_choices(paper)).unwrap_or_default();
+        if choices.len() > 1 && !lib.facing_shown() {
+            breaks.push(items.len());
+            let shown = other.unwrap_or_else(|| if current == Split::Off { String::new() } else { view.resource_id().to_string() });
+            for (id, label) in choices {
+                items.push(MenuItem { label: tf!("另一半：{label}", "Other half: {label}").into(), checked: id == shown, note: None, cmd: Cmd::PdfBeside(id) });
+            }
+        }
+    }
+
+    /// What the PDF's bar had no room for (`Library::bar_level`, a level of `detail::BAR_NO_TOOLS` …), under its ⋯:
+    /// the same things by the same names, the ones in use ticked.
+    fn more_items(&self, items: &mut Vec<MenuItem>, breaks: &mut Vec<usize>, cx: &App) {
+        let Some(lib) = &self.lib else { return };
+        let Some(pdf) = &lib.pdf else { return };
+        let Some(paper) = lib.selected.clone() else { return };
+        let level = lib.bar_level;
+        let view = pdf.read(cx);
+        let plain = |label: &str, cmd: Cmd| MenuItem { label: label.to_string().into(), checked: false, note: None, cmd };
+        let ticked = |label: &str, checked: bool, cmd: Cmd| MenuItem { label: label.to_string().into(), checked, note: None, cmd };
+        let part = |items: &Vec<MenuItem>, breaks: &mut Vec<usize>| if !items.is_empty() && breaks.last() != Some(&items.len()) { breaks.push(items.len()) };
+        if level >= crate::detail::BAR_NO_KEEP {
+            if lib.pins.len() < MAX_PINS && !lib.pins.iter().any(|pin| pin.paper == paper) { items.push(ticked(t("留在旁边"), lib.keep, Cmd::KeepPane)) }
+            if let Some((label, cmd)) = self.facing_next() { items.push(plain(&label, cmd)) }
+        }
+        if level >= crate::detail::BAR_NO_ZOOM {
+            part(items, breaks);
+            items.push(plain(t("放大"), Cmd::PdfZoom(ZoomTo::In)));
+            items.push(plain(t("缩小"), Cmd::PdfZoom(ZoomTo::Out)));
+            items.push(ticked(t("适应整页"), view.zoom() == Zoom::FitPage, Cmd::PdfZoom(ZoomTo::Set(Zoom::FitPage))));
+        }
+        if level >= crate::detail::BAR_NO_TOOLS {
+            // Floating, the tools are in their column at the page's edge already.
+            if !self.settings.pdf_tools_floating {
+                part(items, breaks);
+                self.split_items(items, breaks, cx);
+                part(items, breaks);
+                items.push(ticked(t("截图"), view.cutting(), Cmd::PdfCut));
+                items.push(ticked(t("方框"), view.tool() == crate::pdf::Tool::Box, Cmd::PdfTool(crate::pdf::Tool::Box)));
+                items.push(ticked(t("便签"), view.tool() == crate::pdf::Tool::Note, Cmd::PdfTool(crate::pdf::Tool::Note)));
+                part(items, breaks);
+                let playing = lib.aloud.as_ref().filter(|r| r.resource == view.resource_id()).map(|r| r.kind);
+                items.push(plain(if playing == Some(crate::read_aloud::Kind::Aloud) { t("停止朗读") } else { t("朗读") }, Cmd::ReadAloud));
+                items.push(plain(if playing == Some(crate::read_aloud::Kind::Podcast) { t("停止播客") } else { t("播客") }, Cmd::Podcast));
+                let kept = podcast_files(lib, &paper);
+                if kept.0.is_some() { items.push(plain(t("保存播客音频（WAV）…"), Cmd::SavePodcast(paper.clone(), true))) }
+                if kept.1.is_some() { items.push(plain(t("保存播客稿子（Markdown）…"), Cmd::SavePodcast(paper.clone(), false))) }
+            }
+            part(items, breaks);
+            if !lib.reading {
+                let key = crate::shortcuts::key_of("reading", &self.settings.shortcuts);
+                items.push(MenuItem { label: t("阅读模式").into(), checked: false, note: (!key.is_empty()).then(|| crate::shortcuts::pretty(&key).into()), cmd: Cmd::ToggleReading });
+            }
+            if !self.settings.pdf_tools_floating { items.push(plain(t("用系统应用打开"), Cmd::OpenFile(view.resource_id().to_string()))) }
+            items.push(ticked(t("工具悬浮在页面右侧"), self.settings.pdf_tools_floating, Cmd::FloatPdfTools(!self.settings.pdf_tools_floating)));
+        }
     }
 
     pub fn on_menu(&self, kind: MenuKind, cx: &mut Context<Self>) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
@@ -2453,29 +2587,19 @@ impl Workspace {
                 let Some(lib) = &self.lib else { return };
                 let (current, papers) = (lib.layout_mode(), 1 + lib.pins.len());
                 for mode in wisp_core::panes::Mode::ALL {
-                    // Its units with the papers on show, as the layout is named: 2·2·2·2 is two papers with their translations.
+                    // Its units as the layout is named, with one paper on show (精读 is 3·3·2); beside others each paper has its own share and the layout no such name.
                     let note = wisp_core::panes::grid(&wisp_core::panes::columns(mode, papers)).map(SharedString::from);
                     items.push(MenuItem { label: t(mode.label()).into(), checked: current == Some(mode), note, cmd: Cmd::Layout(mode) });
                 }
             }
-            MenuKind::PdfSplit => {
+            MenuKind::PdfSplit => self.split_items(&mut items, &mut breaks, cx),
+            MenuKind::PdfMore => self.more_items(&mut items, &mut breaks, cx),
+            MenuKind::Panes => {
                 let Some(lib) = &self.lib else { return };
-                let Some(pdf) = &lib.pdf else { return };
-                let view = pdf.read(cx);
-                let other = lib.beside.as_ref().map(|beside| beside.view.read(cx).resource_id().to_string());
-                let current = lib.beside.as_ref().map_or(view.split(), |beside| beside.split);
-                for (label, split) in [("不分屏", Split::Off), ("左右分屏", Split::Side), ("上下分屏", Split::Stacked)] {
-                    items.push(MenuItem { label: t(label).into(), checked: current == split, note: None, cmd: Cmd::PdfSplit(split) });
-                }
-                // What the other half shows: the same file, or another of the paper's (a supplementary figure beside the text).
-                // The translation has the other half while it is on.
-                let choices = lib.selected.as_deref().map(|paper| lib.pdf_choices(paper)).unwrap_or_default();
-                if choices.len() > 1 && !lib.facing_shown() {
-                    breaks.push(items.len());
-                    let shown = other.unwrap_or_else(|| if current == Split::Off { String::new() } else { view.resource_id().to_string() });
-                    for (id, label) in choices {
-                        items.push(MenuItem { label: tf!("另一半：{label}", "Other half: {label}").into(), checked: id == shown, note: None, cmd: Cmd::PdfBeside(id) });
-                    }
+                for paper in lib.panes_behind().into_iter().filter_map(|id| lib.paper(&id)) {
+                    let title = if paper.title.trim().is_empty() { t("未命名文献").to_string() } else { crate::ui::one_line(paper.title.trim()) };
+                    let title: String = if title.chars().count() > 56 { format!("{}…", title.chars().take(54).collect::<String>().trim_end()) } else { title };
+                    items.push(MenuItem { label: title.into(), checked: false, note: None, cmd: Cmd::WorkInPane(paper.id.clone()) });
                 }
             }
             MenuKind::PodcastFiles(paper) => {
@@ -3247,7 +3371,19 @@ impl Workspace {
             Cmd::AttachAs(paper, kind) => self.pick_attachment(paper, Some(kind), cx),
             // With the translation in the second half, one page again is putting the translation away.
             Cmd::PdfSplit(Split::Off) if self.lib.as_ref().is_some_and(|lib| lib.facing_shown()) => self.toggle_facing(cx),
+            Cmd::FacingPlace(in_place) => {
+                // A habit: it stays from paper to paper, and every paper on show follows it.
+                self.settings.facing_in_place = in_place;
+                self.save_settings(cx);
+                self.sync_facing(cx);
+                if let Some(lib) = self.lib.as_ref() {
+                    let views: Vec<Entity<PdfView>> = lib.pdf.iter().chain(lib.pins.iter().map(|pin| &pin.view)).cloned().collect();
+                    for view in views { view.update(cx, |pdf, cx| pdf.set_in_place(in_place, cx)) }
+                }
+            }
             Cmd::PdfSplit(split) => {
+                // Beside or under the pages is where a translation stands that is not on them.
+                if split != Split::Off && self.settings.facing_in_place && self.lib.as_ref().is_some_and(|lib| lib.facing_shown()) { self.run(Cmd::FacingPlace(false), window, cx) }
                 // Two files: one again is the one worked in, else the two halves change how they stand.
                 if self.lib.as_ref().is_some_and(|lib| lib.beside.is_some()) {
                     if split == Split::Off { self.close_beside(cx) } else if let Some(beside) = self.lib.as_mut().and_then(|lib| lib.beside.as_mut()) { beside.split = split }
@@ -3257,22 +3393,21 @@ impl Workspace {
                 if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.choose_split(split, cx)) }
             }
             Cmd::PdfBeside(file) => self.show_beside(file, cx),
-            Cmd::PanePaper(paper) => self.pin(paper, cx),
-            Cmd::ClosePane(paper) => self.unpin(&paper, cx),
-            Cmd::Layout(mode) => self.set_layout(mode, window, cx),
-            Cmd::SwapPane(paper) => {
-                // Each keeps its place: the one on show where it is read, the one beside where it was.
-                let Some(lib) = self.lib.as_mut() else { return };
-                let Some(at) = lib.pins.iter().position(|pin| pin.paper == paper) else { return };
-                let shown = lib.selected.clone().filter(|id| id != &paper && lib.pdf_file(id).is_some());
-                if let Some(view) = lib.pdf.as_ref() { let view = view.read(cx); lib.file_places.insert(view.resource_id().to_string(), view.place()); }
-                self.unpin(&paper, cx);
-                self.select(Some(paper), window, cx);
-                if let Some(shown) = shown {
-                    self.pin(shown, cx);
-                    if let Some(lib) = self.lib.as_mut() && let Some(pin) = lib.pins.pop() { lib.pins.insert(at.min(lib.pins.len()), pin) }
-                }
+            Cmd::PanePaper(paper) => {
+                self.pin(paper, cx);
+                self.room_for_panes(window, cx);
             }
+            Cmd::KeepPane => self.keep_pane(window, cx),
+            Cmd::ClosePane(paper) => {
+                // The pane of the paper on show: the one after it is worked in from here on (the one before, when it is the last).
+                if self.lib.as_ref().is_some_and(|lib| lib.selected.as_deref() == Some(paper.as_str())) {
+                    let Some(next) = self.lib.as_ref().and_then(|lib| lib.pins.get(lib.main_at).or(lib.pins.last()).map(|pin| pin.paper.clone())) else { return };
+                    self.work_in_pane(&next, cx);
+                }
+                self.unpin(&paper, cx);
+            }
+            Cmd::WorkInPane(paper) => self.work_in_pane(&paper, cx),
+            Cmd::Layout(mode) => self.set_layout(mode, window, cx),
             Cmd::BesidePdf(show) => {
                 // Beside the conversation the window is laid out for the two (`asking`); put away, the library is back around it.
                 if let Some(lib) = self.lib.as_mut() { lib.split = show }
@@ -3678,7 +3813,8 @@ impl Workspace {
                 // The file cited is the one shown: the main text, unless an attachment is named.
                 if page.is_some() { self.show_file(&id, file, cx) }
                 // Cited from the paper's own conversation: the PDF opens to its right, where the window has room.
-                let mut beside = self.lib.as_ref().is_some_and(|lib| lib.tab == Tab::Ask && lib.selected.as_deref() == Some(id.as_str()) && lib.pdf_file(&id).is_some()) && page.is_some();
+                // (Among several papers side by side, the one cited is worked in where it is.)
+                let mut beside = self.lib.as_ref().is_some_and(|lib| lib.tab == Tab::Ask && lib.talk_papers().contains(&id) && lib.pdf_file(&id).is_some()) && page.is_some();
                 self.select(Some(id), window, cx);
                 if beside {
                     self.run(Cmd::BesidePdf(true), window, cx);
@@ -4211,8 +4347,12 @@ impl Workspace {
             pdf_events: None,
             beside: None,
             pins: vec![],
-            pane_bars: HashMap::new(),
-            pane_bar: 0.,
+            main_at: 0,
+            panes_from: 0,
+            panes_shown: 1,
+            keep: false,
+            pane_chat: 0.,
+            bar_level: 0,
             zoom: Zoom::FitWidth,
             library_chat,
             paper_chat,
@@ -4293,11 +4433,26 @@ impl Workspace {
     pub(crate) fn select(&mut self, id: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_ref() else { return };
         if lib.selected == id { return }
+        // A paper is on show once: one kept beside that is chosen is worked in where it is.
+        if let Some(id) = id.as_deref().filter(|id| lib.pins.iter().any(|pin| pin.paper == *id)) { return self.work_in_pane(id, cx) }
+        // The conversation with the papers being left is kept as far as it got, under what it was about until now.
+        self.stop_chat(Talk::Paper, cx);
+        // 留在旁边: the paper being left stays in its pane as it is read there, and the one chosen opens in a pane after it.
+        let kept = self.lib.as_mut().and_then(|lib| if std::mem::take(&mut lib.keep) && id.is_some() { lib.selected.clone() } else { None });
+        let mut order = vec![];
+        if let (Some(kept), Some(chosen)) = (&kept, &id) {
+            order = self.lib.as_ref().map(|lib| lib.pane_order()).unwrap_or_default();
+            let after = order.iter().position(|paper| paper == kept).map_or(order.len(), |at| at + 1);
+            order.insert(after, chosen.clone());
+            match self.main_as_pin(cx) {
+                Some(pin) => if let Some(lib) = self.lib.as_mut() { lib.pins.push(pin) },
+                // Its record was on show: a viewer is made for its pane.
+                None => self.pin(kept.clone(), cx),
+            }
+        }
         self.picked = None;
         // One paper on show ends a marking of several.
         if id.is_some() && let Some(lib) = self.lib.as_mut() { lib.marked.clear() }
-        // The conversation with the paper being left is kept as far as it got.
-        self.stop_chat(Talk::Paper, cx);
         let Some(lib) = self.lib.as_mut() else { return };
         // The paper left is where 后退 goes (a step through them is not one more of them), and its file opens where it was left.
         if !std::mem::take(&mut self.stepping) && let Some(left) = lib.selected.clone() {
@@ -4322,8 +4477,10 @@ impl Workspace {
                 window.focus(&self.focus);
             }
         }
+        if kept.is_some() && let Some(lib) = self.lib.as_mut() { lib.order_panes(&order) }
         self.ensure_pdf(cx);
         self.translate_selected(false, cx);
+        if kept.is_some() { self.room_for_panes(window, cx) }
         cx.notify();
     }
 
@@ -4635,7 +4792,9 @@ impl Workspace {
         use wisp_core::panes::{self, Mode, Pane, Placement};
         let Some(lib) = self.lib.as_mut() else { return };
         if lib.selected.is_none() { return }
-        let columns = panes::columns(mode, 1 + lib.pins.len());
+        let mut columns = panes::columns(mode, 1 + lib.pins.len());
+        // A translation that stands on the pages themselves takes no column.
+        if self.settings.facing_in_place { columns.retain(|c| c.pane != Pane::Translation) }
         let placed = panes::arrange(&columns, f32::from(window.viewport_size().width), 1.);
         let width_of = |pane: Pane| columns.iter().zip(&placed).find(|(c, _)| c.pane == pane).and_then(|(_, p)| if let Placement::Shown { width, .. } = p { Some(*width) } else { None });
         let (chat, list) = (width_of(Pane::Chat), width_of(Pane::List));
@@ -4644,12 +4803,97 @@ impl Workspace {
             lib.split = true;
             lib.reading = mode == Mode::Study;
             self.settings.pdf_first = mode == Mode::Study;
-            if let Some(chat) = chat { self.settings.chat_width = chat }
-            if let Some(list) = list { self.settings.ask_list_width = list }
+            // With papers kept beside, the widths follow from the papers each time the window is drawn (`pane_frame`),
+            // anew from here on; the reader's widths beside one paper stay what they are.
+            if lib.pins.is_empty() {
+                if let Some(chat) = chat { self.settings.chat_width = chat }
+                if let Some(list) = list { self.settings.ask_list_width = list }
+            } else {
+                lib.pane_chat = 0.;
+            }
             self.save_settings(cx);
         }
         self.run(Cmd::SetTab(if asking { Tab::Ask } else { Tab::Pdf }), window, cx);
         if self.lib.as_ref().is_some_and(|lib| lib.facing != mode.translates()) { self.toggle_facing(cx) }
+        cx.notify();
+    }
+
+    /// 留在旁边 on the PDF's bar: the paper on show is marked to stay (`Library::keep`), and the next paper chosen
+    /// opens beside it (`select`). Nothing is shown twice meanwhile. In reading mode there is no list to choose
+    /// from: the library comes back around the paper, and the two have the window again once the other is chosen.
+    fn keep_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        let Some(paper) = lib.selected.clone() else { return };
+        if lib.keep {
+            lib.keep = false;
+            return cx.notify();
+        }
+        if lib.pins.len() >= MAX_PINS { return self.fail(tf!("最多在旁边留 {MAX_PINS} 篇。先关掉一栏。", "At most {MAX_PINS} papers can stay beside. Close a pane first."), cx) }
+        if lib.pdf_file(&paper).is_none() { return self.fail(t("这篇文献还没有 PDF，没有可以放在旁边的页面。"), cx) }
+        lib.keep = true;
+        if lib.reading && lib.page == Page::Papers { lib.reading = false }
+        self.ensure_pdf(cx);
+        let listed = self.detail_width(window) < f32::from(window.viewport_size().width);
+        self.say(if listed { t("已留住这篇。在列表里选另一篇，两篇并排显示。") } else { t("已留住这篇。再打开另一篇，两篇并排显示。") }, cx);
+        cx.notify();
+    }
+
+    /// The papers on show are about to change (one kept beside, or let go): the conversation about them ends
+    /// here, kept in the history under what it was about, and the next question starts one about the papers then on show.
+    fn leave_paper_talk(&mut self, cx: &mut Context<Self>) {
+        self.stop_chat(Talk::Paper, cx);
+        if let Some(lib) = self.lib.as_mut() { lib.paper_chat.reset(cx) }
+    }
+
+    /// The viewer of the paper on show taken out as a pane of its own, with its translation's paragraphs: the paper
+    /// goes on being read in it as it is (its place, its zoom, what is selected and searched for). None while no
+    /// viewer of it is on show.
+    fn main_as_pin(&mut self, cx: &mut Context<Self>) -> Option<Pinned> {
+        self.close_beside(cx);
+        let lib = self.lib.as_mut()?;
+        let paper = lib.selected.clone()?;
+        if lib.pdf.is_none() || lib.pdf_events.is_none() { return None }
+        Some(Pinned { paper, view: lib.pdf.take()?, _events: lib.pdf_events.take()?, facing: lib.facing_text.take() })
+    }
+
+    /// Work in the pane of a paper kept beside (#194): it becomes the paper on show (the title over the panes,
+    /// the tools on its bar, the keys, 信息 and the list's selection are its), and the paper that was takes its
+    /// place among those kept beside. No pane moves and no viewer is made anew: the two change roles, as the two
+    /// halves of a viewer do (`work_in`). One behind `+N` comes into view with it: the panes drawn are those
+    /// around the paper on show. It is no step of 后退 / 前进: both papers were on show.
+    pub(crate) fn work_in_pane(&mut self, paper: &str, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        let Some(at) = lib.pins.iter().position(|pin| pin.paper == paper) else { return };
+        lib.keep = false;
+        let order = lib.pane_order();
+        let pin = lib.pins.remove(at);
+        if let Some(left) = self.main_as_pin(cx) && let Some(lib) = self.lib.as_mut() { lib.pins.push(left) }
+        self.picked = None;
+        let Some(lib) = self.lib.as_mut() else { return };
+        lib.marked.clear();
+        lib.keep_places(cx);
+        lib.selected = Some(pin.paper.clone());
+        lib.close_pdf();
+        // The file its pane shows is the one the paper is read in.
+        let file = pin.view.read(cx).resource_id().to_string();
+        if lib.main_pdf(&pin.paper).is_some_and(|main| main.id == file) { lib.read_file.remove(&pin.paper); } else { lib.read_file.insert(pin.paper.clone(), file); }
+        (lib.pdf, lib.pdf_events, lib.facing_text) = (Some(pin.view), Some(pin._events), pin.facing);
+        lib.order_panes(&order);
+        lib.detail_scroll = ScrollHandle::new();
+        if let Some(notes) = lib.selected_paper().map(|paper| paper.notes.clone()) { lib.notes.update(cx, |input, cx| input.set_text(&notes, cx)) }
+        self.ensure_pdf(cx);
+        self.translate_selected(false, cx);
+        cx.notify();
+    }
+
+    /// Papers kept beside need the window: beside the table a panel has room for one. On the PDF tab, outside
+    /// the layout for asking, the papers get the window as in reading mode (Esc brings the library back).
+    fn room_for_panes(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let asking = self.asking(window);
+        let Some(lib) = self.lib.as_mut() else { return };
+        if lib.pins.is_empty() || lib.selected.is_none() || lib.reading || asking || lib.tab != Tab::Pdf { return }
+        lib.reading = true;
+        self.ensure_pdf(cx);
         cx.notify();
     }
 
@@ -4667,6 +4911,8 @@ impl Workspace {
         };
         let Some(file) = file else { return self.fail(t("这篇文献还没有 PDF，没有可以放在旁边的页面。"), cx) };
         let Some((view, events)) = self.pdf_view(&file, cx) else { return };
+        // One more paper on show: the conversation about them is another one.
+        self.leave_paper_talk(cx);
         let Some(lib) = self.lib.as_mut() else { return };
         lib.pins.push(Pinned { paper, view, _events: events, facing: None });
         // Pinned from the record of the paper on show: its pane is beside the PDF.
@@ -4678,9 +4924,16 @@ impl Workspace {
 
     /// Let a pinned paper go: its pane closes, and its file keeps its place for when it is read again.
     pub(crate) fn unpin(&mut self, paper: &str, cx: &mut Context<Self>) {
+        if self.lib.as_ref().is_none_or(|lib| !lib.pins.iter().any(|pin| pin.paper == paper)) { return }
+        // One paper fewer on show: the conversation about them is another one.
+        self.leave_paper_talk(cx);
         let Some(lib) = self.lib.as_mut() else { return };
         let Some(at) = lib.pins.iter().position(|pin| pin.paper == paper) else { return };
+        let order = lib.pane_order();
         let pin = lib.pins.remove(at);
+        lib.order_panes(&order);
+        // The width the conversation was dragged to went with the papers beside.
+        if lib.pins.is_empty() { lib.pane_chat = 0. }
         let view = pin.view.read(cx);
         let place = (view.resource_id().to_string(), view.place());
         lib.file_places.insert(place.0.clone(), place.1);
@@ -4742,6 +4995,10 @@ impl Workspace {
     fn pdf_event(&mut self, view: Entity<PdfView>, event: &PdfEvent, cx: &mut Context<Self>) {
         match event {
             PdfEvent::Worked => self.work_in(&view, cx),
+            // A press in the pane of a paper kept beside: that paper is the one worked in from here on.
+            PdfEvent::Pressed => {
+                if let Some(paper) = self.lib.as_ref().and_then(|lib| lib.pins.iter().find(|pin| pin.view == view).map(|pin| pin.paper.clone())) { self.work_in_pane(&paper, cx) }
+            }
             PdfEvent::Copied => self.say(t("已复制"), cx),
             PdfEvent::Translate(text, profile) => self.translate_passage(text.clone(), profile.clone(), cx),
             PdfEvent::ReadAloud(..) | PdfEvent::Figure(_) if self.lib.as_ref().is_some_and(|lib| lib.pins.iter().any(|pin| pin.view == view)) => self.say(t("朗读和收进图片库只对正在读的那篇：先在列表里选中它。"), cx),
@@ -4757,11 +5014,10 @@ impl Workspace {
                 self.attach_images(if *to_library { Talk::Library } else { Talk::Paper }, vec![Picture::Bytes(png.clone())], cx);
                 if *to_library { self.say(t("截图已加到文献库对话的输入框上方。"), cx) } else { self.show_paper_chat(cx) }
             }
-            // A pinned paper is not the one the paper's conversation is about: what is quoted from it goes to the library's.
+            // The conversation beside several papers is about all of them: a passage of any goes to it, under its own paper.
             PdfEvent::Quote(page, text, to_library) => {
                 let Some(lib) = self.lib.as_mut() else { return };
                 let pinned = lib.pins.iter().find(|pin| pin.view == view).map(|pin| pin.paper.clone());
-                let to_library = &(*to_library || pinned.as_ref().is_some_and(|paper| lib.selected.as_ref() != Some(paper)));
                 let Some(paper_id) = pinned.or_else(|| lib.selected.clone()) else { return };
                 let file_id = view.read(cx).resource_id().to_string();
                 let quote = ChatQuote { paper_id, file_id, page: *page, text: text.clone() };
@@ -5560,7 +5816,8 @@ impl Workspace {
             ai::manuscript_review_note(&handed)
         });
         let Some(lib) = self.lib.as_mut() else { return false };
-        let paper_id = lib.selected.clone();
+        // The papers the paper's conversation is about: the one on show and those kept beside it.
+        let about = lib.talk_papers();
         let chat = chat_of!(lib, talk);
         let (question, again, files) = match again {
             Some((text, images, files)) => (text, Some(images), files),
@@ -5603,9 +5860,11 @@ impl Workspace {
         // the model's own turns are only valid in the conversation that produced them.
         let replay = chat.ctx.is_none() || chat.protocol != Some(profile.protocol);
         if chat.ctx.is_none() {
-            let scope = match (talk, &paper_id) {
-                (Talk::Paper, Some(id)) => Scope::Paper(id.clone()),
-                (Talk::Paper, None) => return false,
+            let scope = match (talk, about.as_slice()) {
+                (Talk::Paper, []) => return false,
+                (Talk::Paper, [one]) => Scope::Paper(one.clone()),
+                // Several papers side by side are read together (#194).
+                (Talk::Paper, several) => Scope::Papers(several.to_vec()),
                 _ => Scope::Library,
             };
             let fulltext = match lib.store.all_fulltext() {
@@ -5618,7 +5877,7 @@ impl Workspace {
             };
             // A question about one paper reads that paper; one about the library reads the current list.
             let papers: Vec<&Paper> = match &scope {
-                Scope::Paper(_) => lib.papers.iter().collect(),
+                Scope::Paper(_) | Scope::Papers(_) => lib.papers.iter().collect(),
                 // The assistant that writes draws on the whole library, whatever the list shows; so does a conversation not yet made a library, which has no list.
                 Scope::Library if talk == Talk::Write || draft => lib.papers.iter().collect(),
                 // As `Library::scope_papers`, field by field: the conversation is held meanwhile.
@@ -5637,7 +5896,7 @@ impl Workspace {
             // A paper is read with its attachments: supplementary figures, tables and methods are part of it.
             let attachments = match &scope {
                 Scope::Paper(id) => lib.store.attachment_pages(id).unwrap_or_default(),
-                Scope::Library => vec![],
+                Scope::Papers(_) | Scope::Library => vec![],
             };
             let mut ctx = ai::build_context(&lib.info.name, &lib.info.topic, &papers, &lib.fields, &fulltext, &attachments, &scope, &prompt, &chat.known);
             // The tools reach every paper of the library, so every paper can be cited.
@@ -7775,10 +8034,10 @@ impl Workspace {
                     files.get(arg.parse::<usize>().unwrap_or(0)).cloned().map(Cmd::ReadFile)
                 }),
                 // `pdfbeside:<n>` shows the n-th PDF of the selected paper (counted as `readfile:` does) in the other half of the viewer.
-                // `pane` keeps the paper on show in a pane beside it, `pane:<n>` the n-th paper of the list; `paneclose:<n>` closes the n-th such pane, `paneswap:<n>` changes it with the paper on show.
-                "pane" if arg.is_empty() => self.lib.as_ref().and_then(|l| l.selected.clone()).map(Cmd::PanePaper),
+                // `pane` marks the paper on show to stay beside the next one selected (留在旁边), `pane:<n>` pins the n-th paper of the list beside it; `paneclose:<n>` closes the n-th such pane, `panework:<n>` makes it the paper on show where it is (a press in it).
+                "pane" if arg.is_empty() => Some(Cmd::KeepPane),
                 "pane" => self.lib.as_ref().and_then(|l| l.shown.get(arg.parse::<usize>().unwrap_or(0)).map(|&i| Cmd::PanePaper(l.papers[i].id.clone()))),
-                "paneswap" => self.lib.as_ref().and_then(|l| l.pins.get(arg.parse::<usize>().unwrap_or(0)).map(|pin| Cmd::SwapPane(pin.paper.clone()))),
+                "panework" => self.lib.as_ref().and_then(|l| l.pins.get(arg.parse::<usize>().unwrap_or(0)).map(|pin| Cmd::WorkInPane(pin.paper.clone()))),
                 "layout" => wisp_core::panes::Mode::from_key(arg).map(Cmd::Layout),
                 "paneclose" => self.lib.as_ref().and_then(|l| l.pins.get(arg.parse::<usize>().unwrap_or(0)).map(|pin| Cmd::ClosePane(pin.paper.clone()))),
                 "pdfbeside" => self.lib.as_ref().and_then(|lib| lib.selected.as_deref().and_then(|paper| lib.pdf_choices(paper).into_iter().nth(arg.parse::<usize>().unwrap_or(0)))).map(|(id, _)| Cmd::PdfBeside(id)),
@@ -7854,7 +8113,7 @@ impl Workspace {
                 "translate" if arg == "stop" => Some(Cmd::StopBatchTranslation),
                 // `facing` shows the pages with their paragraphs translated beside the PDF and starts translating (or puts
                 // it away), `facing:run` translates what is not translated yet, `facing:stop` stops.
-                "facing" => Some(match arg { "run" => Cmd::FacingRun, "stop" => Cmd::FacingStop, _ => Cmd::ToggleFacing }),
+                "facing" => Some(match arg { "run" => Cmd::FacingRun, "stop" => Cmd::FacingStop, "inplace" => Cmd::FacingPlace(true), "beside" => Cmd::FacingPlace(false), _ => Cmd::ToggleFacing }),
                 "translate" => Some(Cmd::ToggleTranslation),
                 // `profile:1` shows the second provider on 设置 › AI › 模型.
                 "profile" => Some(Cmd::SelectProvider(arg.parse().unwrap_or(0))),
@@ -7866,7 +8125,7 @@ impl Workspace {
                     return;
                 }
                 "menu" => {
-                    let kind = match arg { "sort" => MenuKind::Sort, "columns" => MenuKind::Columns, "year" => MenuKind::Filter(FilterKey::Year), "zoom" => MenuKind::PdfZoom, "pdfsplit" => MenuKind::PdfSplit, "layout" => MenuKind::Layout, "pdffiles" => MenuKind::PdfFiles, "fulltext" => MenuKind::Filter(FilterKey::Fulltext), "manuscripts" => MenuKind::Manuscripts, "export" => MenuKind::ManuscriptExport, "retry" => MenuKind::ExtractRetry, "podcasts" => MenuKind::Podcasts, _ => MenuKind::Add };
+                    let kind = match arg { "sort" => MenuKind::Sort, "columns" => MenuKind::Columns, "year" => MenuKind::Filter(FilterKey::Year), "zoom" => MenuKind::PdfZoom, "pdfsplit" => MenuKind::PdfSplit, "pdfmore" => MenuKind::PdfMore, "panes" => MenuKind::Panes, "layout" => MenuKind::Layout, "pdffiles" => MenuKind::PdfFiles, "fulltext" => MenuKind::Filter(FilterKey::Fulltext), "manuscripts" => MenuKind::Manuscripts, "export" => MenuKind::ManuscriptExport, "retry" => MenuKind::ExtractRetry, "podcasts" => MenuKind::Podcasts, _ => MenuKind::Add };
                     self.open_menu(kind, point(px(if matches!(arg, "zoom" | "manuscripts" | "export" | "retry") { 900. } else { 20. }), px(120.)), cx);
                     return;
                 }

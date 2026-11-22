@@ -21,6 +21,9 @@ actions!(pdf, [CopySelection, FindInPdf]);
 pub enum PdfEvent {
     /// The pointer went down or turned the wheel in the viewer: beside a viewer of another file of the paper, this is the one worked in from now on.
     Worked,
+    /// The pointer went down in the viewer: among the panes of several papers, this paper is the one worked in from now on.
+    /// (Turning the wheel in a pane to look something up does not make it so.)
+    Pressed,
     /// The selected text went to the clipboard.
     Copied,
     /// Add what is selected to a conversation: the 1-based page, the text, and whether to the library's (else the paper's own).
@@ -706,6 +709,9 @@ pub struct PdfView {
     /// 译文: the second half shows the pages with their paragraphs translated in place, and the two halves
     /// scroll as one. By page (0-based), what stands in place of what (`Workspace::sync_facing`).
     facing: Option<HashMap<usize, Vec<FacingPiece>>>,
+    /// The translation stands on the pages themselves, each paragraph in its own place (原地替换), instead of on
+    /// a second copy of them in the other half: the viewer is not split for it.
+    in_place: bool,
     /// How the viewer was split before the translation took its second half.
     facing_was: Split,
     /// The translation's half was placed by the viewer's width, not chosen in 分屏: it goes beside the pages or
@@ -817,6 +823,7 @@ impl PdfView {
             panes: [Pane::new(), Pane::new()],
             split: Split::Off,
             facing: None,
+            in_place: false,
             facing_was: Split::Off,
             facing_auto: false,
             active: 0,
@@ -1196,7 +1203,7 @@ impl PdfView {
     /// in is the one that stays.
     pub fn set_split(&mut self, split: Split, cx: &mut Context<Self>) {
         // The translation keeps its half: side by side or one over the other, as chosen.
-        if self.facing.is_some() && split == Split::Off { return }
+        if self.facing_beside() && split == Split::Off { return }
         if split == self.split { return }
         let was = self.split;
         if split == Split::Off && self.active == 1 { self.panes.swap(0, 1) }
@@ -1220,6 +1227,8 @@ impl PdfView {
     /// goes back to how it was split before.
     pub fn set_facing(&mut self, pieces: Option<HashMap<usize, Vec<FacingPiece>>>, cx: &mut Context<Self>) {
         match (self.facing.is_some(), pieces.is_some()) {
+            // In place, the pages stay as they are split: only what stands on them changes.
+            _ if self.in_place => self.facing = pieces,
             (false, true) => {
                 self.facing_was = self.split;
                 self.facing_auto = self.split == Split::Off;
@@ -1239,6 +1248,33 @@ impl PdfView {
 
     pub fn facing(&self) -> bool {
         self.facing.is_some()
+    }
+
+    /// Whether the translation is shown as a second copy of the pages, beside them or under them.
+    pub fn facing_beside(&self) -> bool {
+        self.facing.is_some() && !self.in_place
+    }
+
+    /// The translation on the pages themselves (原地替换), or on a second copy of them (对照). While it is on
+    /// show, the viewer goes back to how it was split before the translation, or is split for it.
+    pub fn set_in_place(&mut self, in_place: bool, cx: &mut Context<Self>) {
+        if in_place == self.in_place { return }
+        if self.facing.is_none() {
+            self.in_place = in_place;
+            return;
+        }
+        if in_place {
+            self.in_place = true;
+            // The original is the half that stays.
+            self.active = 0;
+            self.set_split(self.facing_was, cx);
+        } else {
+            self.in_place = false;
+            self.facing_was = self.split;
+            self.facing_auto = self.split == Split::Off;
+            if self.split == Split::Off { self.set_split(if self.width >= crate::facing::FACING_MIN { Split::Side } else { Split::Stacked }, cx) }
+        }
+        cx.notify();
     }
 
     /// How large the page in view is drawn, in percent of its own size.
@@ -1403,6 +1439,7 @@ impl PdfView {
         let at = f32::from(x - self.panes[pane].list.viewport_bounds().left()) - BAR_INSET;
         self.sliding = Some((pane, if at >= left && at <= left + thumb { at - left } else { thumb / 2. }));
         cx.emit(PdfEvent::Worked);
+        cx.emit(PdfEvent::Pressed);
         self.slide(x, cx);
     }
 
@@ -1656,7 +1693,7 @@ impl PdfView {
         // The facing copy of the page: each paragraph translated stands in the paragraph's own box, on the
         // page's white, set no larger than the paragraph and as small as it takes to stand in it
         // (`translation::fit`). One being asked for is tinted; the rest of the page is as it was.
-        if pane == 1 && let Some(facing) = &self.facing {
+        if (pane == 1 || self.in_place) && let Some(facing) = &self.facing {
             let picture = image.as_ref().map(|(image, _)| image.clone());
             let pieces = facing.get(&index).map(Vec::as_slice).unwrap_or_default().iter().filter_map(|piece| {
                 let [x0, y0, x1, y1] = piece.rect;
@@ -1723,6 +1760,7 @@ impl PdfView {
     fn press(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus);
         cx.emit(PdfEvent::Worked);
+        cx.emit(PdfEvent::Pressed);
         let chosen = self.mark_menu.take();
         (self.selection, self.selecting, self.translation, self.pressed_mark, self.shape_drag) = (None, false, None, None, None);
         // The half pressed in is the one worked in; a drag stays in it. The line between the two is neither.
@@ -2391,7 +2429,7 @@ impl PdfView {
     /// The translation the viewer placed itself stands beside the pages where its width has room for both, else
     /// under them: the layout changed (版面, a pane beside) since it was placed (#194).
     pub fn fit_facing(&mut self, cx: &mut Context<Self>) {
-        if self.facing.is_none() || !self.facing_auto { return }
+        if !self.facing_beside() || !self.facing_auto { return }
         let split = if self.width >= crate::facing::FACING_MIN { Split::Side } else { Split::Stacked };
         if split != self.split { self.set_split(split, cx) }
     }
@@ -2439,7 +2477,7 @@ impl Render for PdfView {
         }
         self.device_scale = window.scale_factor();
         // The page and its translation are read as one: the half last scrolled leads the other.
-        if self.facing.is_some() && self.split != Split::Off {
+        if self.facing_beside() && self.split != Split::Off {
             let (lead, other) = (self.active, 1 - self.active);
             let (top, theirs) = (self.panes[lead].list.logical_scroll_top(), self.panes[other].list.logical_scroll_top());
             if top.item_ix != theirs.item_ix || top.offset_in_item != theirs.offset_in_item { self.panes[other].list.scroll_to(top) }

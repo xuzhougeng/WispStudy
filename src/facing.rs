@@ -139,7 +139,14 @@ impl Workspace {
             if pieces.is_none() && !view.read(cx).facing() { continue }
             updates.push((view.clone(), pieces));
         }
-        for (view, pieces) in updates { view.update(cx, |pdf, cx| pdf.set_facing(pieces, cx)) }
+        // Beside the pages or on them, as the reader has it (`Settings::facing_in_place`).
+        let in_place = self.settings.facing_in_place;
+        for (view, pieces) in updates {
+            view.update(cx, |pdf, cx| {
+                pdf.set_in_place(in_place, cx);
+                pdf.set_facing(pieces, cx);
+            })
+        }
     }
 
     /// Show the translation beside the pages and begin translating, or put it away. Put away, nothing more is asked for.
@@ -219,47 +226,85 @@ impl Workspace {
     }
 
     /// Beside the switch on the PDF's bar while it is on: how far the translation is, and the one thing to do next.
-    pub(crate) fn facing_controls(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    /// `brief` leaves the count to the tooltip of what stands there. Each with the width it takes on the bar.
+    pub(crate) fn facing_controls(&self, brief: bool, window: &Window, cx: &mut Context<Self>) -> Vec<(AnyElement, f32)> {
         let Some(lib) = self.lib.as_ref().filter(|lib| lib.facing) else { return vec![] };
         let Some(facing) = lib.facing_text.as_ref() else { return vec![] };
-        self.controls_of(facing, "facing", Cmd::FacingRun, cx)
+        self.controls_of(facing, "facing", Cmd::FacingRun, brief, window, cx)
     }
 
     /// The same for a paper kept beside (its index among them), on the label over its pane.
-    pub(crate) fn pinned_facing_controls(&self, n: usize, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(crate) fn pinned_facing_controls(&self, n: usize, brief: bool, window: &Window, cx: &mut Context<Self>) -> Vec<(AnyElement, f32)> {
         let Some(lib) = self.lib.as_ref().filter(|lib| lib.facing) else { return vec![] };
         let Some(pin) = lib.pins.get(n) else { return vec![] };
         let Some(facing) = pin.facing.as_ref() else { return vec![] };
-        self.controls_of(facing, &format!("pin-facing-{}", pin.paper), Cmd::FacingRunPane(pin.paper.clone()), cx)
+        self.controls_of(facing, &format!("pin-facing-{}", pin.paper), Cmd::FacingRunPane(pin.paper.clone()), brief, window, cx)
     }
 
-    /// How far a file's translation is, and the one thing to do next: `run` goes on with it. `id` makes the ids of its elements.
-    fn controls_of(&self, facing: &Facing, id: &str, run_it: Cmd, cx: &mut Context<Self>) -> Vec<AnyElement> {
-        let Some(lib) = self.lib.as_ref() else { return vec![] };
-        let name = |part: &str| SharedString::from(format!("{id}-{part}"));
-        let small = |part: &str, label: &str| ui::ghost_button(name(part), None, Some(label.to_string().into())).h(text_px(24.)).px(px(6.)).text_size(text_px(12.));
-        if facing.standing == Standing::Reading {
-            return vec![ui::spinner(name("reading"), 13., Theme::text_tertiary()).into_any_element(), div().flex_none().child(t("正在读取段落…")).into_any_element()];
-        }
+    /// How a file's translation stands: its paragraphs translated of all, whether it is being translated now
+    /// (and being stopped), and why its run ended early.
+    fn standing_of(&self, facing: &Facing) -> (usize, usize, bool, bool, Option<String>) {
+        let Some(lib) = self.lib.as_ref() else { return (0, 0, false, false, None) };
         let total = facing.keys.len();
-        if total == 0 { return vec![] }
         let done = facing.keys.iter().filter(|key| matches!(lib.translations.get(*key), Some(Translated::Done(_)))).count();
         // The run is this file's only while it translates this file.
         let run = lib.facing_run.as_ref().filter(|_| lib.facing_for == facing.file);
         let running = run.is_some_and(|run| run.batch.running());
         let stopping = running && run.is_some_and(|run| run.batch.stopped);
         let error = run.filter(|run| !running && !run.batch.error.is_empty()).map(|run| run.batch.error.clone());
+        (done, total, running, stopping, error)
+    }
+
+    /// The one thing to do next with the translation of the paper on show, as a row of the bar's ⋯ menu where the bar has no room for it.
+    pub(crate) fn facing_next(&self) -> Option<(String, Cmd)> {
+        let lib = self.lib.as_ref().filter(|lib| lib.facing)?;
+        let facing = lib.facing_text.as_ref().filter(|facing| facing.standing != Standing::Reading)?;
+        let (done, total, running, stopping, error) = self.standing_of(facing);
+        if total == 0 || stopping { return None }
+        if running { return Some((tf!("停止翻译（{done} / {total} 段）", "Stop translating ({done} / {total} paragraphs)"), Cmd::FacingStop)) }
+        if done >= total { return None }
+        let label = if error.is_some() { t("重试") } else if done == 0 { t("翻译全文") } else { t("继续翻译") };
+        Some((tf!("{label}（{done} / {total} 段）", "{label} ({done} / {total} paragraphs)"), Cmd::FacingRun))
+    }
+
+    /// How far a file's translation is, and the one thing to do next: `run` goes on with it. `id` makes the ids of
+    /// its elements. Each is a child of the bar, with its width.
+    fn controls_of(&self, facing: &Facing, id: &str, run_it: Cmd, brief: bool, window: &Window, cx: &mut Context<Self>) -> Vec<(AnyElement, f32)> {
+        let name = |part: &str| SharedString::from(format!("{id}-{part}"));
+        let wide = |text: &str| ui::text_width(text, text_px(12.), window);
+        let small = |part: &str, label: &str| ui::ghost_button(name(part), None, Some(label.to_string().into())).h(text_px(24.)).px(px(6.)).text_size(text_px(12.));
+        let mut out: Vec<(AnyElement, f32)> = vec![];
+        if facing.standing == Standing::Reading {
+            out.push((div().id(name("reading-mark")).flex_none().child(ui::spinner(name("reading"), 13., Theme::text_tertiary())).when(brief, |d| d.tooltip(ui::tip(t("正在读取段落…")))).into_any_element(), 13.));
+            if !brief {
+                out.push((div().flex_none().child(t("正在读取段落…")).into_any_element(), wide(t("正在读取段落…"))));
+            }
+            return out;
+        }
+        let (done, total, running, stopping, error) = self.standing_of(facing);
+        if total == 0 { return vec![] }
+        let run = self.lib.as_ref().and_then(|lib| lib.facing_run.as_ref().filter(|_| lib.facing_for == facing.file));
         let with = tf!("{} · 同时 {} 段", "{} · {} paragraphs at a time", run.filter(|_| running).map_or_else(|| self.settings.profile_for_or_default(Task::Translate).labelled(), |run| run.model.clone()), self.settings.translate_workers);
-        let mut out = vec![];
-        if running { out.push(ui::spinner(name("running"), 13., Theme::accent()).into_any_element()) }
-        out.push(div().id(name("count")).flex_none().child(tf!("{done} / {total} 段", "{done} / {total} paragraphs")).tooltip(ui::tip(with)).into_any_element());
+        let count = tf!("{done} / {total} 段", "{done} / {total} paragraphs");
+        if running {
+            // Brief and being stopped, the mark is all there is: it says so itself.
+            out.push((div().id(name("running-mark")).flex_none().child(ui::spinner(name("running"), 13., Theme::accent())).when(brief && stopping, |d| d.tooltip(ui::tip(format!("{count} · {}", t("正在停止…"))))).into_any_element(), 13.));
+        }
+        if !brief {
+            out.push((div().id(name("count")).flex_none().child(count.clone()).tooltip(ui::tip(with)).into_any_element(), wide(&count)));
+        }
+        // Brief, the count is said by what stands in its place.
+        let said = |what: Option<String>| if brief { Some(what.map_or(count.clone(), |what| format!("{count} · {what}"))) } else { what };
         if stopping {
-            out.push(div().flex_none().child(t("正在停止…")).into_any_element());
+            if !brief {
+                out.push((div().flex_none().child(t("正在停止…")).into_any_element(), wide(t("正在停止…"))));
+            }
         } else if running {
-            out.push(small("stop", t("停止")).on_click(self.on(Cmd::FacingStop, cx)).into_any_element());
+            out.push((small("stop", t("停止")).when_some(said(None), |d, tip| d.tooltip(ui::tip(tip))).on_click(self.on(Cmd::FacingStop, cx)).into_any_element(), wide(t("停止")) + 12.));
         } else if done < total {
             // What went wrong is said where the way on is: on the button that tries again.
-            out.push(small("run", if error.is_some() { t("重试") } else if done == 0 { t("翻译全文") } else { t("继续翻译") }).text_color(if error.is_some() { Theme::danger() } else { Theme::accent() }).when_some(error, |d, error| d.tooltip(ui::tip(error))).on_click(self.on(run_it, cx)).into_any_element());
+            let label = if error.is_some() { t("重试") } else if done == 0 { t("翻译全文") } else { t("继续翻译") };
+            out.push((small("run", label).text_color(if error.is_some() { Theme::danger() } else { Theme::accent() }).when_some(said(error), |d, tip| d.tooltip(ui::tip(tip))).on_click(self.on(run_it, cx)).into_any_element(), wide(label) + 12.));
         }
         out
     }
