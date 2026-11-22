@@ -1618,6 +1618,10 @@ pub struct Library {
     pub pane_chat: f32,
     /// How far the PDF's bar gave way to stay one line (the levels `detail::BAR_ICONS` … `BAR_NO_KEEP`): what its ⋯ menu holds.
     pub bar_level: usize,
+    /// The conversation whose question box takes the keyboard when it is next drawn: something from a PDF went to it
+    /// (#205). Handed over where the box is drawn (`render_chat`), so a box not on screen is never given it; what is not
+    /// taken in that frame is let go.
+    pub focus_box: Option<Talk>,
     /// The fit PDF pages are drawn at (`Zoom::carried`): it stays from paper to paper, a percentage does not.
     pub zoom: Zoom,
     pub library_chat: Chat,
@@ -3803,9 +3807,12 @@ impl Workspace {
                 chat.picked = None;
                 // What the assistant said, as a quotation in the box: its words, marked as such, before the reader's own.
                 let quoted: String = text.lines().map(|line| format!("> {line}\n")).collect();
+                // Put after the draft as one step of its Undo, the caret at the end for the question.
                 chat.input.update(cx, |input, cx| {
-                    let before = input.text().trim_end().to_string();
-                    input.set_text(&if before.is_empty() { format!("{quoted}\n") } else { format!("{before}\n\n{quoted}\n") }, cx);
+                    let (kept, end) = (input.text().trim_end().len(), input.text().len());
+                    input.replace_range(kept..end, &if kept == 0 { format!("{quoted}\n") } else { format!("\n\n{quoted}\n") }, cx);
+                    let end = input.text().len();
+                    input.select_range(end..end, cx);
                 });
                 chat.input.read(cx).focus(window);
             }
@@ -4383,6 +4390,7 @@ impl Workspace {
             keep: false,
             pane_chat: 0.,
             bar_level: 0,
+            focus_box: None,
             zoom: Zoom::FitWidth,
             library_chat,
             paper_chat,
@@ -5045,7 +5053,9 @@ impl Workspace {
             PdfEvent::AddShape { paper, resource, page, kind, rect, note } => self.change_pdf_annotation(resource, |store| store.add_pdf_shape(paper, resource, *page, *kind, *rect, note).map(|_| ()), cx),
             PdfEvent::MoveShape { resource, id, rect } => self.change_pdf_annotation(resource, |store| store.move_pdf_shape(resource, id, *rect), cx),
             PdfEvent::Picture(png, to_library) => {
-                self.attach_images(if *to_library { Talk::Library } else { Talk::Paper }, vec![Picture::Bytes(png.clone())], cx);
+                let talk = if *to_library { Talk::Library } else { Talk::Paper };
+                self.attach_images(talk, vec![Picture::Bytes(png.clone())], cx);
+                if let Some(lib) = self.lib.as_mut() { lib.focus_box = Some(talk) }
                 if *to_library { self.say(t("截图已加到文献库对话的输入框上方。"), cx) } else { self.show_paper_chat(cx) }
             }
             // The conversation beside several papers is about all of them: a passage of any goes to it, under its own paper.
@@ -5058,10 +5068,13 @@ impl Workspace {
                 let Some(paper_id) = pinned.or_else(|| lib.selected.clone()) else { return };
                 let file_id = view.read(cx).resource_id().to_string();
                 let quote = ChatQuote { paper_id, file_id, page: *page, text: text.clone() };
-                let chat = lib.chat_mut(if *to_library { Talk::Library } else { Talk::Paper });
+                let talk = if *to_library { Talk::Library } else { Talk::Paper };
+                let chat = lib.chat_mut(talk);
                 if chat.quotes.len() >= MAX_QUOTES { return self.fail(tf!("一个问题最多带 {MAX_QUOTES} 段原文。先发出去，或者去掉一段。", "A question can include at most {MAX_QUOTES} passages. Send it first or remove one."), cx) }
                 if !chat.quotes.contains(&quote) { chat.quotes.push(quote) }
                 chat.history = None;
+                // The question is written next: the caret goes to the box, after the draft already there.
+                lib.focus_box = Some(talk);
                 if *to_library {
                     self.say(t("已加到文献库对话的输入框上方。"), cx);
                 } else {
@@ -8063,6 +8076,11 @@ impl Workspace {
                     if let (Some(pdf), [page, from, to]) = (self.lib.as_ref().and_then(|l| l.pdf.clone()), numbers.as_slice()) && !pdf.update(cx, |pdf, cx| pdf.select_marks(page.saturating_sub(1), *from, *to, cx)) {
                         eprintln!("pdfpick: the glyphs of page {page} are not at hand yet");
                     }
+                    return;
+                }
+                // `pdfquote` hands the PDF's selection to the paper's conversation, as 添加到对话 does; `pdfquote:library` to the library's.
+                "pdfquote" => {
+                    if let Some(pdf) = self.lib.as_ref().and_then(|l| l.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.quote(arg == "library", cx)) }
                     return;
                 }
                 "pdftranslate" => {

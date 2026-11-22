@@ -650,10 +650,15 @@ impl Workspace {
         if let Some(lib) = self.lib.as_mut() { lib.check_quotes(talk) }
         // A drag that ended anywhere but in the conversation says nothing: the flag is put right here.
         if !cx.has_active_drag() { self.pinning = false }
-        let lib = self.lib.as_ref().unwrap();
-        let chat = lib.chat(talk);
         let profile = self.settings.profile_for_or_default(wisp_core::settings::Task::Chat);
         let configured = !profile.key().is_empty();
+        // Something from a PDF went to this conversation (#205): its box, drawn below when there is a model, takes the keyboard.
+        if let Some(lib) = self.lib.as_mut() && configured && lib.focus_box == Some(talk) {
+            lib.focus_box = None;
+            lib.chat(talk).input.read(cx).focus(window);
+        }
+        let lib = self.lib.as_ref().unwrap();
+        let chat = lib.chat(talk);
         let model = profile.title();
         // Ids of the two conversations' elements must differ: both can be on screen.
         let side = talk.side();
