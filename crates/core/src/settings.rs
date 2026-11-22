@@ -892,6 +892,9 @@ mod tests {
         assert_eq!(s.profile_for(Task::Image).map(|p| (p.model, p.provider)), Some(("gpt-image-2".into(), "OpenAI".into())));
         s.tasks.set(Task::Image, &seedream);
         assert_eq!(s.profile_for(Task::Image).map(|p| p.model), Some("doubao-seedream-4-0-250828".into()));
+        // Its model that answers in words is the first with a key, so questions go to it; never to its drawing one.
+        assert_eq!(s.profile_for(Task::Chat).map(|p| (p.model, p.provider)), Some(("gpt-6.2-sol".into(), "OpenAI".into())));
+        s.providers[openai].api_key.clear();
         assert_eq!(s.profile_for(Task::Chat).map(|p| p.model), Some("deepseek-v4-pro".into()));
         // A task bound to a model of the other kind lets go of it, on reading and when a model changes its kind.
         s.tasks.set(Task::Chat, &seedream);
@@ -899,13 +902,13 @@ mod tests {
         assert_eq!((s.tasks.chat.as_str(), s.tasks.image.as_str()), ("", seedream.as_str()));
         s.providers[0].models[2].interface = "chat".into();
         s.set_model_kind(0, 2, "");
-        assert_eq!((s.tasks.image.as_str(), s.providers[0].models[2].interface.as_str(), s.profiles().len()), ("", "", 6));
+        assert_eq!((s.tasks.image.as_str(), s.providers[0].models[2].interface.as_str(), s.profiles().len()), ("", "", 7));
         s.set_model_kind(0, 0, crate::imagegen::KIND);
         assert_eq!((s.providers[0].models[0].draws(), s.profile_for(Task::Chat).map(|p| p.model)), (true, Some("deepseek-flash".into())));
         // Kept in the file, and read back as it was.
         let dir = std::env::temp_dir().join(format!("wisp-settings-{}", crate::model::new_id("T")));
         let path = dir.join("settings.json");
-        s.tasks.set(Task::Image, &s.providers[openai].models[0].id.clone());
+        s.tasks.set(Task::Image, &s.providers[openai].models[1].id.clone());
         s.save(&path).unwrap();
         assert!(std::fs::read_to_string(&path).unwrap().contains("\"kind\": \"image\""));
         assert_eq!(Settings::load(&path).unwrap(), s);

@@ -158,7 +158,7 @@ impl ProviderFields {
         let api_key = input(tf!("留空则读取环境变量 {}", "Leave blank to read {}", provider.key_env()).into(), &provider.api_key);
         let proxy = input(t("留空则使用全局代理").into(), &provider.proxy);
         let models: Vec<Entity<TextInput>> = provider.models.iter().map(|model| input(t("模型名称").into(), &model.model)).collect();
-        let example = preset.and_then(|p| p.models.first().or(p.images.first()).or(p.judges.first()).copied()).unwrap_or("gpt-5.5");
+        let example = preset.and_then(|p| p.example()).unwrap_or("gpt-6.2-sol");
         let new_model = input(tf!("添加模型，例如 {example}", "Add a model, e.g. {example}").into(), "");
         api_key.update(cx, |input, _| input.masked = true);
         let mut subscriptions: Vec<Subscription> = [&name, &base_url, &api_key, &proxy]
@@ -1232,7 +1232,8 @@ impl Workspace {
                 let active = i == shown;
                 let missing = provider.key().is_empty();
                 let busy = used.iter().any(|(_, id)| provider.models.iter().any(|m| m.id == *id));
-                let about: SharedString = if missing { t("缺 API Key").into() } else { tf!("{} 个模型", "{} models", provider.models.len()).into() };
+                let n = provider.models.len();
+                let about: SharedString = if missing { t("缺 API Key").into() } else if n > 0 && provider.models.iter().all(|m| m.draws()) { tf!("{n} 个生图模型", "{n} image models").into() } else { tf!("{} 个模型", "{} models", n).into() };
                 div()
                     .id(("provider", i))
                     .flex()
@@ -1425,6 +1426,12 @@ impl Workspace {
             .when(provider.models.is_empty(), |d| d.child(div().px(px(16.)).pb(px(4.)).child(small(t("还没有模型：在下面写上模型名称，按 Enter 添加。")))))
             .children(models)
             .child(add)
+            // A service whose models only draw shows nothing under 任务's other menus: say why where a chat model is added.
+            .when(!provider.models.iter().any(|m| m.speaks()) && provider.models.iter().any(|m| m.draws()), |d| {
+                let names: Vec<&str> = provider.models.iter().filter(|m| m.draws()).map(|m| m.model.trim()).collect();
+                let text = tf!("这个服务还没有对话模型：{} 只画图，用于生图任务。在上面添加一个对话模型，「任务」里才选得到它。", "This service has no chat model yet: {} only draws pictures, for image generation. Add a chat model above to choose it under Tasks.", names.join(if crate::i18n::is_english() { ", " } else { "、" }));
+                d.child(div().px(px(16.)).pt(px(2.)).pb(px(4.)).text_size(text_px(12.)).line_height(text_px(18.)).text_color(theme::status_colors("uncertain").0).child(text))
+            })
             .child(div().flex().flex_col().gap(px(6.)).px(px(16.)).pt(px(14.)).pb(px(16.)).when(provider.models.iter().any(|m| m.speaks()) || provider.models.is_empty(), |d| d.child(small(thinking))).when(provider.models.iter().any(|m| m.judges()), |d| d.child(small(t("判断：带「判断」标记的是 System One 这一类模型（如 TypeSafe 的 Jev）：给它材料和事先定好的选项，它在选项里作出判断，并给每个选项一个概率，不写文字，所以又快又便宜。在「任务」里可以把「批量筛选」交给它：每篇文献得到一个结论和把握，把握不足的留给你判断，没有理由和原文摘录。它不能回答问题，别的任务用不了它；这个服务的「接口」一项对它不起作用。")))).when(provider.models.iter().any(|m| m.draws()), |d| d.child(small(t("生图：带「生图」标记的模型按描述画图，在图片库里用，名字里看得出是生图模型的会自动标上，也可以在右边的菜单里改。「接口」是向服务要图的方式：「自动」时 Gemini 官方地址用它的原生接口，别处的 Gemini 模型（中转服务）走对话接口，其余走 OpenAI 的 Images 接口（/images/generations，火山方舟的 Seedream 也是它）。描述会发送给这个服务。")))).child(small(privacy)))
             .child(div().flex_1())
             .child(row(t("删除这个服务"), Some(t("连同它的模型一起删除；用到它们的任务改用默认的模型。").into()), button("provider-remove", t("删除…")).text_color(Theme::danger()).on_click(self.on(Cmd::AskRemoveProvider(view.provider.min(self.settings.providers.len().saturating_sub(1))), cx))).border_t_1().border_color(Theme::line()))
