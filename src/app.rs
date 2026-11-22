@@ -442,6 +442,8 @@ pub enum Cmd {
     ClosePane(String),
     /// A paper beside and the paper on show change places.
     SwapPane(String),
+    /// Read this paper in a window of its own (#194).
+    PaperWindow(String),
     /// Read the papers on show in this way (版面).
     Layout(wisp_core::panes::Mode),
     /// Cut a piece out of a page as a picture for a question, or stop doing so.
@@ -1508,6 +1510,15 @@ pub struct Pinned {
     pub facing: Option<crate::facing::Facing>,
 }
 
+/// A paper read in a window of its own (#194, `reader.rs`): the viewer is made and kept here, so what it does
+/// goes where the PDF in the panel's goes.
+pub struct PaperWindow {
+    pub paper: String,
+    pub view: Entity<PdfView>,
+    pub(crate) _events: Subscription,
+    pub window: WindowHandle<crate::reader::Reader>,
+}
+
 /// The most papers pinned beside the one on show: a layout has at most `MAX_COLUMNS` panes.
 pub const MAX_PINS: usize = wisp_core::panes::MAX_COLUMNS - 1;
 
@@ -1583,6 +1594,8 @@ pub struct Library {
     pub beside: Option<Beside>,
     /// Papers pinned beside the one on show, in the order of their panes.
     pub pins: Vec<Pinned>,
+    /// Papers read in windows of their own.
+    pub windows: Vec<PaperWindow>,
     /// How tall each pane's bar is of itself, learned as it is drawn ("main" for the paper on show, else the paper
     /// kept beside); `pane_bar` is the tallest of those drawn, the height every one of them is drawn at, so that
     /// their lines run on as one and the pages under them start level. 0 with no pane beside.
@@ -1694,6 +1707,8 @@ pub struct Workspace {
     pub picked: Option<crate::select::Picked>,
     /// The next `select` is a step through the papers read (`step_history`), not a paper chosen.
     stepping: bool,
+    /// The library's window: a paper's own window shows its paper there (`show_in_library`).
+    pub main_window: AnyWindowHandle,
     /// A paper of the scope panel is held and on its way into the conversation (`chat::PaperDrag`).
     pub pinning: bool,
     /// The pointer is over the filters of a list too narrow for them, or over the card that shows them all.
@@ -2017,10 +2032,15 @@ impl Library {
         (self.pdf, self.pdf_events, self.beside) = (None, None, None);
     }
 
+    /// The paper of a viewer that is not the panel's: one kept beside, or read in a window of its own.
+    pub fn apart(&self, view: &Entity<PdfView>) -> Option<String> {
+        self.pins.iter().find(|pin| &pin.view == view).map(|pin| pin.paper.clone()).or_else(|| self.windows.iter().find(|w| &w.view == view).map(|w| w.paper.clone()))
+    }
+
     /// Note where the files on show are read at, here and in the library's database, before they are put
     /// away: another paper opened, the library closed or the app quit (#194).
     pub fn keep_places(&mut self, cx: &App) {
-        let views = self.pdf.iter().chain(self.beside.as_ref().map(|beside| &beside.view)).chain(self.pins.iter().map(|pin| &pin.view));
+        let views = self.pdf.iter().chain(self.beside.as_ref().map(|beside| &beside.view)).chain(self.pins.iter().map(|pin| &pin.view)).chain(self.windows.iter().map(|w| &w.view));
         let places: Vec<(String, (usize, f32))> = views.map(|view| { let view = view.read(cx); (view.resource_id().to_string(), view.place()) }).collect();
         for (id, place) in &places { self.file_places.insert(id.clone(), *place); }
         let _ = self.store.save_reading_places(&places);
@@ -2274,7 +2294,12 @@ impl Workspace {
         shortcuts::rebuild(&settings.shortcuts, cx);
         let libraries = libraries::list(&root);
         let home = crate::draft::Home::new(window, cx);
-        let mut this = Workspace { focus, settings, settings_path, root, libraries, lib: None, parked: vec![], stepping: false, settings_view: None, connections: vec![], skills: vec![], update: UpdateState::Idle, update_told: None, session: Session::default(), modal: None, modal_error: String::new(), modal_subscriptions: vec![], menu: None, palette: None, toast, home_scroll: ScrollHandle::new(), home, resizing: None, column_drag: None, picked: None, pinning: false, filters_over: [false; 2], filters_drawn: false };
+        let mut this = Workspace { focus, settings, settings_path, root, libraries, lib: None, parked: vec![], stepping: false, main_window: window.window_handle(), settings_view: None, connections: vec![], skills: vec![], update: UpdateState::Idle, update_told: None, session: Session::default(), modal: None, modal_error: String::new(), modal_subscriptions: vec![], menu: None, palette: None, toast, home_scroll: ScrollHandle::new(), home, resizing: None, column_drag: None, picked: None, pinning: false, filters_over: [false; 2], filters_drawn: false };
+        // The library's window closed: the papers' own windows go with it (their viewers are this one's).
+        cx.on_release(|this: &mut Workspace, cx| {
+            if let Some(lib) = this.lib.as_mut() { for open in lib.windows.drain(..) { open.window.update(cx, |_, window, _| window.remove_window()).ok(); } }
+        })
+        .detach();
         this.apply_appearance(window);
         this.apply_typography(window, cx);
         cx.observe_window_appearance(window, |this, window, _| this.apply_appearance(window)).detach();
@@ -3260,6 +3285,7 @@ impl Workspace {
             Cmd::PanePaper(paper) => self.pin(paper, cx),
             Cmd::ClosePane(paper) => self.unpin(&paper, cx),
             Cmd::Layout(mode) => self.set_layout(mode, window, cx),
+            Cmd::PaperWindow(paper) => self.open_paper_window(paper, window, cx),
             Cmd::SwapPane(paper) => {
                 // Each keeps its place: the one on show where it is read, the one beside where it was.
                 let Some(lib) = self.lib.as_mut() else { return };
@@ -4000,9 +4026,11 @@ impl Workspace {
 
     /// Leave the open library. One whose conversation is still answering is kept, off screen, until the answer is in:
     /// leaving a conversation does not stop it.
-    pub(crate) fn close_library(&mut self, cx: &App) {
+    pub(crate) fn close_library(&mut self, cx: &mut App) {
         let Some(mut lib) = self.lib.take() else { return };
         lib.keep_places(cx);
+        // A paper's own window belongs to its library.
+        for open in lib.windows.drain(..) { open.window.update(cx, |_, window, _| window.remove_window()).ok(); }
         if lib.answering() { self.parked.push(lib) }
     }
 
@@ -4211,6 +4239,7 @@ impl Workspace {
             pdf_events: None,
             beside: None,
             pins: vec![],
+            windows: vec![],
             pane_bars: HashMap::new(),
             pane_bar: 0.,
             zoom: Zoom::FitWidth,
@@ -4347,12 +4376,16 @@ impl Workspace {
         let models: Vec<(String, String)> = self.settings.profiles().into_iter().filter(|p| !p.model.trim().is_empty()).map(|p| (p.id.clone(), p.labelled())).collect();
         let usual = self.settings.profile_for_or_default(Task::Translate);
         let Some(lib) = self.lib.as_ref() else { return };
-        let Some(pdf) = lib.pdf.clone() else { return };
-        let Some((text, profile)) = pdf.read(cx).translation_asked() else { return };
-        let state = lib.translations.get(&wisp_core::store::translation_key(&text, &prompt)).cloned().unwrap_or(Translated::Busy);
-        let model = profile.and_then(|id| self.settings.profile(&id)).unwrap_or(usual);
-        let model = (model.id.clone(), model.labelled());
-        pdf.update(cx, |pdf, cx| pdf.show_translation(state, model, models, cx));
+        // Each viewer with a selection asked to be translated: the panel's, those beside it, those in windows of their own.
+        let views: Vec<Entity<PdfView>> = lib.pdf.iter().chain(lib.beside.as_ref().map(|beside| &beside.view)).chain(lib.pins.iter().map(|pin| &pin.view)).chain(lib.windows.iter().map(|w| &w.view)).cloned().collect();
+        let mut shown = vec![];
+        for pdf in views {
+            let Some((text, profile)) = pdf.read(cx).translation_asked() else { continue };
+            let state = lib.translations.get(&wisp_core::store::translation_key(&text, &prompt)).cloned().unwrap_or(Translated::Busy);
+            let model = profile.and_then(|id| self.settings.profile(&id)).unwrap_or_else(|| usual.clone());
+            shown.push((pdf, state, (model.id.clone(), model.labelled())));
+        }
+        for (pdf, state, model) in shown { pdf.update(cx, |pdf, cx| pdf.show_translation(state, model, models.clone(), cx)) }
     }
 
     /// 朗读: read `selection` aloud, or (`None`) the file on show from the page in view to its reference
@@ -4580,7 +4613,7 @@ impl Workspace {
     }
 
     /// A viewer of a file of the selected paper, with its own marks, at the place it was left, and what it says heard.
-    fn pdf_view(&mut self, file: &PaperFile, cx: &mut Context<Self>) -> Option<(Entity<PdfView>, Subscription)> {
+    pub(crate) fn pdf_view(&mut self, file: &PaperFile, cx: &mut Context<Self>) -> Option<(Entity<PdfView>, Subscription)> {
         let lib = self.lib.as_mut()?;
         let path = lib.store.file_path(file);
         let annotations = match lib.store.pdf_annotations(&file.paper_id, &file.id) {
@@ -4744,7 +4777,7 @@ impl Workspace {
             PdfEvent::Worked => self.work_in(&view, cx),
             PdfEvent::Copied => self.say(t("已复制"), cx),
             PdfEvent::Translate(text, profile) => self.translate_passage(text.clone(), profile.clone(), cx),
-            PdfEvent::ReadAloud(..) | PdfEvent::Figure(_) if self.lib.as_ref().is_some_and(|lib| lib.pins.iter().any(|pin| pin.view == view)) => self.say(t("朗读和收进图片库只对正在读的那篇：先在列表里选中它。"), cx),
+            PdfEvent::ReadAloud(..) | PdfEvent::Figure(_) if self.lib.as_ref().is_some_and(|lib| lib.apart(&view).is_some()) => self.say(t("朗读和收进图片库只对正在读的那篇：先在列表里选中它。"), cx),
             PdfEvent::ReadAloud(page, text) => self.read_aloud(Some((*page, text.clone())), cx),
             PdfEvent::Figure(piece) => self.collect_piece(piece, cx),
             PdfEvent::Annotate { paper, resource, page, kind, quote, boxes } => self.change_pdf_annotation(resource, |store| store.add_pdf_annotation(paper, resource, *page, *kind, quote, boxes).map(|_| ()), cx),
@@ -4760,7 +4793,7 @@ impl Workspace {
             // A pinned paper is not the one the paper's conversation is about: what is quoted from it goes to the library's.
             PdfEvent::Quote(page, text, to_library) => {
                 let Some(lib) = self.lib.as_mut() else { return };
-                let pinned = lib.pins.iter().find(|pin| pin.view == view).map(|pin| pin.paper.clone());
+                let pinned = lib.apart(&view);
                 let to_library = &(*to_library || pinned.as_ref().is_some_and(|paper| lib.selected.as_ref() != Some(paper)));
                 let Some(paper_id) = pinned.or_else(|| lib.selected.clone()) else { return };
                 let file_id = view.read(cx).resource_id().to_string();
@@ -4783,7 +4816,7 @@ impl Workspace {
         let Some(lib) = self.lib.as_mut() else { return };
         // An event queued by an old viewer cannot edit the newly selected PDF: the marks go to the viewers showing their
         // file, every one of them (a paper pinned beside may be the one on show as well).
-        let views: Vec<Entity<PdfView>> = lib.pdf.iter().chain(lib.beside.as_ref().map(|beside| &beside.view)).chain(lib.pins.iter().map(|pin| &pin.view)).filter(|view| view.read(cx).resource_id() == resource).cloned().collect();
+        let views: Vec<Entity<PdfView>> = lib.pdf.iter().chain(lib.beside.as_ref().map(|beside| &beside.view)).chain(lib.pins.iter().map(|pin| &pin.view)).chain(lib.windows.iter().map(|w| &w.view)).filter(|view| view.read(cx).resource_id() == resource).cloned().collect();
         if views.is_empty() { return }
         match change(&mut lib.store).and_then(|()| lib.store.pdf_annotations("", resource)) {
             Ok(annotations) => {
@@ -7437,6 +7470,26 @@ impl Workspace {
                 }
                 // `shot:<file.png>` writes the window as it is drawn to a picture, without the screen:
                 // the frame is rendered off it. macOS only.
+                // `window` reads the paper on show in a window of its own, `window:<n>` the n-th paper of the list; `windowshot:<file.png>` draws the last such window.
+                "window" if arg.is_empty() => self.lib.as_ref().and_then(|l| l.selected.clone()).map(Cmd::PaperWindow),
+                "window" => self.lib.as_ref().and_then(|l| l.shown.get(arg.parse::<usize>().unwrap_or(0)).map(|&i| Cmd::PaperWindow(l.papers[i].id.clone()))),
+                "windowshot" => {
+                    let path = PathBuf::from(arg);
+                    // Untyped: a typed handle would hold the window's root view, which drawing it needs.
+                    let Some(handle) = self.lib.as_ref().and_then(|l| l.windows.last()).map(|w| AnyWindowHandle::from(w.window)) else { eprintln!("windowshot: no paper window"); return };
+                    cx.defer(move |cx| {
+                        handle.update(cx, |_, window, cx| {
+                            let Some((width, height, mut pixels)) = window.render_offscreen(cx) else { return eprintln!("windowshot: this platform cannot render off the screen") };
+                            for pixel in pixels.as_chunks_mut::<4>().0 { pixel.swap(0, 2) }
+                            match image::RgbaImage::from_raw(width as u32, height as u32, pixels).map(|picture| picture.save(&path)) {
+                                Some(Ok(())) => eprintln!("windowshot: {}", path.display()),
+                                other => eprintln!("windowshot: not written ({other:?})"),
+                            }
+                        })
+                        .ok();
+                    });
+                    return;
+                }
                 "shot" => {
                     let path = PathBuf::from(arg);
                     window.defer(cx, move |window, cx| {
