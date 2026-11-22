@@ -143,6 +143,8 @@ impl Workspace {
                 let Some(p) = lib.paper(id) else { return (items, breaks) };
                 let pdf = lib.pdf_file(id);
                 if pdf.is_some() { items.push(item(t("打开 PDF"), Cmd::OpenPaper(id.clone(), Tab::Pdf))) }
+                // Its PDF in a window of its own, the library's window left free (#194).
+                if pdf.is_some() { items.push(item(t("在新窗口中阅读"), Cmd::PaperWindow(id.clone()))) }
                 items.push(item(t("查看信息"), Cmd::OpenPaper(id.clone(), Tab::Info)));
                 items.push(item(t("就这篇提问"), Cmd::OpenPaper(id.clone(), Tab::Ask)));
                 // Beside another paper on show: this one in a pane of its own, to read the two side by side (#194).

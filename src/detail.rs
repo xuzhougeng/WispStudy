@@ -848,6 +848,11 @@ impl Workspace {
             let (reading, width) = button("pdf-reading", None, "expand", t("阅读模式"), false, tip, named);
             put((reading.on_click(self.on(Cmd::ToggleReading, cx)), width));
         }
+        // This paper in a window of its own: the library's window is free for the list (#194).
+        if has && tools {
+            let (apart, width) = button("pdf-window", None, "app-window", t("新窗口"), false, Some(t("在新窗口中阅读：文献库的窗口留给列表和别的文献").to_string()), named);
+            put((apart.on_click(self.on(Cmd::PaperWindow(bar.paper_id.clone()), cx)), width));
+        }
         // Floating, the column has it; a file that could not be read keeps it here, the way to read it elsewhere.
         if (!bar.floating && tools) || !has {
             let (open, width) = button("pdf-open", Some("link"), "link", t("用系统应用打开"), false, None, named && bar.width >= 700.);
