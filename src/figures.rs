@@ -235,6 +235,7 @@ impl Workspace {
                 self.run(Cmd::CloseModal, window, cx);
                 self.run(Cmd::OpenPaper(paper_id, Tab::Ask), window, cx);
                 self.attach_images(crate::app::Talk::Paper, vec![Picture::File(path)], cx);
+                if let Some(lib) = self.lib.as_mut() { lib.focus_box = Some(crate::app::Talk::Paper) }
             }
             Cmd::CopyFigure(id) => {
                 let Some(path) = self.lib.as_ref().and_then(|lib| lib.gallery.figure(&id).map(|figure| lib.store.figure_path(figure))) else { return };

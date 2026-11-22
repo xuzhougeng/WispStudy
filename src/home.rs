@@ -24,6 +24,8 @@ impl Render for Workspace {
         } else {
             self.render_home(cx)
         };
+        // A question box asked for the keyboard and not drawn this frame does not take it later (#205).
+        if let Some(lib) = self.lib.as_mut() { lib.focus_box = None }
         // An element says only when the pointer comes or goes: once the folded filters are not drawn, nothing would say it went.
         if !self.filters_drawn { self.filters_over = [false; 2] }
         div()

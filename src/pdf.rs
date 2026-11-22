@@ -2075,7 +2075,7 @@ impl PdfView {
     }
 
     /// Hand what is selected to a conversation, and let go of it.
-    fn quote(&mut self, to_library: bool, cx: &mut Context<Self>) {
+    pub fn quote(&mut self, to_library: bool, cx: &mut Context<Self>) {
         let Some((page, text)) = self.selected() else { return };
         self.selection = None;
         cx.emit(PdfEvent::Quote(page, text, to_library));
