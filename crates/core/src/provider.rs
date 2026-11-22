@@ -30,9 +30,9 @@ pub const PRESETS: [Preset; 8] = [
     Preset { key: "kimi", name: "Kimi", protocol: Protocol::OpenAI, base_url: "https://api.moonshot.cn/v1", key_env: "MOONSHOT_API_KEY", models: &["kimi-k2.6"], images: &[], judges: &[], console: "https://platform.moonshot.cn/console/api-keys" },
     Preset { key: "glm", name: "GLM", protocol: Protocol::OpenAI, base_url: "https://open.bigmodel.cn/api/paas/v4", key_env: "ZHIPUAI_API_KEY", models: &["glm-5.3", "glm-5.1"], images: &[], judges: &[], console: "https://open.bigmodel.cn/usercenter/apikeys" },
     Preset { key: "claude", name: "Claude", protocol: Protocol::Anthropic, base_url: ANTHROPIC_BASE, key_env: "ANTHROPIC_API_KEY", models: &[DEFAULT_MODEL, "claude-sonnet-5-5", "claude-haiku-5-5"], images: &[], judges: &[], console: "https://console.anthropic.com/settings/keys" },
-    Preset { key: "openai", name: "OpenAI", protocol: Protocol::Responses, base_url: "https://api.openai.com/v1", key_env: "OPENAI_API_KEY", models: &[], images: &["gpt-image-2"], judges: &[], console: "https://platform.openai.com/api-keys" },
+    Preset { key: "openai", name: "OpenAI", protocol: Protocol::Responses, base_url: "https://api.openai.com/v1", key_env: "OPENAI_API_KEY", models: &["gpt-6.2-sol"], images: &["gpt-image-2"], judges: &[], console: "https://platform.openai.com/api-keys" },
     // Chat goes to Google's OpenAI-compatible address; pictures to Gemini's own interface beside it (`imagegen::guess`).
-    Preset { key: "gemini", name: "Gemini", protocol: Protocol::OpenAI, base_url: "https://generativelanguage.googleapis.com/v1beta/openai", key_env: "GEMINI_API_KEY", models: &[], images: &["gemini-3.1-flash-image-preview", "gemini-3-pro-image-preview"], judges: &[], console: "https://aistudio.google.com/apikey" },
+    Preset { key: "gemini", name: "Gemini", protocol: Protocol::OpenAI, base_url: "https://generativelanguage.googleapis.com/v1beta/openai", key_env: "GEMINI_API_KEY", models: &["gemini-4-hydrogen"], images: &["gemini-3.1-flash-image-preview", "gemini-3-pro-image-preview"], judges: &[], console: "https://aistudio.google.com/apikey" },
     // 火山方舟: 豆包 for chat, Seedream (the model behind 即梦) for pictures.
     Preset { key: "ark", name: "火山方舟", protocol: Protocol::OpenAI, base_url: "https://ark.cn-beijing.volces.com/api/v3", key_env: "ARK_API_KEY", models: &[], images: &["doubao-seedream-4-0-250828"], judges: &[], console: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey" },
     // A System One service: its models judge and write nothing (`judge`). The interface chosen for chat is not used.
@@ -41,6 +41,16 @@ pub const PRESETS: [Preset; 8] = [
 
 /// The providers a new settings file starts with.
 pub const DEFAULT_PRESETS: [&str; 3] = ["deepseek", "kimi", "glm"];
+
+impl Preset {
+    /// The model name a box for adding one suggests: one that answers in words, a judge only where the
+    /// service has nothing else by nature. 火山方舟 names its chat models per account: its documentation's example.
+    pub fn example(&self) -> Option<&'static str> {
+        if let Some(model) = self.models.first() { return Some(model) }
+        if self.images.is_empty() && !self.judges.is_empty() { return Some(self.judges[0]) }
+        (self.key == "ark").then_some("doubao-seed-1-6-251015")
+    }
+}
 
 pub fn preset(key: &str) -> Option<&'static Preset> {
     PRESETS.iter().find(|preset| preset.key == key)
@@ -168,12 +178,14 @@ mod tests {
         assert_eq!(preset_of_address("https://api.anthropic.com").map(|p| p.key), Some("claude"));
         assert_eq!(preset_of_address("http://127.0.0.1:8787").map(|p| p.key), None);
         assert!(DEFAULT_PRESETS.iter().all(|key| preset(key).is_some()));
-        // The services that draw come with their drawing models, marked as such.
+        // The services that draw come with their drawing models, marked as such, and one that answers in words.
         let openai = Provider::from_preset(preset("openai").unwrap());
-        assert_eq!(openai.models.iter().map(|m| (m.model.as_str(), m.draws())).collect::<Vec<_>>(), [("gpt-image-2", true)]);
+        assert_eq!(openai.models.iter().map(|m| (m.model.as_str(), m.draws())).collect::<Vec<_>>(), [("gpt-6.2-sol", false), ("gpt-image-2", true)]);
         let gemini = Provider::from_preset(preset("gemini").unwrap());
-        assert!(gemini.models.iter().all(Model::draws) && gemini.key_env() == "GEMINI_API_KEY");
-        assert_eq!(crate::imagegen::interface(&gemini.profile(&gemini.models[0])), crate::imagegen::Interface::Gemini);
+        assert_eq!((gemini.models.iter().filter(|m| m.speaks()).count(), gemini.models.iter().filter(|m| m.draws()).count(), gemini.key_env()), (1, 2, "GEMINI_API_KEY"));
+        assert_eq!(crate::imagegen::interface(&gemini.profile(&gemini.models[1])), crate::imagegen::Interface::Gemini);
+        // The add box suggests a model that answers in words, a judge only where the service has nothing else.
+        assert_eq!(PRESETS.map(|p| p.example()), [Some("deepseek-v4-pro"), Some("kimi-k2.6"), Some("glm-5.3"), Some(DEFAULT_MODEL), Some("gpt-6.2-sol"), Some("gemini-4-hydrogen"), Some("doubao-seed-1-6-251015"), Some("jev-latest")]);
         assert_eq!(preset_of_address("https://ark.cn-beijing.volces.com/api/v3").map(|p| p.key), Some("ark"));
         assert_eq!(preset_of_address("https://generativelanguage.googleapis.com/v1beta/openai").map(|p| p.key), Some("gemini"));
         // A service whose models judge: its own key, its own address, and no other kind of model.
