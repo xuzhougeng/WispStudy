@@ -14,6 +14,11 @@ fn parse(value: &str) -> Option<DateTime<Utc>> {
     DateTime::parse_from_rfc3339(value.trim()).ok().map(|d| d.with_timezone(&Utc))
 }
 
+/// Today on this machine's calendar, `2026-11-11`: a day of use (`settings::note_use`).
+pub fn today() -> String {
+    Local::now().format("%Y-%m-%d").to_string()
+}
+
 /// `2026.11.11` in local time; 日期待补 when the value is not a timestamp.
 pub fn date_text(value: &str) -> String {
     match parse(value) {

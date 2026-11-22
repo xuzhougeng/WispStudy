@@ -1650,7 +1650,7 @@ impl Workspace {
             .child(group(
                 None,
                 vec![
-                    row(t("项目主页"), Some("github.com/xuzhougeng/WispStudy".into()), open("about-project", t("打开"), update::PROJECT_URL.to_string(), self, cx)).into_any_element(),
+                    row(t("项目主页"), Some(format!("github.com/xuzhougeng/WispStudy · {}", t("用得顺手的话，欢迎在 GitHub 上点个 star")).into()), open("about-project", t("打开"), update::PROJECT_URL.to_string(), self, cx)).into_any_element(),
                     row(t("开源许可"), Some(t("Wisp Study 以 MIT 协议发布；随附的第三方组件见 THIRD_PARTY.md。").into()), open("about-license", t("查看"), format!("{}/blob/main/THIRD_PARTY.md", update::PROJECT_URL), self, cx)).into_any_element(),
                 ],
             ))

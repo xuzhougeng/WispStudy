@@ -157,12 +157,18 @@ pub struct Settings {
     /// The libraries of the home page in the order the person dragged them to, by id (`libraries::shelf`); one not
     /// here comes after them in the order it was made.
     pub library_order: Vec<String>,
+    /// On how many local calendar days the window has been opened (`note_use`), until the invitation to star the project is answered.
+    pub days_used: u32,
+    /// The last of those days, `2026-11-22` (`time::today`).
+    pub last_used_day: String,
+    /// The invitation to star the project on GitHub was answered, either way: it is not made again.
+    pub star_answered: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         let providers = provider::DEFAULT_PRESETS.iter().filter_map(|key| provider::preset(key)).map(Provider::from_preset).collect();
-        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, library_order: vec![] };
+        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, library_order: vec![], days_used: 0, last_used_day: String::new(), star_answered: false };
         settings.tidy();
         settings
     }
@@ -347,6 +353,23 @@ pub fn proxy_problem(value: &str, allow_direct: bool) -> Option<String> {
     let host = rest.rsplit('@').next().unwrap_or("").split(['/', ':']).next().unwrap_or("");
     if host.is_empty() || value.contains(char::is_whitespace) { return Some("代理地址里缺少主机名，或者含有空格。".into()) }
     None
+}
+
+/// On how many days of use the app asks, once, to be starred on GitHub: by then the person has plainly taken to it.
+pub const STAR_AFTER_DAYS: u32 = 5;
+
+/// Counts `today` (a local date, `time::today`) as a day of use when it is a new one; true when the settings
+/// changed and are to be saved. Nothing is counted once the invitation was answered.
+pub fn note_use(settings: &mut Settings, today: &str) -> bool {
+    if settings.star_answered || today.is_empty() || settings.last_used_day == today { return false }
+    settings.days_used = settings.days_used.saturating_add(1);
+    settings.last_used_day = today.to_string();
+    true
+}
+
+/// The invitation to star the project is due: used on enough days, and not answered yet.
+pub fn star_due(settings: &Settings) -> bool {
+    !settings.star_answered && settings.days_used >= STAR_AFTER_DAYS
 }
 
 impl Settings {
@@ -948,5 +971,48 @@ mod tests {
             assert!(proxy_problem(bad, false).is_some(), "{bad}");
         }
         assert_eq!(proxy_problem(" Direct ", true), None);
+    }
+
+    #[test]
+    fn days_of_use_are_counted_once_each_until_the_star_is_answered() {
+        let mut settings = Settings::default();
+        assert!(note_use(&mut settings, "2026-11-18"));
+        // The same day again is not a second day.
+        assert!(!note_use(&mut settings, "2026-11-18"));
+        assert_eq!((settings.days_used, settings.last_used_day.as_str()), (1, "2026-11-18"));
+        for day in ["2026-11-19", "2026-11-20", "2026-11-21"] {
+            assert!(note_use(&mut settings, day));
+            assert!(!star_due(&settings));
+        }
+        assert!(note_use(&mut settings, "2026-11-22"));
+        assert_eq!(settings.days_used, STAR_AFTER_DAYS);
+        assert!(star_due(&settings));
+        // Answered either way, it is never due again and the days are no longer counted.
+        settings.star_answered = true;
+        assert!(!star_due(&settings));
+        assert!(!note_use(&mut settings, "2026-11-23"));
+        settings.days_used = 50;
+        assert!(!star_due(&settings));
+    }
+
+    #[test]
+    fn an_old_settings_file_reads_without_the_days_of_use() {
+        let dir = std::env::temp_dir().join(format!("wisp-star-{}", crate::model::new_id("T")));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, r#"{"dataDir": "", "fontSize": 14, "keepRunning": false}"#).unwrap();
+        let mut settings = Settings::load(&path).unwrap();
+        assert_eq!((settings.days_used, settings.last_used_day.as_str(), settings.star_answered, settings.keep_running), (0, "", false, false));
+        assert!(!star_due(&settings));
+        // What is written is read back.
+        settings.days_used = 7;
+        settings.last_used_day = "2026-11-22".into();
+        settings.star_answered = true;
+        settings.save(&path).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains(r#""daysUsed": 7"#) && text.contains(r#""lastUsedDay": "2026-11-22""#) && text.contains(r#""starAnswered": true"#), "{text}");
+        let again = Settings::load(&path).unwrap();
+        assert_eq!((again.days_used, again.last_used_day.as_str(), again.star_answered), (7, "2026-11-22", true));
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
