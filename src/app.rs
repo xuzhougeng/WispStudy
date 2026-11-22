@@ -3652,6 +3652,12 @@ impl Workspace {
                 } else {
                     // As a click in the list: the paper selected, its PDF or record following; then its conversation, beside the list.
                     if self.lib.as_ref().is_some_and(|lib| lib.page == Page::Ask) { self.run(Cmd::SetPage(Page::Papers), window, cx) }
+                    // It was a conversation with that paper alone, and papers side by side have one of their own (#194): those kept
+                    // beside are let go, the paper itself staying where it is read when it is one of them.
+                    self.work_in_pane(&owner, cx);
+                    let beside: Vec<String> = self.lib.as_ref().map(|lib| lib.pins.iter().map(|pin| pin.paper.clone()).collect()).unwrap_or_default();
+                    for paper in beside { self.unpin(&paper, cx) }
+                    if let Some(lib) = self.lib.as_mut() { lib.keep = false }
                     self.select(Some(owner), window, cx);
                     self.run(Cmd::SetTab(Tab::Ask), window, cx);
                     self.run(Cmd::OpenChat(Talk::Paper, id), window, cx);

@@ -1622,7 +1622,7 @@ impl Workspace {
             .child(div().flex().flex_1().min_w_0().child(chat.history_find.clone()))
             .when(!words.is_empty(), |d| d.child(ui::ghost_button(SharedString::from(format!("history-find-clear-{side}")), Some("x"), None).h(text_px(22.)).min_w(px(22.)).on_click(self.on(Cmd::ClearHistoryFind(talk), cx))));
         let switch = spans.then(|| {
-            let (id, own) = if talk == Talk::Paper { ("history-scope-paper", t("这篇文献")) } else { ("history-scope-library", t("助手")) };
+            let (id, own) = if talk != Talk::Paper { ("history-scope-library", t("助手")) } else if lib.talk_papers().len() > 1 { ("history-scope-paper", t("这几篇文献")) } else { ("history-scope-paper", t("这篇文献")) };
             crate::settings::segmented(id, vec![(own, Cmd::HistoryAll(talk, false)), (t("全部对话"), Cmd::HistoryAll(talk, true))], usize::from(all), self, cx).text_size(text_px(12.))
         });
         let bar = div().flex().flex_none().flex_wrap().items_center().gap(px(8.)).px(px(edge)).pt(px(10.)).pb(px(2.)).children(switch).child(find);
