@@ -231,6 +231,8 @@ impl Workspace {
             }
             MenuKind::Conversation(paper, id) => {
                 items.push(item(t("接着问下去"), Cmd::OpenChat(*paper, id.clone())));
+                items.push(item(t("重命名…"), Cmd::AskRenameChat(*paper, id.clone())));
+                breaks.push(items.len());
                 items.push(item(t("删除这次对话…"), Cmd::AskRemoveChat(*paper, id.clone())));
             }
             MenuKind::Text(text) => {

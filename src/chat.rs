@@ -734,6 +734,8 @@ impl Workspace {
             (scope, brief)
         };
         let listing = chat.history.is_some();
+        // 历史 lists every conversation of the library (全部对话).
+        let every = listing && lib.history_all && lib.history_spans(talk);
         // What was said and the box under it keep to the reading column, centred: the room a wide page has is left at the sides.
         let side_pad = reading_pad(chat.drawn_width);
         // The conversation's width, learned as it is drawn: the padding of the next frame is worked out from it.
@@ -751,7 +753,7 @@ impl Workspace {
         let body = if draft && self.home.listing {
             self.render_draft_history(cx)
         } else if let Some(history) = &chat.history {
-            self.render_history(talk, chat, history, cx)
+            self.render_history(talk, chat, history, window, cx)
         } else if let Some(review) = review.filter(|_| chat.review_open) {
             self.render_review_record(chat, review, cx)
         } else if !configured && chat.messages.is_empty() {
@@ -800,14 +802,15 @@ impl Workspace {
                             .flex_col()
                             .flex_1()
                             .min_w_0()
-                            .when(talk == Talk::Library, |d| d.child(div().truncate().text_size(text_px(ui::HEAD_TITLE)).font_weight(FontWeight::SEMIBOLD).child(if draft { ui::one_line(&lib.info.name) } else if listing { t("助手的历史对话").to_string() } else { t("助手").to_string() })))
+                            .when(talk == Talk::Library, |d| d.child(div().truncate().text_size(text_px(ui::HEAD_TITLE)).font_weight(FontWeight::SEMIBOLD).child(if draft { ui::one_line(&lib.info.name) } else if every { t("全部历史对话").to_string() } else if listing { t("助手的历史对话").to_string() } else { t("助手").to_string() })))
                             .when(talk == Talk::Write, |d| d.child(div().truncate().text_size(text_px(ui::HEAD_TITLE)).font_weight(FontWeight::SEMIBOLD).child(if listing { t("这份稿件的历史对话") } else { t("助手写") })))
                             // The paper's panel has its title above; its history says whose it is.
-                            .when(talk == Talk::Paper && listing, |d| d.child(div().font_weight(FontWeight::MEDIUM).child(if several > 1 { t("这几篇文献的历史对话") } else { t("这篇文献的历史对话") })))
+                            .when(talk == Talk::Paper && listing, |d| d.child(div().font_weight(FontWeight::MEDIUM).child(if every { t("全部历史对话") } else if several > 1 { t("这几篇文献的历史对话") } else { t("这篇文献的历史对话") })))
                             .child(div().id(SharedString::from(format!("chat-scope-{side}"))).truncate().text_size(text_px(12.)).line_height(text_px(17.)).text_color(Theme::text_tertiary())
                                 .when(!listing && brief != scope, |d| { let whole = scope.clone(); d.tooltip(move |_, cx| cx.new(|_| crate::write_assist::Tip(whole.clone())).into()) })
                                 .child(match (listing, talk) {
-                                (true, Talk::Library) => t("和助手就整个文献库有过的对话；点开一次可以接着说。单篇文献的对话在各自的「提问」里").to_string(),
+                                _ if every => t("助手和各篇文献的对话，最近的在前").to_string(),
+                                (true, Talk::Library) => t("和助手就整个文献库有过的对话；点开一次可以接着说").to_string(),
                                 (true, Talk::Paper) if several > 1 => t("并排读这几篇时提过的问题和回答；点开一次对话可以接着问").to_string(),
                                 (true, Talk::Paper) => t("就这篇文献提过的问题和回答；点开一次对话可以接着问").to_string(),
                                 (true, Talk::Write) => t("和助手就这份稿件有过的对话；点开一次可以接着说").to_string(),
@@ -1591,27 +1594,83 @@ impl Workspace {
     }
 
     /// The library's past conversations (or the paper's), the latest first.
-    fn render_history(&self, talk: Talk, chat: &Chat, history: &[wisp_core::store::ConversationInfo], cx: &mut Context<Self>) -> AnyElement {
+    fn render_history(&self, talk: Talk, chat: &Chat, history: &[wisp_core::store::ConversationInfo], window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let side = talk.side();
-        if history.is_empty() {
-            return ui::empty_state("history", t("还没有历史对话"), t("提过的问题和回答会留在这个文献库里，之后可以在这里找到，接着问下去。")).into_any_element();
-        }
-        div()
-            .id(SharedString::from(format!("history-{side}")))
+        let lib = self.lib.as_ref().unwrap();
+        let spans = lib.history_spans(talk);
+        let all = spans && lib.history_all;
+        let words = chat.history_find.read(cx).text().trim().to_string();
+        // The list keeps to the reading column as the conversation does: its titles start where what was said starts, the rows' hover a little outside.
+        let edge = reading_pad(chat.drawn_width) - 8.;
+        let shown: Vec<&wisp_core::store::ConversationInfo> = history.iter().filter(|c| chat.history_hits.as_ref().is_none_or(|hits| hits.contains(&c.id))).collect();
+        // Over the list, on one line while there is room for both, the search under the switch when not: this place's conversations or all of them, and words to find one by.
+        let focused = chat.history_find.focus_handle(cx).is_focused(window);
+        let find = div()
             .flex()
-            .flex_col()
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            .px(px(10.))
-            .py(px(8.))
-            .gap(px(2.))
-            .children(history.iter().map(|conversation| {
-                let current = conversation.id == chat.id;
-                // Set aside by 新对话 while it answered, it goes on: said until the answer is in, and a click takes it up as it stands.
-                let aside = self.lib.as_ref().and_then(|lib| lib.aside.iter().find(|aside| aside.id == conversation.id)).map(|aside| Self::at_work_mark(SharedString::from(format!("aside-{}", conversation.id)), aside.pending.is_some()));
-                let group = SharedString::from(format!("history-row-{}", conversation.id));
-                div()
+            .flex_grow()
+            .flex_basis(px(200.))
+            .min_w_0()
+            .items_center()
+            .gap(px(8.))
+            .h(text_px(30.))
+            .px(px(7.))
+            .rounded(px(8.))
+            .bg(Theme::bg_sunken())
+            .border_1()
+            .border_color(if focused { Theme::accent() } else { Theme::bg_sunken() })
+            .child(ui::icon("search", 15., Theme::text_tertiary()))
+            .child(div().flex().flex_1().min_w_0().child(chat.history_find.clone()))
+            .when(!words.is_empty(), |d| d.child(ui::ghost_button(SharedString::from(format!("history-find-clear-{side}")), Some("x"), None).h(text_px(22.)).min_w(px(22.)).on_click(self.on(Cmd::ClearHistoryFind(talk), cx))));
+        let switch = spans.then(|| {
+            let (id, own) = if talk == Talk::Paper { ("history-scope-paper", t("这篇文献")) } else { ("history-scope-library", t("助手")) };
+            crate::settings::segmented(id, vec![(own, Cmd::HistoryAll(talk, false)), (t("全部对话"), Cmd::HistoryAll(talk, true))], usize::from(all), self, cx).text_size(text_px(12.))
+        });
+        let bar = div().flex().flex_none().flex_wrap().items_center().gap(px(8.)).px(px(edge)).pt(px(10.)).pb(px(2.)).children(switch).child(find);
+        let body = if history.is_empty() {
+            ui::empty_state("history", t("还没有历史对话"), if all { t("提过的问题和回答会留在这个文献库里，之后可以在这里找到，接着问下去。") } else if talk == Talk::Paper { t("就这篇文献提过的问题会留在这里。别的文献和助手的对话在「全部对话」里。") } else { t("提过的问题和回答会留在这个文献库里，之后可以在这里找到，接着问下去。") }).flex_1().into_any_element()
+        } else {
+            // Under quiet headings by the day they were last spoken in; a day with none has no heading.
+            let mut day = None;
+            let mut rows: Vec<AnyElement> = vec![];
+            for conversation in &shown {
+                let ago = time::ago_today(&conversation.updated_at);
+                if day != Some(ago) {
+                    rows.push(ui::caption(t(ago.label())).px(px(8.)).pt(px(if day.is_none() { 6. } else { 14. })).pb(px(4.)).into_any_element());
+                    day = Some(ago);
+                }
+                rows.push(self.render_history_row(talk, chat, conversation, all, cx));
+            }
+            div()
+                .id(SharedString::from(format!("history-{side}")))
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .px(px(edge))
+                .pt(px(4.))
+                .pb(px(8.))
+                .gap(px(2.))
+                .children(rows)
+                .when(shown.is_empty(), |d| d.child(div().px(px(8.)).py(px(10.)).text_color(Theme::text_tertiary()).child(tf!("没有说到「{}」的对话。换个词，或清空搜索。", "No conversation mentions “{}”. Try other words, or clear the search.", words))))
+                .into_any_element()
+        };
+        div().flex().flex_col().flex_1().min_h_0().child(bar).child(body).into_any_element()
+    }
+
+    /// One conversation of 历史: its title, whose it is when every conversation is listed, when it was last spoken in, and how it stands.
+    fn render_history_row(&self, talk: Talk, chat: &Chat, conversation: &wisp_core::store::ConversationInfo, all: bool, cx: &mut Context<Self>) -> AnyElement {
+        let side = talk.side();
+        let current = conversation.id == chat.id;
+        // Set aside by 新对话 while it answered, it goes on: said until the answer is in, and a click takes it up as it stands.
+        let aside = self.lib.as_ref().and_then(|lib| lib.aside.iter().find(|aside| aside.id == conversation.id)).map(|aside| Self::at_work_mark(SharedString::from(format!("aside-{}", conversation.id)), aside.pending.is_some()));
+        let group = SharedString::from(format!("history-row-{}", conversation.id));
+        // Among every conversation, whose each is goes first and gives way when the line is short; the time and the count stay whole.
+        let owner = all.then(|| div().min_w_0().truncate().child(if conversation.paper_id.is_empty() { t("助手").to_string() } else { ui::one_line(&conversation.about) }));
+        // Under 今天 and 昨天 the heading has said the day.
+        let at = if matches!(time::ago_today(&conversation.updated_at), time::Ago::Today | time::Ago::Yesterday) { time::clock_time(&conversation.updated_at) } else { time::short_time(&conversation.updated_at) };
+        let when = tf!("{} · {} 个问题", "{} · {} questions", at, conversation.questions);
+        div()
                     .group(group.clone())
                     .flex()
                     .items_center()
@@ -1632,7 +1691,7 @@ impl Workspace {
                             .py(px(7.))
                             .cursor_pointer()
                             .on_click(self.on(Cmd::OpenChat(talk, conversation.id.clone()), cx))
-                            .child(div().truncate().child(conversation.title.clone()))
+                            .child(div().truncate().child(ui::one_line(&conversation.title)))
                             .child(
                                 div()
                                     .flex()
@@ -1640,14 +1699,13 @@ impl Workspace {
                                     .gap(px(6.))
                                     .text_size(text_px(12.))
                                     .text_color(Theme::text_tertiary())
-                                    .child(tf!("{} · {} 个问题", "{} · {} questions", time::short_time(&conversation.updated_at), conversation.questions))
-                                    .when(current, |d| d.child(div().text_color(Theme::accent()).child(t("正在进行"))))
+                                    .child(div().flex().min_w_0().gap(px(4.)).children(owner).when(all, |d| d.child(div().flex_none().child("·"))).child(div().flex_none().child(when)))
+                                    .when(current, |d| d.child(div().flex_none().text_color(Theme::accent()).child(t("正在进行"))))
                                     .children(aside),
                             ),
                     )
                     .child(ui::ghost_button(SharedString::from(format!("history-remove-{side}-{}", conversation.id)), Some("bin"), None).invisible().group_hover(group, |s| s.visible()).on_click(self.on(Cmd::AskRemoveChat(talk, conversation.id.clone()), cx)))
-            }))
-            .into_any_element()
+                    .into_any_element()
     }
 
     /// The box the next question is written in: its pictures, a button to

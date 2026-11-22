@@ -294,6 +294,12 @@ impl Workspace {
                 .child(body().child(ui::field(name, window, cx)).child(error))
                 .child(footer(t("改名"), false, self, cx)),
 
+            // A conversation of 历史: the same dialog, and what an empty name does.
+            Modal::RenameChat { name, .. } => ui::dialog(420.)
+                .child(ui::dialog_title(t("重命名对话")))
+                .child(body().child(ui::field(name, window, cx)).child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_tertiary()).child(t("留空，就用第一个问题作标题。"))).child(error))
+                .child(footer(t("改名"), false, self, cx)),
+
             Modal::Library { editing, name, topic, color, proposing } => {
                 // A conversation of the home page being made a library: it says so, and a model can name it from what was said.
                 let promoting = editing.as_ref().is_some_and(|id| self.lib.as_ref().is_some_and(|lib| lib.info.id == *id && lib.info.draft));
