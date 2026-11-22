@@ -291,6 +291,8 @@ pub enum Cmd {
     Draft(crate::draft::Do),
     RevealFolder,
     OpenUrl(String),
+    /// The home page's invitation to star the project, answered: true opens the project's page first; either way it is not made again.
+    AnswerStar(bool),
     NoteOpen(Option<Talk>, bool),
     NotePick(usize),
     NoteDestination(bool),
@@ -1751,6 +1753,8 @@ pub struct Workspace {
     pub filters_over: [bool; 2],
     /// Those filters were drawn in this frame; a frame without them forgets the pointer.
     pub filters_drawn: bool,
+    /// The home page invites the person, once, to star the project (`settings::star_due` at start, or the debug step `starask`).
+    pub star_ask: bool,
 }
 
 impl Chat {
@@ -2382,7 +2386,11 @@ impl Workspace {
         shortcuts::rebuild(&settings.shortcuts, cx);
         let libraries = libraries::list(&root);
         let home = crate::draft::Home::new(window, cx);
-        let mut this = Workspace { focus, settings, settings_path, root, libraries, lib: None, parked: vec![], stepping: false, main_window: window.window_handle(), settings_view: None, connections: vec![], skills: vec![], update: UpdateState::Idle, update_told: None, session: Session::default(), modal: None, modal_error: String::new(), modal_subscriptions: vec![], menu: None, palette: None, toast, home_scroll: ScrollHandle::new(), home, resizing: None, column_drag: None, picked: None, pinning: false, filters_over: [false; 2], filters_drawn: false };
+        let mut this = Workspace { focus, settings, settings_path, root, libraries, lib: None, parked: vec![], stepping: false, main_window: window.window_handle(), settings_view: None, connections: vec![], skills: vec![], update: UpdateState::Idle, update_told: None, session: Session::default(), modal: None, modal_error: String::new(), modal_subscriptions: vec![], menu: None, palette: None, toast, home_scroll: ScrollHandle::new(), home, resizing: None, column_drag: None, picked: None, pinning: false, filters_over: [false; 2], filters_drawn: false, star_ask: false };
+        // A new day of use is counted once at start; on the fifth the home page asks for a star, until answered.
+        // A settings file that could not be read is not written over with defaults for it (the toast says so).
+        if this.toast.is_none() && wisp_core::settings::note_use(&mut this.settings, &wisp_core::time::today()) { this.save_settings(cx) }
+        this.star_ask = wisp_core::settings::star_due(&this.settings);
         // The library's window closed: the papers' own windows go with it (their viewers are this one's).
         cx.on_release(|this: &mut Workspace, cx| {
             if let Some(lib) = this.lib.as_mut() { for open in lib.windows.drain(..) { open.window.update(cx, |_, window, _| window.remove_window()).ok(); } }
@@ -2877,6 +2885,12 @@ impl Workspace {
                 cx.open_with_system(&path);
             }
             Cmd::OpenUrl(url) => cx.open_url(&url),
+            Cmd::AnswerStar(star) => {
+                if star { cx.open_url(wisp_core::update::PROJECT_URL) }
+                self.star_ask = false;
+                self.settings.star_answered = true;
+                self.save_settings(cx);
+            }
             Cmd::NoteOpen(talk, notion) => self.open_note(talk, notion, window, cx),
             Cmd::NotePick(at) => self.pick_note(at, cx),
             Cmd::NoteDestination(notion) => self.note_destination(notion, cx),
@@ -7745,6 +7759,12 @@ impl Workspace {
                 }
                 // `assistant` is the home page's corner button; `drafts` 历史 inside a conversation (again: back to it).
                 "assistant" => Some(Cmd::Draft(crate::draft::Do::Begin)),
+                // The home page's invitation to star the project, due in this run; nothing is written until it is answered.
+                "starask" => {
+                    self.star_ask = true;
+                    cx.notify();
+                    return;
+                }
                 "drafts" => Some(Cmd::Draft(crate::draft::Do::History)),
                 "newdraft" => Some(Cmd::Draft(crate::draft::Do::New)),
                 // `draftmanuscript:off` closes the manuscript beside a conversation (its ×), `draftmanuscript:on` brings it back (稿件 in the header).

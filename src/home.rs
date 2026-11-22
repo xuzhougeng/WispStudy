@@ -177,6 +177,9 @@ impl Render for LibraryDrag {
 
 /// How far the assistant's button stands from the window's bottom right corner.
 const CORNER_GAP: f32 = 24.;
+/// The invitation to star the project in the other corner, and the room left under the cards to scroll past it.
+const STAR_WIDTH: f32 = 340.;
+const STAR_ROOM: f32 = 120.;
 
 impl Workspace {
     fn render_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
@@ -382,9 +385,47 @@ impl Workspace {
                     .when(empty, |d| {
                         d.child(div().p(px(16.)).rounded(px(10.)).bg(Theme::accent_soft()).text_color(Theme::text_secondary()).child(t("还没有文献库。先为一个研究主题新建文献库，再往里添加文献：粘贴 DOI、拖入 PDF，或导入 BibTeX / RIS。")))
                     })
-                    .child(div().flex().flex_wrap().gap(px(16.)).children(cards).child(new_card)),
+                    .child(div().flex().flex_wrap().gap(px(16.)).children(cards).child(new_card))
+                    // Room under the last cards to scroll them clear of the invitation in the corner.
+                    .when(self.star_ask, |d| d.pb(px(STAR_ROOM))),
             )
             ;
+        // Asked once, after days of use, where the person is between libraries; it stays until answered (`settings::star_due`).
+        let star = (self.star_ask && self.modal.is_none()).then(|| {
+            ui::fade_in(
+                "home-star",
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(px(10.))
+                    .w(px(STAR_WIDTH))
+                    .p(px(14.))
+                    .rounded(px(12.))
+                    .bg(Theme::bg_body())
+                    .border_1()
+                    .border_color(Theme::line())
+                    .shadow(theme::shadow_panel())
+                    .occlude()
+                    .child(div().flex_none().pt(px(2.)).child(ui::icon("star", 16., Theme::accent())))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(px(10.))
+                            .child(div().text_color(Theme::text_secondary()).child(t("Wisp Study 是开源软件。用得顺手的话，到 GitHub 点个 star，能让更多人找到它。")))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(4.))
+                                    .child(ui::secondary_button("home-star-go", t("去点 star")).h(text_px(28.)).on_click(self.on(Cmd::AnswerStar(true), cx)))
+                                    .child(ui::ghost_button("home-star-never", None, Some(t("不再提示").into())).on_click(self.on(Cmd::AnswerStar(false), cx))),
+                            ),
+                    ),
+            )
+        });
         // The assistant: one button in the window's corner, drawn as the floating conversation's is; it does not scroll with the cards.
         let assistant = div()
             .id("home-assistant")
@@ -407,6 +448,8 @@ impl Workspace {
             .child(ui::title_strip())
             .child(page)
             .child(div().absolute().right(px(CORNER_GAP)).bottom(px(CORNER_GAP)).rounded_full().shadow(theme::shadow_panel()).child(assistant))
+            // The free corner: the assistant has the right one, a toast the top.
+            .children(star.map(|card| div().absolute().left(px(CORNER_GAP)).bottom(px(CORNER_GAP)).child(card)))
             .into_any_element()
     }
 }
