@@ -94,8 +94,41 @@ pub fn passages(pages: &[Vec<pdftext::Mark>]) -> Vec<Passage> {
 
 /// How wide a text runs when set at size 1: a Chinese, Japanese or Korean
 /// character takes a square, a letter about half of one.
-fn ems(text: &str) -> f32 {
-    text.chars().map(|c| if structure::is_cjk(c) || ('\u{3000}'..='\u{303f}').contains(&c) || ('\u{ff00}'..='\u{ffef}').contains(&c) { 1. } else { 0.55 }).sum()
+fn em(c: char) -> f32 {
+    if structure::is_cjk(c) || ('\u{3000}'..='\u{303f}').contains(&c) || ('\u{ff00}'..='\u{ffef}').contains(&c) { 1. } else { 0.55 }
+}
+
+/// How many lines a text takes in a box `width` wide, in the widths of `em`, broken the way the window
+/// breaks it: at any Chinese character, space or mark, never inside a run of letters, digits and the marks
+/// that hold a word together (a DOI's `10.3389`, `fpls.2022.988594`), unless the run is longer than a line;
+/// a line break of the text's own starts a line. The lines of a narrow box end well before its edge when
+/// what comes next is such a run, so the text's length over the box's width counts too few of them.
+fn lines(text: &str, width: f32) -> usize {
+    let width = width.max(1.);
+    // As gpui's line wrapper has it (`LineWrapper::is_word_char`).
+    let word = |c: char| c.is_ascii_alphanumeric() || ('\u{c0}'..='\u{24f}').contains(&c) || ('\u{400}'..='\u{4ff}').contains(&c) || "-_.'$%@#^~,=:".contains(c);
+    let mut count = 0;
+    for line in text.split('\n') {
+        count += 1;
+        let (mut used, mut chars) = (0., line.chars().peekable());
+        while let Some(c) = chars.next() {
+            let mut run = em(c);
+            if word(c) { while let Some(next) = chars.next_if(|next| word(*next)) { run += em(next) } }
+            if used > 0. && used + run > width {
+                count += 1;
+                used = 0.;
+                // The space a line is broken at is not carried to the next.
+                if c == ' ' { continue }
+            }
+            // A run longer than a line is broken where the line ends.
+            while run > width {
+                count += 1;
+                run -= width;
+            }
+            used += run;
+        }
+    }
+    count
 }
 
 /// How far apart the lines of a translation are set, by its size.
@@ -106,11 +139,10 @@ pub const LEADING: f32 = 1.3;
 /// paragraph where it fits, else the largest that does, and never under
 /// `SMALLEST`, where it is cut off instead of being too small to read.
 pub fn fit(text: &str, width: f32, height: f32, size: f32) -> f32 {
-    let ems = ems(text);
     let mut at = size.max(SMALLEST);
     while at > SMALLEST {
-        // Lines break at words, so none is filled to its end.
-        let lines = (ems * at * 1.05 / width.max(1.)).ceil().max(1.);
+        // The letters are measured roughly: the box is taken a little narrower than it is.
+        let lines = lines(text, width.max(1.) / (at * 1.05)) as f32;
         // A line of the page is given a little more than its letters take.
         if lines * at * LEADING <= height.max(size * LEADING) + at * 0.3 { break }
         at -= 0.25;
@@ -281,6 +313,32 @@ mod tests {
         // A heading's one line keeps its size; what cannot fit is cut off, not set unreadably small.
         assert_eq!(fit("方法", 60., 12.5, 10.), 10.);
         assert_eq!(fit(&"根".repeat(5000), 240., 60., 10.), SMALLEST);
+    }
+
+    #[test]
+    fn lines_are_counted_as_they_break() {
+        // Chinese breaks anywhere: ten to a line.
+        assert_eq!((lines(&"根".repeat(10), 10.), lines(&"根".repeat(11), 10.), lines(&"根".repeat(30), 10.)), (1, 2, 3));
+        // A run of letters and digits goes to the next line whole, leaving the rest of this one empty; the
+        // length alone (17.6 of 10) would say two lines.
+        assert_eq!(lines("期刊 fpls.2022.988594 植物科学 2022 年", 10.), 3);
+        // The space a line breaks at is not counted on the next; a run longer than a line is broken.
+        assert_eq!(lines("abcdefghij klmnopqrst", 5.6), 2);
+        assert_eq!(lines(&"a".repeat(40), 5.6), 4);
+        // The text's own line breaks, an empty line among them.
+        assert_eq!(lines("类型\n\n日期", 10.), 3);
+
+        // The box at the head of a journal's first page: three short lines, 75 points wide. Its translation
+        // runs together and ends in a DOI that breaks only at its slash: it is set small enough for the
+        // lines it really takes, so the DOI's end is not cut off under the box.
+        let head = "类型：原创研究 发表日期：2022年10月19日 DOI：10.3389/fpls.2022.988594";
+        let (width, height, size) = (75., 22., 5.5);
+        let set = fit(head, width, height, size);
+        assert!(set < size && set >= SMALLEST, "{set}");
+        assert!(lines(head, width / (set * 1.05)) as f32 * set * LEADING <= height + set * 0.3);
+        // By its length alone it was thought to stand in three lines at its own size.
+        assert!((head.chars().map(em).sum::<f32>() * size * 1.05 / width).ceil() <= 3.);
+        assert_eq!(lines(head, width / (size * 1.05)), 4);
     }
 
     #[test]

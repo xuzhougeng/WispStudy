@@ -145,6 +145,24 @@ pub(crate) fn zone_sort(settings: &wisp_core::settings::Settings) -> &'static st
     }
 }
 
+/// The width a sortable column has by itself: `own`, or what its name in the header needs with the arrow that
+/// marks the sort beside it, when that is more. The name is measured roughly (a Chinese character is as wide
+/// as the 12px type is high, a Latin letter a little over half of that, at `scale` of that size), with the
+/// cell's padding (8 each side), the gap and the arrow (3 + 12) and a little to spare. Without this the arrow
+/// took the name's room: sorted by 影响因子 the header read 「影响...」.
+pub(crate) fn sortable_width(label: &str, own: f32, scale: f32) -> f32 {
+    let name: f32 = label.chars().map(|c| if c.is_ascii() { 6.5 } else { 12. }).sum::<f32>() * scale;
+    own.max((name + 16. + 15. + 4.).ceil())
+}
+
+/// A sort as the list is to be in: one by a partition (`cas`, `xr`, `jcr`) is by the partition the 分区 column
+/// shows now, in the same direction, whichever it named when it was chosen or kept with the library; any
+/// other sort as it is. The column's header marks the sort by its own key, so the two never disagree.
+pub(crate) fn sort_in_zone(sort: &str, settings: &wisp_core::settings::Settings) -> String {
+    let (key, desc) = filter::sort_parts(sort);
+    if ["cas", "xr", "jcr"].contains(&key) { format!("{}-{}", zone_sort(settings), if desc { "desc" } else { "asc" }) } else { sort.to_string() }
+}
+
 /// A journal's zone in one partition as the window writes it: `1区 Top`, `Zone 1 Top`, `Q2`.
 pub(crate) fn zone_text(j: &wisp_core::journals::Journal, which: &str) -> Option<String> {
     let zone = |z: Option<u8>, top: bool| z.map(|z| format!("{}{}", tf!("{}区", "Zone {}", z), if top { " Top" } else { "" }));
@@ -522,7 +540,7 @@ impl Workspace {
                     .cursor_pointer()
                     .hover(|s| s.bg(Theme::hover()))
                     .when(playing, |d| d.text_color(Theme::accent()))
-                    .on_click(self.on_menu(MenuKind::Podcasts, cx))
+                    .on_click(self.on_menu_beside(MenuKind::Podcasts, cx))
                     .child(ui::icon("headphones", 16., if playing { Theme::accent() } else { Theme::text_secondary() }))
                     .child(div().flex_1().min_w_0().truncate().child(t("播客")))
                     .child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(podcasts.to_string()))
@@ -648,8 +666,10 @@ impl Workspace {
         let mut optional = vec![column(t("阅读"), if english { 112. } else { 76. }, None, ColumnKind::Reading), column(t("年份"), 60., Some("year"), ColumnKind::Year), column(t("全文"), if english { 144. } else { 84. }, None, ColumnKind::Fulltext)];
         optional.extend(lib.fields.iter().filter(|f| f.in_table).map(|f| column(&f.name, 132., None, ColumnKind::Field(f.id.clone()))));
         optional.push(column(t("期刊"), 150., Some("journal"), ColumnKind::Journal));
-        optional.push(column(t("影响因子"), if english { 72. } else { 76. }, Some("impact"), ColumnKind::Impact));
-        optional.push(column(t("分区"), 76., Some(zone_sort(settings)), ColumnKind::Zone));
+        // A column the list can be sorted by has room for its name and the arrow beside it.
+        let scale = f32::from(text_px(12.)) / 12.;
+        optional.push(column(t("影响因子"), sortable_width(t("影响因子"), 76., scale), Some("impact"), ColumnKind::Impact));
+        optional.push(column(t("分区"), sortable_width(t("分区"), 76., scale), Some(zone_sort(settings)), ColumnKind::Zone));
         optional.push(column(t("收录"), if english { 176. } else { 84. }, None, ColumnKind::Screening));
         optional.retain(|c| !settings.columns_hidden.contains(&c.key));
         let mut chosen = vec![];
@@ -1343,9 +1363,36 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: that would bring in gpui's own `test` attribute.
-    use super::{ASK_LIST_MAX, ASK_LIST_MIN, ASK_LIST_W, COLUMN_MAX, COLUMN_MIN, SPLIT_CHAT_MIN, SPLIT_PDF_MIN, ask_list_width, dragged, split_chat_reach, split_chat_width};
+    use super::{ASK_LIST_MAX, ASK_LIST_MIN, ASK_LIST_W, COLUMN_MAX, COLUMN_MIN, SPLIT_CHAT_MIN, SPLIT_PDF_MIN, ask_list_width, dragged, sort_in_zone, sortable_width, split_chat_reach, split_chat_width};
     use crate::app::ColumnDrag;
     use crate::detail::SPLIT_MIN;
+
+    #[test]
+    fn a_sorted_header_has_room_for_its_name_and_arrow() {
+        // What the cell leaves the name once sorted: its width less the padding, the gap and the arrow.
+        let room = |width: f32| width - 16. - 15.;
+        // 影响因子 is four characters of 12px: the 76 it had left 45.
+        assert!(room(76.) < 48.);
+        assert!(room(sortable_width("影响因子", 76., 1.)) >= 48.);
+        assert!(room(sortable_width("Impact factor", 76., 1.)) >= 13. * 6.5);
+        // A short name keeps the column's own width; larger type asks for more.
+        assert_eq!(sortable_width("分区", 76., 1.), 76.);
+        assert_eq!(sortable_width("Zone", 76., 1.), 76.);
+        assert!(sortable_width("影响因子", 76., 1.5) > sortable_width("影响因子", 76., 1.));
+    }
+
+    #[test]
+    fn a_sort_by_a_partition_is_by_the_one_the_column_shows() {
+        let mut settings = wisp_core::settings::Settings::default();
+        // 中科院 is the column's partition when none is chosen.
+        assert_eq!(sort_in_zone("jcr-asc", &settings), "cas-asc");
+        assert_eq!(sort_in_zone("xr-desc", &settings), "cas-desc");
+        settings.journal_zone = "jcr".into();
+        assert_eq!(sort_in_zone("cas-asc", &settings), "jcr-asc");
+        assert_eq!(sort_in_zone("jcr-desc", &settings), "jcr-desc");
+        // Any other sort is left as it is, the empty one (latest added) too.
+        for sort in ["", "newest", "impact-desc", "year-asc", "title-desc"] { assert_eq!(sort_in_zone(sort, &settings), sort) }
+    }
 
     #[test]
     fn list_beside_a_paper_asked_about() {
