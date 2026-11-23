@@ -107,6 +107,23 @@ fn answer_source_labels(answer: &str, sources: &[wisp_core::ai::Source], papers:
     }).collect::<Vec<_>>().join("\n\n")
 }
 
+/// Copy the pictures a Markdown file written at `path` names to the same places beside it, and say so in words.
+fn pictures_beside(path: &std::path::Path, pictures: &[(String, std::path::PathBuf)]) -> String {
+    let beside = path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
+    let copied = pictures
+        .iter()
+        .filter(|(address, from)| {
+            let to = beside.join(address.replace('/', std::path::MAIN_SEPARATOR_STR));
+            to.parent().is_some_and(|folder| std::fs::create_dir_all(folder).is_ok()) && std::fs::copy(from, &to).is_ok()
+        })
+        .count();
+    if copied == pictures.len() {
+        tf!("（{copied} 张图片在它旁边的 figures 文件夹里）", " ({copied} pictures in the figures folder beside it)")
+    } else {
+        tf!("（{copied} 张图片在它旁边的 figures 文件夹里，{} 张没有复制过去）", " ({copied} pictures in the figures folder beside it, {} could not be copied)", pictures.len() - copied)
+    }
+}
+
 impl Workspace {
     /// Save a finished chat answer in its own manuscript, never replacing an
     /// existing draft. Conversation-local citation labels travel with it.
@@ -529,11 +546,13 @@ impl Workspace {
         };
         let name = format!("{}.{extension}", file_name(crate::i18n::manuscript_title(&manuscript)));
         let directory = dirs::document_dir().or_else(dirs::home_dir).unwrap_or_else(|| self.root.clone());
+        let pictures = if kind == ManuscriptExport::Markdown { self.markdown_pictures(&manuscript) } else { vec![] };
         let picked = cx.prompt_for_new_path(&directory, Some(&name));
         cx.spawn(async move |this, cx| {
             if let Ok(Ok(Some(mut path))) = picked.await {
                 if path.extension().is_none() { path.set_extension(extension); }
                 let result = std::fs::write(&path, bytes);
+                let note = if result.is_ok() && !pictures.is_empty() { pictures_beside(&path, &pictures) } else { note };
                 this.update(cx, |this, cx| match result {
                     Ok(()) => this.say(tf!("已导出到 {}{note}", "Exported to {}{note}", path.display()), cx),
                     Err(err) => this.fail(tf!("无法写入 {}：{err}", "Cannot write {}: {err}", path.display()), cx),
@@ -561,7 +580,28 @@ impl Workspace {
             said.push(t("原来的 Word 文件不在了，按新文档导出").to_string());
         }
         if done.comments > 0 { said.push(tf!("批注 {} 条", "{} comments", done.comments)) }
+        if done.pictures > 0 { said.push(tf!("图片 {} 张", "{} pictures", done.pictures)) }
+        // A picture whose file is gone, or a WebP, which Word does not read: its caption stands alone.
+        if !done.left_out.is_empty() { said.push(tf!("{} 张图片没有放进去（文件不在了，或是 Word 读不了的 WebP）", "{} pictures left out (file missing, or a WebP, which Word cannot read)", done.left_out.len())) }
         Ok((done.bytes, if said.is_empty() { String::new() } else { tf!("（{}）", " ({})", said.join(if crate::i18n::is_english() { ", " } else { "，" })) }))
+    }
+
+    /// The pictures a manuscript's Markdown names, with where each is kept. The file names them by their place in
+    /// the library (`figures/…`): copied to the same place beside it (`pictures_beside`), it reads the same there
+    /// and Pandoc finds them.
+    fn markdown_pictures(&self, manuscript: &Manuscript) -> Vec<(String, std::path::PathBuf)> {
+        let Some(lib) = self.lib.as_ref() else { return vec![] };
+        manuscript::pictures_used(manuscript).into_iter().map(|address| (address.clone(), lib.store.root().join(address.replace('/', std::path::MAIN_SEPARATOR_STR)))).collect()
+    }
+
+    /// Write the manuscript on show as Markdown at `path`, its pictures beside it, without asking where: a scripted run's export.
+    pub(crate) fn write_markdown_to(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) {
+        let Some(manuscript) = self.lib.as_ref().and_then(|l| l.writing.current()).cloned() else { return };
+        let pictures = self.markdown_pictures(&manuscript);
+        match std::fs::write(&path, manuscript::markdown(&manuscript)) {
+            Ok(()) => self.say(tf!("已导出到 {}{}", "Exported to {}{}", path.display(), if pictures.is_empty() { String::new() } else { pictures_beside(&path, &pictures) }), cx),
+            Err(err) => self.fail(tf!("无法写入 {}：{err}", "Cannot write {}: {err}", path.display()), cx),
+        }
     }
 
     /// Write the manuscript on show as a Word file at `path`, without asking where: a scripted run's export.
@@ -774,6 +814,13 @@ impl Workspace {
                     .pt(px(6.))
                     .border_t_1()
                     .border_color(Theme::line())
+                    // What the manuscript draws on besides papers: pictures to bring in and to put into it (write_figures.rs).
+                    .child({
+                        let pictures = manuscript::pictures_used(manuscript).len();
+                        small_row("outline-materials", "image", t("资料库").into(), matches!(self.modal, Some(Modal::WriteFigures)))
+                            .on_click(self.on(Cmd::WriteFigures(crate::write_figures::Do::Open), cx))
+                            .when(pictures > 0, |d| d.child(div().flex_none().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(pictures.to_string())))
+                    })
                     // The manuscript's reference list, where a paper has it: after its sections.
                     .child(
                         small_row("outline-references", "library", t("参考文献").into(), references_on)
@@ -878,6 +925,8 @@ impl Workspace {
                     // Beside a draft's conversation it says its name even in a narrow column: it is where the manuscripts are switched and removed.
                     .when(!outlined && !self.in_draft(), |d| d.child(tool("write-manuscripts", "list", Some(tf!("稿件 {}", "Manuscript {}", writing.manuscripts.len()).into())).on_click(self.on_menu(MenuKind::Manuscripts, cx))))
                     .when(!outlined && self.in_draft(), |d| d.child(ui::ghost_button("write-manuscripts", Some("list"), Some(tf!("稿件 {}", "Manuscript {}", writing.manuscripts.len()).into())).h(text_px(26.)).px(px(7.)).text_size(text_px(12.)).on_click(self.on_menu(MenuKind::Manuscripts, cx))))
+                    // 资料库 is a row of the outline: here while that is put away.
+                    .when(!outlined, |d| d.child(tool("write-materials", "image", Some(t("资料库").into())).on_click(self.on(Cmd::WriteFigures(crate::write_figures::Do::Open), cx))))
                     // 预览 shows the whole manuscript as it reads, Markdown drawn; lit while it does, a click goes back to writing.
                     .child(preview)
                     // The language is said even in a narrow column: there is no icon that says it.
@@ -892,7 +941,7 @@ impl Workspace {
     }
 
     /// The whole manuscript, to be read through; a heading opens its section.
-    pub(crate) fn render_manuscript_reading(&self, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_manuscript_reading(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let lib = self.lib.as_ref().unwrap();
         let Some(manuscript) = lib.writing.current() else { return div().into_any_element() };
         let sections: Vec<AnyElement> = manuscript
@@ -900,8 +949,20 @@ impl Workspace {
             .iter()
             .enumerate()
             .map(|(n, section)| {
-                // The section's Markdown drawn as it says, a heading in it under the section's name.
+                // The section's Markdown drawn as it says, a heading in it under the section's name. A picture's line
+                // is the picture over its caption (write_figures.rs): the text is drawn in the pieces between them.
                 let written = manuscript::section_markdown(&section.body, 2);
+                let pictures = manuscript::picture_lines(&section.body);
+                let mut pieces: Vec<AnyElement> = vec![];
+                let mut from = 0;
+                for (at, picture) in pictures.iter().enumerate() {
+                    let before = manuscript::section_markdown(&section.body[from..picture.line.start], 2);
+                    if !before.is_empty() { pieces.push(crate::markdown::render(&format!("write-read-{n}-{at}"), &before, None, None).into_any_element()) }
+                    pieces.push(self.render_manuscript_picture(format!("write-read-picture-{n}-{at}"), picture, window));
+                    from = picture.line.end;
+                }
+                let rest = manuscript::section_markdown(&section.body[from..], 2);
+                if !rest.is_empty() { pieces.push(crate::markdown::render(&format!("write-read-{n}"), &rest, None, None).into_any_element()) }
                 div()
                     .flex()
                     .flex_col()
@@ -918,7 +979,7 @@ impl Workspace {
                             .when(section.kind != "other", |d| d.child(div().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(label(&SECTIONS, &section.kind).to_string()))),
                     )
                     .when(written.is_empty(), |d| d.child(div().text_size(text_px(13.)).text_color(Theme::text_tertiary()).child(t("这一节还没有写。"))))
-                    .when(!written.is_empty(), |d| d.child(div().text_size(text_px(15.)).text_color(Theme::text()).child(crate::markdown::render(&format!("write-read-{n}"), &written, None, None))))
+                    .when(!written.is_empty(), |d| d.child(div().flex().flex_col().gap(theme::paragraph_gap(10.)).text_size(text_px(15.)).text_color(Theme::text()).children(pieces)))
                     .into_any_element()
             })
             .collect();

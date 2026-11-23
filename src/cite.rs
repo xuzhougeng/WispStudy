@@ -207,13 +207,27 @@ impl Workspace {
     /// 引用: the paper's key at the caret, kept so it stays the paper's.
     /// `from` is the sentence of the paper it is cited from (a candidate's): kept as the passage the citation rests on.
     /// A sentence that cites the paper already is not made to cite it twice: the passage is kept for the citation there.
-    pub fn cite_paper(&mut self, id: &str, from: Option<Candidate>, cx: &mut Context<Self>) {
-        let Some(lib) = self.lib.as_mut() else { return };
-        let Some(key) = index(lib).key(id).map(str::to_string) else { return self.fail(t("文献库里没有这篇文献。"), cx) };
+    /// The key a paper is cited by, kept so that it stays the paper's. None, said in a toast, when the paper is not
+    /// in the library or the key could not be kept.
+    pub(crate) fn cite_key_kept(&mut self, id: &str, cx: &mut Context<Self>) -> Option<String> {
+        let lib = self.lib.as_mut()?;
+        let Some(key) = index(lib).key(id).map(str::to_string) else {
+            self.fail(t("文献库里没有这篇文献。"), cx);
+            return None;
+        };
         if !lib.citing.kept.contains_key(&key) {
-            if let Err(err) = lib.store.keep_cite_key(id, &key) { return self.fail(tf!("引用没有记下：{err:#}", "Citation not saved: {err:#}"), cx) }
+            if let Err(err) = lib.store.keep_cite_key(id, &key) {
+                self.fail(tf!("引用没有记下：{err:#}", "Citation not saved: {err:#}"), cx);
+                return None;
+            }
             lib.citing.kept.insert(key.clone(), id.to_string());
         }
+        Some(key)
+    }
+
+    pub fn cite_paper(&mut self, id: &str, from: Option<Candidate>, cx: &mut Context<Self>) {
+        let Some(key) = self.cite_key_kept(id, cx) else { return };
+        let Some(lib) = self.lib.as_mut() else { return };
         let (text, caret) = { let editor = lib.writing.editor.read(cx); (editor.text().to_string(), editor.caret()) };
         let cited_here = from.as_ref().and_then(|_| wisp_core::citefind::sentences(&text).into_iter().find(|range| range.start <= caret && caret <= range.end)).filter(|range| wisp_core::citefind::cites(&text[range.clone()], &key));
         if cited_here.is_none() {

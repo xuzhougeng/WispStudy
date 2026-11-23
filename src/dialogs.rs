@@ -37,6 +37,11 @@ fn option_chip(id: impl Into<ElementId>, label: impl Into<SharedString>, chosen:
 impl Workspace {
     pub fn render_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.tend_figure_dialog(window, cx);
+        // 资料库 reads its cards' pictures as it draws them: it is drawn before anything of the dialogs is borrowed.
+        if matches!(self.modal, Some(Modal::WriteFigures)) {
+            let card = self.render_write_figures_dialog(window, cx)?;
+            return Some(div().absolute().top_0().left_0().size_full().occlude().flex().items_center().justify_center().bg(Theme::scrim()).child(ui::title_strip().absolute().top_0().left_0()).child(card).into_any_element());
+        }
         let modal = self.modal.as_ref()?;
         let error = ui::error_line(&self.modal_error);
         let footer = |confirm: &str, danger: bool, this: &Self, cx: &mut Context<Self>| {
@@ -59,6 +64,7 @@ impl Workspace {
             Modal::ReviewEvidence(_) => self.render_review_evidence_dialog(window, cx)?,
             Modal::ReviewText { .. } => self.render_review_text_dialog(window, cx)?,
             Modal::Figure(_) => self.render_figure_dialog(window, cx)?,
+            Modal::WriteFigures => return None,
             Modal::Extract(_) => self.render_extract_dialog(cx)?,
             Modal::Headings(_) => self.render_headings_dialog(cx)?,
             Modal::Zotero { open } => ui::dialog(560.)

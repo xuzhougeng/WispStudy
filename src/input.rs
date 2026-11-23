@@ -4,7 +4,9 @@
 
 use crate::theme::Theme;
 use gpui::*;
+use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::Arc;
 use wisp_core::selection::{self, Unit};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -77,6 +79,8 @@ struct Row {
     x: Pixels,
     line_height: Pixels,
     decor: Decor,
+    /// The picture this line is (`![caption](address)`), drawn over its words at this size: the room for it is above `top`.
+    picture: Option<(Arc<RenderImage>, Size<Pixels>)>,
 }
 
 impl Row {
@@ -103,6 +107,9 @@ enum Decor {
 #[derive(Default)]
 struct DisplayMap {
     segs: Vec<Seg>,
+    /// Words drawn where nothing is written, saying what to write there (under a picture without a caption): where
+    /// they are drawn, and the byte of the text they stand at. A click on them puts the caret at that byte.
+    invites: Vec<(Range<usize>, usize)>,
 }
 
 struct Seg {
@@ -184,6 +191,8 @@ pub struct TextInput {
     /// Stretches that lead somewhere (a manuscript's citations): the pointer over one is told to the owner,
     /// and ⌘ or Ctrl with a click follows it instead of selecting a sentence.
     links: Vec<Range<usize>>,
+    /// The pictures a text drawn as Markdown shows, by the addresses its picture lines name: each is drawn over its line.
+    pictures: HashMap<String, Arc<RenderImage>>,
     /// Where the links were last drawn, in the window: a box for each line of each, with its place in `links`.
     link_boxes: Vec<(usize, Bounds<Pixels>)>,
     /// The link under the pointer, and the box of the line of it the pointer is on.
@@ -241,6 +250,7 @@ impl TextInput {
             marks: vec![],
             mark_tops: vec![],
             links: vec![],
+            pictures: HashMap::new(),
             link_boxes: vec![],
             hovered: None,
             selection_geometry: None,
@@ -296,6 +306,13 @@ impl TextInput {
         if self.links == links { return }
         self.links = links;
         self.hovered = None;
+    }
+
+    /// The pictures the text's picture lines show, by their addresses. The owner gives them anew as they are read;
+    /// a line whose picture is not among them is its words alone.
+    pub fn set_pictures(&mut self, pictures: Vec<(String, Arc<RenderImage>)>) {
+        if self.pictures.len() == pictures.len() && pictures.iter().all(|(address, image)| self.pictures.get(address).is_some_and(|held| Arc::ptr_eq(held, image))) { return }
+        self.pictures = pictures.into_iter().collect();
     }
 
     /// The link under the pointer (its place in `set_links`'s list) and the box of the line of it the pointer is on, in the window.
@@ -677,7 +694,9 @@ impl TextInput {
 
     /// The display offset closest to a point relative to the text origin.
     fn index_in(&self, l: &Layout, p: Point<Pixels>) -> usize {
-        let Some(row) = l.rows.iter().rev().find(|row| row.top <= p.y).or(l.rows.first()) else { return 0 };
+        // A picture over a line is that line's: a click on it goes to its caption, not to the paragraph before it.
+        let over = |row: &Row| row.picture.as_ref().map_or(px(0.), |(_, drawn)| drawn.height + px(crate::write_figures::SHOT_GAP));
+        let Some(row) = l.rows.iter().rev().find(|row| row.top - over(row) <= p.y).or(l.rows.first()) else { return 0 };
         let local = point((p.x - row.x).max(px(0.)), (p.y - row.top).max(px(0.)).min(row.height() - px(1.)));
         row.start + match row.line.closest_index_for_position(local, row.line_height) {
             Ok(i) | Err(i) => i,
@@ -687,7 +706,9 @@ impl TextInput {
     fn index_for_mouse(&self, p: Point<Pixels>) -> usize {
         let Some(l) = &self.layout else { return 0 };
         let local = point(p.x - l.bounds.left() + l.scroll_x, p.y - l.bounds.top());
-        self.text_offset(&l.map, self.index_in(l, local))
+        let drawn = self.index_in(l, local);
+        if let Some((_, stands_at)) = l.map.invites.iter().find(|(shown, _)| shown.start <= drawn && drawn <= shown.end) { return *stands_at }
+        self.text_offset(&l.map, drawn)
     }
 
     fn on_down(&mut self, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -1000,6 +1021,8 @@ struct Prepaint {
     selection: Vec<PaintQuad>,
     caret: Option<PaintQuad>,
     scroll_x: Pixels,
+    /// The pictures of the lines that are pictures, where each is drawn.
+    pictures: Vec<(Bounds<Pixels>, Arc<RenderImage>)>,
 }
 
 impl IntoElement for InputElement {
@@ -1042,7 +1065,7 @@ fn shape(input: &TextInput, style: &TextStyle, window: &mut Window, wrap: Option
     let (mut start, mut top) = (0, px(0.));
     for line in shaped {
         let len = line.len();
-        let row = Row { line, start, top, x: px(0.), line_height, decor: Decor::None };
+        let row = Row { line, start, top, x: px(0.), line_height, decor: Decor::None, picture: None };
         top += row.height();
         rows.push(row);
         start += len + 1;
@@ -1101,6 +1124,8 @@ fn shape_markdown(input: &TextInput, style: &TextStyle, window: &mut Window, wra
             let color = match piece.part {
                 Part::Syntax => Theme::text_tertiary(),
                 Part::Bullet => Theme::text_secondary(),
+                // A picture's caption is set a little back from the text.
+                Part::Text if line.picture.is_some() && marks.link.is_none() && !piece.cite => Theme::text_secondary(),
                 Part::Text if marks.link.is_some() || piece.cite => Theme::accent(),
                 Part::Text => base_color,
             };
@@ -1123,6 +1148,17 @@ fn shape_markdown(input: &TextInput, style: &TextStyle, window: &mut Window, wra
                 }
                 None => runs.push(run),
             }
+        }
+        // A picture without a caption says where one is written, while its line is not being edited. A click on
+        // those words lands between the brackets: they stand for the empty caption there.
+        if line.picture.is_some() && shown.is_empty() && !revealed && let Some(last) = map.segs.pop() {
+            let invite = if line.picture.as_ref().is_some_and(|address| input.pictures.contains_key(&text[address.clone()])) { crate::i18n::t("在这里写图注…") } else { crate::i18n::t("图片 · 在这里写图注…") };
+            let from = start;
+            map.invites.push((from..from + invite.len(), last.src.start));
+            map.segs.push(Seg { src: last.src.start..last.src.start, shown: from..from + invite.len(), same: false });
+            map.segs.push(Seg { src: last.src, shown: from + invite.len()..from + invite.len(), same: false });
+            shown.push_str(invite);
+            runs.push(TextRun { len: invite.len(), font: style.font(), color: Theme::text_placeholder(), background_color: None, underline: None, strikethrough: None });
         }
         let scale = heading_scale(line.heading);
         let (size, mut line_height) = if line.code { (font_size * 0.9, base_height) } else { (font_size * scale, (base_height * scale).round()) };
@@ -1153,10 +1189,17 @@ fn shape_markdown(input: &TextInput, style: &TextStyle, window: &mut Window, wra
         if empty(n) && !line.code { line_height *= paragraph_factor }
         top += gap * paragraph_factor;
         let len = shown.len();
+        // A picture's line has its picture over it, whole in the column: the room is made above the words.
+        let picture = line.picture.as_ref().and_then(|address| input.pictures.get(&text[address.clone()])).zip(wrap).map(|(image, wrap)| {
+            let natural = image.size(0);
+            let (w, h) = crate::write_figures::shot_size((natural.width.0 as f32, natural.height.0 as f32), f32::from(wrap - x), window.scale_factor().min(2.));
+            (image.clone(), gpui::size(px(w), px(h)))
+        });
+        if let Some((_, drawn)) = &picture { top += drawn.height + px(crate::write_figures::SHOT_GAP) }
         let wrap = wrap.map(|w| (w - x).max(px(40.)));
         let shaped = window.text_system().shape_text(shown.into(), size, &runs, wrap, None).unwrap_or_default();
         let Some(shaped) = shaped.into_iter().next() else { continue };
-        let row = Row { line: shaped, start, top, x, line_height, decor };
+        let row = Row { line: shaped, start, top, x, line_height, decor, picture };
         top += row.height();
         rows.push(row);
         start += len + 1;
@@ -1291,6 +1334,7 @@ impl Element for InputElement {
                 }
             })
             .collect();
+        let pictures = probe.rows.iter().filter_map(|row| row.picture.as_ref().map(|(image, drawn)| (Bounds::new(origin + point(row.x, row.top - drawn.height - px(crate::write_figures::SHOT_GAP)), *drawn), image.clone()))).collect();
         let viewport = bounds.intersect(&window.content_mask().bounds);
         let visible: Vec<_> = selection.iter().map(|quad| quad.bounds.intersect(&viewport)).filter(|bounds| !bounds.is_empty()).collect();
         let geometry = visible.first().zip(visible.last()).map(|(&first, &last)| SelectionGeometry { first, last, viewport });
@@ -1305,7 +1349,7 @@ impl Element for InputElement {
             input.selection_geometry = geometry;
             input.selection_toolbar_visible = false;
         });
-        Prepaint { rows: probe.rows, map: probe.map, decor, marks, selection, caret, scroll_x }
+        Prepaint { rows: probe.rows, map: probe.map, decor, marks, selection, caret, scroll_x, pictures }
     }
 
     fn paint(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, bounds: Bounds<Pixels>, _: &mut (), prepaint: &mut Prepaint, window: &mut Window, cx: &mut App) {
@@ -1317,6 +1361,11 @@ impl Element for InputElement {
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
             for quad in prepaint.decor.drain(..).chain(prepaint.marks.drain(..)) {
                 window.paint_quad(quad);
+            }
+            for (at, image) in prepaint.pictures.drain(..) {
+                // On the white of a page, as the figure library shows it: a picture with a clear ground reads the same in the dark.
+                window.paint_quad(fill(at, gpui::white()));
+                let _ = window.paint_image(at, Corners::default(), image, 0, false);
             }
             if focused {
                 for quad in prepaint.selection.drain(..) {
@@ -1354,7 +1403,7 @@ mod tests {
     /// `a **b**` drawn as `a b`, then a line break and `- c` drawn as `• c`.
     fn map() -> DisplayMap {
         let seg = |src: std::ops::Range<usize>, shown: std::ops::Range<usize>, same: bool| Seg { src, shown, same };
-        DisplayMap { segs: vec![seg(0..2, 0..2, true), seg(2..4, 2..2, false), seg(4..5, 2..3, true), seg(5..7, 3..3, false), seg(7..8, 3..4, true), seg(8..9, 4..7, false), seg(9..11, 7..9, true)] }
+        DisplayMap { segs: vec![seg(0..2, 0..2, true), seg(2..4, 2..2, false), seg(4..5, 2..3, true), seg(5..7, 3..3, false), seg(7..8, 3..4, true), seg(8..9, 4..7, false), seg(9..11, 7..9, true)], invites: vec![] }
     }
 
     #[test]

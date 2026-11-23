@@ -493,6 +493,9 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     ("papers", "pages", "TEXT NOT NULL DEFAULT ''"),
     // The name a person gave a conversation (重命名); empty, its first question is its title.
     ("conversations", "name", "TEXT NOT NULL DEFAULT ''"),
+    // Where a figure without a paper is from, and the file it was (`figure::UPLOADED`).
+    ("figures", "origin", "TEXT NOT NULL DEFAULT ''"),
+    ("figures", "file_name", "TEXT NOT NULL DEFAULT ''"),
 ];
 
 /// Add the columns added to a table after it was first made: `CREATE TABLE IF NOT

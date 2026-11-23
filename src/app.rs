@@ -756,6 +756,8 @@ pub enum Cmd {
     Revise(crate::revise::Do),
     /// 写作's other mode, where the assistant writes (`write_agent.rs`).
     Agent(crate::write_agent::Do),
+    /// 写作's 资料库: the pictures a manuscript can show, brought in and put into it (`write_figures.rs`).
+    WriteFigures(crate::write_figures::Do),
     /// Looking for words in the manuscript (`write_seek.rs`).
     Seek(crate::write_seek::Do),
     // The figure library (`src/figures.rs`)
@@ -1607,6 +1609,8 @@ pub enum Modal {
     Extract(Box<crate::extract::Form>),
     /// 写作: which paragraphs of a Word file without heading styles start a section.
     Headings(Box<crate::comments::HeadingsForm>),
+    /// 写作's 资料库: the figures to bring in and to put into the manuscript. Its state is `Library::write_figures`.
+    WriteFigures,
 }
 
 /// A paper kept in a pane of its own beside the paper on show (#194): choosing another paper leaves it
@@ -1789,6 +1793,8 @@ pub struct Library {
     pub citing: crate::cite::Citing,
     /// 图片库: the figures cut out of the library's PDFs.
     pub gallery: crate::figures::Gallery,
+    /// 写作's 资料库, and the pictures the manuscript on show draws (`write_figures.rs`).
+    pub write_figures: crate::write_figures::Shelf,
     /// 提取: the assistant's proposals for the custom fields, its run over the papers, and their confirmation.
     pub extract: crate::extract::Extract,
     /// Conversations with the library set aside by 新对话 (or another taken up from 历史) while they were answering: they go
@@ -2183,7 +2189,7 @@ impl Library {
     }
 
     /// The panel of the papers in scope is on show over the library's conversation.
-    pub fn materials_shown(&self) -> bool {
+    pub fn write_figures_shown(&self) -> bool {
         let chat = &self.library_chat;
         self.page == Page::Ask && chat.materials_open && chat.history.is_none() && (chat.ctx.is_some() || chat.messages.is_empty() || self.info.draft)
     }
@@ -3410,6 +3416,7 @@ impl Workspace {
             Cmd::Revise(what) => self.run_revise(what, cx),
             Cmd::Seek(what) => self.run_seek(what, window, cx),
             Cmd::Agent(what) => self.run_agent(what, window, cx),
+            Cmd::WriteFigures(what) => self.run_write_figures(what, window, cx),
             Cmd::WriteStop => {
                 if let Some(lib) = self.lib.as_mut() {
                     let sorting = &mut lib.writing.sorting;
@@ -4343,7 +4350,9 @@ impl Workspace {
                 // A file not imported: the next one waiting is asked about.
                 if matches!(self.modal, Some(Modal::Headings(_))) { self.headings_done(false, cx) }
                 if matches!(self.modal, Some(Modal::Headings(_))) { return cx.notify() }
-                self.modal = None;
+                // A figure looked at from 资料库 gives the place back to it.
+                let back = matches!(&self.modal, Some(Modal::Figure(form)) if form.back) && self.lib.as_ref().is_some_and(|lib| lib.page == Page::Write);
+                self.modal = back.then_some(Modal::WriteFigures);
                 self.modal_subscriptions.clear();
                 self.figure_drag = None;
                 // The piece a figure dialog was for is no longer shown on its page.
@@ -4414,7 +4423,7 @@ impl Workspace {
             let typed = self.lib.as_ref().is_some_and(|lib| !lib.chat(talk).history_find.read(cx).text().is_empty());
             self.run(if typed { Cmd::ClearHistoryFind(talk) } else { Cmd::ToggleHistory(talk) }, window, cx);
         } else if self.picked.take().is_some() || self.lib.as_mut().is_some_and(Library::unpick) {
-        } else if self.lib.as_ref().is_some_and(|l| l.materials_shown()) {
+        } else if self.lib.as_ref().is_some_and(|l| l.write_figures_shown()) {
             // The panel floating over the conversation is put away first; what it searched for stays.
             if let Some(lib) = self.lib.as_mut() {
                 lib.library_chat.materials_open = false;
@@ -4663,10 +4672,19 @@ impl Workspace {
         subscriptions.push(cx.subscribe(&title, |this, input, event: &InputEvent, cx| {
             if *event == InputEvent::Changed { this.write_title_typed(input.read(cx).text().to_string(), cx) }
         }));
-        let editor = cx.new(|cx| TextInput::new(crate::write::PLACEHOLDER, cx).multiline(14).markdown().with_text(&draft));
+        let editor = cx.new(|cx| {
+            let mut input = TextInput::new(crate::write::PLACEHOLDER, cx).multiline(14).markdown().with_text(&draft);
+            // A picture pasted into the manuscript is kept in 资料库 and put in at the caret (write_figures.rs).
+            input.accepts_images = true;
+            input
+        });
         let find = cx.new(|cx| TextInput::new("找句子：输入词或短语，例如 remains unclear", cx));
         subscriptions.push(cx.subscribe(&editor, |this, input, event: &InputEvent, cx| {
             if let InputEvent::MarkClicked(n) = *event { return this.comment_mark_clicked(n, cx) }
+            if *event == InputEvent::Images {
+                let pasted = input.update(cx, |input, _| input.take_images());
+                return this.manuscript_pasted(pasted, cx);
+            }
             if *event != InputEvent::Changed { return }
             let text = input.read(cx).text().to_string();
             this.write_typed(text, cx);
@@ -4686,6 +4704,7 @@ impl Workspace {
         let writing = Writing { manuscripts, manuscript, section_id, reading: false, title, typed: 0, editor, find, search: Default::default(), structures: BTreeMap::new(), sorting: Sorting::default(), scroll: ScrollHandle::new(), assist: Default::default(), revise, comments, editor_scroll: ScrollHandle::new(), side: Side::default(), side_open: false, agent: Default::default(), seek, away: false };
         let citing = crate::cite::Citing::new(&store, &writing.manuscript, &mut subscriptions, cx);
         let gallery = crate::figures::Gallery::new(&mut subscriptions, cx);
+        let write_figures = crate::write_figures::Shelf::new(&mut subscriptions, cx);
         // The sort kept with the library may name a partition the 分区 column no longer shows (the setting was changed while
         // another library, or none, was open): the list is sorted by the column's, so its header says so.
         let filters = Filters { sort: crate::library::sort_in_zone(&info.sort, &self.settings), ..Default::default() };
@@ -4772,6 +4791,7 @@ impl Workspace {
             writing,
             citing,
             gallery,
+            write_figures,
             extract: crate::extract::Extract::new(),
             aside: vec![],
             _subscriptions: subscriptions,
@@ -7847,6 +7867,7 @@ impl Workspace {
             Modal::ReviewEvidence(_) => self.submit_review_evidence(window, cx),
             Modal::ReviewText { .. } => self.submit_review_text(window, cx),
             Modal::Figure(_) => self.submit_figure(window, cx),
+            Modal::WriteFigures => {}
             Modal::Complete(form) => {
                 if form.chosen.is_some() { self.complete_apply(window, cx) } else if form.by_id { self.complete_lookup(cx) } else { self.complete_find(cx) }
             }
@@ -8268,6 +8289,11 @@ impl Workspace {
                 "references" => Some(match arg { "off" => Cmd::WriteSide(Side::Candidates), "whole" => Cmd::WriteReferences, _ => Cmd::WriteSide(Side::References) }),
                 "wish" | "commenttext" => {
                     if let Some(comments) = self.lib.as_ref().map(|lib| &lib.writing.comments) { (if name == "wish" { &comments.wish } else { &comments.draft }).update(cx, |input, cx| input.set_text(arg, cx)) }
+                    None
+                }
+                // `exportmd:<path>` writes the manuscript as Markdown there, its pictures in `figures/` beside it.
+                "exportmd" => {
+                    self.write_markdown_to(PathBuf::from(arg), cx);
                     None
                 }
                 "exportdoc" => {
@@ -8817,6 +8843,29 @@ impl Workspace {
                         _ => Some(Cmd::Unretract(Talk::Library)),
                     }
                 }),
+                // `wfig` opens 写作's 资料库; `wfig:add:<path>` brings a picture file in, `wfig:put:<path>` also puts it into
+                // the manuscript; `wfig:insert:<n>` puts the n-th figure of the library into the manuscript, `wfig:edit:<n>` opens its
+                // dialog; `wfig:only:uploaded|papers|drawn|used|all` narrows; `wfig:find:<words>` searches.
+                "wfig" => {
+                    use crate::write_figures::{Do, Only};
+                    let (what, rest) = arg.split_once(':').unwrap_or((arg, ""));
+                    let nth = |this: &Self| this.lib.as_ref().and_then(|lib| lib.gallery.items.get(rest.parse::<usize>().unwrap_or(1).saturating_sub(1))).map(|figure| figure.id.clone());
+                    match what {
+                        "add" => Some(Cmd::WriteFigures(Do::Add(vec![rest.into()]))),
+                        "put" => {
+                            self.write_figures_add(vec![rest.into()], true, cx);
+                            return;
+                        }
+                        "insert" => nth(self).map(|id| Cmd::WriteFigures(Do::Insert(id))),
+                        "edit" => nth(self).map(|id| Cmd::WriteFigures(Do::Edit(id))),
+                        "only" => Some(Cmd::WriteFigures(Do::Only(match rest { "uploaded" => Only::Uploaded, "papers" => Only::Papers, "drawn" => Only::Drawn, "used" => Only::Used, _ => Only::All }))),
+                        "find" => {
+                            if let Some(lib) = self.lib.as_ref() { lib.write_figures.search.update(cx, |input, cx| input.set_text(rest, cx)) }
+                            return;
+                        }
+                        _ => Some(Cmd::WriteFigures(Do::Open)),
+                    }
+                }
                 // `agent` / `agent:off` is 写作's other mode, where the assistant writes; `agent:earlier|later|now|restore` steps through the versions of the section on show.
                 "agent" => Some(Cmd::Agent(match arg {
                     "off" => crate::write_agent::Do::Mode(false),

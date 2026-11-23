@@ -21,6 +21,7 @@
 
 use crate::ai::diff_tokens;
 use crate::manuscript::{crc32, xml_escape as escape};
+pub use crate::pptx::Picture;
 use anyhow::{Result, anyhow, bail};
 use std::collections::BTreeMap;
 use std::io::{Read as _, Write as _};
@@ -1546,6 +1547,10 @@ pub struct Wanted {
     /// Never one of the file's paragraphs changed: written anew, set like the nearest of its kind. An entry of a
     /// reference list in another style, which would else keep the italics of the words it shares with the old one.
     pub fresh: bool,
+    /// Pictures the manuscript has by this paragraph and the file has not: each a paragraph of its own, over it (a
+    /// figure over its caption) or under it (one without a caption, after the paragraph before it).
+    pub above: Vec<Picture>,
+    pub below: Vec<Picture>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1568,6 +1573,86 @@ pub struct Rewritten {
     pub removed: usize,
     /// Comments put in.
     pub comments: usize,
+    /// Pictures put in.
+    pub pictures: usize,
+    /// The pictures the manuscript names that were not put in, by their addresses: said by whoever read them
+    /// (`Store::manuscript_word`), not by `rewrite`.
+    pub left_out: Vec<String>,
+}
+
+/// The widest and the tallest a picture is set in a document, in EMU (914400 to the inch): the text of a page with
+/// inch margins is a little wider and taller than this, on A4 as on Letter.
+const PICTURE_MOST: (u64, u64) = (5_486_400, 7_315_200);
+/// A pixel of a picture, at the 96 to the inch a screen has.
+const EMU_PER_PIXEL: u64 = 9525;
+
+/// The size a picture of so many pixels is set at, in EMU: its own, or the largest that fits a page.
+fn picture_extent(width: u32, height: u32) -> (u64, u64) {
+    let (w, h) = (width.max(1) as u64 * EMU_PER_PIXEL, height.max(1) as u64 * EMU_PER_PIXEL);
+    if w <= PICTURE_MOST.0 && h <= PICTURE_MOST.1 { return (w, h) }
+    // By the side that is further over.
+    if w * PICTURE_MOST.1 >= h * PICTURE_MOST.0 { (PICTURE_MOST.0, (h * PICTURE_MOST.0 / w).max(1)) } else { ((w * PICTURE_MOST.1 / h).max(1), PICTURE_MOST.1) }
+}
+
+/// The pictures put into a document: the parts they are kept in, the relationships that name them, and the numbers
+/// the next one takes.
+struct Media {
+    /// (part, bytes) of each picture.
+    files: Vec<(String, Vec<u8>)>,
+    /// The relationships to add to the main part's.
+    added: String,
+    /// The number of the next drawing, after the file's largest.
+    drawing: u32,
+    jpeg: bool,
+    png: bool,
+}
+
+impl Media {
+    /// A paragraph that draws `picture`, which becomes a part of the file beside `main`. With `keep` it stays on
+    /// the page of the paragraph after it: a figure over its caption.
+    fn para(&mut self, picture: &Picture, keep: bool, zip: &Zip, main: &str, rels: &str) -> String {
+        let mut n = self.files.len() + 1;
+        let (part, target, id) = loop {
+            let target = format!("media/wisp{n}.{}", picture.kind);
+            let (part, id) = (beside(main, &target), format!("rIdWisp{n}"));
+            if !zip.has(&part) && !rels.contains(&format!("\"{id}\"")) && !self.files.iter().any(|(held, _)| *held == part) { break (part, target, id) }
+            n += 1;
+        };
+        self.files.push((part, picture.bytes.clone()));
+        self.added.push_str(&format!("<Relationship Id=\"{id}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"{target}\"/>"));
+        if picture.kind == "png" { self.png = true } else { self.jpeg = true }
+        self.drawing += 1;
+        let (number, (cx, cy)) = (self.drawing, picture_extent(picture.width, picture.height));
+        let ppr = if keep { "<w:pPr><w:keepNext/></w:pPr>" } else { "" };
+        // The names are said on the elements that use them: the document's root may not have them.
+        format!(
+            "<w:p>{ppr}<w:r><w:drawing><wp:inline xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\" distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{number}\" name=\"Picture {number}\"/>\
+<a:graphic xmlns:a=\"http://schemas.openxmlformats.org/drawingml/2006/main\"><a:graphicData uri=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:pic xmlns:pic=\"http://schemas.openxmlformats.org/drawingml/2006/picture\"><pic:nvPicPr><pic:cNvPr id=\"{number}\" name=\"Picture {number}\"/><pic:cNvPicPr/></pic:nvPicPr>\
+<pic:blipFill><a:blip xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\" r:embed=\"{id}\"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x=\"0\" y=\"0\"/><a:ext cx=\"{cx}\" cy=\"{cy}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>"
+        )
+    }
+
+    /// Put the pictures into the archive: their parts, the main part's relationships to them, and what kind of file each is.
+    fn write(self, zip: &mut Zip, main: &str) -> Result<usize> {
+        if self.files.is_empty() { return Ok(0) }
+        for (part, bytes) in &self.files { zip.set(part, bytes) }
+        let rels_part = rels_of(main);
+        let rels = zip.text(&rels_part)?;
+        let rels = match rels.rfind("</Relationships>") {
+            Some(end) => format!("{}{}{}", &rels[..end], self.added, &rels[end..]),
+            None => format!("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">{}</Relationships>", self.added),
+        };
+        zip.set(&rels_part, rels.as_bytes());
+        let mut types = zip.text("[Content_Types].xml")?;
+        let lower = types.to_ascii_lowercase();
+        for (wanted, extension, kind) in [(self.png, "png", "image/png"), (self.jpeg, "jpg", "image/jpeg")] {
+            if !wanted || lower.contains(&format!("extension=\"{extension}\"")) { continue }
+            let end = types.rfind("</Types>").ok_or_else(|| anyhow!(NOT_DOCX))?;
+            types.insert_str(end, &format!("<Default Extension=\"{extension}\" ContentType=\"{kind}\"/>"));
+        }
+        zip.set("[Content_Types].xml", types.as_bytes());
+        Ok(self.files.len())
+    }
 }
 
 /// The comments to add to a document, and the number of the next one.
@@ -1764,6 +1849,18 @@ pub fn rewrite(source: &[u8], wanted: &[Wanted], options: &Options) -> Result<Re
         }
     };
 
+    // The pictures that stand by a paragraph: each a paragraph of its own, before it or after it.
+    let main_rels = zip.text(&rels_of(&main))?;
+    let drawings = xml.match_indices("<wp:docPr ").filter_map(|(at, _)| attr(open_tag(&xml[at..]), "id")?.parse::<u32>().ok()).max().unwrap_or(0);
+    let mut media = Media { files: vec![], added: String::new(), drawing: drawings, jpeg: false, png: false };
+    let mut with_pictures = |para: String, wanted: &Wanted| -> Vec<String> {
+        if wanted.above.is_empty() && wanted.below.is_empty() { return vec![para] }
+        let mut paras: Vec<String> = wanted.above.iter().map(|picture| media.para(picture, true, &zip, &main, &main_rels)).collect();
+        paras.push(para);
+        paras.extend(wanted.below.iter().map(|picture| media.para(picture, false, &zip, &main, &main_rels)));
+        paras
+    };
+
     let mut out: Vec<Vec<String>> = doc.blocks.iter().map(|block| match block {
         Block::Para(xml, _) | Block::Other(xml) => vec![xml.clone()],
     }).collect();
@@ -1776,12 +1873,12 @@ pub fn rewrite(source: &[u8], wanted: &[Wanted], options: &Options) -> Result<Re
             Step::Same(o, w) => {
                 let block = readable[o];
                 let written = std::mem::take(&mut out[block][0]);
-                out[block] = vec![dressed(noted(written, &wanted[w].notes, &mut comments), &wanted[w], &anchors)];
+                out[block] = with_pictures(dressed(noted(written, &wanted[w].notes, &mut comments), &wanted[w], &anchors), &wanted[w]);
                 (last, last_old, done.kept) = (Some(block), Some(o), done.kept + 1);
             }
             Step::Changed(o, w) => {
                 let block = readable[o];
-                out[block] = vec![dressed(noted(doc.para(block).edited_by(&wanted[w].text, &wanted[w].edits, track.as_mut()), &wanted[w].notes, &mut comments), &wanted[w], &anchors)];
+                out[block] = with_pictures(dressed(noted(doc.para(block).edited_by(&wanted[w].text, &wanted[w].edits, track.as_mut()), &wanted[w].notes, &mut comments), &wanted[w], &anchors), &wanted[w]);
                 (last, last_old, done.changed) = (Some(block), Some(o), done.changed + 1);
             }
             Step::Removed(o) => {
@@ -1796,10 +1893,10 @@ pub fn rewrite(source: &[u8], wanted: &[Wanted], options: &Options) -> Result<Re
             }
             Step::Added(w) => {
                 let (ppr, rpr) = template(w, last_old);
-                let para = dressed(noted(new_para(&ppr, &rpr, wanted[w].text.trim(), track.as_mut()), &wanted[w].notes, &mut comments), &wanted[w], &anchors);
+                let paras = with_pictures(dressed(noted(new_para(&ppr, &rpr, wanted[w].text.trim(), track.as_mut()), &wanted[w].notes, &mut comments), &wanted[w], &anchors), &wanted[w]);
                 match last {
-                    Some(block) => out[block].push(para),
-                    None => front.push(para),
+                    Some(block) => out[block].extend(paras),
+                    None => front.extend(paras),
                 }
                 done.added += 1;
             }
@@ -1814,6 +1911,7 @@ pub fn rewrite(source: &[u8], wanted: &[Wanted], options: &Options) -> Result<Re
     }
     if front_at >= out.len() { front.iter().for_each(|para| body.push_str(para)) }
     zip.set(&main, format!("{}{body}{}", doc.head, doc.tail).as_bytes());
+    done.pictures = media.write(&mut zip, &main)?;
 
     if comments.count > 0 {
         // The names the document itself uses: a file in the strict form of the format has others.

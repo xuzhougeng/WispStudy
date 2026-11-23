@@ -37,6 +37,15 @@ const PLACEHOLDER_AGENT: &str = "这一节还是空的。在左边告诉助手�
 /// letter is one, and so is every word of a language that spaces them.
 /// The second is whether letters were counted, which is what to call the number.
 pub(crate) fn text_length(text: &str) -> (usize, bool) {
+    // A picture's line is its caption: the address of its file is not something written.
+    if text.contains("![") {
+        let said: Vec<&str> = text.lines().map(|line| wisp_core::markdown::picture_line(line).map_or(line, |(caption, _)| &line[caption])).collect();
+        return count_length(&said.join("\n"));
+    }
+    count_length(text)
+}
+
+fn count_length(text: &str) -> (usize, bool) {
     let letters = text.chars().filter(|c| wisp_core::structure::is_cjk(*c)).count();
     let words = text.split(|c: char| c.is_whitespace() || wisp_core::structure::is_cjk(c)).filter(|word| word.chars().any(char::is_alphanumeric)).count();
     (letters + words, letters > 0)
@@ -88,10 +97,17 @@ impl Workspace {
         let links = self.citation_links();
         // What the search over the manuscript found here, last: a click on words is a comment's before it is anything else.
         let found = self.seek_marks(&text, cx);
+        // The pictures the text shows (write_figures.rs): those of the section being written, or of every section read through.
+        let shown: Vec<String> = match self.lib.as_ref().filter(|lib| lib.writing.reading).and_then(|lib| lib.writing.current()) {
+            Some(manuscript) => wisp_core::manuscript::pictures_used(manuscript),
+            None => wisp_core::manuscript::picture_lines(&text).into_iter().map(|picture| picture.address).collect(),
+        };
+        let pictures = self.manuscript_shots(&shown, cx);
         let lib = self.lib.as_ref().unwrap();
         lib.writing.editor.update(cx, |input, _| {
             input.set_marks(noted.into_iter().chain(changed).chain(found).collect());
             input.set_links(links);
+            input.set_pictures(pictures);
             input.set_placeholder(if agent { PLACEHOLDER_AGENT } else { PLACEHOLDER });
         });
         let lib = self.lib.as_ref().unwrap();
@@ -123,7 +139,7 @@ impl Workspace {
             .mx_auto()
             .children(seek)
             .child(
-                div().flex().flex_col().flex_1().min_h_0().px(px(16.)).pb(px(8.)).when(version.is_some(), |d| d.pt(px(12.))).child(if writing.reading { self.render_manuscript_reading(cx) } else if let Some(version) = version { self.render_version(version, cx) } else {
+                div().flex().flex_col().flex_1().min_h_0().px(px(16.)).pb(px(8.)).when(version.is_some(), |d| d.pt(px(12.))).child(if writing.reading { self.render_manuscript_reading(window, cx) } else if let Some(version) = version { self.render_version(version, cx) } else {
                     let page = div().relative().w_full().max_w(theme::manuscript_width()).mx_auto().pl(px(18.)).pr(px(if markers.is_empty() { 18. } else { MARGIN })).py(px(14.)).text_size(text_px(15.)).line_height(theme::body_line(26.)).text_color(Theme::text());
                     div()
                         .id("write-editor")
@@ -507,5 +523,7 @@ mod tests {
         // Each Chinese letter is one, a Latin word among them one more.
         assert_eq!(text_length("单细胞 RNA-seq 技术"), (6, true));
         assert_eq!(text_length("  "), (0, false));
+        // A picture counts for its caption, not for where its file is.
+        assert_eq!(text_length("Roots adapt.\n\n![Figure 1. Root length.](figures/G-1795403933728-955eed00.png)\n\n![](figures/G-2.png)"), (6, false));
     }
 }

@@ -82,27 +82,12 @@ impl Picture {
     pub fn read(bytes: Vec<u8>) -> Result<Picture> {
         let (kind, size) = match crate::figure::picture_kind(&bytes) {
             Some("png") => ("png", crate::figure::png_size(&bytes)),
-            Some("jpg") => ("jpg", jpeg_size(&bytes)),
+            Some("jpg") => ("jpg", crate::figure::jpeg_size(&bytes)),
             Some("webp") => bail!("WebP 图片放不进幻灯片（旧版 PowerPoint 读不了），请换成 PNG 或 JPEG"),
             _ => bail!("不是 PNG 或 JPEG 图片"),
         };
         let Some((width, height)) = size.filter(|(width, height)| *width > 0 && *height > 0) else { bail!("读不出图片的尺寸") };
         Ok(Picture { bytes, kind, width, height })
-    }
-}
-
-/// The width and height a JPEG says it has: those of its frame header.
-fn jpeg_size(bytes: &[u8]) -> Option<(u32, u32)> {
-    let mut at = 2;
-    loop {
-        let (marker, length) = (*bytes.get(at + 1)?, u16::from_be_bytes([*bytes.get(at + 2)?, *bytes.get(at + 3)?]) as usize);
-        if bytes[at] != 0xff { return None }
-        // A start of frame, of any kind of coding; C4, C8 and CC among them are tables.
-        if matches!(marker, 0xc0..=0xcf) && !matches!(marker, 0xc4 | 0xc8 | 0xcc) {
-            let number = |at: usize| Some(u16::from_be_bytes([*bytes.get(at)?, *bytes.get(at + 1)?]) as u32);
-            return Some((number(at + 7)?, number(at + 5)?));
-        }
-        at += 2 + length;
     }
 }
 
