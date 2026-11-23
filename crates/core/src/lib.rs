@@ -90,6 +90,7 @@ pub mod podcast;
 pub mod speech;
 pub mod selection;
 pub mod settings;
+pub mod shrink;
 pub mod skill;
 pub mod sources;
 pub mod store;
