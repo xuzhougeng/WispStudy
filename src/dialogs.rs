@@ -61,6 +61,7 @@ impl Workspace {
             Modal::Figure(_) => self.render_figure_dialog(window, cx)?,
             Modal::Extract(_) => self.render_extract_dialog(cx)?,
             Modal::Headings(_) => self.render_headings_dialog(cx)?,
+            Modal::MoveTo { .. } => self.render_move_dialog(cx)?,
             Modal::Zotero { open } => ui::dialog(560.)
                 .child(ui::dialog_title(t("从 Zotero 导入")))
                 .child(body()

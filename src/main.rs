@@ -44,6 +44,7 @@ mod select;
 mod settings;
 mod shortcuts;
 mod theme;
+mod transfer;
 mod translate;
 mod ui;
 mod updater;
