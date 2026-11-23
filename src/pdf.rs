@@ -1680,8 +1680,8 @@ impl PdfView {
             .filter(|_| cited)
             .map(|line| div().absolute().left(px(line[0] * scale - 1.)).top(px(line[1] * scale)).w(px((line[2] - line[0]) * scale + 2.)).h(px((line[3] - line[1]) * scale)).rounded(px(2.)).bg(hsla(50. / 360., 1., 0.5, 0.35)))
             .collect();
-        // The sentence being read aloud: a band of the accent under its lines.
-        let spoken: Vec<Div> = self.spoken.boxes.iter().filter(|_| self.spoken.page == index).map(|line| div().absolute().left(px(line[0] * scale - 2.)).top(px(line[1] * scale - 1.)).w(px((line[2] - line[0]) * scale + 4.)).h(px((line[3] - line[1]) * scale + 2.)).rounded(px(3.)).bg(Theme::spoken())).collect();
+        // The sentence being read aloud: a rule of ink under each of its lines over a faint wash, unlike a selection's fill (`Theme::spoken`).
+        let spoken: Vec<Div> = self.spoken.boxes.iter().filter(|_| self.spoken.page == index).map(|line| div().absolute().left(px(line[0] * scale - 1.)).top(px(line[1] * scale - 1.)).w(px((line[2] - line[0]) * scale + 2.)).h(px((line[3] - line[1]) * scale + 3.)).bg(Theme::spoken()).border_b_2().border_color(Theme::spoken_line())).collect();
         // What the find bar found on this page: the place gone to stronger.
         let found: Vec<Div> = self
             .finder

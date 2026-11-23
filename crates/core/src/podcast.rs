@@ -38,7 +38,7 @@ pub fn source(paper: &Paper, pages: &[String]) -> String {
     let place = [paper.journal.trim().to_string(), paper.year.map(|y| y.to_string()).unwrap_or_default()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("，");
     if !place.is_empty() { out.push_str(&format!("发表：{place}\n")) }
     if !paper.abstract_text.trim().is_empty() { out.push_str(&format!("\n摘要：\n{}\n", paper.abstract_text.trim())) }
-    let body = speech::body(pages);
+    let body = speech::body(pages, paper);
     if !body.is_empty() {
         out.push_str("\n正文：\n");
         let cut: String = body.chars().take(SOURCE).collect();

@@ -168,7 +168,7 @@ fn speech(request: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(request).ok()?;
     if value.get("voice_id").is_none() || value["format"] != "pcm" { return None }
     let text = value["text"].as_str().unwrap_or("");
-    println!("speech: voice {} for {:?}", value["voice_id"].as_str().unwrap_or("(none)"), text.chars().take(40).collect::<String>());
+    println!("speech: voice {} for {:?}", value["voice_id"].as_str().unwrap_or("(none)"), text.chars().take(160).collect::<String>());
     if text.contains("试试失败") {
         let body = r#"{"error":{"message":"Content Exists Risk"}}"#;
         return Some(format!("HTTP/1.1 400 Bad Request\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()));

@@ -4669,12 +4669,14 @@ impl Workspace {
         // The text kept for the file when there is some; the file itself is read on the reading's thread.
         let kept = match lib.store.fulltext_pages(&resource) { Ok(Some(Ok(pages))) => Some(pages), _ => None };
         let path = lib.files.iter().find(|f| f.id == resource).map(|f| lib.store.file_path(f));
+        // Its paper's record finds the title on the first page (an attachment's will not have it).
+        let paper = lib.files.iter().find(|f| f.id == resource).and_then(|f| lib.papers.iter().find(|p| p.id == f.paper_id)).cloned().unwrap_or_default();
         let plan = move || -> Result<crate::read_aloud::Plan, String> {
             use wisp_core::speech;
             let pieces = match selection {
                 // A selection marks no page on the button; its sentences are marked on its page all the same.
                 Some((on, text)) => speech::pieces(&speech::readable(&text), speech::PIECE).into_iter().map(|piece| (0, on, piece)).collect(),
-                None => speech::from_pages(&pages_of(kept, path)?, page).into_iter().map(|(page, piece)| (page, page, piece)).collect::<Vec<_>>(),
+                None => speech::from_pages(&pages_of(kept, path)?, page, &paper).into_iter().map(|(page, piece)| (page, page, piece)).collect::<Vec<_>>(),
             };
             let voice = speech::voice(&voice).to_string();
             Ok(crate::read_aloud::Plan::of(pieces.into_iter().map(|(mark, page, text)| crate::read_aloud::Piece { mark, page, voice: voice.clone(), text, pause: false }).collect()))
@@ -4699,6 +4701,8 @@ impl Workspace {
         let Some(paper) = lib.files.iter().find(|f| f.id == resource).and_then(|f| lib.papers.iter().find(|p| p.id == f.paper_id)).cloned() else { return };
         let kept = match lib.store.fulltext_pages(&resource) { Ok(Some(Ok(pages))) => Some(pages), _ => None };
         let path = lib.files.iter().find(|f| f.id == resource).map(|f| lib.store.file_path(f));
+        // Its paper's record finds the title on the first page (an attachment's will not have it).
+        let paper = lib.files.iter().find(|f| f.id == resource).and_then(|f| lib.papers.iter().find(|p| p.id == f.paper_id)).cloned().unwrap_or_default();
         let plan = move || -> Result<crate::read_aloud::Plan, String> {
             use wisp_core::podcast;
             // A file that gives no text still has its title and abstract to talk about.

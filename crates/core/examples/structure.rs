@@ -1,13 +1,15 @@
 //! What the structuring makes of a file, for looking at a PDF that comes out wrong:
 //!
-//!     cargo run -p wisp_core --example structure -- a.pdf [blocks|sentences|pages|outline|captions|apply <reply.txt>]
+//!     cargo run -p wisp_core --example structure -- a.pdf [blocks|sentences|pages|outline|captions|aloud [title [journal]]|apply <reply.txt>]
 //!
 //! Prints the text's language, how many sentences each part got and how
 //! each part opens; with `blocks`, every block and its label; with
 //! `sentences`, every sentence kept; with `pages`, the page text; with
 //! `outline`, what a model is asked when it sorts the parts; with `apply`,
 //! the parts a model's answer (in a file) gives; with `captions`, the
-//! captions of figures and tables each page shows, as the figure library reads them.
+//! captions of figures and tables each page shows, as the figure library reads them; with
+//! `aloud`, what 朗读 sends page by page, one sentence a line (the paper's title and journal, if given, find
+//! the first page's title).
 
 use wisp_core::structure;
 
@@ -37,6 +39,14 @@ fn main() {
         Ok(pages) => pages,
         Err(err) => return println!("{err}"),
     };
+    if mode == "aloud" {
+        let paper = wisp_core::model::Paper { title: args.next().unwrap_or_default(), journal: args.next().unwrap_or_default(), ..Default::default() };
+        for (page, piece) in wisp_core::speech::from_pages(&pages, 1, &paper) {
+            println!("=================== page {page}");
+            for sentence in wisp_core::speech::sentences(&piece) { println!("{}", sentence.trim()) }
+        }
+        return;
+    }
     if mode == "pages" {
         for (index, page) in pages.iter().enumerate() {
             println!("=================== page {}\n{page}", index + 1);
