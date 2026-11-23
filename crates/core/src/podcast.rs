@@ -186,10 +186,17 @@ pub fn wav(pcm: &[u8]) -> Vec<u8> {
     out
 }
 
-/// A name for the kept files: the title, short and without what a file system refuses.
+/// How many characters of the title a kept file's name has at most.
+const NAME: usize = 60;
+
+/// A name for the kept files: the title, short (`NAME` characters, cut between two words where it has spaces)
+/// and without what a file system refuses.
 pub fn file_name(title: &str) -> String {
     let title: String = title.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { ' ' } else { c }).collect();
-    let title: String = title.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(60).collect();
+    let whole = title.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut title: String = whole.chars().take(NAME).collect();
+    // Cut inside a word: back to the space before it, unless that leaves less than half (a title without spaces).
+    if whole[title.len()..].starts_with(|c: char| !c.is_whitespace()) && let Some(space) = title.rfind(' ') && title[..space].chars().count() >= NAME / 2 { title.truncate(space) }
     if title.is_empty() { "播客".into() } else { format!("播客 - {}", title.trim_end_matches(['.', ' '])) }
 }
 
@@ -280,6 +287,10 @@ mod tests {
         assert_eq!(u32::from_le_bytes(file[40..44].try_into().unwrap()), 4);
         assert_eq!(file_name("A/B: c?"), "播客 - A B c");
         assert_eq!(file_name(" "), "播客");
+        // A long title is cut between two words, not inside one; one without spaces at the length.
+        assert_eq!(file_name("Transcriptional landscape of sweetpotato root tip development at the single-cell level"), "播客 - Transcriptional landscape of sweetpotato root tip");
+        assert_eq!(file_name("Transcriptional landscape of sweetpotato root tip developmen"), "播客 - Transcriptional landscape of sweetpotato root tip developmen");
+        assert_eq!(file_name(&"单细胞".repeat(30)).chars().count(), "播客 - ".chars().count() + 60);
         assert_eq!(pcm_of(&wav(&[1, 0, 2, 0])), Some(&[1u8, 0, 2, 0][..]));
         // Played again, the turns share the sound by their length after the pauses between speakers.
         let turns = [Turn { host: 0, text: "ab".into() }, Turn { host: 0, text: "cd".into() }, Turn { host: 1, text: "efgh".into() }];

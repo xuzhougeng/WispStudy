@@ -26,8 +26,8 @@ pub struct Journal {
     pub names: Vec<String>,
     pub issn: String,
     pub eissn: String,
-    /// JCR's journal impact factor.
-    pub impact: Option<f32>,
+    /// JCR's journal impact factor. An `f64`, so that JSON says `18.1` as the table does.
+    pub impact: Option<f64>,
     /// JCR's best quartile among the journal's categories (`Q1`…`Q4`), and that category.
     pub quartile: String,
     pub quartile_category: String,
@@ -131,6 +131,15 @@ fn shortens(short: &str, long: &str) -> bool {
     s.all(|c| l.any(|d| d == c))
 }
 
+/// The name without what PubMed adds to it: the subtitle after ` : ` (`The Plant journal : for cell and molecular
+/// biology`) and the place in brackets at its end (`Advanced science (Weinheim, Baden-Wurttemberg, Germany)`,
+/// `Adv Sci (Weinh)`). `None` when the name has neither.
+fn plain(name: &str) -> Option<&str> {
+    let mut kept = name.split(" : ").next().unwrap_or(name).trim_end();
+    if let Some(open) = kept.strip_suffix(')').and_then(|inside| inside.rfind('(')) { kept = kept[..open].trim_end() }
+    (!kept.is_empty() && kept.len() < name.trim_end().len()).then_some(kept)
+}
+
 pub fn issn_key(issn: &str) -> String {
     issn.chars().filter(|c| c.is_ascii_alphanumeric()).flat_map(char::to_uppercase).collect()
 }
@@ -177,8 +186,13 @@ impl Table {
         self.by_issn.get(&issn_key(issn)).map(|&i| &self.journals[i])
     }
 
-    /// The journal of that name, or the one journal it abbreviates.
+    /// The journal of that name, or the one journal it abbreviates; a name PubMed wrote with a place or a subtitle
+    /// (`plain`) is looked for as it is first, then without them.
     pub fn find(&self, name: &str) -> Option<&Journal> {
+        self.named(name).or_else(|| self.named(plain(name)?))
+    }
+
+    fn named(&self, name: &str) -> Option<&Journal> {
         let key = key(name);
         if key.is_empty() { return None }
         if let Some(&i) = self.by_key.get(&key) { return Some(&self.journals[i]) }
@@ -229,6 +243,25 @@ mod tests {
         // Not a journal, and a word alone is not guessed at.
         assert_eq!(find("bioRxiv preprint server of nothing"), None);
         assert_eq!(find(""), None);
+    }
+
+    #[test]
+    fn names_as_pubmed_writes_them() {
+        // The place in brackets, on the full title and on the abbreviation.
+        let advanced = find("Advanced Science").unwrap();
+        assert_eq!(find("Advanced science (Weinheim, Baden-Wurttemberg, Germany)"), Some(advanced));
+        assert_eq!(find("Adv Sci (Weinh)"), Some(advanced));
+        assert_eq!(find("Science (New York, N.Y.)"), find("Science"));
+        assert_eq!(find("Development (Cambridge, England)"), find("Development"));
+        // The subtitle after " : ".
+        assert_eq!(find("The Plant journal : for cell and molecular biology"), find("Plant Journal"));
+        assert!(find("Plant Journal").is_some());
+        // A name the table writes with brackets is found as it is, and brackets alone are no name.
+        assert!(find("化学学报 (中文)").is_some());
+        assert_eq!((find("(Weinheim)"), find("bioRxiv (Cold Spring Harbor)")), (None, None));
+        assert_eq!((plain("Nature"), plain("Proteins: Structure, Function, and Bioinformatics")), (None, None));
+        // What JSON says of the impact factor is the table's number.
+        assert_eq!(serde_json::to_value(find("Nature Communications").unwrap()).unwrap()["impact"].to_string(), find("Nature Communications").unwrap().impact_text().unwrap());
     }
 
     #[test]
