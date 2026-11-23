@@ -2519,10 +2519,6 @@ impl Workspace {
                 if kept.1.is_some() { items.push(plain(t("保存播客稿子（Markdown）…"), Cmd::SavePodcast(paper.clone(), false))) }
             }
             part(items, breaks);
-            if !lib.reading {
-                let key = crate::shortcuts::key_of("reading", &self.settings.shortcuts);
-                items.push(MenuItem { label: t("阅读模式").into(), checked: false, note: (!key.is_empty()).then(|| crate::shortcuts::pretty(&key).into()), cmd: Cmd::ToggleReading });
-            }
             items.push(plain(t("在新窗口中阅读"), Cmd::PaperWindow(paper.clone())));
             if !self.settings.pdf_tools_floating { items.push(plain(t("用系统应用打开"), Cmd::OpenFile(view.resource_id().to_string()))) }
             items.push(ticked(t("工具悬浮在页面右侧"), self.settings.pdf_tools_floating, Cmd::FloatPdfTools(!self.settings.pdf_tools_floating)));

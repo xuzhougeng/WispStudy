@@ -106,7 +106,7 @@ impl Workspace {
         let mut fixed: Vec<(&'static str, &'static str, &'static str, Cmd)> = vec![];
         if let Some(lib) = self.lib.as_ref().filter(|lib| lib.info.draft) {
             // A conversation not yet made a library: its one step on, and the way back.
-            if lib.selected.is_some() { fixed.extend([("expand", "展开 / 收起文献详情", "detail", Cmd::ToggleWide), ("eye", "进入 / 退出阅读模式", "reading", Cmd::ToggleReading)]) }
+            if lib.selected.is_some() { fixed.extend([("panel-left", "展开 / 收起文献详情", "detail", Cmd::ToggleWide), ("expand", "进入 / 退出阅读模式", "reading", Cmd::ToggleReading)]) }
             fixed.push(("arrow-left", "回到首页", "home", Cmd::GoHome));
         } else if let Some(lib) = self.lib.as_ref() {
             fixed.extend(crate::library::VIEWS.into_iter().map(|(_, icon, label, view)| (icon, label, "", Cmd::SetView(view))));
@@ -128,7 +128,7 @@ impl Workspace {
                 ("sliders", "自定义词条", "", Cmd::ManageFields),
                 ("panel-left", "显示 / 收起侧边栏", "sidebar", Cmd::ToggleSidebar),
             ]);
-            if lib.selected.is_some() { fixed.extend([("expand", "展开 / 收起文献详情", "detail", Cmd::ToggleWide), ("eye", "进入 / 退出阅读模式", "reading", Cmd::ToggleReading)]) }
+            if lib.selected.is_some() { fixed.extend([("panel-left", "展开 / 收起文献详情", "detail", Cmd::ToggleWide), ("expand", "进入 / 退出阅读模式", "reading", Cmd::ToggleReading)]) }
             // A paper asked about with its PDF beside: the two change places.
             if lib.selected.is_some() && lib.tab == crate::app::Tab::Ask && lib.split && !self.settings.floating.on { fixed.push(("arrow-left-right", "交换 PDF 与提问的位置", "", Cmd::SwapPanes)) }
             fixed.push(("arrow-left", "回到所有文献库", "home", Cmd::GoHome));
