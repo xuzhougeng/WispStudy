@@ -1520,7 +1520,7 @@
   "添加附件": "Add attachment",
   "点击页面任意位置添加便签": "Click anywhere on the page to add a note",
   "补图、补表、补充方法等文件放在这里；PDF 附件可以在阅读器里打开，提问时会和正文一起读。": "Supplementary figures, tables and methods go here. PDF attachments open in the reader and are read together with the main text when you ask questions.",
-  "选中 PDF 文字后，可添加下划线或高亮；「方框」「便签」两个工具可以框出区域、在任意位置记笔记。": "Select PDF text to underline or highlight it. Use the Box and Note tools to frame an area or add a note anywhere.",
+  "选中 PDF 文字后，可添加下划线或高亮；「方框」「便签」「文本框」三个工具可以框出区域、在任意位置记笔记，或直接把字写在页面上。": "Select PDF text to underline or highlight it. Use the Box, Note and Text box tools to frame an area, add a note anywhere, or write straight on the page.",
   "附件／补充材料": "Attachments / supplementary material",
   "（空白便签）": "(Empty note)",
   "导入文献库": "Import library",
@@ -1730,5 +1730,17 @@
   "移过去": "Move",
   "选一个文献库。": "Choose a library.",
   "PDF、标注、读到的位置和关于它的对话都一起过去；这段对话里不再有它。": "Its PDFs, annotations, reading position and conversations about it go along; it leaves this conversation.",
-  "PDF、标注、读到的位置和关于它的对话都一起过去，收录状态回到待判断；原来的那条留在本库的回收站里。": "Its PDFs, annotations, reading position and conversations about it go along, and its screening goes back to pending; the original stays in this library's trash."
+  "PDF、标注、读到的位置和关于它的对话都一起过去，收录状态回到待判断；原来的那条留在本库的回收站里。": "Its PDFs, annotations, reading position and conversations about it go along, and its screening goes back to pending; the original stays in this library's trash.",
+  "文本框": "Text box",
+  "在页面上拖出文本框，直接在框里写字": "Drag out a text box on the page and write right in it",
+  "输入文字": "Type here",
+  "填充": "Fill",
+  "边框": "Border",
+  "文字": "Text",
+  "无": "None",
+  "白色": "White",
+  "黑色": "Black",
+  "灰色": "Gray",
+  "编辑文字": "Edit text",
+  "删除文本框": "Delete text box"
 }

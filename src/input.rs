@@ -212,6 +212,9 @@ pub struct TextInput {
     /// The caret, the length of the text and the field's width when the caret was last brought into sight:
     /// text wrapped anew to another width moves the caret too.
     followed: (usize, usize, Pixels),
+    /// Written on a PDF page (a text box): the caret in these words' colour and the placeholder a faint one of
+    /// it, since the page is white under them whatever the window's theme.
+    paper_ink: Option<Hsla>,
 }
 
 /// The most changes a field can go back through.
@@ -264,6 +267,7 @@ impl TextInput {
             selection_toolbar_dismissed: false,
             follow: None,
             followed: (0, 0, px(0.)),
+            paper_ink: None,
         }
     }
 
@@ -271,6 +275,11 @@ impl TextInput {
         self.multiline = true;
         self.min_lines = min_lines;
         self
+    }
+
+    /// Written on a PDF page in `ink` (`paper_ink`); the owner sets it anew when the words change colour.
+    pub fn set_paper_ink(&mut self, ink: Hsla) {
+        self.paper_ink = Some(ink);
     }
 
     /// Draw the text as Markdown (`markdown`).
@@ -1083,7 +1092,7 @@ fn row_of(l: &Layout, o: usize) -> Option<&Row> {
 fn shape(input: &TextInput, style: &TextStyle, window: &mut Window, wrap: Option<Pixels>) -> (Vec<Row>, DisplayMap) {
     if input.markdown && !input.text.is_empty() && !input.masked { return shape_markdown(input, style, window, wrap) }
     let display = input.display_text();
-    let (text, color) = if display.is_empty() { (crate::i18n::t(&input.placeholder).to_string(), Theme::text_placeholder()) } else { (display, style.color) };
+    let (text, color) = if display.is_empty() { (crate::i18n::t(&input.placeholder).to_string(), input.paper_ink.map_or(Theme::text_placeholder(), |ink| ink.opacity(0.4))) } else { (display, style.color) };
     let run = TextRun { len: text.len(), font: style.font(), color, background_color: None, underline: None, strikethrough: None };
     let plain = DisplayMap::default();
     let marked = input.marked.as_ref().filter(|_| !input.text.is_empty()).map(|m| input.to_display(&plain, m.start)..input.to_display(&plain, m.end));
@@ -1370,7 +1379,7 @@ impl Element for InputElement {
             })
             .collect();
         let line_height = row_of(&probe, cursor).map_or(window.line_height(), |row| row.line_height);
-        let caret = input.sel.is_empty().then(|| fill(Bounds::new(origin + point(caret_at.x, caret_at.y + px(1.)), size(px(1.5), line_height - px(2.))), Theme::text()));
+        let caret = input.sel.is_empty().then(|| fill(Bounds::new(origin + point(caret_at.x, caret_at.y + px(1.)), size(px(1.5), line_height - px(2.))), input.paper_ink.unwrap_or(Theme::text())));
         let decor = probe
             .rows
             .iter()

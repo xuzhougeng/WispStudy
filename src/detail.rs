@@ -834,6 +834,8 @@ impl Workspace {
             put((boxed.on_click(self.on(Cmd::PdfTool(Tool::Box), cx)), width));
             let (note, width) = button("pdf-note", Some("sticky-note"), "sticky-note", t("便签"), bar.pen == Tool::Note, Some(t("点击页面任意位置添加便签").to_string()), named);
             put((note.on_click(self.on(Cmd::PdfTool(Tool::Note), cx)), width));
+            let (text, width) = button("pdf-text", Some("type"), "type", t("文本框"), bar.pen == Tool::Text, Some(t("在页面上拖出文本框，直接在框里写字").to_string()), named);
+            put((text.on_click(self.on(Cmd::PdfTool(Tool::Text), cx)), width));
         }
         drop(put);
         // 朗读 from the page in view, 播客 of the whole paper; while one plays (the player at the pages' foot says where),
@@ -977,6 +979,7 @@ impl Workspace {
             .child(tool("pdf-float-cut", "scissors", cutting, if cutting { "取消截图" } else { "截图" }).on_click(self.on(Cmd::PdfCut, cx)))
             .child(tool("pdf-float-box", "square", pen == Tool::Box, "在页面上拖出方框，框住图表或文字").on_click(self.on(Cmd::PdfTool(Tool::Box), cx)))
             .child(tool("pdf-float-note", "sticky-note", pen == Tool::Note, "点击页面任意位置添加便签").on_click(self.on(Cmd::PdfTool(Tool::Note), cx)))
+            .child(tool("pdf-float-text", "type", pen == Tool::Text, "在页面上拖出文本框，直接在框里写字").on_click(self.on(Cmd::PdfTool(Tool::Text), cx)))
             .child(tool("pdf-float-read", "volume-2", aloud, if aloud { pause_tip } else { "从这一页起朗读" }).on_click(self.on(Cmd::ReadAloud, cx)))
             .child(tool("pdf-float-podcast", "headphones", podcast, if podcast { pause_tip } else { "播客：两位主持人聊这篇论文" }).on_click(self.on(Cmd::Podcast, cx)))
             .children(self.lib.as_ref().and_then(|lib| lib.files.iter().find(|f| f.id == file_id)).map(|f| f.paper_id.clone()).and_then(|paper| self.podcast_save_button("pdf-float-podcast-save", &paper, 28., cx)))

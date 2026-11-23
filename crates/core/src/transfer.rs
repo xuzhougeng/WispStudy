@@ -187,7 +187,7 @@ impl Store {
                 _ => {}
             })?;
         }
-        for table in ["pdf_annotations", "pdf_shapes", "pdf_cuts"] {
+        for table in ["pdf_annotations", "pdf_shapes", "pdf_cuts", "pdf_texts"] {
             let (names, found) = rows(&from.db, table, "paper_id", id)?;
             taken.marks += put(&tx, table, &names, found, to_paper)?;
         }
@@ -234,6 +234,7 @@ mod tests {
         store.save_reading_places(&[(file.id.clone(), (3, 120.))]).unwrap();
         store.db.execute("INSERT INTO pdf_annotations(id, paper_id, resource_id, page, kind, quote, boxes_json, created_at, updated_at) VALUES ('A-1', ?1, ?2, 1, 'highlight', 'Root hairs grow', '[]', 'now', 'now')", params![paper.id, file.id]).unwrap();
         store.db.execute("INSERT INTO pdf_shapes(id, paper_id, resource_id, page, kind, rect_json, created_at, updated_at) VALUES ('S-1', ?1, ?2, 1, 'box', '[0,0,1,1]', 'now', 'now')", params![paper.id, file.id]).unwrap();
+        store.db.execute("INSERT INTO pdf_texts(id, paper_id, resource_id, page, rect_json, note, fill, border, ink, created_at, updated_at) VALUES ('T-1', ?1, ?2, 1, '[0,0,40,20]', '根毛', 'yellow', 'none', 'black', 'now', 'now')", params![paper.id, file.id]).unwrap();
         store.db.execute("INSERT INTO conversations(id, paper_id, title, questions, created_at, updated_at) VALUES ('C-1', ?1, '方法是什么', 1, 'now', 'now')", [&paper.id]).unwrap();
         (store, paper.id)
     }
@@ -247,7 +248,7 @@ mod tests {
         to.save_field(&mut field).unwrap();
         let taken = to.take_paper(&mut from, &id).unwrap();
         assert!(!taken.joined);
-        assert_eq!((taken.files, taken.marks, taken.fields_left.clone()), (1, 2, vec!["物种".to_string()]));
+        assert_eq!((taken.files, taken.marks, taken.fields_left.clone()), (1, 3, vec!["物种".to_string()]));
         let paper = to.get_paper(&taken.paper).unwrap();
         // The decision was the other library's; the rest is the paper's own.
         assert_eq!((paper.screening.as_str(), paper.reading.as_str(), paper.notes.as_str(), paper.doi.as_str()), ("pending", "read", "读过第二节", "10.1234/root"));
@@ -259,6 +260,9 @@ mod tests {
         assert_eq!(to.reading_places().unwrap().get(&files[0].id), Some(&(3, 120.)));
         let on_file: i64 = to.db.query_row("SELECT count(*) FROM pdf_annotations WHERE resource_id = ?1 AND paper_id = ?2", params![files[0].id, taken.paper], |r| r.get(0)).unwrap();
         assert_eq!(on_file, 1);
+        // A text box goes with its file, its words and colours as they were.
+        let written: (String, String) = to.db.query_row("SELECT note, fill FROM pdf_texts WHERE resource_id = ?1 AND paper_id = ?2", params![files[0].id, taken.paper], |r| Ok((r.get(0)?, r.get(1)?))).unwrap();
+        assert_eq!(written, ("根毛".to_string(), "yellow".to_string()));
         let pages: String = to.db.query_row("SELECT pages FROM fulltext_text WHERE resource_id = ?1", [&files[0].id], |r| r.get(0)).unwrap();
         assert!(pages.contains("Root hairs grow."));
         assert_eq!(to.list_conversations(&taken.paper).unwrap().len(), 1);
