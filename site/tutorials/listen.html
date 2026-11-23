@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>把一篇论文听一遍 · Wisp Study 教程</title>
+<meta name="description" content="在路上或手上有别的事时，把一篇论文听一遍：配好 DeepSeek 的语音服务，从当前页朗读到参考文献，或者让两位主持人把论文聊成一档播客；播客存成这篇的附件，在侧栏的「播客」里随时再放。">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../app-icon.png">
+<link rel="stylesheet" href="../style.css">
+<link rel="stylesheet" href="../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">跳到正文</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="站点">
+      <a href="index.html" aria-current="page">教程</a>
+      <a href="../index.html#ideas">理念</a>
+      <a href="../index.html#tools">工具</a>
+      <a href="../index.html#download">下载</a>
+    </nav>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="位置"><a href="index.html">教程</a><span>›</span>阅读</nav>
+
+  <header class="doc-head">
+    <p class="kicker">教程 06　·　阅读</p>
+    <h1>把一篇论文听一遍：朗读与播客</h1>
+    <p class="lead">通勤路上、做实验等离心的时候，眼睛腾不出来，耳朵可以。本篇把库里的一篇论文听一遍：先配好语音服务，让它从当前页一句句读下去，或者只读选中的一段；再把整篇做成两位主持人的对谈，离开这篇文献也接着播。做好的播客存成这篇的附件，以后在侧栏里点一下就能再听。</p>
+    <dl class="facts">
+      <div><dt>场景</dt><dd>听一篇红薯根尖单细胞图谱的文章，先粗知大意，回头再细读。</dd></div>
+      <div><dt>需要</dt><dd>一篇带 PDF 的文献；DeepSeek 的 API Key（声音）；一个在「设置 › AI」里配置好的助手模型（播客的稿子）。</dd></div>
+      <div><dt>用时</dt><dd>配置约 3 分钟；其余是听的时间，朗读看篇幅，一档播客有多长就听多久。</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="本篇的小节">
+      <h2>本篇</h2>
+      <ol>
+        <li><a href="#s1">先配好声音</a></li>
+        <li><a href="#s2">朗读：从这一页读到参考文献</a></li>
+        <li><a href="#s3">播客：两位主持人聊这篇</a></li>
+        <li><a href="#s4">离开这篇，接着听</a></li>
+        <li><a href="#s5">存下的音频和稿子</a></li>
+        <li><a href="#s6">侧栏的「播客」：再听一遍</a></li>
+        <li class="plain"><a href="#recap">回顾</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>先配好声音</h2>
+        <p>要听的是 2024 年 BMC Plant Biology 上的 Transcriptional landscape of sweetpotato root tip development at the single-cell level，17 页，库里存了 PDF。在列表上方的搜索框里输入 <code>sweetpotato</code>，点这一篇，切到「PDF」。</p>
+        <p>朗读和播客的声音不来自你在「任务」里给助手指定的模型，而是 DeepSeek 的语音服务。还没配置时点「朗读」或「播客」，弹出的不是声音，而是一个提示：</p>
+
+        <figure class="shot">
+          <img src="../img/t/listen-01-prompt.jpg" width="1372" height="867" loading="lazy" alt="文献列表只剩红薯根尖这一篇，右侧打开它的 PDF；窗口中间是对话框「还没有配置语音服务」，说明声音来自 DeepSeek 的语音服务、按字数计费，按钮是「取消」和「配置 DeepSeek」。">
+          <figcaption><b>图 1</b>　没有配置语音服务时点「朗读」：一个提示，按钮直接通往设置。</figcaption>
+        </figure>
+
+        <p>点「配置 DeepSeek」，窗口转到「设置 › AI › 模型」，左边的服务列表里已经替你添加好了 DeepSeek，地址是 <code>https://api.deepseek.com</code>，下面写着「缺 API Key」。到 platform.deepseek.com 申请一个 Key（右上角的「获取 API Key」就通向那里），填进「API Key」一栏，列表里的「缺 API Key」变成「2 个模型」，栏下写着「已保存在本机。」。已经添加过 DeepSeek 而只差 Key 时，提示的按钮是「去填写 API Key」，落到同一个地方。</p>
+
+        <figure class="shot">
+          <img src="../img/t/listen-02-key.jpg" width="1372" height="867" loading="lazy" alt="「设置 › AI › 模型」：左边服务列表选中 DeepSeek，写着 2 个模型；右边服务地址是 https://api.deepseek.com，API Key 一栏是一串圆点，下面写着「已保存在本机。」。">
+          <figcaption><b>图 2</b>　DeepSeek 填好了 API Key。Key 以明文保存在本机的 settings.json 里。</figcaption>
+        </figure>
+
+        <p>声音在旁边的「任务」页最下面选。「朗读的声音」有「女声」和「男声」两档，说明里写着用哪个服务的 Key、按字数计费。这一档管的是「朗读」；播客的两位主持人各用一种声音，不受它影响。</p>
+
+        <figure class="shot">
+          <img src="../img/t/listen-03-voice.jpg" width="1372" height="867" loading="lazy" alt="「设置 › AI › 任务」页滚到最下面：「朗读的声音」一栏，说明是「PDF 工具栏和选中文字的「朗读」用 DeepSeek 的语音服务，Key 取自「DeepSeek」；按字数计费。」，右边是「女声」「男声」，选中女声。">
+          <figcaption><b>图 3</b>　「任务」页最下面的「朗读的声音」。</figcaption>
+        </figure>
+
+        <aside class="note warn"><b>注意</b>朗读和播客都会把论文的文字发给 DeepSeek，按字数计费，中文一个字算两个字符。朗读是读到哪里才请求到哪里前面一小段，中途停下不会把整篇都请求完；播客的稿子还会把题目、摘要和全文发给助手用的模型。</aside>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>朗读：从这一页读到参考文献</h2>
+        <p>详情面板窄的时候，PDF 工具栏只放得下几个图标，「朗读」「播客」收在 ⋯ 菜单里。按 <kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd>（Windows 上是 <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd>）进入阅读模式，工具栏上就有了带喇叭的「朗读」和带耳机的「播客」。</p>
+        <p>朗读从正在看的那一页读起。本例先翻到第 2 页的引言，再点「朗读」：按钮变成绿色的「停止朗读 · 第 2 页」。正在读的那一句在页面上铺一层淡绿的底色，一句读完，底色移到下一句；读到屏幕下方时，页面自己往下走，正在读的句子留在眼前。读完一页接着下一页，一直读到参考文献之前。</p>
+
+        <figure class="shot">
+          <img src="../img/t/listen-04-aloud.jpg" width="1372" height="867" loading="lazy" alt="阅读模式下的第 2 页，页面已往下滚过引言开头；左栏「Since the vegetative organs, such as the storage root and stem……reproduction.」这一句铺着淡绿底色；工具栏上的按钮是绿色的「停止朗读 · 第 2 页」，旁边是「播客」。">
+          <figcaption><b>图 4</b>　朗读到第 2 页引言的第三段。正在读的句子有底色，页面已跟着往下走了一屏。</figcaption>
+        </figure>
+
+        <p>再点一下「停止朗读 · 第 2 页」就停下，按钮回到「朗读」。</p>
+
+        <h3>只读选中的一段</h3>
+        <p>只想听某一段时，在页面上拖选它，选区旁的那排按钮里最后一个就是「朗读」，前面是「复制」「下划线」「高亮」「添加到对话」「翻译」。本例选的是引言里讲红薯短日照、耐旱的那一句。</p>
+
+        <figure class="shot">
+          <img src="../img/t/listen-05-selection.jpg" width="1372" height="867" loading="lazy" alt="第 2 页左栏选中了「Sweetpotato is a short-day crop rich in multiple nutrients……drought resistance.」，选区下方一排按钮：复制、下划线、高亮、添加到对话、翻译、朗读。">
+          <figcaption><b>图 5</b>　选区工具条上的「朗读」只读选中的这一段。</figcaption>
+        </figure>
+
+        <p>点它，工具栏上的按钮变成「停止朗读」，这时不带页码；这一段读完，按钮自己回到「朗读」，不会接着往下读。</p>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>播客：两位主持人聊这篇</h2>
+        <p>朗读是照着原文一句句念，适合要听原话的时候。只想先知道这篇讲了什么，就点「播客」：助手用的模型根据题目、摘要和全文（到参考文献为止）写一份对谈稿，女主持「小星」和男主持「阿潮」聊研究背景、方法、主要发现、局限和意义，再用 DeepSeek 的两种声音分别读出来。</p>
+        <p>不用等稿子写完。点下后，按钮先转着圈写「正在写播客稿…」；模型写出第一轮就开始播，按钮变成「停止播客 · 第 N 轮」，N 是正在播的那一轮；模型接着往下写，写出一轮就读一轮。再点一下这个按钮就停下。</p>
+
+        <figure class="shot">
+          <img src="../img/t/listen-06-podcast.jpg" width="1372" height="867" loading="lazy" alt="阅读模式下的第 2 页，工具栏上「朗读」恢复为灰色，旁边是绿色的「停止播客 · 第 12 轮」。">
+          <figcaption><b>图 6</b>　播客播到第 12 轮。播客不在页面上标句子，按钮只说播到第几轮。</figcaption>
+        </figure>
+
+        <p>这一次助手的模型是 claude-sonnet-5-5，整份稿子一共 82 轮，开头是这样的：</p>
+        <blockquote><cite>播客稿</cite><p>小星：简单说，就是给红薯的根尖拍一张细胞级别的基因表达地图，看看里面到底有哪些细胞，它们怎么从干细胞一步步变成成熟细胞。</p><p>阿潮：对，这篇论文想回答的是，红薯根尖里有多少种细胞，它们之间怎么分化，还有跟拟南芥、玉米比起来有什么不一样。</p></blockquote>
+        <p>稿子只讲论文里写了的内容：品种广薯 87、酶液里摇三小时、活细胞超过 80%、用 10x Genomics 平台测序，这些在原文的摘要和第 2 页都找得到。快结束时，阿潮还提了一句论文没有解释的细节：比对率有的地方写 75%，有的地方写超过 89%。这样的话是模型读出来的，值不值得追究，要你回原文看。听播客是为了先知道大意，要引用的数字回原文核对。</p>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>离开这篇，接着听</h2>
+        <p>播客开始后可以去做别的。本例按 <kbd>Esc</kbd> 退出阅读模式，再按一次关掉详情，播客没有停：窗口底部浮起一条横条，左边是耳机图标，然后是题目、播到第几轮、正在说的那句话（带着是谁在说），右边三个按钮。</p>
+
+        <figure class="shot">
+          <img src="../img/t/listen-07-bar.jpg" width="1372" height="867" loading="lazy" alt="文献列表，详情已关闭；窗口底部的悬浮条写着「Transcriptional landscape of sweetpotat…」「第 20 轮」，下一行是「阿潮：最后留下一万两千一百七十二个细胞，一共检测到两…」，右边是下载、列表和方块三个按钮；侧栏多了一项「播客 1」。">
+          <figcaption><b>图 7</b>　关掉详情后的悬浮条。侧栏里多出的「播客 1」是刚存下的这一档（见第 5、6 节）。</figcaption>
+        </figure>
+
+        <p>点横条的文字部分，回到这篇的 PDF；右边的方块是停止，中间的列表图标是播放列表（第 6 节）。只要还在播，横条就一直在底部，播到哪一轮写到哪一轮。</p>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>存下的音频和稿子</h2>
+        <p>全部声音生成后，播客存成这篇文献的两个附件：声音是 WAV，对谈稿是 Markdown。声音是赶在正在播的那一句前面生成的，所以通常还没播到结尾，播客就已经存好了，之后照样往下播。中途停下或出错，不会保存。</p>
+        <p>存好之后，阅读模式工具栏的「播客」旁多出一个下载图标，悬浮条上也有一个。点它是一个小菜单：「保存播客音频（WAV）…」「保存播客稿子（Markdown）…」，选一个，在弹出的保存对话框里另存到任意位置，比如拷到手机上听。</p>
+        <p>回到「信息」页往下翻，在「附件 / 补充材料」里能看到这两份文件，名字是「播客 - 」加题目，和这篇的其他附件放在一起。</p>
+
+        <figure class="shot">
+          <img src="../img/t/listen-08-kept.jpg" width="1372" height="867" loading="lazy" alt="「信息」页下部：「正文 PDF」是 Zhao et al., 2024.pdf；「附件 / 补充材料」里有两项：「播客 - Transcriptional landscape of sweetpotato root tip.wav」和「播客 - Transcriptional landscape of sweetpotato root tip.md」，都标着「附件」。">
+          <figcaption><b>图 8</b>　播客存成这篇的两个附件：声音和稿子。题目长时，文件名只取题目的前几个词，在两个词之间截断。</figcaption>
+        </figure>
+
+        <p>稿子就是读出来的那份对谈，一个标题加一轮一段，用任何文本编辑器都能打开、复制、改：</p>
+        <figure class="code">
+          <figcaption>播客 - Transcriptional landscape of sweetpotato root tip.md（开头）</figcaption>
+<pre><code># 播客：Transcriptional landscape of sweetpotato root tip development at the single-cell level
+
+**小星**：大家好，欢迎收听本期节目，我是小星。
+
+**阿潮**：我是阿潮。今天我们聊一篇2024年发表在《BMC植物生物学》上的论文，题目叫《单细胞水平上的红薯根尖发育转录图谱》。</code></pre>
+        </figure>
+      </section>
+
+      <section id="s6">
+        <h2><i>6</i>侧栏的「播客」：再听一遍</h2>
+        <p>有了第一档播客，侧栏「缺 PDF」下面就多出一项「播客」，数字是存下的个数；一档也没有时它不出现。本例又给 Orthologous marker groups reveal broad cell identity conservation across plant single-cell transcriptomes 做了一档，数字变成 2。</p>
+        <p>点「播客」，弹出播放列表：每档一行，写着题目和时长。选一行就播放存好的音频，不再请求任何服务，也不再计费；悬浮条照样出现，写着第几轮和正在说的那句话，点它同样回到那篇的 PDF。再点正在放的那一行就停，悬浮条右边的方块也能停。</p>
+        <p>本例先选了 Orthologous 那一档。它放完后，没有再点什么，悬浮条上的题目就换成了红薯那一篇，从头放起。这时再打开列表，正在放的那一行前面有一个勾：</p>
+
+        <figure class="shot">
+          <img src="../img/t/listen-09-playlist.jpg" width="1372" height="867" loading="lazy" alt="文献列表，侧栏「播客」旁弹出播放列表，两行：「Orthologous marker groups reveal br…」和「Transcriptional landscape of sweetpo…」，各带时长，第二行前有勾；窗口底部的悬浮条写着「Transcriptional landscape of sweetpotato …」「第 6 轮」和阿潮的一句话。">
+          <figcaption><b>图 9</b>　侧栏「播客」的播放列表，每行是题目和时长。前一档放完，接着放下一档，勾标出正在放的那一档。</figcaption>
+        </figure>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>回顾</h2>
+        <ul>
+          <li>在「设置 › AI › 模型」里添加 DeepSeek 并填上 API Key，在「任务」页最下面选朗读的声音；没配置时点「朗读」会直接领你过去。</li>
+          <li>「朗读」从当前页读到参考文献，正在读的句子有底色，页面跟着走；选中一段可以只读这一段。</li>
+          <li>「播客」由助手的模型写稿、两位主持人对谈，边写边读；离开这篇，底部的悬浮条接着播。</li>
+          <li>全部生成后，音频和稿子存为这篇的附件，可以另存；侧栏的「播客」里随时再放，不再计费。</li>
+          <li>下一步：听出兴趣的那篇，回来精读，见<a href="read.html">精读一篇文献</a>。</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="上一篇和下一篇">
+    <a class="prev" href="compare.html"><small>上一篇 · 05</small><strong>对照着读几篇文献</strong></a>
+    <a class="next" href="slides.html"><small>下一篇 · 07</small><strong>把一篇文献讲成组会幻灯片</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>参考</h2>
+      <ol>
+        <li><a href="index.html">全部教程</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">功能详解：每个页面能做什么</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">数据与隐私：文件放在哪里，哪些数据会离开本机</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">问题与想法：Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>关于这篇教程</b>　截图和数字来自 2026 年 11 月在 macOS 上用 v0.16.0 的一次实际操作。播客的稿子由真实的模型写成；声音换成了一个本机的测试服务，所以文中不描述声音听起来怎样，时长和文件大小以你自己的为准。模型每次写的稿子不一样，步骤是一样的。</p>
+      <p><b>助手可能出错</b>　播客稿是模型对论文的转述；关键的数字和结论请对照原文。</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
