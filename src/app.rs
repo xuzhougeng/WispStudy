@@ -410,6 +410,10 @@ pub enum Cmd {
     TagPapers(Vec<String>),
     FindPdfsOf(Vec<String>),
     AskTrashPapers(Vec<String>),
+    /// 移到文献库: the dialog for a paper, a library chosen in it, and the move (`transfer.rs`).
+    AskMovePaper(String),
+    ChooseMoveTarget(String),
+    MovePaper(String, String),
     TrashPapers(Vec<String>),
     /// Open a paper on one page of the detail panel.
     OpenPaper(String, Tab),
@@ -1611,6 +1615,8 @@ pub enum Modal {
     Headings(Box<crate::comments::HeadingsForm>),
     /// 写作's 资料库: the figures to bring in and to put into the manuscript. Its state is `Library::write_figures`.
     WriteFigures,
+    /// 移到文献库: the paper, and the library chosen for it (`transfer.rs`).
+    MoveTo { paper: String, to: Option<String> },
 }
 
 /// A paper kept in a pane of its own beside the paper on show (#194): choosing another paper leaves it
@@ -3029,6 +3035,12 @@ impl Workspace {
                 window.focus(&self.focus);
             }
             Cmd::Draft(what) => self.run_draft(what, window, cx),
+            Cmd::AskMovePaper(paper) => self.ask_move_paper(paper, cx),
+            Cmd::ChooseMoveTarget(id) => {
+                if let Some(Modal::MoveTo { to, .. }) = self.modal.as_mut() { *to = Some(id) }
+                self.modal_error.clear();
+            }
+            Cmd::MovePaper(paper, to) => self.move_paper(paper, to, window, cx),
             Cmd::NewLibrary => self.library_dialog(None, window, cx),
             Cmd::EditLibrary(id) => self.library_dialog(Some(id), window, cx),
             Cmd::AskRemoveLibrary(id) => {
@@ -4405,7 +4417,7 @@ impl Workspace {
         if self.menu.take().is_some() {
         } else if self.palette.is_some() {
             self.close_palette(window, cx);
-        } else if self.modal.as_ref().is_some_and(|modal| matches!(modal, Modal::Figure(form) if form.collects())) && !self.figure_dialog_focused(window, cx) {
+        } else if self.modal.as_ref().is_some_and(|modal| matches!(modal, Modal::Figure(form) if form.beside_page())) && !self.figure_dialog_focused(window, cx) {
             // The figure dialog standing beside the page: Esc on the page (a selection copied from) does not put away what was written.
         } else if self.modal.is_some() {
             self.run(Cmd::CloseModal, window, cx);
@@ -5420,6 +5432,11 @@ impl Workspace {
             PdfEvent::RemoveAnnotation { resource, id } => self.change_pdf_annotation(resource, |store| store.remove_pdf_annotation(resource, id), cx),
             PdfEvent::AddShape { paper, resource, page, kind, rect, note } => self.change_pdf_annotation(resource, |store| store.add_pdf_shape(paper, resource, *page, *kind, *rect, note).map(|_| ()), cx),
             PdfEvent::MoveShape { resource, id, rect } => self.change_pdf_annotation(resource, |store| store.move_pdf_shape(resource, id, *rect), cx),
+            PdfEvent::OpenFigure(id) => self.open_figure_on_page(id, cx),
+            PdfEvent::Reframe { page, bbox, png } => {
+                let resource = view.read(cx).resource_id().to_string();
+                self.reframe_piece(&resource, *page, *bbox, png, cx);
+            }
             PdfEvent::Picture(png, to_library) => {
                 let talk = if *to_library { Talk::Library } else { Talk::Paper };
                 self.attach_images(talk, vec![Picture::Bytes(png.clone())], cx);
@@ -7859,6 +7876,13 @@ impl Workspace {
                 self.run(cmd, window, cx);
             }
             Modal::ImportReport => self.run(Cmd::CloseModal, window, cx),
+            Modal::MoveTo { paper, to } => match to.clone() {
+                Some(to) => {
+                    let paper = paper.clone();
+                    self.run(Cmd::MovePaper(paper, to), window, cx)
+                }
+                None => self.modal_error = t("选一个文献库。").into(),
+            },
             Modal::Section { .. } | Modal::History { .. } => self.submit_manuscript_modal(window, cx),
             Modal::Headings(_) => {
                 self.headings_done(true, cx);
@@ -8280,6 +8304,9 @@ impl Workspace {
                 // `importdoc:<path>` starts a manuscript from a Word or Markdown file; `comments` shows the comments beside the manuscript (`comments:off` the candidates);
                 // `comment:<step>` is `review`, `stop`, `write`, `save`, `cancel`, `takeall`, `import`, `fromreview` (a manuscript of the newest review the assistant wrote sections for), and by a comment's place among those of the section from 0: `take;<n>`, `back;<n>`, `drop;<n>`, `done;<n>`, `show;<n>`;
                 // `wish:<text>` / `commenttext:<text>` leave text in the review's box / the comment being written; `exportdoc:<path>` / `exportdoc:track;<path>` write the manuscript as a Word file there.
+                // 移到文献库 for the selected paper: the dialog; `moveto:<n>` chooses the n-th library it offers, `submit` moves.
+                "movepaper" => self.lib.as_ref().and_then(|lib| lib.selected.clone()).map(Cmd::AskMovePaper),
+                "moveto" => self.move_targets().get(arg.parse::<usize>().unwrap_or(0)).map(|info| Cmd::ChooseMoveTarget(info.id.clone())),
                 "importdoc" => {
                     self.import_manuscript_files(vec![PathBuf::from(arg)], cx);
                     None

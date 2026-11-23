@@ -108,12 +108,17 @@ pub struct FigureForm {
     pub back: bool,
     /// Brought in by the person, and the name of the file it was.
     uploaded: Option<String>,
+    /// Opened from the page (a piece just cut out, or the number on a figure kept): it stands beside the page.
+    from_pdf: bool,
+    /// A figure kept was framed anew on its page: `png`, `page` and `bbox` are kept with the words.
+    reframed: bool,
 }
 
 impl FigureForm {
-    /// A piece just cut out of a PDF: its dialog stands over the page without hiding it, and is moved by the pointer.
-    pub fn collects(&self) -> bool {
-        self.id.is_none() && self.draw.is_none() && !self.paper_id.is_empty()
+    /// Its dialog stands over the page without hiding it, and is moved by the pointer: the page is where its
+    /// words are copied from, and its frame there is sized (`PdfEvent::Reframe`).
+    pub fn beside_page(&self) -> bool {
+        self.from_pdf && self.draw.is_none()
     }
 }
 
@@ -275,6 +280,7 @@ impl Workspace {
                 self.modal_subscriptions.clear();
                 self.modal_error.clear();
                 self.modal = Some(Modal::Confirm { title: tf!("把{name}移出图片库？", "Remove {name} from figures?"), message: t("它的图注、标签和备注会一起删除。图片文件不会被删除，会移到文献库文件夹下的 removed 文件夹。PDF 和文献不动。").into(), action: t("移出图片库").into(), cmd: Cmd::RemoveFigure(id) });
+                self.sync_figure_frames(cx);
             }
             Cmd::RemoveFigure(id) => {
                 self.run(Cmd::CloseModal, window, cx);
@@ -354,6 +360,8 @@ impl Workspace {
             draw: None,
             back: false,
             uploaded: from.uploaded().then(|| from.file_name.clone()),
+            from_pdf: false,
+            reframed: false,
         }
     }
 
@@ -452,14 +460,14 @@ impl Workspace {
         let mut figure = Figure { paper_id, resource_id, page: piece.page, bbox: Some(piece.bbox), label: caption.label, legend: caption.legend, ..Default::default() };
         // A piece cut again while the dialog of the last one is open is that figure cut better: what was
         // written stays, and the number and legend are the page's only where it gives them.
-        if let Some(Modal::Figure(form)) = self.modal.as_ref().filter(|modal| matches!(modal, Modal::Figure(form) if form.collects())) {
+        if let Some(Modal::Figure(form)) = self.modal.as_ref().filter(|modal| matches!(modal, Modal::Figure(form) if form.beside_page() && form.id.is_none())) {
             let text = |input: &Entity<TextInput>| input.read(cx).text().to_string();
             if piece.caption.is_none() { (figure.label, figure.legend) = (text(&form.label), text(&form.legend)) }
             (figure.tags, figure.notes) = (split_list(&text(&form.tags)), text(&form.notes));
         }
         let mut form = self.figure_form(Some(&figure), cx);
         let png = Arc::new(piece.png.clone());
-        (form.id, form.key, form.png, form.guessed) = (None, new_id("N"), Some(png.clone()), piece.caption.is_some());
+        (form.id, form.key, form.png, form.guessed, form.from_pdf) = (None, new_id("N"), Some(png.clone()), piece.caption.is_some(), true);
         let key = form.key.clone();
         self.modal_subscriptions.clear();
         self.modal_error.clear();
@@ -469,13 +477,33 @@ impl Workspace {
         cx.notify();
     }
 
+    /// The number on a figure kept was clicked in the PDF: its dialog, beside the page, its frame there to size.
+    pub(crate) fn open_figure_on_page(&mut self, id: &str, cx: &mut Context<Self>) {
+        self.figure_dialog(id, cx);
+        if let Some(Modal::Figure(form)) = self.modal.as_mut() && form.id.as_deref() == Some(id) { form.from_pdf = true }
+        self.sync_figure_frames(cx);
+    }
+
+    /// The frame of the dialog's figure was moved or sized on its page: the dialog shows the piece it frames now,
+    /// kept only with 收藏 / 保存.
+    pub(crate) fn reframe_piece(&mut self, resource: &str, page: usize, bbox: [f32; 4], png: &[u8], cx: &mut Context<Self>) {
+        let Some(Modal::Figure(form)) = self.modal.as_mut().filter(|modal| matches!(modal, Modal::Figure(form) if form.beside_page() && form.resource_id == resource)) else { return };
+        let png = Arc::new(png.to_vec());
+        (form.page, form.bbox, form.png, form.reframed) = (page, Some(bbox), Some(png.clone()), form.id.is_some());
+        let key = form.key.clone();
+        self.modal_error.clear();
+        self.load_large(key, move || Some(png.to_vec()), cx);
+        self.sync_figure_frames(cx);
+        cx.notify();
+    }
+
     /// What the pages of a file show of the figure library: its figures cut from that file, and the piece
     /// whose dialog is open when it is of that file.
-    pub(crate) fn figure_frames(&self, resource: &str) -> (Vec<crate::pdf::KeptFigure>, Option<(usize, [f32; 4])>) {
+    pub(crate) fn figure_frames(&self, resource: &str) -> (Vec<crate::pdf::KeptFigure>, Option<crate::pdf::Collecting>) {
         let Some(lib) = self.lib.as_ref() else { return (vec![], None) };
-        let kept = lib.gallery.items.iter().filter(|f| f.resource_id == resource && f.page > 0).filter_map(|f| Some(crate::pdf::KeptFigure { page: f.page, rect: f.bbox?, label: f.label.clone() })).collect();
+        let kept = lib.gallery.items.iter().filter(|f| f.resource_id == resource && f.page > 0).filter_map(|f| Some(crate::pdf::KeptFigure { id: f.id.clone(), page: f.page, rect: f.bbox?, label: f.label.clone() })).collect();
         let collecting = match self.modal.as_ref() {
-            Some(Modal::Figure(form)) if form.collects() && form.resource_id == resource => form.bbox.map(|bbox| (form.page, bbox)),
+            Some(Modal::Figure(form)) if form.beside_page() && form.resource_id == resource => form.bbox.map(|rect| crate::pdf::Collecting { figure: form.id.clone(), page: form.page, rect }),
             _ => None,
         };
         (kept, collecting)
@@ -494,7 +522,7 @@ impl Workspace {
     /// The size of a figure's dialog in this window. One of a piece cut out leaves more of the page in view.
     pub(crate) fn figure_dialog_size(form: &FigureForm, window: &Window) -> (f32, f32) {
         let viewport = window.viewport_size();
-        let (most_w, most_h) = if form.collects() { (940., 640.) } else { (1060., 700.) };
+        let (most_w, most_h) = if form.beside_page() { (940., 640.) } else { (1060., 700.) };
         ((f32::from(viewport.width) * 0.92).min(most_w), (f32::from(viewport.height) * 0.88).min(most_h))
     }
 
@@ -509,7 +537,7 @@ impl Workspace {
 
     /// The dialog of a piece cut out, taken hold of by its title or its picture.
     fn figure_grab(&mut self, at: Point<Pixels>, window: &Window, cx: &mut Context<Self>) {
-        let Some(Modal::Figure(form)) = self.modal.as_ref().filter(|modal| matches!(modal, Modal::Figure(form) if form.collects())) else { return };
+        let Some(Modal::Figure(form)) = self.modal.as_ref().filter(|modal| matches!(modal, Modal::Figure(form) if form.beside_page())) else { return };
         // From where it is drawn, so a window made smaller since does not leave it far off.
         let size = Self::figure_dialog_size(form, window);
         let (x, y) = self.figure_place(size, window);
@@ -676,6 +704,8 @@ impl Workspace {
         let text = |input: &Entity<TextInput>| input.read(cx).text().trim().to_string();
         let (label, legend, tags, notes) = (text(&form.label), text(&form.legend), split_list(&text(&form.tags)), text(&form.notes));
         let (id, png, drawing) = (form.id.clone(), form.png.clone(), form.draw.is_some());
+        // A figure kept and framed anew on its page: its new piece is kept with its words.
+        let reframe = form.reframed.then(|| png.clone().zip(form.bbox).map(|(png, bbox)| (form.page, bbox, png))).flatten();
         if id.is_none() && png.is_none() {
             self.modal_error = t("还没有图片：先写下要画什么，点「生成」。").into();
             return cx.notify();
@@ -686,7 +716,11 @@ impl Workspace {
             let result = match (&id, &png) {
                 (Some(id), _) => lib.store.get_figure(id).and_then(|held| {
                     figure = Figure { label: figure.label.clone(), legend: figure.legend.clone(), tags: figure.tags.clone(), notes: figure.notes.clone(), ..held };
-                    lib.store.save_figure(&mut figure)
+                    lib.store.save_figure(&mut figure)?;
+                    match &reframe {
+                        Some((page, bbox, png)) => lib.store.reframe_figure(&mut figure, *page, *bbox, png),
+                        None => Ok(()),
+                    }
                 }),
                 (None, Some(png)) => lib.store.add_figure(&mut figure, png),
                 (None, None) => Ok(()),
@@ -697,6 +731,11 @@ impl Workspace {
         });
         if !failed.is_empty() { return self.modal_error = failed }
         if !kept { return }
+        // The card shows the new piece: the picture read before is let go of.
+        if reframe.is_some() && let Some(id) = id.as_ref() && let Some(lib) = self.lib.as_mut() {
+            lib.gallery.broken.remove(id);
+            if let Some(image) = lib.gallery.thumbs.remove(id) { cx.drop_image(image, Some(window)) }
+        }
         self.run(Cmd::CloseModal, window, cx);
         if drawing {
             self.say(t("已收藏到图片库。"), cx);
@@ -710,7 +749,7 @@ impl Workspace {
         let lib = self.lib.as_ref()?;
         let (width, height) = Self::figure_dialog_size(form, window);
         // A piece cut out: the dialog is moved by its title or its picture, off what is to be read on the page.
-        let movable = form.collects();
+        let movable = form.beside_page();
         let stage = (width - SIDE_W, height - if form.draw.is_some() { DRAW_H } else { TOOLS_H });
         let paper = lib.paper(&form.paper_id);
         let held = form.id.as_deref().and_then(|id| lib.gallery.figure(id));

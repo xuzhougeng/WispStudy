@@ -1539,7 +1539,7 @@ fn row_to_paper(r: &rusqlite::Row) -> rusqlite::Result<Paper> {
     })
 }
 
-fn existing_paper(db: &Connection, p: &Paper) -> Result<Option<String>> {
+pub(crate) fn existing_paper(db: &Connection, p: &Paper) -> Result<Option<String>> {
     for (namespace, value) in [("doi", &p.doi), ("pmid", &p.pmid)] {
         if value.is_empty() { continue }
         let found: Option<String> = db.query_row("SELECT paper_id FROM paper_identifiers WHERE namespace = ?1 AND value = ?2", params![namespace, value], |r| r.get(0)).optional()?;
@@ -1558,7 +1558,7 @@ fn existing_paper(db: &Connection, p: &Paper) -> Result<Option<String>> {
     Ok(found)
 }
 
-fn write_paper(tx: &Transaction, p: &Paper) -> Result<()> {
+pub(crate) fn write_paper(tx: &Transaction, p: &Paper) -> Result<()> {
     let authors: Vec<String> = p.authors.split(';').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
     tx.execute(
         "INSERT INTO papers(id, title, title_key, abstract, authors_json, journal, year, publication_state, url, source, \
@@ -1622,7 +1622,7 @@ fn file_hash(source: &Path) -> Result<String> {
     Ok(hasher.finalize().iter().map(|b| format!("{b:02x}")).collect())
 }
 
-fn copy_hashed(source: &Path, target: &Path) -> Result<(u64, String)> {
+pub(crate) fn copy_hashed(source: &Path, target: &Path) -> Result<(u64, String)> {
     let mut input = std::fs::File::open(source)?;
     let mut output = std::fs::File::create(target)?;
     let mut hasher = Sha256::new();

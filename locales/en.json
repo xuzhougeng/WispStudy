@@ -61,6 +61,7 @@
   "删除标记": "Delete mark",
   "截图标记": "Screenshot mark",
   "在页面上留一圈虚线，之后点它再收藏或提问": "Leave a dashed frame on the page; click it later to save or ask",
+  "已收藏到图片库：点开可以修改、重新框选或移出": "Saved to figures: click to edit, reframe or remove it",
   "取消": "Cancel",
   "无法预览": "Preview unavailable",
   "正在打开 PDF…": "Opening PDF…",
@@ -1718,5 +1719,13 @@
   "点「上传图片」把自己的图放进来，也可以把图片文件拖到这里，或者直接粘贴。在文献的 PDF 上截图收藏的图，也会出现在这里。": "Click “Upload pictures” to bring in your own figures, drop picture files here, or paste one. Figures saved from the PDFs of your papers appear here too.",
   "点一张图，把它放进稿件光标所在的段落后面 · 图片文件可以拖进来，也可以粘贴": "Click a picture to put it after the paragraph at the caret · Drop picture files here, or paste one",
   "资料库里还没有图片": "No pictures in Materials yet",
-  "这张图片已经在资料库里了。": "This picture is in Materials already."
+  "这张图片已经在资料库里了。": "This picture is in Materials already.",
+  "还没有别的文献库可以移过去。": "There is no other library to move it to yet.",
+  "这次回答结束后再移。": "Move it once this answer is done.",
+  "移到文献库": "Move to library",
+  "移到文献库…": "Move to library…",
+  "移过去": "Move",
+  "选一个文献库。": "Choose a library.",
+  "PDF、标注、读到的位置和关于它的对话都一起过去；这段对话里不再有它。": "Its PDFs, annotations, reading position and conversations about it go along; it leaves this conversation.",
+  "PDF、标注、读到的位置和关于它的对话都一起过去，收录状态回到待判断；原来的那条留在本库的回收站里。": "Its PDFs, annotations, reading position and conversations about it go along, and its screening goes back to pending; the original stays in this library's trash."
 }
