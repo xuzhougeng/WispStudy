@@ -290,8 +290,18 @@ impl Workspace {
                 items.push(item(t("移除附件"), Cmd::RemoveFile(id.clone())));
             }
             MenuKind::Tag(tag) => {
-                let on = lib.page == Page::Papers && lib.filters.tag == *tag;
-                items.push(item(if on { t("不再只看这个标签") } else { t("只看这个标签") }, Cmd::SetFilter(crate::app::FilterKey::Tag, if on { String::new() } else { tag.clone() })));
+                // What a plain click, a ⌘ / Ctrl-click and an ⌥ / Alt-click on the row do, by name.
+                let f = &lib.filters;
+                let listed = lib.page == Page::Papers;
+                if listed && f.excluded(tag) {
+                    items.push(item(t("取消排除"), Cmd::ExcludeTag(tag.clone())));
+                } else {
+                    let only = listed && f.tags.len() == 1 && f.chosen(tag);
+                    items.push(item(if only { t("不再只看这个标签") } else { t("只看这个标签") }, Cmd::ClickTag(tag.clone(), false)));
+                    if listed && !f.tags.is_empty() && !only { items.push(MenuItem { label: (if f.chosen(tag) { t("不再要求这个标签") } else { t("同时要有这个标签") }).into(), checked: false, note: Some(held_click(false).into()), cmd: Cmd::ClickTag(tag.clone(), true) }) }
+                    items.push(MenuItem { label: t("排除此标签").into(), checked: false, note: Some(held_click(true).into()), cmd: Cmd::ExcludeTag(tag.clone()) });
+                }
+                breaks.push(items.len());
                 items.push(item(t("重命名…"), Cmd::RenameTag(tag.clone())));
                 items.push(item(t("复制标签名"), Cmd::CopyText(tag.clone())));
                 breaks.push(items.len());
@@ -432,4 +442,15 @@ impl Library {
     pub fn trash_chosen_ids(&self) -> Vec<String> {
         self.trash.iter().map(|entry| entry.paper.id.clone()).filter(|id| self.trash_chosen.contains(id)).collect()
     }
+}
+
+/// A click with the key that adds a tag to the chosen ones (⌘ / Ctrl), or with the one that excludes it (⌥ / Alt).
+pub(crate) fn held_click(exclude: bool) -> String {
+    let key = match (cfg!(target_os = "macos"), exclude) {
+        (true, false) => "⌘",
+        (true, true) => "⌥",
+        (false, false) => "Ctrl",
+        (false, true) => "Alt",
+    };
+    tf!("{key} 点击", "{key}-click")
 }

@@ -24,7 +24,10 @@ pub enum View {
 pub struct Filters {
     pub view: View,
     pub search: String,
-    pub tag: String,
+    /// The tags chosen in the sidebar: a paper must hold every one (AND, as Zotero does).
+    pub tags: Vec<String>,
+    /// The tags excluded (反选): a paper holding any of them is hidden.
+    pub not_tags: Vec<String>,
     pub year: String,
     pub screening: String,
     pub reading: String,
@@ -41,7 +44,61 @@ pub struct Filters {
 impl Filters {
     /// How many filters (not counting the search and the view) are set.
     pub fn active(&self) -> usize {
-        [&self.tag, &self.year, &self.screening, &self.reading, &self.fulltext, &self.source, &self.preprint].iter().filter(|v| !v.is_empty()).count() + self.fields.len()
+        [&self.year, &self.screening, &self.reading, &self.fulltext, &self.source, &self.preprint].iter().filter(|v| !v.is_empty()).count() + self.fields.len() + self.tags.len() + self.not_tags.len()
+    }
+
+    /// Whether a paper holds every chosen tag and none of the excluded ones.
+    pub fn tagged(&self, p: &Paper) -> bool {
+        self.tags.iter().all(|tag| p.tags.contains(tag)) && !self.not_tags.iter().any(|tag| p.tags.contains(tag))
+    }
+
+    pub fn excluded(&self, tag: &str) -> bool {
+        self.not_tags.iter().any(|t| t == tag)
+    }
+
+    pub fn chosen(&self, tag: &str) -> bool {
+        self.tags.iter().any(|t| t == tag)
+    }
+
+    /// A click on a tag. An excluded tag is let go; else alone (`add` false) it chooses just this tag, or none
+    /// when it was the only one chosen; with ⌘ / Ctrl (`add`) it joins the chosen tags or leaves them.
+    pub fn click_tag(&mut self, tag: &str, add: bool) {
+        if self.excluded(tag) {
+            self.not_tags.retain(|t| t != tag);
+        } else if add {
+            if self.chosen(tag) { self.tags.retain(|t| t != tag) } else { self.tags.push(tag.to_string()) }
+        } else if self.tags.len() == 1 && self.chosen(tag) {
+            self.tags.clear();
+        } else {
+            self.tags = vec![tag.to_string()];
+        }
+    }
+
+    /// Excludes a tag (no longer chosen), or lets an excluded one go.
+    pub fn exclude_tag(&mut self, tag: &str) {
+        if self.excluded(tag) {
+            self.not_tags.retain(|t| t != tag);
+        } else {
+            self.tags.retain(|t| t != tag);
+            self.not_tags.push(tag.to_string());
+        }
+    }
+
+    /// A tag renamed (`Some`) or taken off every paper (`None`): the choices follow it.
+    pub fn retag(&mut self, tag: &str, name: Option<&str>) {
+        for list in [&mut self.tags, &mut self.not_tags] {
+            let mut kept: Vec<String> = vec![];
+            for old in list.drain(..) {
+                let new = if old == tag { name.map(str::to_string) } else { Some(old) };
+                if let Some(new) = new && !kept.contains(&new) { kept.push(new) }
+            }
+            *list = kept;
+        }
+    }
+
+    /// The tag filter as one line: `#a #b −#c`.
+    pub fn tags_said(&self) -> String {
+        self.tags.iter().map(|t| format!("#{t}")).chain(self.not_tags.iter().map(|t| format!("−#{t}"))).collect::<Vec<_>>().join(" ")
     }
 
     pub fn clear(&mut self) {
@@ -85,7 +142,7 @@ pub fn matches(p: &Paper, f: &Filters, now_ms: i64) -> bool {
     // them; they show up when asked for by name.
     if f.screening.is_empty() { if p.screening == "irrelevant" { return false } } else if p.screening != f.screening { return false }
     if !in_view(p, f.view, now_ms) { return false }
-    if !f.tag.is_empty() && !p.tags.contains(&f.tag) { return false }
+    if !f.tagged(p) { return false }
     if !f.year.is_empty() && p.year.map(|y| y.to_string()).as_deref() != Some(f.year.as_str()) { return false }
     if !f.reading.is_empty() && p.reading != f.reading { return false }
     if !f.fulltext.is_empty() && p.fulltext != f.fulltext { return false }
@@ -190,8 +247,11 @@ pub fn view_count(papers: &[Paper], view: View, now_ms: i64) -> usize {
 pub const VIEWS: [View; 5] = [View::All, View::Recent, View::Unread, View::Starred, View::NoPdf];
 
 /// What the sidebar counts under the search and filters that are set: how many papers each view would
-/// show, and each tag. A view is counted as if it were the one chosen, a tag as if it were the one
-/// filtered by; everything else set narrows both. With nothing set, the counts of the whole library.
+/// show, and each tag. A view is counted as if it were the one chosen, under the tags chosen and excluded.
+/// A tag is counted among the papers on show (the view chosen and the tags too): how many would stay if it
+/// were added to the chosen ones, so a chosen tag counts all on show and a tag none of them holds counts 0.
+/// An excluded tag counts the papers it alone hides, those that would be on show holding it were it not
+/// excluded. Everything else set narrows both. With nothing set, the counts of the whole library.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Counts {
     pub views: [usize; 5],
@@ -209,17 +269,25 @@ impl Counts {
 }
 
 pub fn counts(papers: &[Paper], f: &Filters, now_ms: i64) -> Counts {
-    let rest = Filters { view: View::All, tag: String::new(), ..f.clone() };
+    let rest = Filters { view: View::All, tags: vec![], not_tags: vec![], ..f.clone() };
     let mut counts = Counts::default();
     for p in papers.iter().filter(|p| matches(p, &rest, now_ms)) {
-        if f.tag.is_empty() || p.tags.contains(&f.tag) {
+        let held = f.tags.iter().all(|tag| p.tags.contains(tag));
+        let mut hidden_by = f.not_tags.iter().filter(|tag| p.tags.contains(tag));
+        let (first, second) = (hidden_by.next(), hidden_by.next());
+        if held && first.is_none() {
             for (n, view) in counts.views.iter_mut().zip(VIEWS) {
                 if in_view(p, view, now_ms) { *n += 1 }
             }
         }
-        if in_view(p, f.view, now_ms) {
-            for tag in &p.tags {
+        // On show, the paper counts for each of its tags; hidden by one excluded tag alone, for that one.
+        if held && second.is_none() && in_view(p, f.view, now_ms) {
+            if let Some(tag) = first {
                 *counts.tags.entry(tag.clone()).or_default() += 1;
+            } else {
+                for tag in &p.tags {
+                    *counts.tags.entry(tag.clone()).or_default() += 1;
+                }
             }
         }
     }
@@ -317,7 +385,7 @@ mod tests {
         };
         assert_eq!(f(|f| f.search = "ATLAS fish".into()), ["Zebra fish atlas"]);
         assert_eq!(f(|f| f.search = "danio".into()), ["Zebra fish atlas"]);
-        assert_eq!(f(|f| f.tag = "atlas".into()).len(), 2);
+        assert_eq!(f(|f| f.tags = vec!["atlas".into()]).len(), 2);
         assert_eq!(f(|f| f.year = "2024".into()), ["Maize root cells"]);
         assert_eq!(f(|f| f.preprint = "yes".into()), ["apple genome"]);
         assert_eq!(f(|f| f.preprint = "no".into()).len(), 2);
@@ -360,10 +428,85 @@ mod tests {
         assert_eq!(years(&papers), [("2024".to_string(), 1), ("2021".to_string(), 1)]);
         assert_eq!(view_count(&papers, View::All, 0), 3);
         assert_eq!(field_counts(&papers, "F1"), [("Danio rerio".to_string(), 1)]);
-        let mut f = Filters { tag: "x".into(), search: "q".into(), sort: "year-asc".into(), view: View::Starred, ..Default::default() };
+        let mut f = Filters { tags: vec!["x".into()], search: "q".into(), sort: "year-asc".into(), view: View::Starred, ..Default::default() };
         assert_eq!(f.active(), 1);
         f.clear();
         assert_eq!((f.active(), f.search.as_str(), f.sort.as_str(), f.view), (0, "", "year-asc", View::Starred));
+    }
+
+    #[test]
+    fn several_tags_are_all_held_and_excluded_ones_hide() {
+        let papers = library();
+        let tagged = |tags: &[&str], not_tags: &[&str]| titles(&papers, &Filters { tags: tags.iter().map(|t| t.to_string()).collect(), not_tags: not_tags.iter().map(|t| t.to_string()).collect(), ..Default::default() });
+        assert_eq!(tagged(&["atlas"], &[]), ["Zebra fish atlas", "Maize root cells"]);
+        assert_eq!(tagged(&["atlas", "fish"], &[]), ["Zebra fish atlas"]);
+        assert_eq!(tagged(&["fish", "none"], &[]).len(), 0);
+        assert_eq!(tagged(&["atlas"], &["fish"]), ["Maize root cells"]);
+        assert_eq!(tagged(&[], &["atlas"]), ["apple genome"]);
+        assert_eq!(tagged(&[], &["fish", "atlas"]), ["apple genome"]);
+        let f = Filters { tags: vec!["a".into()], not_tags: vec!["b".into(), "c".into()], ..Default::default() };
+        assert_eq!((f.active(), f.tags_said().as_str()), (3, "#a −#b −#c"));
+    }
+
+    #[test]
+    fn clicks_choose_add_and_exclude_tags() {
+        let mut f = Filters::default();
+        let state = |f: &Filters| (f.tags.join(","), f.not_tags.join(","));
+        f.click_tag("a", false);
+        assert_eq!(state(&f), ("a".into(), "".into()));
+        // Alone, a click on the only tag chosen lets it go.
+        f.click_tag("a", false);
+        assert_eq!(state(&f), ("".into(), "".into()));
+        f.click_tag("a", false);
+        f.click_tag("b", true);
+        assert_eq!(state(&f), ("a,b".into(), "".into()));
+        // Alone, a click on one of several chooses just that one.
+        f.click_tag("b", false);
+        assert_eq!(state(&f), ("b".into(), "".into()));
+        f.click_tag("a", true);
+        f.click_tag("b", true);
+        assert_eq!(state(&f), ("a".into(), "".into()));
+        // Excluding a chosen tag takes it out of the chosen; a click on an excluded tag lets the exclusion go.
+        f.exclude_tag("a");
+        f.exclude_tag("c");
+        assert_eq!(state(&f), ("".into(), "a,c".into()));
+        f.click_tag("a", false);
+        assert_eq!(state(&f), ("".into(), "c".into()));
+        f.exclude_tag("c");
+        assert_eq!(state(&f), ("".into(), "".into()));
+        // Renamed onto one already chosen, a tag is chosen once; taken off the papers, it is no choice.
+        let mut f = Filters { tags: vec!["a".into(), "b".into()], not_tags: vec!["c".into()], ..Default::default() };
+        f.retag("a", Some("b"));
+        f.retag("c", None);
+        assert_eq!(state(&f), ("b".into(), "".into()));
+        f.clear();
+        assert_eq!(f, Filters::default());
+    }
+
+    #[test]
+    fn a_tag_counts_what_would_stay_were_it_added() {
+        let papers = library();
+        let with = |tags: &[&str], not_tags: &[&str]| Filters { tags: tags.iter().map(|t| t.to_string()).collect(), not_tags: not_tags.iter().map(|t| t.to_string()).collect(), ..Default::default() };
+        let c = counts(&papers, &with(&["atlas"], &[]), 0);
+        assert_eq!((c.view(View::All), c.view(View::Unread), c.tag("atlas"), c.tag("fish")), (2, 1, 2, 1));
+        let c = counts(&papers, &with(&["atlas", "fish"], &[]), 0);
+        assert_eq!((c.view(View::All), c.tag("atlas"), c.tag("fish")), (1, 1, 1));
+        // An excluded tag counts the papers it alone hides.
+        let c = counts(&papers, &with(&[], &["fish"]), 0);
+        assert_eq!((c.view(View::All), c.tag("atlas"), c.tag("fish")), (2, 1, 1));
+        let c = counts(&papers, &with(&[], &["fish", "atlas"]), 0);
+        assert_eq!((c.view(View::All), c.tag("atlas"), c.tag("fish")), (1, 1, 0));
+        let c = counts(&papers, &with(&["atlas"], &["fish"]), 0);
+        assert_eq!((c.view(View::All), c.tag("atlas"), c.tag("fish")), (1, 1, 1));
+        // A tag not excluded counts what the list shows with it added to the chosen ones.
+        for f in [with(&[], &[]), with(&["atlas"], &[]), with(&[], &["fish"]), Filters { view: View::Unread, ..with(&["fish"], &[]) }] {
+            let c = counts(&papers, &f, 0);
+            for (tag, _) in tag_counts(&papers).into_iter().filter(|(tag, _)| !f.excluded(tag)) {
+                let mut added = f.clone();
+                if !added.chosen(&tag) { added.tags.push(tag.clone()) }
+                assert_eq!(c.tag(&tag), filter_papers(&papers, &added, 0).len(), "{tag} under {f:?}");
+            }
+        }
     }
 
     #[test]
@@ -378,8 +521,8 @@ mod tests {
         let searched = counts(&papers, &Filters { search: "atlas".into(), ..Default::default() }, 0);
         assert_eq!((searched.view(View::All), searched.view(View::Unread), searched.view(View::Starred)), (2, 1, 0));
         assert_eq!((searched.tag("atlas"), searched.tag("fish")), (2, 1));
-        // The tag filtered by narrows the views, not the other tags; the view chosen narrows the tags, not the other views.
-        let tagged = counts(&papers, &Filters { tag: "fish".into(), view: View::Unread, ..Default::default() }, 0);
+        // The tags chosen narrow the views, and a tag counts the papers on show; the view chosen narrows the tags, not the other views.
+        let tagged = counts(&papers, &Filters { tags: vec!["fish".into()], view: View::Unread, ..Default::default() }, 0);
         assert_eq!((tagged.view(View::All), tagged.view(View::Unread), tagged.view(View::Starred)), (1, 1, 0));
         assert_eq!((tagged.tag("atlas"), tagged.tag("fish")), (1, 1));
         // Asked for by name, the irrelevant paper is counted.

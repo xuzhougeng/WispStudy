@@ -557,8 +557,12 @@ impl Workspace {
             .enumerate()
             .map(|(i, (tag, _))| {
                 // Listed in the order of the whole library, so the rows stay put while the search is typed.
+                // Chosen (all must be held) is lit; excluded is struck through, quiet, and a click lets it go.
+                // Its number is then how many papers it hides.
                 let count = lib.counts.tag(tag);
-                let active = on_papers && &lib.filters.tag == tag;
+                let active = on_papers && lib.filters.chosen(tag);
+                let excluded = on_papers && lib.filters.excluded(tag);
+                let clicked = tag.clone();
                 div()
                     .id(("tag", i))
                     .flex()
@@ -570,14 +574,20 @@ impl Workspace {
                     .cursor_pointer()
                     .when(active, |d| d.bg(Theme::accent_soft()).text_color(Theme::accent()))
                     .when(!active, |d| d.hover(|s| s.bg(Theme::hover())))
-                    .on_click(self.on(Cmd::SetFilter(FilterKey::Tag, if active { String::new() } else { tag.clone() }), cx))
+                    .when(excluded, |d| d.text_color(Theme::text_tertiary()))
+                    // Alone a click chooses just this tag; ⌘ / Ctrl adds it to those chosen, ⌥ / Alt excludes it.
+                    .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
+                        let held = ev.modifiers();
+                        this.run(if held.alt { Cmd::ExcludeTag(clicked.clone()) } else { Cmd::ClickTag(clicked.clone(), held.secondary()) }, window, cx)
+                    }))
                     .on_mouse_down(MouseButton::Right, self.on_context(MenuKind::Tag(tag.clone()), cx))
-                    .child(div().size(px(6.)).flex_none().rounded_full().bg(if active { Theme::accent() } else { Theme::text_placeholder() }))
-                    .child(div().flex_1().min_w_0().truncate().child(tag.clone()))
-                    .child(div().text_size(text_px(12.)).text_color(if count == 0 { Theme::text_placeholder() } else { Theme::text_tertiary() }).child(count.to_string()))
+                    .child(if excluded { div().w(px(6.)).h(px(1.5)).flex_none().rounded_full().bg(Theme::text_tertiary()) } else { div().size(px(6.)).flex_none().rounded_full().bg(if active { Theme::accent() } else { Theme::text_placeholder() }) })
+                    .child(div().flex_1().min_w_0().truncate().when(excluded, |d| d.line_through()).child(tag.clone()))
+                    .child(div().text_size(text_px(12.)).text_color(if count == 0 || excluded { Theme::text_placeholder() } else { Theme::text_tertiary() }).child(count.to_string()))
                     .into_any_element()
             })
             .collect();
+        let tags_set = on_papers && !(lib.filters.tags.is_empty() && lib.filters.not_tags.is_empty());
         let trash_count = lib.trash.len();
         div()
             .id("library-sidebar")
@@ -617,7 +627,19 @@ impl Workspace {
                     .flex_1()
                     .min_h(px(80.))
                     .gap(px(2.))
-                    .child(ui::caption(t("标签")).px(px(8.)).py(px(4.)))
+                    // The caption says on hover what the keys held with a click do; while tags are chosen or excluded, 清除 lets them all go.
+                    .child(
+                        div()
+                            .id("tags-head")
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .px(px(8.))
+                            .py(px(4.))
+                            .tooltip(ui::tip(tf!("{}多选 · {}排除", "{} to add · {} to exclude", crate::context::held_click(false), crate::context::held_click(true))))
+                            .child(ui::caption(t("标签")))
+                            .when(tags_set, |d| d.child(div().id("tags-clear").text_size(text_px(11.)).text_color(Theme::text_tertiary()).cursor_pointer().hover(|s| s.text_color(Theme::text_secondary())).on_click(self.on(Cmd::SetFilter(FilterKey::Tag, String::new()), cx)).child(t("清除")))),
+                    )
                     .child(div().id("tags").flex().flex_col().flex_1().min_h_0().overflow_y_scroll().gap(px(1.)).children(tag_rows).when(tags.is_empty(), |d| d.child(div().px(px(8.)).text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(t("编辑文献时添加标签")))))
             )
             .children(self.render_import(cx))
@@ -720,7 +742,7 @@ impl Workspace {
             ("f-reading".into(), t("阅读").into(), label(&READINGS, &f.reading).to_string(), FilterKey::Reading),
             ("f-screening".into(), t("收录").into(), label(&SCREENINGS, &f.screening).to_string(), FilterKey::Screening),
             ("f-fulltext".into(), t("全文").into(), label(&FULLTEXTS, &f.fulltext).to_string(), FilterKey::Fulltext),
-            ("f-tag".into(), t("标签").into(), f.tag.clone(), FilterKey::Tag),
+            ("f-tag".into(), t("标签").into(), f.tags.iter().cloned().chain(f.not_tags.iter().map(|tag| format!("−{tag}"))).collect::<Vec<_>>().join(", "), FilterKey::Tag),
         ];
         for (i, field) in lib.fields.iter().enumerate() {
             if field.kind == FieldKind::Text { continue }
@@ -1269,7 +1291,7 @@ impl Workspace {
                     .justify_between()
                     .gap(px(8.))
                     .px(px(8.))
-                    .child(ui::caption(if lib.filters.tag.is_empty() { view_label(lib.filters.view).to_string() } else { format!("{} · #{}", view_label(lib.filters.view), lib.filters.tag) }).min_w_0().truncate())
+                    .child(ui::caption(if lib.filters.tags.is_empty() && lib.filters.not_tags.is_empty() { view_label(lib.filters.view).to_string() } else { format!("{} · {}", view_label(lib.filters.view), lib.filters.tags_said()) }).min_w_0().truncate())
                     .child(div().flex_none().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(if filtered || shown != total { tf!("{shown} / {total} 篇", "{shown} / {total} papers") } else { tf!("{total} 篇", "{total} papers") })),
             )
             .child(body)

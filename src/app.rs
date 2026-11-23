@@ -401,7 +401,12 @@ pub enum Cmd {
     // The list
     SetView(View),
     SetPage(Page),
+    /// `FilterKey::Tag` with a tag is a plain click on it (`Filters::click_tag`); empty lets every tag choice go.
     SetFilter(FilterKey, String),
+    /// A click on a tag in the sidebar; true with ⌘ / Ctrl held, to add it to the chosen tags or take it out.
+    ClickTag(String, bool),
+    /// Exclude a tag, or let an excluded one go (⌥ / Alt-click, the tag's menu).
+    ExcludeTag(String),
     ClearFilters,
     SetSort(String),
     Select(String),
@@ -3013,19 +3018,28 @@ impl Workspace {
                 let f = &lib.filters;
                 let fixed = |table: &[(&str, &str)]| table.iter().map(|(v, l)| (v.to_string(), t(l).to_string(), None)).collect::<Vec<_>>();
                 let counted = |list: Vec<(String, usize)>| list.into_iter().take(40).map(|(v, n)| (v.clone(), v, Some(n))).collect::<Vec<_>>();
-                let (current, choices): (String, Vec<(String, String, Option<usize>)>) = match &key {
-                    FilterKey::Tag => (f.tag.clone(), counted(filter::tag_counts(&lib.papers))),
-                    FilterKey::Year => (f.year.clone(), counted(filter::years(&lib.papers))),
-                    FilterKey::Source => (f.source.clone(), counted(filter::source_counts(&lib.papers))),
-                    FilterKey::Reading => (f.reading.clone(), fixed(&READINGS)),
-                    FilterKey::Screening => (f.screening.clone(), fixed(&SCREENINGS)),
-                    FilterKey::Fulltext => (f.fulltext.clone(), fixed(&FULLTEXTS)),
-                    FilterKey::Preprint => (f.preprint.clone(), fixed(&[("yes", t("只看预印本")), ("no", t("不含预印本"))])),
-                    FilterKey::Field(id) => (f.fields.get(id).cloned().unwrap_or_default(), counted(filter::field_counts(&lib.papers, id))),
-                };
-                items.push(MenuItem { label: t("全部").into(), checked: current.is_empty(), note: None, cmd: Cmd::SetFilter(key.clone(), String::new()) });
-                for (value, label, count) in choices {
-                    items.push(MenuItem { label: label.into(), checked: current == value, note: count.map(|n| n.to_string().into()), cmd: Cmd::SetFilter(key.clone(), value) });
+                // Several tags can be chosen and some excluded: each chosen one is ticked, an excluded one says so.
+                if key == FilterKey::Tag {
+                    items.push(MenuItem { label: t("全部").into(), checked: f.tags.is_empty() && f.not_tags.is_empty(), note: None, cmd: Cmd::SetFilter(key.clone(), String::new()) });
+                    for (tag, n) in filter::tag_counts(&lib.papers).into_iter().take(40) {
+                        let note = if f.excluded(&tag) { t("已排除").to_string() } else { n.to_string() };
+                        items.push(MenuItem { label: tag.clone().into(), checked: f.chosen(&tag), note: Some(note.into()), cmd: Cmd::SetFilter(key.clone(), tag) });
+                    }
+                } else {
+                    let (current, choices): (String, Vec<(String, String, Option<usize>)>) = match &key {
+                        FilterKey::Year => (f.year.clone(), counted(filter::years(&lib.papers))),
+                        FilterKey::Source => (f.source.clone(), counted(filter::source_counts(&lib.papers))),
+                        FilterKey::Reading => (f.reading.clone(), fixed(&READINGS)),
+                        FilterKey::Screening => (f.screening.clone(), fixed(&SCREENINGS)),
+                        FilterKey::Fulltext => (f.fulltext.clone(), fixed(&FULLTEXTS)),
+                        FilterKey::Preprint => (f.preprint.clone(), fixed(&[("yes", t("只看预印本")), ("no", t("不含预印本"))])),
+                        FilterKey::Field(id) => (f.fields.get(id).cloned().unwrap_or_default(), counted(filter::field_counts(&lib.papers, id))),
+                        FilterKey::Tag => unreachable!("the tags are listed above"),
+                    };
+                    items.push(MenuItem { label: t("全部").into(), checked: current.is_empty(), note: None, cmd: Cmd::SetFilter(key.clone(), String::new()) });
+                    for (value, label, count) in choices {
+                        items.push(MenuItem { label: label.into(), checked: current == value, note: count.map(|n| n.to_string().into()), cmd: Cmd::SetFilter(key.clone(), value) });
+                    }
                 }
             }
         }
@@ -3473,7 +3487,8 @@ impl Workspace {
                 if let Some(lib) = self.lib.as_mut() {
                     let f = &mut lib.filters;
                     match key {
-                        FilterKey::Tag => f.tag = value,
+                        FilterKey::Tag if value.is_empty() => (f.tags, f.not_tags) = (vec![], vec![]),
+                        FilterKey::Tag => f.click_tag(&value, false),
                         FilterKey::Year => f.year = value,
                         FilterKey::Reading => f.reading = value,
                         FilterKey::Screening => f.screening = value,
@@ -3484,6 +3499,26 @@ impl Workspace {
                             if value.is_empty() { f.fields.remove(&id); } else { f.fields.insert(id, value); }
                         }
                     }
+                    lib.page = Page::Papers;
+                    lib.refilter();
+                }
+            }
+            Cmd::ClickTag(tag, add) => {
+                if let Some(lib) = self.lib.as_mut() {
+                    // Away from the list the tags are not lit, so a plain click chooses just this one.
+                    if lib.page == Page::Papers || add {
+                        lib.filters.click_tag(&tag, add);
+                    } else {
+                        lib.filters.not_tags.retain(|t| *t != tag);
+                        lib.filters.tags = vec![tag];
+                    }
+                    lib.page = Page::Papers;
+                    lib.refilter();
+                }
+            }
+            Cmd::ExcludeTag(tag) => {
+                if let Some(lib) = self.lib.as_mut() {
+                    if lib.page == Page::Papers || !lib.filters.excluded(&tag) { lib.filters.exclude_tag(&tag) }
                     lib.page = Page::Papers;
                     lib.refilter();
                 }
@@ -5593,7 +5628,7 @@ impl Workspace {
                 paper.tags = tags;
                 lib.store.save_paper(&mut paper)?;
             }
-            if lib.filters.tag == tag { lib.filters.tag = name.unwrap_or("").to_string() }
+            lib.filters.retag(tag, name);
             Ok(())
         })
     }
@@ -8902,6 +8937,12 @@ impl Workspace {
                     self.lib.as_ref().and_then(|l| l.gallery.items.get(n.parse::<usize>().unwrap_or(0))).map(|figure| if source { Cmd::FigureSource(figure.id.clone()) } else { Cmd::OpenFigure(figure.id.clone()) })
                 }
                 "figtag" => Some(Cmd::FigureTag(arg.to_string())),
+                // `tag:<tag>` is a click on a tag of the sidebar, `tag:+<tag>` one with ⌘ / Ctrl, `tag:-<tag>` one with ⌥ / Alt.
+                "tag" => Some(match (arg.strip_prefix('+'), arg.strip_prefix('-')) {
+                    (Some(tag), _) => Cmd::ClickTag(tag.to_string(), true),
+                    (_, Some(tag)) => Cmd::ExcludeTag(tag.to_string()),
+                    _ => Cmd::ClickTag(arg.to_string(), false),
+                }),
                 "figfind" => {
                     if let Some(lib) = self.lib.as_ref() { lib.gallery.search.update(cx, |input, cx| input.insert(arg, cx)) }
                     return;
