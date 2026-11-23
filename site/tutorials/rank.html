@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>先读哪几篇：影响因子、分区与预警 · Wisp Study 教程</title>
+<meta name="description" content="用文献列表的影响因子、分区两列排出先读的几篇，在详情里看一种期刊的全部指标，在设置里换成 JCR 或新锐分区，认出预警名单上的期刊，再让助手和 wisp 命令行查期刊。">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../app-icon.png">
+<link rel="stylesheet" href="../style.css">
+<link rel="stylesheet" href="../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">跳到正文</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="站点">
+      <a href="index.html" aria-current="page">教程</a>
+      <a href="../index.html#ideas">理念</a>
+      <a href="../index.html#tools">工具</a>
+      <a href="../index.html#download">下载</a>
+    </nav>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="位置"><a href="index.html">教程</a><span>›</span>整理</nav>
+
+  <header class="doc-head">
+    <p class="kicker">教程 09　·　整理</p>
+    <h1>先读哪几篇：影响因子、分区与预警</h1>
+    <p class="lead">文献收了几十篇，读不过来，要先挑几篇。期刊的影响因子和分区是一个粗略但常用的参考；另一些期刊上了预警名单，引用之前要多看一眼。这一篇在文献列表里按这两项排序，看一篇文献所在期刊的全部指标，换一种分区，认出预警期刊，最后让助手和命令行来查。</p>
+    <dl class="facts">
+      <div><dt>场景</dt><dd>文献库「植物单细胞转录组」里有 28 篇已纳入的文献，要决定先读哪几篇，哪些要小心对待。</dd></div>
+      <div><dt>需要</dt><dd>一个文献库，文献有期刊名；问助手时，需要在「设置 › AI」里配置好的模型服务。查分区本身不联网，也不用模型。</dd></div>
+      <div><dt>用时</dt><dd>约 5 分钟。</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="本篇的小节">
+      <h2>本篇</h2>
+      <ol>
+        <li><a href="#s1">列表里的两列</a></li>
+        <li><a href="#s2">按影响因子排序</a></li>
+        <li><a href="#s3">一篇文献的期刊指标</a></li>
+        <li><a href="#s4">换一种分区</a></li>
+        <li><a href="#s5">预警名单上的期刊</a></li>
+        <li><a href="#s6">问助手，或者用命令行</a></li>
+        <li class="plain"><a href="#recap">回顾</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>列表里的两列</h2>
+        <p>打开文献库，文献列表在「期刊」右边有「影响因子」和「分区」两列。数字不是联网查来的：应用里带着一张期刊表，合了四份名单：</p>
+        <ul>
+          <li>JCR 2025：影响因子和 JCR 分区（Q1–Q4）。</li>
+          <li>中科院分区表升级版 2025：大类分区（1–4 区）和是否 Top。</li>
+          <li>新锐期刊分区表 2026：分区和是否 Top。</li>
+          <li>国际期刊预警名单 2025：上了名单的期刊和原因。</li>
+        </ul>
+        <p>每篇文献按它记录里的期刊名到这张表里找，全称和 PubMed 式的缩写（例如 <code>Nat Commun</code>）都认得，PubMed 在刊名后面用括号加上出版地的写法也认得，例如 <code>Advanced science (Weinheim, Baden-Wurttemberg, Germany)</code>。所以不用网络，也不会把你的文献发给谁。</p>
+        <p>看不到这两列时，在表头上点右键，勾选「影响因子」「分区」；不需要的列在同一个菜单里取消勾选。</p>
+
+        <figure class="shot">
+          <img src="../img/t/rank-01-columns.jpg" width="1372" height="867" loading="lazy" alt="文献列表，表头有文献、期刊、影响因子、分区、年份、全文、阅读、收录；在表头上右键弹出的菜单里勾着期刊、影响因子、分区、年份、全文、阅读、收录七项。">
+          <figcaption><b>图 1</b>　在表头上右键，勾选要显示的列。菜单下面几行能看到两列的样子：5.9 / 2区，5.6 / 3区。</figcaption>
+        </figure>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>按影响因子排序</h2>
+        <p>点一下列名「影响因子」，列表从高到低排；再点一下，从低到高。点「分区」是从 1 区排起，同一区里 Top 期刊在前。</p>
+
+        <figure class="shot">
+          <img src="../img/t/rank-02-impact.jpg" width="1372" height="867" loading="lazy" alt="文献列表按影响因子从高到低排序：最前面三篇是 Nature communications，18.1，1区 Top；接着一篇 Advanced science (Weinheim, Baden-Wurttemberg, Germany) 14.1，两篇 Horticulture research 9.5，四篇 Genome biology 9.2，一篇 The New phytologist 8.7，都是 1区 Top；再往下是 Frontiers in plant science 5.9，2区。">
+          <figcaption><b>图 2</b>　按影响因子排序：Nature communications 的三篇在最前，接着是 Advanced science（14.1）、Horticulture research、Genome biology 和 The New phytologist，这十一篇都在中科院 1 区 Top 的期刊上。</figcaption>
+        </figure>
+
+        <p>期刊不在表里的文献显示「—」，沉到最后，不管哪个方向排序都是这样。本例拉到列表末尾：</p>
+
+        <figure class="shot">
+          <img src="../img/t/rank-03-unknown.jpg" width="1372" height="867" loading="lazy" alt="同一列表的末尾：BMC plant biology 5.6、2区 Top，Plant methods 5.2、2区，The Journal of biological chemistry 4.1、2区，Genes 3.1、3区；最后一行期刊是 bioRxiv，影响因子和分区都是一条短横。">
+          <figcaption><b>图 3</b>　列表末尾：只有 bioRxiv 那篇是「—」。bioRxiv 是预印本服务器，不在任何一份名单里。</figcaption>
+        </figure>
+
+        <aside class="note"><b>提示</b>影响因子和分区说的是期刊，不是这一篇文章。它们是期刊前两年所有文章被引次数的平均或排名，一本期刊里各篇的引用差别很大；不同学科的数字也不能直接比。用它排一个先读的顺序可以，判断一篇文章做得好不好，还得读它。</aside>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>一篇文献的期刊指标</h2>
+        <p>点开一篇文献，右侧「信息」页在期刊、年份那一行下面，多一行这本期刊的全部指标。列表的「分区」列只放得下一种分区，这里四种都写出来：</p>
+
+        <figure class="shot">
+          <img src="../img/t/rank-04-detail.jpg" width="1372" height="867" loading="lazy" alt="选中一篇 Nature communications 的文献，右侧信息页：作者下面一行是 Nature communications · 2025 · 正式发表，再下面一行灰字 IF 18.1 · JCR Q1 · 中科院 1区 Top · 新锐 1区 Top；然后是 DOI 和 PMID。详情打开后列表变窄，表头上出现「+3 列」。">
+          <figcaption><b>图 4</b>　期刊下面的一行：<code>IF 18.1 · JCR Q1 · 中科院 1区 Top · 新锐 1区 Top</code>。</figcaption>
+        </figure>
+
+        <p>把指针停在这一行上，会列出这本期刊在各表里的学科：本例是「JCR Q1：MULTIDISCIPLINARY SCIENCES」「中科院大类：综合性期刊」「新锐大类：综合性期刊」，最后是数据的版本。记录里的刊名和表里的不一样时，第一行先写是按哪个名字查到的：那篇 Advanced science (Weinheim, Baden-Wurttemberg, Germany) 的文献，悬停写的是「按「Advanced Science」查到」，可以核对认的是不是同一本。</p>
+        <p>详情打开时列表变窄，放不下的列收起来，表头上显示「+3 列」。本例「期刊」「分区」「收录」三列被收起，「影响因子」还在。</p>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>换一种分区</h2>
+        <p>「分区」列显示哪一种，在「设置 › 外观 › 期刊分区」里选：「中科院」「新锐」「JCR」。默认是中科院。本例换成 JCR。</p>
+
+        <figure class="shot">
+          <img src="../img/t/rank-05-setting.jpg" width="1372" height="867" loading="lazy" alt="设置的外观页：主题、文献列表、期刊分区、增强对比度四行；期刊分区一行的说明是：文献列表的「分区」列显示哪一种分区。数据随应用附带：JCR 2025 · 中科院分区表升级版 2025 · 新锐期刊分区表 2026 · 国际期刊预警名单 2025。右边三个选项中科院、新锐、JCR，选中的是 JCR。">
+          <figcaption><b>图 5</b>　「期刊分区」一行，说明里写着带的是哪几份名单。</figcaption>
+        </figure>
+
+        <p>点「返回」回到列表，「分区」列成了 Q1、Q2。再点列名按它排序：</p>
+
+        <figure class="shot">
+          <img src="../img/t/rank-06-jcr.jpg" width="1372" height="867" loading="lazy" alt="文献列表的分区列改为 JCR 分区并按它排序：Advanced science、Plant methods、Frontiers in plant science、International journal of molecular sciences、The New phytologist、Genome biology、BMC plant biology、Horticulture research 等一路都是 Q1。">
+          <figcaption><b>图 6</b>　换成 JCR 之后，满屏都是 Q1：中科院分 1、2、3 区的期刊，在 JCR 里几乎都在 Q1。</figcaption>
+        </figure>
+
+        <p>两种分区差别很大。International journal of molecular sciences 在中科院是 3 区，在 JCR 是 Q1；Frontiers in plant science、Plant methods 在中科院是 2 区，在 JCR 也是 Q1。JCR 的分区取的是期刊所属各学科里最好的一个；用哪一种，看你的单位或投稿要求认哪一种。看完在同一处点回「中科院」，后面的截图用的都是中科院分区。</p>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>预警名单上的期刊</h2>
+        <p>本库原来的 28 篇里没有预警期刊。为了看它是什么样子，点「添加文献」，选「通过 DOI / PMID / 网址添加…」，加了一篇 Natural Resources Forum 的文章（DOI <code>10.1111/1477-8947.12555</code>，讲撒哈拉以南非洲的农业外资和甲烷排放，与本库主题无关）。这本期刊在国际期刊预警名单 2025 上。</p>
+        <p>加进来之后，这一行的影响因子和分区不再是灰色，而是警示色。点两下「分区」列名，从 4 区排起，它就在最前面。把指针停在数字上，看得到期刊名、全部指标和预警原因：</p>
+
+        <figure class="shot">
+          <img src="../img/t/rank-07-warning.jpg" width="1372" height="867" loading="lazy" alt="文献列表按中科院分区从 4 区往 1 区排，第一行 Natural Resources Forum，影响因子 4.7 和分区 4区 是橙色；指针停在分区上，提示写着 Natural Resources Forum、IF 4.7 · JCR Q2 · 中科院 4区 · 新锐 3区、国际期刊预警名单 2025：论文工厂。这一行的收录是「待判断」。">
+          <figcaption><b>图 7</b>　预警期刊的数字用警示色；悬停写出原因「国际期刊预警名单 2025：论文工厂」。</figcaption>
+        </figure>
+
+        <p>它的详情里，期刊下面一行是「IF 4.7 · JCR Q2 · 中科院 4区 · 新锐 3区」，后面跟着同样颜色的「国际期刊预警名单 2025：论文工厂」。</p>
+        <p>上了预警名单不等于这一篇有问题，名单说的是期刊整体的风险。对这样的文献，引用前多核对它的数据和方法，或者找一篇别处发表的文献来佐证。</p>
+        <aside class="note"><b>提示</b>应用带的表里，国际期刊预警名单 2025 只有 5 种期刊；新锐期刊分区表里标为「Under Review」的期刊也记作预警，原因写「新锐期刊分区表 Under Review」，例如 Heliyon。</aside>
+      </section>
+
+      <section id="s6">
+        <h2><i>6</i>问助手，或者用命令行</h2>
+        <p>助手也能查这张表：它有一个「查期刊分区与影响因子」的工具。在侧栏点「助手」，问：</p>
+        <blockquote><cite>提问</cite><p>这个文献库里哪些文献发表在中科院 1 区的期刊上？各讲了什么？</p></blockquote>
+        <p>本例用的模型是 <code>claude/claude-sonnet-5-5</code>，半分钟内答完。它先按期刊查了 13 次，然后按期刊列出文献，每篇一两句话：</p>
+
+        <figure class="shot">
+          <img src="../img/t/rank-08-ask.jpg" width="1372" height="867" loading="lazy" alt="助手页：提问「这个文献库里哪些文献发表在中科院 1 区的期刊上？各讲了什么？」；回答上方是折叠的一行工具调用「查期刊分区与影响因子 ×13」；然后写按中科院分区表升级版 2025 查询，库里有 7 篇文献发表在 1 区期刊上，分属 5 种期刊；接着是标题「中科院 1 区文献」和 Horticulture Research、Advanced Science、New Phytologist、Genome Biology 下各篇的概要。">
+          <figcaption><b>图 8</b>　助手的回答：上面一行是它查期刊的 13 次工具调用，点开看得到每次查的是什么；下面按期刊列出 1 区的文献。开头写的「7 篇」「5 种期刊」是错的。</figcaption>
+        </figure>
+
+        <p>它下面列出的是 6 种期刊：Horticulture Research 2 篇、Advanced Science 1 篇、New Phytologist 1 篇、Genome Biology 4 篇、Nature Communications 3 篇、Communications Biology 1 篇，共 12 篇，和列表里按分区排序看到的一致。可它开头写的是「7 篇」「5 种期刊」。列完之后它自己发现了：先改成「11 篇」，接着又写「我数错了。上面实际列出 12 篇」。最后的数对了，开头那句却还留在回答里。这种数字要自己数一遍，或者回列表里按分区排序核对。</p>
+        <p>回答末尾的「说明」还列了其余期刊的分区，指出 IJMS 等期刊在 JCR 是 Q1、在中科院不是 1 区，bioRxiv 那篇是预印本、没有分区，那篇 Natural Resources Forum 的文章与主题无关、期刊在预警名单上，建议复核是否该收录。</p>
+
+        <p>不开窗口也能查。<code>wisp journal_metrics</code> 给一个刊名（全称、PubMed 式缩写或 ISSN），或者给一篇文献的 ID，返回 JSON：</p>
+
+        <figure class="code">
+          <figcaption>命令行</figcaption>
+<pre><code><span class="p">$</span> wisp journal_metrics --journal "Nat Commun"
+{
+  "asked": "Nat Commun",
+  "editions": "JCR 2025 · 中科院分区表升级版 2025 · 新锐期刊分区表 2026 · 国际期刊预警名单 2025",
+  "found": true,
+  "journal": {
+    "cas": 1,
+    "casCategory": "综合性期刊",
+    "casTop": true,
+    "eissn": "2041-1723",
+    "impact": 18.1,
+    "issn": "2041-1723",
+    "names": [
+      "Nature Communications"
+    ],
+    "quartile": "Q1",
+    "quartileCategory": "MULTIDISCIPLINARY SCIENCES",
+    "warning": "",
+    "xr": 1,
+    "xrCategory": "综合性期刊",
+    "xrTop": true
+  },
+  "summary": "IF 18.1 · JCR Q1 · 中科院 1区 Top · 新锐 1区 Top"
+}</code></pre>
+        </figure>
+
+        <p><code>summary</code> 就是详情里那一行；<code>warning</code> 是预警原因，不在名单上时为空。查不到时 <code>found</code> 是 <code>false</code>，例如那篇 bioRxiv 的文献：</p>
+
+        <figure class="code">
+          <figcaption>命令行</figcaption>
+<pre><code><span class="p">$</span> wisp journal_metrics --paper-id P-1794919880205-20630f8e
+{
+  "asked": "bioRxiv",
+  "editions": "JCR 2025 · 中科院分区表升级版 2025 · 新锐期刊分区表 2026 · 国际期刊预警名单 2025",
+  "found": false
+}</code></pre>
+        </figure>
+
+        <p>同一个工具也通过 <code>wisp mcp</code> 提供给其他 AI 客户端，用法见 <a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/CLI.md">命令行文档</a>。</p>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>回顾</h2>
+        <ul>
+          <li>文献列表的「影响因子」「分区」两列来自应用附带的四份名单，不联网；表头右键可以显示或收起。</li>
+          <li>点列名排序，排出先读的几篇；查不到的期刊（本例只有 bioRxiv）显示「—」，沉到最后。</li>
+          <li>详情里期刊下面一行写出全部指标；「设置 › 外观 › 期刊分区」决定列表显示中科院、新锐还是 JCR。</li>
+          <li>预警名单上的期刊用警示色显示，悬停看原因。</li>
+          <li>助手和 <code>wisp journal_metrics</code> 都能查同一张表；助手的计数要自己核对。挑出要读的几篇之后，可以接着<a href="extract.html">把一批文献读成一张表</a>。</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="上一篇和下一篇">
+    <a class="prev" href="ask.html"><small>上一篇 · 08</small><strong>向整个文献库提问，并核对回答</strong></a>
+    <a class="next" href="extract.html"><small>下一篇 · 10</small><strong>把一批文献读成一张表</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>参考</h2>
+      <ol>
+        <li><a href="index.html">全部教程</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">功能详解：每个页面能做什么</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/CLI.md">命令行：wisp 的每个工具</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">数据与隐私：文件放在哪里，哪些数据会离开本机</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">问题与想法：Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>关于这篇教程</b>　截图和数字来自 2026 年 11 月在 macOS 上用 v0.16.0 的一次实际操作。模型每次的回答不一样，你照做时措辞和数字会有出入，步骤是一样的。</p>
+      <p><b>助手可能出错</b>　它的建议和回答都要你确认；关键的数字和结论请对照原文。</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

@@ -229,6 +229,10 @@ pub enum MenuKind {
     PodcastFiles(String),
     /// 播客's playlist: every podcast kept in the library, the latest first.
     Podcasts,
+    /// The speeds 朗读 and 播客 play at (`playback::SPEEDS`).
+    PlaySpeed,
+    /// The player's ⋯ for the podcast of a paper (its id): make it anew, save its sound or its script.
+    PodcastMore(String),
 }
 
 /// What a person does to a review's record from the conversation.
@@ -456,15 +460,23 @@ pub enum Cmd {
     Layout(wisp_core::panes::Mode),
     /// Cut a piece out of a page as a picture for a question, or stop doing so.
     PdfCut,
-    /// Read the file on show aloud from the page in view, or stop reading it.
+    /// Read the file on show aloud from the page in view; while it is read, pause or go on.
     ReadAloud,
-    /// 播客: two hosts talk the paper on show over, or stop them.
+    /// 播客: the podcast of the paper on show. While it plays, pause or go on; else the one kept (from
+    /// where it was left), and only when there is none two hosts talk the paper over anew.
     Podcast,
+    /// Make the podcast of the paper on show (or of the one heard) anew, after `AskNewPodcast` asked.
+    NewPodcast,
+    AskNewPodcast,
+    /// Pause what is read aloud or talked over, or go on.
+    PauseReading,
+    /// Play 朗读 and 播客 at the speed of `playback::SPEEDS` at this index, from now on.
+    PlaySpeed(usize),
     /// Stop what is read aloud or talked over, wherever it is of.
     StopReading,
     /// Save a copy of the podcast kept for a paper (its id): its sound (true) or its script.
     SavePodcast(String, bool),
-    /// Play a kept podcast again, by its sound's attachment (again stops it).
+    /// Play a kept podcast again, by its sound's attachment, from where it was left (while it plays, pause or go on).
     PlayPodcast(String),
     /// 朗读 and 播客 have no voice yet: 设置 › AI on the DeepSeek service, added when there is none, for its key.
     SetUpSpeech,
@@ -1638,6 +1650,10 @@ pub struct Library {
     /// another file on show, or the library closed, stops it (dropping it stops the sound).
     pub aloud: Option<crate::read_aloud::Reading>,
     pub aloud_shown: Option<crate::read_aloud::Status>,
+    /// The player's bar as it was last drawn (its left edge and width in the window), and where the pointer
+    /// holds it while it is dragged: the place is sought on release.
+    pub seek_bar: (f32, f32),
+    pub seek_held: Option<f32>,
     pdf_events: Option<Subscription>,
     /// Another file of the paper in the other half of the viewer (#185), while there is one.
     pub beside: Option<Beside>,
@@ -2155,14 +2171,28 @@ impl Library {
     /// away: another paper opened, the library closed or the app quit (#194).
     pub fn keep_places(&mut self, cx: &App) {
         let views = self.pdf.iter().chain(self.beside.as_ref().map(|beside| &beside.view)).chain(self.pins.iter().map(|pin| &pin.view)).chain(self.windows.iter().map(|w| &w.view));
-        let places: Vec<(String, (usize, f32))> = views.map(|view| { let view = view.read(cx); (view.resource_id().to_string(), view.place()) }).collect();
+        let mut places: Vec<(String, (usize, f32))> = views.map(|view| { let view = view.read(cx); (view.resource_id().to_string(), view.place()) }).collect();
+        // A kept podcast is read at a sample of its sound.
+        places.extend(self.podcast_place());
         for (id, place) in &places { self.file_places.insert(id.clone(), *place); }
         let _ = self.store.save_reading_places(&places);
     }
 
-    /// Stop what is read aloud or talked over, and take the sentence it marked off the page.
+    /// Where the kept podcast heard is: its sound's attachment and the sample heard, kept as a file's place
+    /// is (`reading_places`, the sample as its page).
+    fn podcast_place(&self) -> Option<(String, (usize, f32))> {
+        let reading = self.aloud.as_ref()?;
+        Some((reading.sound.clone()?, (reading.status().played, 0.)))
+    }
+
+    /// Stop what is read aloud or talked over, and take the sentence it marked off the page. Where a kept
+    /// podcast was left is remembered: 播客 goes on from there.
     pub fn stop_reading(&mut self, cx: &mut App) {
-        (self.aloud, self.aloud_shown) = (None, None);
+        if let Some((sound, place)) = self.podcast_place() {
+            self.file_places.insert(sound.clone(), place);
+            let _ = self.store.save_reading_places(&[(sound, place)]);
+        }
+        (self.aloud, self.aloud_shown, self.seek_held) = (None, None, None);
         if let Some(pdf) = &self.pdf { pdf.update(cx, |pdf, cx| pdf.follow_spoken(None, cx)) }
     }
 
@@ -2195,10 +2225,19 @@ impl Library {
     pub fn podcast_away(&self, cx: &App) -> Option<(&Paper, String, crate::read_aloud::Status)> {
         let reading = self.aloud.as_ref().filter(|r| r.kind == crate::read_aloud::Kind::Podcast)?;
         let viewing = self.pdf_on_show();
-        let on_show = self.selected.is_some() && viewing && self.pdf.as_ref().is_some_and(|pdf| pdf.read(cx).resource_id() == reading.resource);
+        let on_show = self.selected.is_some() && viewing && self.pdf.as_ref().is_some_and(|pdf| self.playing_here(pdf.read(cx).resource_id()).is_some());
         if on_show { return None }
         let paper = self.files.iter().find(|f| f.id == reading.resource).and_then(|f| self.papers.iter().find(|p| p.id == f.paper_id))?;
         Some((paper, reading.resource.clone(), self.aloud_shown.clone()?))
+    }
+
+    /// What is read of the file `file` (`PaperFile::id`) while it is on show: 朗读 of that file, or 播客 of
+    /// its paper (made from whichever of its files, or played again from what was kept).
+    pub fn playing_here(&self, file: &str) -> Option<crate::read_aloud::Kind> {
+        let reading = self.aloud.as_ref()?;
+        if reading.resource == file { return Some(reading.kind) }
+        let paper = |id: &str| self.files.iter().find(|f| f.id == id).map(|f| f.paper_id.as_str());
+        (reading.kind == crate::read_aloud::Kind::Podcast && paper(file).is_some() && paper(file) == paper(&reading.resource)).then_some(reading.kind)
     }
 
     /// The viewer's size as it was laid out, both halves of it while it shows two files.
@@ -2535,10 +2574,13 @@ impl Workspace {
                 items.push(ticked(t("方框"), view.tool() == crate::pdf::Tool::Box, Cmd::PdfTool(crate::pdf::Tool::Box)));
                 items.push(ticked(t("便签"), view.tool() == crate::pdf::Tool::Note, Cmd::PdfTool(crate::pdf::Tool::Note)));
                 part(items, breaks);
-                let playing = lib.aloud.as_ref().filter(|r| r.resource == view.resource_id()).map(|r| r.kind);
-                items.push(plain(if playing == Some(crate::read_aloud::Kind::Aloud) { t("停止朗读") } else { t("朗读") }, Cmd::ReadAloud));
-                items.push(plain(if playing == Some(crate::read_aloud::Kind::Podcast) { t("停止播客") } else { t("播客") }, Cmd::Podcast));
+                let playing = lib.playing_here(view.resource_id());
+                let paused = lib.aloud_shown.as_ref().is_some_and(|status| status.paused);
+                let label = |kind, idle, pause, resume| if playing != Some(kind) { idle } else if paused { resume } else { pause };
+                items.push(plain(label(crate::read_aloud::Kind::Aloud, t("朗读"), t("暂停朗读"), t("继续朗读")), Cmd::ReadAloud));
+                items.push(plain(label(crate::read_aloud::Kind::Podcast, t("播客"), t("暂停播客"), t("继续播客")), Cmd::Podcast));
                 let kept = podcast_files(lib, &paper);
+                if kept.0.is_some() || playing == Some(crate::read_aloud::Kind::Podcast) { items.push(plain(t("重新生成播客…"), Cmd::AskNewPodcast)) }
                 if kept.0.is_some() { items.push(plain(t("保存播客音频（WAV）…"), Cmd::SavePodcast(paper.clone(), true))) }
                 if kept.1.is_some() { items.push(plain(t("保存播客稿子（Markdown）…"), Cmd::SavePodcast(paper.clone(), false))) }
             }
@@ -2708,9 +2750,23 @@ impl Workspace {
                 if kept.0.is_some() { items.push(MenuItem { label: t("保存播客音频（WAV）…").into(), checked: false, note: None, cmd: Cmd::SavePodcast(paper.clone(), true) }) }
                 if kept.1.is_some() { items.push(MenuItem { label: t("保存播客稿子（Markdown）…").into(), checked: false, note: None, cmd: Cmd::SavePodcast(paper.clone(), false) }) }
             }
+            MenuKind::PlaySpeed => {
+                let speed = wisp_core::playback::speed(self.settings.play_speed);
+                for (index, each) in wisp_core::playback::SPEEDS.into_iter().enumerate() {
+                    items.push(MenuItem { label: wisp_core::playback::speed_label(each).into(), checked: each == speed, note: None, cmd: Cmd::PlaySpeed(index) });
+                }
+            }
+            MenuKind::PodcastMore(paper) => {
+                let Some(lib) = &self.lib else { return };
+                items.push(item(t("重新生成播客…"), Cmd::AskNewPodcast));
+                let kept = podcast_files(lib, &paper);
+                if kept.0.is_some() || kept.1.is_some() { breaks.push(items.len()) }
+                if kept.0.is_some() { items.push(item(t("保存播客音频（WAV）…"), Cmd::SavePodcast(paper.clone(), true))) }
+                if kept.1.is_some() { items.push(item(t("保存播客稿子（Markdown）…"), Cmd::SavePodcast(paper.clone(), false))) }
+            }
             MenuKind::Podcasts => {
                 let Some(lib) = &self.lib else { return };
-                let playing = lib.aloud.as_ref().and_then(|r| r.replay.clone());
+                let playing = lib.aloud.as_ref().and_then(|r| r.sound.clone());
                 for (paper, sound, _) in podcast_list(lib) {
                     // How long it plays: 16-bit samples at the service's rate, after the WAV header.
                     let seconds = sound.size_bytes.saturating_sub(44) / 2 / wisp_core::speech::SAMPLE_RATE as u64;
@@ -3447,25 +3503,53 @@ impl Workspace {
                 }
             }
             Cmd::PlayPodcast(sound) => {
-                let again = self.lib.as_ref().and_then(|lib| lib.aloud.as_ref()).is_some_and(|r| r.replay.as_deref() == Some(sound.as_str()));
-                if again {
-                    if let Some(lib) = self.lib.as_mut() { lib.stop_reading(cx) }
-                    return cx.notify();
-                }
+                let again = self.lib.as_ref().and_then(|lib| lib.aloud.as_ref()).is_some_and(|r| r.sound.as_deref() == Some(sound.as_str()));
+                if again { return self.run(Cmd::PauseReading, window, cx) }
                 self.play_podcast(&sound, cx);
+            }
+            Cmd::PauseReading => {
+                let Some(lib) = self.lib.as_mut() else { return };
+                if let Some(reading) = lib.aloud.as_ref() {
+                    let paused = reading.status().paused;
+                    reading.pause(!paused);
+                    lib.aloud_shown = Some(reading.status());
+                }
+                cx.notify();
+            }
+            Cmd::PlaySpeed(index) => {
+                let speed = wisp_core::playback::SPEEDS.get(index).copied().unwrap_or(1.);
+                self.settings.play_speed = speed;
+                self.save_settings(cx);
+                if let Some(reading) = self.lib.as_ref().and_then(|lib| lib.aloud.as_ref()) { reading.set_speed(speed) }
+                cx.notify();
+            }
+            Cmd::AskNewPodcast => {
+                self.modal = Some(Modal::Confirm { title: t("重新生成播客？").into(), message: t("会请模型重写对话稿，再用 DeepSeek 的语音服务读出来，按字数计费。已存的那一版仍留在附件里。").into(), action: t("重新生成").into(), cmd: Cmd::NewPodcast });
+                cx.notify();
+            }
+            Cmd::NewPodcast => {
+                self.modal = None;
+                // Of the paper on show; from the bar at the window's foot, of the one heard.
+                let Some(lib) = self.lib.as_ref() else { return };
+                let on_show = lib.pdf.as_ref().map(|pdf| pdf.read(cx).resource_id().to_string());
+                let heard = lib.aloud.as_ref().filter(|r| r.kind == crate::read_aloud::Kind::Podcast).map(|r| r.resource.clone());
+                let away = heard.is_some() && lib.podcast_away(cx).is_some();
+                let Some(resource) = (if away { heard } else { on_show.or(heard) }) else { return };
+                self.podcast(&resource, cx);
             }
             Cmd::ReadAloud | Cmd::Podcast => {
                 let kind = if matches!(cmd, Cmd::Podcast) { crate::read_aloud::Kind::Podcast } else { crate::read_aloud::Kind::Aloud };
-                // The same button again stops it; the other one, or the same one on another file (a podcast
-                // heard on after its paper was left), stops it and starts its own.
-                let on_show = self.lib.as_ref().and_then(|lib| lib.pdf.as_ref()).map(|pdf| pdf.read(cx).resource_id().to_string());
-                let same = self.lib.as_ref().and_then(|lib| lib.aloud.as_ref()).map(|reading| reading.kind == kind && on_show.as_deref() == Some(reading.resource.as_str()));
-                if let Some(lib) = self.lib.as_mut().filter(|_| same.is_some()) {
-                    lib.stop_reading(cx);
-                    cx.notify();
-                }
-                if same != Some(true) {
-                    if kind == crate::read_aloud::Kind::Podcast { self.podcast(cx) } else { self.read_aloud(None, cx) }
+                // While its button's reading is here, the button pauses it and goes on: the place is kept.
+                // The other one, or 播客 of another paper, stops it and starts its own.
+                let Some(lib) = self.lib.as_ref() else { return };
+                let Some(on_show) = lib.pdf.as_ref().map(|pdf| pdf.read(cx).resource_id().to_string()) else { return };
+                if lib.playing_here(&on_show) == Some(kind) { return self.run(Cmd::PauseReading, window, cx) }
+                if kind == crate::read_aloud::Kind::Aloud { return self.read_aloud(None, cx) }
+                // A podcast of the paper was kept: it plays from where it was left. Making one anew is asked for apart (`AskNewPodcast`).
+                let paper = lib.files.iter().find(|f| f.id == on_show).map(|f| f.paper_id.clone()).unwrap_or_default();
+                match podcast_files(lib, &paper).0.map(|f| f.id.clone()) {
+                    Some(sound) => self.play_podcast(&sound, cx),
+                    None => self.podcast(&on_show, cx),
                 }
             }
             Cmd::PdfTool(tool) => {
@@ -4526,6 +4610,8 @@ impl Workspace {
             pdf: None,
             aloud: None,
             aloud_shown: None,
+            seek_bar: (0., 0.),
+            seek_held: None,
             pdf_events: None,
             beside: None,
             pins: vec![],
@@ -4712,12 +4798,14 @@ impl Workspace {
         // The text kept for the file when there is some; the file itself is read on the reading's thread.
         let kept = match lib.store.fulltext_pages(&resource) { Ok(Some(Ok(pages))) => Some(pages), _ => None };
         let path = lib.files.iter().find(|f| f.id == resource).map(|f| lib.store.file_path(f));
+        // Its paper's record finds the title on the first page (an attachment's will not have it).
+        let paper = lib.files.iter().find(|f| f.id == resource).and_then(|f| lib.papers.iter().find(|p| p.id == f.paper_id)).cloned().unwrap_or_default();
         let plan = move || -> Result<crate::read_aloud::Plan, String> {
             use wisp_core::speech;
             let pieces = match selection {
                 // A selection marks no page on the button; its sentences are marked on its page all the same.
                 Some((on, text)) => speech::pieces(&speech::readable(&text), speech::PIECE).into_iter().map(|piece| (0, on, piece)).collect(),
-                None => speech::from_pages(&pages_of(kept, path)?, page).into_iter().map(|(page, piece)| (page, page, piece)).collect::<Vec<_>>(),
+                None => speech::from_pages(&pages_of(kept, path)?, page, &paper).into_iter().map(|(page, piece)| (page, page, piece)).collect::<Vec<_>>(),
             };
             let voice = speech::voice(&voice).to_string();
             Ok(crate::read_aloud::Plan::of(pieces.into_iter().map(|(mark, page, text)| crate::read_aloud::Piece { mark, page, voice: voice.clone(), text, pause: false }).collect()))
@@ -4731,14 +4819,13 @@ impl Workspace {
     /// their script from the file's text on the reading's thread; each turn is then spoken in its host's
     /// voice and played as it comes. Once all the sound came it is kept as the paper's attachments: a WAV
     /// file and the script.
-    fn podcast(&mut self, cx: &mut Context<Self>) {
+    fn podcast(&mut self, resource: &str, cx: &mut Context<Self>) {
         let Some(provider) = self.settings.speech_provider().cloned().filter(|p| !p.key().is_empty()) else { return self.ask_for_speech(cx) };
         let key = provider.key();
         let profile = self.settings.speaking_profile_for(wisp_core::settings::Task::Chat);
         let language = match self.settings.language { wisp_core::settings::Language::Zh => "中文", wisp_core::settings::Language::En => "英文" };
         let Some(lib) = self.lib.as_mut() else { return };
-        let Some(pdf) = lib.pdf.clone() else { return };
-        let resource = pdf.read(cx).resource_id().to_string();
+        let resource = resource.to_string();
         let Some(paper) = lib.files.iter().find(|f| f.id == resource).and_then(|f| lib.papers.iter().find(|p| p.id == f.paper_id)).cloned() else { return };
         let kept = match lib.store.fulltext_pages(&resource) { Ok(Some(Ok(pages))) => Some(pages), _ => None };
         let path = lib.files.iter().find(|f| f.id == resource).map(|f| lib.store.file_path(f));
@@ -4799,6 +4886,7 @@ impl Workspace {
     fn follow_reading(&mut self, reading: crate::read_aloud::Reading, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
         lib.stop_reading(cx);
+        reading.set_speed(self.settings.play_speed);
         lib.aloud_shown = Some(reading.status());
         lib.aloud = Some(reading);
         let library = lib.info.id.clone();
@@ -4864,6 +4952,11 @@ impl Workspace {
         if let Err(error) = written { return self.fail(tf!("播客没有存下来：{}", "The podcast was not saved: {}", error), cx) }
         if self.change(cx, |lib| { lib.store.import_file(&paper_id, &audio, "other")?; lib.store.import_file(&paper_id, &text, "other")?; Ok(()) }) {
             self.say(t("播客的声音和稿子已存为这篇的附件"), cx);
+            // The podcast heard is the one kept now: where it is left is remembered under its sound.
+            if let Some(lib) = self.lib.as_mut() {
+                let sound = podcast_files(lib, &paper_id).0.map(|f| f.id.clone());
+                if let Some(reading) = lib.aloud.as_mut().filter(|r| r.resource == resource) { reading.sound = sound }
+            }
         }
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -4883,7 +4976,8 @@ impl Workspace {
         let Some(file) = lib.files.iter().find(|f| f.id == sound) else { return };
         let script = podcast_files(lib, &file.paper_id).1.map(|f| lib.store.file_path(f));
         let resource = lib.pdf_file(&file.paper_id).map_or(file.id.clone(), |f| f.id.clone());
-        let reading = crate::read_aloud::Reading::replay(resource, file.id.clone(), lib.store.file_path(file), script);
+        let at = lib.file_places.get(&file.id).map_or(0, |place| place.0);
+        let reading = crate::read_aloud::Reading::replay(resource, file.id.clone(), lib.store.file_path(file), script, at);
         self.follow_reading(reading, cx);
     }
 
@@ -8274,8 +8368,17 @@ impl Workspace {
                     return;
                 }
                 "readaloud" => Some(Cmd::ReadAloud),
-                // `podcast` has two hosts talk the PDF on show over (again stops them).
+                // `podcast` plays the podcast of the PDF on show: the one kept, else two hosts talk it over anew (again pauses
+                // or goes on, as `pause` does); `podcast:new` makes it anew without asking. `seek:<0..1>` plays it from that
+                // share of what was made, `speed:<n>` at the n-th of `playback::SPEEDS`.
+                "podcast" if arg == "new" => Some(Cmd::NewPodcast),
                 "podcast" => Some(Cmd::Podcast),
+                "pause" => Some(Cmd::PauseReading),
+                "speed" => Some(Cmd::PlaySpeed(arg.parse().unwrap_or(1))),
+                "seek" => {
+                    if let Some(reading) = self.lib.as_ref().and_then(|lib| lib.aloud.as_ref()) { reading.seek((arg.parse::<f64>().unwrap_or(0.) * reading.status().length as f64) as usize) }
+                    return;
+                }
                 // `pdftool:box` / `pdftool:note` draw boxes / place a note on the PDF on show; again, or `pdftool:off`, selects text.
                 "pdftool" => Some(Cmd::PdfTool(match arg { "box" => crate::pdf::Tool::Box, "note" => crate::pdf::Tool::Note, _ => crate::pdf::Tool::Select })),
                 // `readfile:<n>` reads the n-th PDF of the selected paper (0 its main text, then its attachments) in the viewer.
@@ -8376,7 +8479,7 @@ impl Workspace {
                     return;
                 }
                 "menu" => {
-                    let kind = match arg { "sort" => MenuKind::Sort, "columns" => MenuKind::Columns, "year" => MenuKind::Filter(FilterKey::Year), "zoom" => MenuKind::PdfZoom, "pdfsplit" => MenuKind::PdfSplit, "pdfmore" => MenuKind::PdfMore, "panes" => MenuKind::Panes, "layout" => MenuKind::Layout, "pdffiles" => MenuKind::PdfFiles, "fulltext" => MenuKind::Filter(FilterKey::Fulltext), "manuscripts" => MenuKind::Manuscripts, "export" => MenuKind::ManuscriptExport, "retry" => MenuKind::ExtractRetry, "podcasts" => MenuKind::Podcasts, _ => MenuKind::Add };
+                    let kind = match arg { "sort" => MenuKind::Sort, "columns" => MenuKind::Columns, "year" => MenuKind::Filter(FilterKey::Year), "zoom" => MenuKind::PdfZoom, "pdfsplit" => MenuKind::PdfSplit, "pdfmore" => MenuKind::PdfMore, "panes" => MenuKind::Panes, "layout" => MenuKind::Layout, "pdffiles" => MenuKind::PdfFiles, "fulltext" => MenuKind::Filter(FilterKey::Fulltext), "manuscripts" => MenuKind::Manuscripts, "export" => MenuKind::ManuscriptExport, "retry" => MenuKind::ExtractRetry, "podcasts" => MenuKind::Podcasts, "speed" => MenuKind::PlaySpeed, _ => MenuKind::Add };
                     self.open_menu(kind, point(px(if matches!(arg, "zoom" | "manuscripts" | "export" | "retry") { 900. } else { 20. }), px(120.)), cx);
                     return;
                 }

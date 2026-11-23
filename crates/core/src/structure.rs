@@ -47,13 +47,13 @@ pub struct Sentence {
 }
 
 /// A line with its digits blanked: what a running header looks like from page to page.
-fn shape(line: &str) -> String {
+pub(crate) fn shape(line: &str) -> String {
     line.chars().map(|c| if c.is_ascii_digit() { '#' } else { c }).collect::<String>().to_lowercase()
 }
 
 /// The lines that come back on page after page: running headers and
 /// footers, journal names, download notices.
-fn furniture(pages: &[String]) -> HashSet<String> {
+pub(crate) fn furniture(pages: &[String]) -> HashSet<String> {
     let mut seen: HashMap<String, usize> = HashMap::new();
     for page in pages {
         let shapes: HashSet<String> = page.lines().map(str::trim).filter(|l| !l.is_empty() && l.chars().count() <= 120).map(shape).collect();
@@ -219,7 +219,7 @@ fn join_lines(lines: &[&str], lexicon: &Lexicon) -> String {
 }
 
 /// Whether a block of these lines looks like a title standing alone.
-fn looks_like_heading(lines: &[&str], text: &str) -> bool {
+pub(crate) fn looks_like_heading(lines: &[&str], text: &str) -> bool {
     let count = width(text);
     if lines.len() > 2 || !(3..=110).contains(&count) { return false }
     let Some(first) = text.chars().next() else { return false };
@@ -243,13 +243,13 @@ fn is_caption(text: &str) -> bool {
 /// The words of a button a publisher draws on the page: Crossmark's, which
 /// stands alone like a title on the first page and would head the
 /// sentences after it.
-fn is_button(text: &str) -> bool {
+pub(crate) fn is_button(text: &str) -> bool {
     let words = text.split_whitespace().map(str::to_lowercase).collect::<Vec<_>>().join(" ");
     matches!(words.as_str(), "check for updates" | "check for update" | "updates check for")
 }
 
 /// The small print of a first or last page: licence, copyright, correspondence, dates.
-fn is_notice(text: &str) -> bool {
+pub(crate) fn is_notice(text: &str) -> bool {
     let lower = text.to_lowercase();
     ["creative commons", "licensed under", "© the author", "the author(s)", "all rights reserved", "correspondence:", "*correspondence", "received:", "accepted:", "published online", "publisher's note", "publisher’s note", "doi.org/", "open access this article", "these authors contributed equally", "handling editor", "edited by", "reviewed by", "peer review", "ª the author", "收稿日期", "通信作者", "通讯作者", "出版日期", "基金项目", "作者简介", "責任著者", "교신저자"]
         .iter()
