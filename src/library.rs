@@ -623,8 +623,12 @@ impl Workspace {
             .enumerate()
             .map(|(i, (tag, _))| {
                 // Listed in the order of the whole library, so the rows stay put while the search is typed.
+                // Chosen (all must be held) is lit; excluded is struck through, quiet, and a click lets it go.
+                // Its number is then how many papers it hides.
                 let count = lib.counts.tag(tag);
-                let active = on_papers && &lib.filters.tag == tag;
+                let active = on_papers && lib.filters.chosen(tag);
+                let excluded = on_papers && lib.filters.excluded(tag);
+                let clicked = tag.clone();
                 div()
                     .id(("tag", i))
                     .flex()
@@ -636,14 +640,20 @@ impl Workspace {
                     .cursor_pointer()
                     .when(active, |d| d.bg(Theme::accent_soft()).text_color(Theme::accent()))
                     .when(!active, |d| d.hover(|s| s.bg(Theme::hover())))
-                    .on_click(self.on(Cmd::SetFilter(FilterKey::Tag, if active { String::new() } else { tag.clone() }), cx))
+                    .when(excluded, |d| d.text_color(Theme::text_tertiary()))
+                    // Alone a click chooses just this tag; ⌘ / Ctrl adds it to those chosen, ⌥ / Alt excludes it.
+                    .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
+                        let held = ev.modifiers();
+                        this.run(if held.alt { Cmd::ExcludeTag(clicked.clone()) } else { Cmd::ClickTag(clicked.clone(), held.secondary()) }, window, cx)
+                    }))
                     .on_mouse_down(MouseButton::Right, self.on_context(MenuKind::Tag(tag.clone()), cx))
-                    .child(div().size(px(6.)).flex_none().rounded_full().bg(if active { Theme::accent() } else { Theme::text_placeholder() }))
-                    .child(div().flex_1().min_w_0().truncate().child(tag.clone()))
-                    .child(div().text_size(text_px(12.)).text_color(if count == 0 { Theme::text_placeholder() } else { Theme::text_tertiary() }).child(count.to_string()))
+                    .child(if excluded { div().w(px(6.)).h(px(1.5)).flex_none().rounded_full().bg(Theme::text_tertiary()) } else { div().size(px(6.)).flex_none().rounded_full().bg(if active { Theme::accent() } else { Theme::text_placeholder() }) })
+                    .child(div().flex_1().min_w_0().truncate().when(excluded, |d| d.line_through()).child(tag.clone()))
+                    .child(div().text_size(text_px(12.)).text_color(if count == 0 || excluded { Theme::text_placeholder() } else { Theme::text_tertiary() }).child(count.to_string()))
                     .into_any_element()
             })
             .collect();
+        let tags_set = on_papers && !(lib.filters.tags.is_empty() && lib.filters.not_tags.is_empty());
         let trash_count = lib.trash.len();
         div()
             .id("library-sidebar")
@@ -683,7 +693,19 @@ impl Workspace {
                     .flex_1()
                     .min_h(px(80.))
                     .gap(px(2.))
-                    .child(ui::caption(t("标签")).px(px(8.)).py(px(4.)))
+                    // The caption says on hover what the keys held with a click do; while tags are chosen or excluded, 清除 lets them all go.
+                    .child(
+                        div()
+                            .id("tags-head")
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .px(px(8.))
+                            .py(px(4.))
+                            .tooltip(ui::tip(tf!("{}多选 · {}排除", "{} to add · {} to exclude", crate::context::held_click(false), crate::context::held_click(true))))
+                            .child(ui::caption(t("标签")))
+                            .when(tags_set, |d| d.child(div().id("tags-clear").text_size(text_px(11.)).text_color(Theme::text_tertiary()).cursor_pointer().hover(|s| s.text_color(Theme::text_secondary())).on_click(self.on(Cmd::SetFilter(FilterKey::Tag, String::new()), cx)).child(t("清除")))),
+                    )
                     .child(div().id("tags").flex().flex_col().flex_1().min_h_0().overflow_y_scroll().gap(px(1.)).children(tag_rows).when(tags.is_empty(), |d| d.child(div().px(px(8.)).text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(t("编辑文献时添加标签")))))
             )
             .children(self.render_import(cx))
@@ -788,7 +810,7 @@ impl Workspace {
             ("f-reading".into(), t("阅读").into(), label(&READINGS, &f.reading).to_string(), FilterKey::Reading),
             ("f-screening".into(), t("收录").into(), label(&SCREENINGS, &f.screening).to_string(), FilterKey::Screening),
             ("f-fulltext".into(), t("全文").into(), label(&FULLTEXTS, &f.fulltext).to_string(), FilterKey::Fulltext),
-            ("f-tag".into(), t("标签").into(), f.tag.clone(), FilterKey::Tag),
+            ("f-tag".into(), t("标签").into(), f.tags.iter().cloned().chain(f.not_tags.iter().map(|tag| format!("−{tag}"))).collect::<Vec<_>>().join(", "), FilterKey::Tag),
         ];
         for (i, field) in lib.fields.iter().enumerate() {
             if field.kind == FieldKind::Text { continue }
@@ -1337,7 +1359,7 @@ impl Workspace {
                     .justify_between()
                     .gap(px(8.))
                     .px(px(8.))
-                    .child(ui::caption(if lib.filters.tag.is_empty() { view_label(lib.filters.view).to_string() } else { format!("{} · #{}", view_label(lib.filters.view), lib.filters.tag) }).min_w_0().truncate())
+                    .child(ui::caption(if lib.filters.tags.is_empty() && lib.filters.not_tags.is_empty() { view_label(lib.filters.view).to_string() } else { format!("{} · {}", view_label(lib.filters.view), lib.filters.tags_said()) }).min_w_0().truncate())
                     .child(div().flex_none().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(if filtered || shown != total { tf!("{shown} / {total} 篇", "{shown} / {total} papers") } else { tf!("{total} 篇", "{total} papers") })),
             )
             .child(body)
@@ -1413,7 +1435,10 @@ impl Workspace {
             .enumerate()
             .map(|(i, entry)| {
                 let p = &entry.paper;
+                let chosen = lib.trash_chosen.contains(&p.id);
+                // A click chooses the paper, with ⌘ / Ctrl or on its box one more, with Shift a stretch; its buttons are for it alone.
                 div()
+                    .id(SharedString::from(format!("trashed-{}", p.id)))
                     .flex()
                     .items_center()
                     .gap(px(12.))
@@ -1421,20 +1446,43 @@ impl Workspace {
                     .py(px(10.))
                     .border_b_1()
                     .border_color(Theme::line())
-                    .on_mouse_down(MouseButton::Right, self.on_context(MenuKind::Trashed(p.id.clone()), cx))
-                    .child(div().flex().flex_col().flex_1().min_w_0().child(div().truncate().child(p.title.clone())).child(div().truncate().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tf!("{} · 删除于 {}", "{} · Deleted {}", if p.authors.is_empty() { t("作者待补").to_string() } else { crate::i18n::short_authors(p) }, time::date_text(&entry.deleted_at)))))
-                    .child(ui::secondary_button(("restore", i), t("恢复")).on_click(self.on(Cmd::RestorePaper(p.id.clone()), cx)))
-                    .child(ui::ghost_button(("delete", i), Some("bin"), Some(t("彻底删除").into())).text_color(Theme::danger()).on_click(self.on(Cmd::AskDeletePaper(p.id.clone()), cx)))
+                    .cursor_pointer()
+                    .when(chosen, |d| d.bg(Theme::accent_soft()))
+                    .when(!chosen, |d| d.hover(|s| s.bg(Theme::hover())))
+                    .on_mouse_down(MouseButton::Right, self.on_trashed_context(p.id.clone(), cx))
+                    .on_click(cx.listener({
+                        let id = p.id.clone();
+                        move |this, ev: &ClickEvent, window, cx| this.choose_trashed(&id, ev.modifiers().secondary(), ev.modifiers().shift, window, cx)
+                    }))
+                    .child(div().id(("trash-tick", i)).flex_none().child(crate::extract::tick_box(chosen, true)).on_click(cx.listener({
+                        let id = p.id.clone();
+                        move |this, ev: &ClickEvent, window, cx| {
+                            cx.stop_propagation();
+                            this.choose_trashed(&id, true, ev.modifiers().shift, window, cx)
+                        }
+                    })))
+                    .child(div().flex().flex_col().flex_1().min_w_0().child(div().truncate().when(chosen, |d| d.text_color(Theme::accent())).child(p.title.clone())).child(div().truncate().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tf!("{} · 删除于 {}", "{} · Deleted {}", if p.authors.is_empty() { t("作者待补").to_string() } else { crate::i18n::short_authors(p) }, time::date_text(&entry.deleted_at)))))
+                    .child(ui::secondary_button(("restore", i), t("恢复")).on_click(self.on_alone(Cmd::RestorePaper(p.id.clone()), cx)))
+                    .child(ui::ghost_button(("delete", i), Some("bin"), Some(t("彻底删除").into())).text_color(Theme::danger()).on_click(self.on_alone(Cmd::AskDeletePaper(p.id.clone()), cx)))
                     .into_any_element()
             })
             .collect();
+        let (chosen, total) = (lib.trash_chosen_ids(), lib.trash.len());
+        let count = chosen.len();
+        // With papers chosen, the head's two buttons are for them, where 清空回收站 and 全部恢复 stand otherwise.
+        let (delete, restore) = if count == 0 {
+            (ui::ghost_button("trash-empty", Some("bin"), Some(t("清空回收站").into())).on_click(self.on(Cmd::AskEmptyTrash, cx)), ui::secondary_button("trash-restore-all", t("全部恢复")).on_click(self.on(Cmd::RestoreAll, cx)))
+        } else {
+            (ui::ghost_button("trash-delete-chosen", Some("bin"), Some(tf!("彻底删除所选 {count} 篇", "Delete {count} selected").into())).on_click(self.on(Cmd::AskDeletePapers(chosen.clone()), cx)), ui::secondary_button("trash-restore-chosen", tf!("恢复所选 {count} 篇", "Restore {count} selected")).on_click(self.on(Cmd::RestorePapers(chosen), cx)))
+        };
+        let all = count == total;
         div()
             .flex()
             .flex_col()
             .size_full()
-            // 全部恢复 stands over the rows' 恢复; 清空回收站, which cannot be undone, by the title, away from both.
+            // 全部恢复 stands over the rows' 恢复, 全选 beside it; 清空回收站, which cannot be undone, by the title, away from them.
             .child(ui::column_head().gap(px(8.)).child(div().flex_none().text_size(text_px(ui::HEAD_TITLE)).font_weight(FontWeight::SEMIBOLD).child(t("回收站"))).child(ui::hint("trash-hint", t("这里的文献保留着笔记、词条和 PDF，可以恢复。它们仍会阻止同一篇文献被重复导入。")))
-                .when(!rows.is_empty(), |d| d.child(ui::ghost_button("trash-empty", Some("bin"), Some(t("清空回收站").into())).text_color(Theme::danger()).on_click(self.on(Cmd::AskEmptyTrash, cx))).child(div().flex_1()).child(ui::secondary_button("trash-restore-all", t("全部恢复")).on_click(self.on(Cmd::RestoreAll, cx)))))
+                .when(!rows.is_empty(), |d| d.child(delete.text_color(Theme::danger())).child(div().flex_1()).child(ui::ghost_button("trash-choose-all", None, Some(if all { t("取消全选") } else { t("全选") }.into())).on_click(self.on(Cmd::ChooseAllTrash(!all), cx))).child(restore)))
             .child(if rows.is_empty() { ui::empty_state("bin", t("回收站是空的"), "").into_any_element() } else { div().id("trash").flex().flex_col().flex_1().min_h_0().overflow_y_scroll().children(rows).into_any_element() })
             .into_any_element()
     }

@@ -32,10 +32,73 @@ pub struct Row {
     pub problems: Vec<String>,
 }
 
+/// One library of a Zotero database that can be imported: 我的文库 or a group.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Library {
+    /// Zotero's `libraryID`, what `read` takes.
+    pub id: i64,
+    /// `user` or `group`.
+    pub kind: String,
+    /// The group's name; `MY_LIBRARY` for the person's own.
+    pub name: String,
+    /// The group's id at zotero.org, for a group.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_id: Option<i64>,
+    /// How many items `read` takes from it.
+    pub items: usize,
+}
+
+impl Library {
+    pub fn is_user(&self) -> bool { self.kind == "user" }
+}
+
+/// What Zotero calls the person's own library, as the tools say it.
+pub const MY_LIBRARY: &str = "我的文库";
+
+/// The items `read` takes: of the person's own library and the groups, no notes, attachments,
+/// annotations or what is in Zotero's trash. `?1` is one `libraryID`, or NULL for all of them.
+const ITEMS: &str = "FROM items i JOIN itemTypes t USING(itemTypeID) JOIN libraries l USING(libraryID) WHERE l.type IN ('user', 'group') AND t.typeName NOT IN ('attachment', 'note', 'annotation') AND NOT EXISTS (SELECT 1 FROM deletedItems d WHERE d.itemID = i.itemID) AND (?1 IS NULL OR i.libraryID = ?1)";
+
 /// A read transaction includes committed WAL data and keeps all queries on the
 /// same snapshot. Do not use `immutable=1`, which would ignore Zotero's WAL.
-pub fn read(path: &Path) -> Result<Import> {
-    read_snapshot(path).map_err(|error| {
+/// `library` is one `Library::id`; `None` reads every library.
+pub fn read(path: &Path, library: Option<i64>) -> Result<Import> {
+    explained(snapshot(path).and_then(|db| read_items(&db, path.parent().unwrap_or_else(|| Path::new(".")), library)))
+}
+
+/// The libraries `read` can import, the person's own first, then the groups by name.
+pub fn libraries(path: &Path) -> Result<Vec<Library>> {
+    explained(snapshot(path).and_then(|db| list_libraries(&db)))
+}
+
+/// The library a caller named: its `id`, a group's id at zotero.org, a group's name, or
+/// 我的文库 (also `user`, `My Library`). Empty, 全部 or `all` is every library. A name that
+/// fits none, or two groups, is refused with the libraries there are.
+pub fn choose(libraries: &[Library], wanted: &str) -> Result<Option<i64>> {
+    let wanted = wanted.trim();
+    if wanted.is_empty() || wanted == "全部" || wanted.eq_ignore_ascii_case("all") { return Ok(None) }
+    let own = [MY_LIBRARY, "user", "my library"].iter().any(|name| wanted.eq_ignore_ascii_case(name));
+    let number = wanted.parse::<i64>().ok();
+    let fits = |l: &&Library| {
+        if own { return l.is_user() }
+        match number {
+            Some(n) if libraries.iter().any(|l| l.id == n) => l.id == n,
+            Some(n) => l.group_id == Some(n),
+            None => l.name.trim().to_lowercase() == wanted.to_lowercase(),
+        }
+    };
+    let found: Vec<&Library> = libraries.iter().filter(fits).collect();
+    let listed = libraries.iter().map(|l| format!("{}（id {}，{} 条）", l.name, l.id, l.items)).collect::<Vec<_>>().join("、");
+    match found.as_slice() {
+        [one] => Ok(Some(one.id)),
+        [] => bail!("这个 Zotero 数据库里没有「{wanted}」。其中的文献库：{listed}；不指定时导入全部。"),
+        _ => bail!("有不止一个名为「{wanted}」的群组，请用 id 指定：{listed}。"),
+    }
+}
+
+fn explained<T>(result: Result<T>) -> Result<T> {
+    result.map_err(|error| {
         if is_locked(&error) {
             error.context("Zotero 数据库正在被占用。请在 Zotero 中选择「退出」，等待 Zotero 后台进程结束，再重新导入同一个 zotero.sqlite；仅关闭窗口可能仍在后台运行。")
         } else {
@@ -65,17 +128,29 @@ pub fn in_use(path: &Path) -> bool {
     probe().is_err_and(|error| is_locked(&error))
 }
 
-fn read_snapshot(path: &Path) -> Result<Import> {
+/// The database opened read-only in a read transaction, which lasts as long as the connection.
+fn snapshot(path: &Path) -> Result<Connection> {
     let db = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
         .with_context(|| format!("无法只读打开 {}", path.display()))?;
     db.busy_timeout(std::time::Duration::from_secs(2))?;
     db.execute_batch("BEGIN")?;
-    read_items(&db, path.parent().unwrap_or_else(|| Path::new(".")))
+    Ok(db)
 }
 
-fn read_items(db: &Connection, root: &Path) -> Result<Import> {
-    let mut items = db.prepare("SELECT i.itemID, t.typeName FROM items i JOIN itemTypes t USING(itemTypeID) JOIN libraries l USING(libraryID) WHERE l.type IN ('user', 'group') AND t.typeName NOT IN ('attachment', 'note', 'annotation') AND NOT EXISTS (SELECT 1 FROM deletedItems d WHERE d.itemID = i.itemID) ORDER BY i.itemID")?;
-    let items = items.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+fn list_libraries(db: &Connection) -> Result<Vec<Library>> {
+    let mut rows = db.prepare("SELECT l.libraryID, l.type, g.groupID, g.name FROM libraries l LEFT JOIN groups g USING(libraryID) WHERE l.type IN ('user', 'group') ORDER BY l.type != 'user', g.name COLLATE NOCASE, l.libraryID")?;
+    let rows = rows.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<i64>>(2)?, r.get::<_, Option<String>>(3)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut count = db.prepare(&format!("SELECT count(*) {ITEMS}"))?;
+    rows.into_iter().map(|(id, kind, group_id, name)| {
+        let items = count.query_row([id], |r| r.get::<_, i64>(0))? as usize;
+        let name = if kind == "user" { MY_LIBRARY.to_string() } else { name.filter(|n| !n.trim().is_empty()).unwrap_or_else(|| format!("群组 {}", group_id.unwrap_or(id))) };
+        Ok(Library { id, kind, name, group_id, items })
+    }).collect()
+}
+
+fn read_items(db: &Connection, root: &Path, library: Option<i64>) -> Result<Import> {
+    let mut items = db.prepare(&format!("SELECT i.itemID, t.typeName {ITEMS} ORDER BY i.itemID"))?;
+    let items = items.query_map([library], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
     let mut fields = db.prepare("SELECT f.fieldName, CAST(v.value AS TEXT) FROM itemData d JOIN fieldsCombined f USING(fieldID) JOIN itemDataValues v USING(valueID) WHERE d.itemID = ?1")?;
     let mut creators = db.prepare("SELECT c.firstName, c.lastName, c.fieldMode FROM itemCreators ic JOIN creators c USING(creatorID) JOIN creatorTypes ct USING(creatorTypeID) WHERE ic.itemID = ?1 AND ct.creatorType = 'author' ORDER BY ic.orderIndex")?;
     let mut tags = db.prepare("SELECT t.name FROM itemTags it JOIN tags t USING(tagID) WHERE it.itemID = ?1 ORDER BY t.name")?;
@@ -232,7 +307,9 @@ mod tests {
                 CREATE TABLE deletedItems(itemID INTEGER PRIMARY KEY);
                 CREATE TABLE collections(collectionID INTEGER PRIMARY KEY, collectionName TEXT, parentCollectionID INT);
                 CREATE TABLE collectionItems(collectionID INT, itemID INT);
-                INSERT INTO libraries VALUES(1, 'user'), (2, 'group'), (3, 'feed');
+                CREATE TABLE groups(groupID INTEGER PRIMARY KEY, libraryID INT, name TEXT);
+                INSERT INTO libraries VALUES(1, 'user'), (2, 'group'), (3, 'feed'), (4, 'group');
+                INSERT INTO groups VALUES(4711, 2, 'Root Lab'), (99, 4, 'Empty Lab');
                 INSERT INTO itemTypes VALUES(1, 'journalArticle'), (2, 'note'), (3, 'attachment'), (4, 'annotation'), (5, 'preprint');
                 INSERT INTO items VALUES(1, 1, 1, 'PAPER001'), (2, 2, 1, 'NOTE0001'), (3, 3, 1, 'PDFKEY01'), (4, 1, 1, 'TRASH001'), (5, 2, 1, 'LOOSE001'), (6, 3, 1, 'MISSING1'), (7, 3, 1, 'HTML0001'), (8, 4, 1, 'ANNOT001'), (9, 5, 2, 'GROUP001'), (10, 1, 3, 'FEED0001'), (11, 2, 1, 'DELNOTE1'), (12, 3, 1, 'DELPDF01');
                 INSERT INTO fieldsCombined VALUES(101, 'title'), (102, 'DOI'), (103, 'date'), (104, 'publicationTitle'), (105, 'abstractNote'), (106, 'extra'), (107, 'url'), (108, 'volume'), (109, 'issue'), (110, 'pages');
@@ -252,7 +329,9 @@ mod tests {
             Self { root, db }
         }
 
-        fn read(&self) -> Import { read(&self.root.join("zotero.sqlite")).unwrap() }
+        fn read(&self) -> Import { read(&self.path(), None).unwrap() }
+
+        fn path(&self) -> PathBuf { self.root.join("zotero.sqlite") }
     }
 
     impl Drop for Fixture {
@@ -278,6 +357,65 @@ mod tests {
         let second = call("import_zotero", args);
         assert_eq!((second["added"].as_u64(), second["skipped"].as_u64(), second["filesAdded"].as_u64(), second["filesExisting"].as_u64()), (Some(0), Some(2), Some(0), Some(1)));
         assert_eq!(before, std::fs::read(fixture.root.join("zotero.sqlite")).unwrap());
+    }
+
+    #[test]
+    fn lists_the_libraries_with_what_each_would_import() {
+        let fixture = Fixture::new();
+        let listed = libraries(&fixture.path()).unwrap();
+        // The person's own first, then the groups by name; no feed. Trash, notes and attachments are not counted.
+        let seen: Vec<_> = listed.iter().map(|l| (l.id, l.kind.as_str(), l.name.as_str(), l.group_id, l.items)).collect();
+        assert_eq!(seen, [(1, "user", MY_LIBRARY, None, 1), (4, "group", "Empty Lab", Some(99), 0), (2, "group", "Root Lab", Some(4711), 1)]);
+        assert_eq!(listed.iter().map(|l| l.items).sum::<usize>(), fixture.read().entries.len());
+        let wrong = fixture.root.join("wrong.sqlite");
+        drop(Connection::open(&wrong).unwrap());
+        assert!(libraries(&wrong).err().unwrap().to_string().contains("无法读取 Zotero"));
+    }
+
+    #[test]
+    fn reads_only_the_library_chosen() {
+        let fixture = Fixture::new();
+        let own = read(&fixture.path(), Some(1)).unwrap();
+        assert_eq!(own.entries.iter().map(|e| e.paper.title.as_str()).collect::<Vec<_>>(), ["Root atlas"]);
+        assert_eq!(own.other_attachments, 1);
+        let group = read(&fixture.path(), Some(2)).unwrap();
+        assert_eq!(group.entries.iter().map(|e| e.paper.title.as_str()).collect::<Vec<_>>(), ["Group preprint"]);
+        assert_eq!(group.other_attachments, 0);
+        assert!(read(&fixture.path(), Some(4)).unwrap().entries.is_empty());
+        // A feed is never imported, even when asked for by id.
+        assert!(read(&fixture.path(), Some(3)).unwrap().entries.is_empty());
+    }
+
+    #[test]
+    fn a_library_is_chosen_by_name_or_id() {
+        let fixture = Fixture::new();
+        let listed = libraries(&fixture.path()).unwrap();
+        for (wanted, id) in [("", None), ("全部", None), ("ALL", None), ("我的文库", Some(1)), ("My Library", Some(1)), ("root lab", Some(2)), (" Root Lab ", Some(2)), ("2", Some(2)), ("4711", Some(2)), ("99", Some(4))] {
+            assert_eq!(choose(&listed, wanted).unwrap(), id, "{wanted}");
+        }
+        let error = choose(&listed, "Shoot Lab").unwrap_err().to_string();
+        assert!(error.contains("没有「Shoot Lab」") && error.contains("Root Lab（id 2，1 条）") && error.contains("我的文库"), "{error}");
+        let twins = [listed[2].clone(), Library { id: 5, group_id: Some(5000), ..listed[2].clone() }];
+        assert!(choose(&twins, "Root Lab").unwrap_err().to_string().contains("用 id 指定"));
+        assert_eq!(choose(&twins, "5").unwrap(), Some(5));
+    }
+
+    #[test]
+    fn tool_imports_one_library_and_lists_them() {
+        let fixture = Fixture::new();
+        let root = fixture.root.join("wisp");
+        let call = |name: &str, args: serde_json::Value| crate::tools::call(&root, name, &args, &crate::tools::tests::offline, &crate::tools::tests::no_download);
+        call("create_library", serde_json::json!({"name": "Imported Zotero"})).unwrap();
+        let listed = call("list_zotero_libraries", serde_json::json!({"path": fixture.path()})).unwrap();
+        assert_eq!(listed["libraries"].as_array().unwrap().len(), 3);
+        assert_eq!((listed["libraries"][2]["name"].as_str(), listed["libraries"][2]["groupId"].as_i64(), listed["libraries"][2]["items"].as_u64()), (Some("Root Lab"), Some(4711), Some(1)));
+        let group = call("import_zotero", serde_json::json!({"path": fixture.path(), "zoteroLibrary": "Root Lab"})).unwrap();
+        assert_eq!((group["total"].as_u64(), group["added"].as_u64(), group["zoteroLibrary"].as_str()), (Some(1), Some(1), Some("Root Lab")));
+        assert_eq!(group["results"][0]["title"], "Group preprint");
+        let wrong = call("import_zotero", serde_json::json!({"path": fixture.path(), "zoteroLibrary": "Nobody"})).unwrap_err();
+        assert!(wrong.contains("Root Lab") && wrong.contains("Empty Lab"), "{wrong}");
+        let cli = crate::tools::cli_args(&crate::tools::catalog().into_iter().find(|t| t.name == "import_zotero").unwrap().input_schema, &["--path".into(), "x".into(), "--zotero-library".into(), "我的文库".into()]).unwrap();
+        assert_eq!(cli["zoteroLibrary"], "我的文库");
     }
 
     #[test]
@@ -359,9 +497,9 @@ mod tests {
         assert_eq!(fixture.read().entries[0].paper.title, "Updated through WAL");
         let wrong = fixture.root.join("wrong.sqlite");
         drop(Connection::open(&wrong).unwrap());
-        assert!(read(&wrong).err().unwrap().to_string().contains("无法读取 Zotero"));
+        assert!(read(&wrong, None).err().unwrap().to_string().contains("无法读取 Zotero"));
         let missing = fixture.root.join("absent.sqlite");
-        assert!(read(&missing).is_err());
+        assert!(read(&missing, None).is_err());
         assert!(!missing.exists());
     }
 
@@ -369,7 +507,7 @@ mod tests {
     fn locked_database_explains_how_to_release_it_and_can_be_retried() {
         let fixture = Fixture::new();
         fixture.db.execute_batch("BEGIN EXCLUSIVE").unwrap();
-        let error = read(&fixture.root.join("zotero.sqlite")).err().unwrap();
+        let error = read(&fixture.path(), None).err().unwrap();
         let message = format!("{error:#}");
         assert!(message.contains("正在被占用"));
         assert!(message.contains("退出"));

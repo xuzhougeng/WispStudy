@@ -84,13 +84,24 @@ fn report(path: &Path, rows: Vec<Row>) -> Value {
 
 pub(super) fn import_zotero(store: &mut Store, args: &Value) -> Result<Value> {
     let path = input_path(args)?;
-    let imported = zotero::read(&path)?;
+    let wanted = text(args, "zoteroLibrary")?;
+    // Only a library named asks the database what it holds; every library needs no list.
+    let listed = if wanted.trim().is_empty() { vec![] } else { zotero::libraries(&path)? };
+    let library = zotero::choose(&listed, wanted)?;
+    let imported = zotero::read(&path, library)?;
     let rows = imported.entries.into_iter().map(|entry| Row { record: zotero::import_entry(store, entry), ..Default::default() }).collect();
     let mut result = report(&path, rows);
     // Zotero copies attachments here; text is extracted by the reading tools.
     result.as_object_mut().unwrap().remove("textless");
     result["otherAttachments"] = json!(imported.other_attachments);
+    if let Some(chosen) = listed.iter().find(|l| Some(l.id) == library) { result["zoteroLibrary"] = json!(chosen.name) }
     Ok(result)
+}
+
+/// What `import_zotero` can take from a database, one library at a time.
+pub(super) fn zotero_libraries(args: &Value) -> Result<Value> {
+    let path = input_path(args)?;
+    Ok(json!({"path": path, "libraries": zotero::libraries(&path)?}))
 }
 
 pub(super) fn import_pdf(store: &mut Store, args: &Value) -> Result<Value> {

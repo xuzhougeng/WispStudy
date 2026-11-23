@@ -222,6 +222,8 @@ pub enum MenuKind {
     /// Several papers marked in the list.
     Papers(Vec<String>),
     Trashed(String),
+    /// Several papers chosen in the trash (`Library::trash_chosen`).
+    TrashedMany(Vec<String>),
     File(String),
     Tag(String),
     Conversation(Talk, String),
@@ -382,6 +384,8 @@ pub enum Cmd {
     ImportReferences,
     ImportZotero,
     PickZotero,
+    /// One library of the Zotero database chosen to import (`zotero::Library::id`), or `None`: all of them.
+    ChooseZoteroLibrary(Option<i64>),
     ShowZotero,
     ImportPdfs,
     ImportFolder,
@@ -401,9 +405,14 @@ pub enum Cmd {
     // The list
     SetView(View),
     SetPage(Page),
+    /// `FilterKey::Tag` with a tag is a plain click on it (`Filters::click_tag`); empty lets every tag choice go.
     SetFilter(FilterKey, String),
     /// 自定义区间…: the two ends of a filter by year or by impact factor, typed (`Modal::Range`).
     FilterRange(FilterKey),
+    /// A click on a tag in the sidebar; true with ⌘ / Ctrl held, to add it to the chosen tags or take it out.
+    ClickTag(String, bool),
+    /// Exclude a tag, or let an excluded one go (⌥ / Alt-click, the tag's menu).
+    ExcludeTag(String),
     ClearFilters,
     SetSort(String),
     Select(String),
@@ -436,6 +445,12 @@ pub enum Cmd {
     DeletePaper(String),
     /// Every paper in the trash back in the library.
     RestoreAll,
+    /// 回收站多选: every paper of the trash chosen or none (全选 / 取消全选); the chosen ones restored,
+    /// or deleted for good after asking.
+    ChooseAllTrash(bool),
+    RestorePapers(Vec<String>),
+    AskDeletePapers(Vec<String>),
+    DeletePapers(Vec<String>),
     /// 清空回收站: the dialog that asks for the phrase, and the deletion it leads to.
     AskEmptyTrash,
     EmptyTrash,
@@ -1602,6 +1617,8 @@ pub enum Modal {
     ImportReport,
     /// `open`: Zotero holds its database right now, as far as the usual place of it tells.
     Zotero { open: bool },
+    /// The database picked holds more than one library with items: which of them to import (`None`: all).
+    ZoteroLibraries { path: PathBuf, libraries: Vec<zotero::Library>, chosen: Option<i64> },
     ZoteroReport,
     /// What came of looking for each paper's open full text (`Library::fetching`).
     FetchReport,
@@ -1683,6 +1700,10 @@ pub struct Library {
     /// Where a stretch marked with Shift starts, and where it reaches to.
     pub anchor: Option<String>,
     pub cursor: Option<String>,
+    /// The papers chosen in the trash, kept apart from `marked`; emptied when the trash is opened or
+    /// left. `trash_anchor` is where a stretch chosen with Shift starts.
+    pub trash_chosen: Vec<String>,
+    pub trash_anchor: Option<String>,
     /// The papers the library's next conversation is kept to: picked in the list, or dragged into the
     /// conversation from the panel over it. None means the list on show, narrowed by that panel's search.
     pub asked: Vec<String>,
@@ -2529,6 +2550,10 @@ impl Library {
             self.marked.retain(|id| held.contains(id));
             self.asked.retain(|id| held.contains(id));
         }
+        // Chosen papers restored or deleted meanwhile are no longer chosen.
+        let trashed: HashSet<&str> = self.trash.iter().map(|entry| entry.paper.id.as_str()).collect();
+        self.trash_chosen.retain(|id| trashed.contains(id.as_str()));
+        if self.trash_anchor.as_deref().is_some_and(|id| !trashed.contains(id)) { self.trash_anchor = None }
         self.refilter();
         // A paper changed or gone is another source for the review's evidence.
         self.load_review()?;
@@ -2792,7 +2817,7 @@ impl Workspace {
         };
         let filter = matches!(kind, MenuKind::Filter(_));
         match kind {
-            MenuKind::Paper(_) | MenuKind::Papers(_) | MenuKind::Trashed(_) | MenuKind::File(_) | MenuKind::Tag(_) | MenuKind::Conversation(..) | MenuKind::Text(_) | MenuKind::Answer(..) => (items, breaks) = self.context_menu(&kind),
+            MenuKind::Paper(_) | MenuKind::Papers(_) | MenuKind::Trashed(_) | MenuKind::TrashedMany(_) | MenuKind::File(_) | MenuKind::Tag(_) | MenuKind::Conversation(..) | MenuKind::Text(_) | MenuKind::Answer(..) => (items, breaks) = self.context_menu(&kind),
             MenuKind::Figure(id) => (items, breaks) = self.figure_menu(&id),
             MenuKind::Add => {
                 items.push(item(t("通过 DOI / PMID / 网址添加…"), Cmd::AddById));
@@ -3001,51 +3026,60 @@ impl Workspace {
                 let f = &lib.filters;
                 let fixed = |table: &[(&str, &str)]| table.iter().map(|(v, l)| (v.to_string(), t(l).to_string(), None)).collect::<Vec<_>>();
                 let counted = |list: Vec<(String, usize)>| list.into_iter().take(40).map(|(v, n)| (v.clone(), v, Some(n))).collect::<Vec<_>>();
-                // A span of numbers: the usual ones by name with how many papers each keeps, then one typed.
-                let now = time::now_millis();
-                let kept = |set: &dyn Fn(&mut Filters)| Some(filter::count_with(&lib.papers, set, now));
-                let (current, choices): (String, Vec<(String, String, Option<usize>)>) = match &key {
-                    FilterKey::Tag => (f.tag.clone(), counted(filter::tag_counts(&lib.papers))),
-                    FilterKey::Year => (f.year.clone(), crate::library::YEARS_BACK.iter().map(|n| format!("last:{n}")).map(|value| (value.clone(), crate::library::year_label(&value), kept(&|f| f.year = value.clone()))).collect()),
-                    FilterKey::Impact => (f.impact.clone(), crate::library::IMPACTS.iter().map(|least| filter::span_value(Some(least), None)).map(|value| (value.clone(), crate::library::impact_label(&value), kept(&|f| f.impact = value.clone()))).collect()),
-                    FilterKey::Zone => {
-                        let which = crate::library::zone_sort(&self.settings);
-                        (f.zone.clone(), (1..=3).map(|last| filter::zone_value(which, last)).map(|value| (value.clone(), crate::library::zone_label(&value), kept(&|f| f.zone = value.clone()))).collect())
+                // Several tags can be chosen and some excluded: each chosen one is ticked, an excluded one says so.
+                if key == FilterKey::Tag {
+                    items.push(MenuItem { label: t("全部").into(), checked: f.tags.is_empty() && f.not_tags.is_empty(), note: None, cmd: Cmd::SetFilter(key.clone(), String::new()) });
+                    for (tag, n) in filter::tag_counts(&lib.papers).into_iter().take(40) {
+                        let note = if f.excluded(&tag) { t("已排除").to_string() } else { n.to_string() };
+                        items.push(MenuItem { label: tag.clone().into(), checked: f.chosen(&tag), note: Some(note.into()), cmd: Cmd::SetFilter(key.clone(), tag) });
                     }
-                    FilterKey::Source => (f.source.clone(), counted(filter::source_counts(&lib.papers))),
-                    FilterKey::Reading => (f.reading.clone(), fixed(&READINGS)),
-                    FilterKey::Screening => (f.screening.clone(), fixed(&SCREENINGS)),
-                    FilterKey::Fulltext => (f.fulltext.clone(), fixed(&FULLTEXTS)),
-                    FilterKey::Preprint => (f.preprint.clone(), fixed(&[("yes", t("只看预印本")), ("no", t("不含预印本"))])),
-                    FilterKey::Field(id) => (f.fields.get(id).cloned().unwrap_or_default(), counted(filter::field_counts(&lib.papers, id))),
-                };
-                items.push(MenuItem { label: t("全部").into(), checked: current.is_empty(), note: None, cmd: Cmd::SetFilter(key.clone(), String::new()) });
-                let mut named = current.is_empty();
-                for (value, label, count) in choices {
-                    named |= current == value;
-                    items.push(MenuItem { label: label.into(), checked: current == value, note: count.map(|n| n.to_string().into()), cmd: Cmd::SetFilter(key.clone(), value) });
-                }
-                match &key {
-                    FilterKey::Year => {
-                        // The years one by one come last; a span typed is ticked on its own row, which says what it is.
-                        let years = counted(filter::years(&lib.papers));
-                        let typed = !named && !years.iter().any(|(value, ..)| *value == current);
-                        items.push(MenuItem { label: t("自定义区间…").into(), checked: typed, note: typed.then(|| crate::library::year_label(&current).into()), cmd: Cmd::FilterRange(key.clone()) });
-                        breaks.push(items.len());
-                        for (value, label, count) in years {
-                            items.push(MenuItem { label: label.into(), checked: current == value, note: count.map(|n| n.to_string().into()), cmd: Cmd::SetFilter(key.clone(), value) });
+                } else {
+                    // A span of numbers: the usual ones by name with how many papers each keeps, then one typed.
+                    let now = time::now_millis();
+                    let kept = |set: &dyn Fn(&mut Filters)| Some(filter::count_with(&lib.papers, set, now));
+                    let (current, choices): (String, Vec<(String, String, Option<usize>)>) = match &key {
+                        FilterKey::Year => (f.year.clone(), crate::library::YEARS_BACK.iter().map(|n| format!("last:{n}")).map(|value| (value.clone(), crate::library::year_label(&value), kept(&|f| f.year = value.clone()))).collect()),
+                        FilterKey::Impact => (f.impact.clone(), crate::library::IMPACTS.iter().map(|least| filter::span_value(Some(least), None)).map(|value| (value.clone(), crate::library::impact_label(&value), kept(&|f| f.impact = value.clone()))).collect()),
+                        FilterKey::Zone => {
+                            let which = crate::library::zone_sort(&self.settings);
+                            (f.zone.clone(), (1..=3).map(|last| filter::zone_value(which, last)).map(|value| (value.clone(), crate::library::zone_label(&value), kept(&|f| f.zone = value.clone()))).collect())
                         }
+                        FilterKey::Source => (f.source.clone(), counted(filter::source_counts(&lib.papers))),
+                        FilterKey::Reading => (f.reading.clone(), fixed(&READINGS)),
+                        FilterKey::Screening => (f.screening.clone(), fixed(&SCREENINGS)),
+                        FilterKey::Fulltext => (f.fulltext.clone(), fixed(&FULLTEXTS)),
+                        FilterKey::Preprint => (f.preprint.clone(), fixed(&[("yes", t("只看预印本")), ("no", t("不含预印本"))])),
+                        FilterKey::Field(id) => (f.fields.get(id).cloned().unwrap_or_default(), counted(filter::field_counts(&lib.papers, id))),
+                        FilterKey::Tag => unreachable!("the tags are listed above"),
+                    };
+                    items.push(MenuItem { label: t("全部").into(), checked: current.is_empty(), note: None, cmd: Cmd::SetFilter(key.clone(), String::new()) });
+                    let mut named = current.is_empty();
+                    for (value, label, count) in choices {
+                        named |= current == value;
+                        items.push(MenuItem { label: label.into(), checked: current == value, note: count.map(|n| n.to_string().into()), cmd: Cmd::SetFilter(key.clone(), value) });
                     }
-                    FilterKey::Impact => items.push(MenuItem { label: t("自定义范围…").into(), checked: !named, note: (!named).then(|| crate::library::impact_label(&current).into()), cmd: Cmd::FilterRange(key.clone()) }),
-                    FilterKey::Zone => {
-                        // Which partition the zones are of is the 分区 column's (设置 › 外观): the same choice, here where it is needed.
-                        breaks.push(items.len());
-                        let which = crate::library::zone_sort(&self.settings);
-                        for (value, label) in wisp_core::journals::ZONES {
-                            items.push(MenuItem { label: tf!("分区表：{}", "Partition: {}", t(label)).into(), checked: value == which, note: None, cmd: Cmd::SetJournalZone(if value == "cas" { String::new() } else { value.to_string() }) });
+                    match &key {
+                        FilterKey::Year => {
+                            // The years one by one come last; a span typed is ticked on its own row, which says what it is.
+                            let years = counted(filter::years(&lib.papers));
+                            let typed = !named && !years.iter().any(|(value, ..)| *value == current);
+                            items.push(MenuItem { label: t("自定义区间…").into(), checked: typed, note: typed.then(|| crate::library::year_label(&current).into()), cmd: Cmd::FilterRange(key.clone()) });
+                            breaks.push(items.len());
+                            for (value, label, count) in years {
+                                items.push(MenuItem { label: label.into(), checked: current == value, note: count.map(|n| n.to_string().into()), cmd: Cmd::SetFilter(key.clone(), value) });
+                            }
                         }
+                        FilterKey::Impact => items.push(MenuItem { label: t("自定义范围…").into(), checked: !named, note: (!named).then(|| crate::library::impact_label(&current).into()), cmd: Cmd::FilterRange(key.clone()) }),
+                        FilterKey::Zone => {
+                            // Which partition the zones are of is the 分区 column's (设置 › 外观): the same choice, here where it is needed.
+                            breaks.push(items.len());
+                            let which = crate::library::zone_sort(&self.settings);
+                            for (value, label) in wisp_core::journals::ZONES {
+                                items.push(MenuItem { label: tf!("分区表：{}", "Partition: {}", t(label)).into(), checked: value == which, note: None, cmd: Cmd::SetJournalZone(if value == "cas" { String::new() } else { value.to_string() }) });
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
         }
@@ -3342,6 +3376,9 @@ impl Workspace {
                 self.modal = Some(if self.lib.as_ref().and_then(|l| l.zotero.as_ref()).is_some_and(|r| r.running) { Modal::ZoteroReport } else { Modal::Zotero { open: zotero::default_database().is_some_and(|path| zotero::in_use(&path)) } });
             }
             Cmd::PickZotero => self.pick_zotero(cx),
+            Cmd::ChooseZoteroLibrary(id) => {
+                if let Some(Modal::ZoteroLibraries { chosen, .. }) = self.modal.as_mut() { *chosen = id }
+            }
             Cmd::ShowZotero => {
                 self.modal_error.clear();
                 self.modal = Some(Modal::ZoteroReport);
@@ -3406,6 +3443,8 @@ impl Workspace {
                     self.agent_versions(cx);
                 }
                 if let Some(lib) = self.lib.as_mut() {
+                    // What was chosen in the trash is for that visit: none chosen on coming back, nor after leaving.
+                    if lib.page == Page::Trash || page == Page::Trash { (lib.trash_chosen, lib.trash_anchor) = (vec![], None) }
                     if page == Page::Write { lib.enter_write() } else { lib.page = page }
                     lib.reading = false;
                     if page == Page::Ask { lib.library_chat.input.read(cx).focus(window) }
@@ -3489,7 +3528,8 @@ impl Workspace {
                 if let Some(lib) = self.lib.as_mut() {
                     let f = &mut lib.filters;
                     match key {
-                        FilterKey::Tag => f.tag = value,
+                        FilterKey::Tag if value.is_empty() => (f.tags, f.not_tags) = (vec![], vec![]),
+                        FilterKey::Tag => f.click_tag(&value, false),
                         FilterKey::Year => f.year = value,
                         FilterKey::Impact => f.impact = value,
                         FilterKey::Zone => f.zone = value,
@@ -3515,6 +3555,26 @@ impl Workspace {
                 let (low, high) = if key == FilterKey::Impact { (self.modal_input("最低，例如 5", from, false, window, cx), self.modal_input("最高，可留空", to, false, window, cx)) } else { (self.modal_input("最早，例如 2000", from, false, window, cx), self.modal_input("最晚，可留空", to, false, window, cx)) };
                 low.read(cx).focus(window);
                 self.modal = Some(Modal::Range { key, low, high });
+            }
+            Cmd::ClickTag(tag, add) => {
+                if let Some(lib) = self.lib.as_mut() {
+                    // Away from the list the tags are not lit, so a plain click chooses just this one.
+                    if lib.page == Page::Papers || add {
+                        lib.filters.click_tag(&tag, add);
+                    } else {
+                        lib.filters.not_tags.retain(|t| *t != tag);
+                        lib.filters.tags = vec![tag];
+                    }
+                    lib.page = Page::Papers;
+                    lib.refilter();
+                }
+            }
+            Cmd::ExcludeTag(tag) => {
+                if let Some(lib) = self.lib.as_mut() {
+                    if lib.page == Page::Papers || !lib.filters.excluded(&tag) { lib.filters.exclude_tag(&tag) }
+                    lib.page = Page::Papers;
+                    lib.refilter();
+                }
             }
             Cmd::ClearFilters => {
                 if let Some(lib) = self.lib.as_mut() {
@@ -3571,11 +3631,37 @@ impl Workspace {
             }
             Cmd::RestoreAll => {
                 let ids: Vec<String> = self.lib.as_ref().map(|lib| lib.trash.iter().map(|entry| entry.paper.id.clone()).collect()).unwrap_or_default();
+                self.run(Cmd::RestorePapers(ids), window, cx);
+            }
+            Cmd::ChooseAllTrash(all) => {
+                if let Some(lib) = self.lib.as_mut() {
+                    lib.trash_chosen = if all { lib.trash.iter().map(|entry| entry.paper.id.clone()).collect() } else { vec![] };
+                    lib.trash_anchor = None;
+                }
+                window.focus(&self.focus);
+            }
+            Cmd::RestorePapers(ids) => {
                 let done = self.change(cx, |lib| {
                     for id in &ids { lib.store.restore_paper(id)? }
                     Ok(())
                 });
-                if done { self.say(tf!("已恢复 {} 篇。", "Restored {} papers.", ids.len()), cx) }
+                if done { self.say(if ids.len() == 1 { t("已恢复。").to_string() } else { tf!("已恢复 {} 篇。", "Restored {} papers.", ids.len()) }, cx) }
+            }
+            Cmd::AskDeletePapers(ids) => {
+                let total = self.lib.as_ref().map_or(0, |lib| lib.trash.len());
+                // One is that paper's own question; all of them is emptying the trash, which asks for the phrase.
+                if let [id] = ids.as_slice() { return self.run(Cmd::AskDeletePaper(id.clone()), window, cx) }
+                if ids.is_empty() { return }
+                if ids.len() == total { return self.run(Cmd::AskEmptyTrash, window, cx) }
+                self.modal_error.clear();
+                let count = ids.len();
+                self.modal = Some(Modal::Confirm { title: tf!("彻底删除这 {count} 篇文献？", "Delete these {count} papers permanently?"), message: t("它们连同各自的笔记、词条、标注、PDF 和图片，会从磁盘上完全删除，无法恢复。删除之后它们不再阻止重复导入。").into(), action: t("彻底删除").into(), cmd: Cmd::DeletePapers(ids) });
+            }
+            Cmd::DeletePapers(ids) => {
+                self.modal = None;
+                let mut count = 0;
+                if self.change(cx, |lib| lib.store.purge_trashed_papers(&ids).map(|n| count = n)) { self.say(tf!("已彻底删除 {count} 篇。", "Deleted {count} papers permanently."), cx) }
+                window.focus(&self.focus);
             }
             Cmd::AskEmptyTrash => {
                 if self.lib.as_ref().is_none_or(|lib| lib.trash.is_empty()) { return }
@@ -4501,6 +4587,8 @@ impl Workspace {
                 lib.library_chat.materials_open = false;
                 lib.library_chat.input.read(cx).focus(window);
             }
+        } else if self.lib.as_ref().is_some_and(|l| l.page == Page::Trash && !l.trash_chosen.is_empty()) {
+            if let Some(lib) = self.lib.as_mut() { (lib.trash_chosen, lib.trash_anchor) = (vec![], None) }
         } else if self.lib.as_ref().is_some_and(|l| !l.marked.is_empty()) {
             if let Some(lib) = self.lib.as_mut() { lib.marked.clear() }
         } else if self.lib.as_ref().is_some_and(|l| l.reading && l.selected.is_some()) {
@@ -4839,6 +4927,8 @@ impl Workspace {
             write_chat,
             marked: vec![],
             anchor: None,
+            trash_chosen: vec![],
+            trash_anchor: None,
             cursor: None,
             asked: vec![],
             scope_find,
@@ -5604,7 +5694,7 @@ impl Workspace {
                 paper.tags = tags;
                 lib.store.save_paper(&mut paper)?;
             }
-            if lib.filters.tag == tag { lib.filters.tag = name.unwrap_or("").to_string() }
+            lib.filters.retag(tag, name);
             Ok(())
         })
     }
@@ -5631,7 +5721,7 @@ impl Workspace {
                 if this.lib.as_ref().is_none_or(|l| l.info.id != library) { return }
                 match result {
                     Ok(Ok(Some(paths))) => match paths.into_iter().next() {
-                        Some(path) => this.import_zotero(path, cx),
+                        Some(path) => this.zotero_picked(path, cx),
                         None => this.modal_error = t("没有得到所选文件的路径，请重新选择 zotero.sqlite。").into(),
                     },
                     Ok(Ok(None)) => {}
@@ -5643,7 +5733,28 @@ impl Workspace {
         }).detach();
     }
 
-    fn import_zotero(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+    /// A database picked: when more than one of its libraries holds items, the person chooses which to import;
+    /// otherwise the import starts. A database that cannot be listed goes on to the import, whose report says why.
+    fn zotero_picked(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_ref() else { return };
+        let library = lib.info.id.clone();
+        let listing = path.clone();
+        cx.spawn(async move |this, cx| {
+            let listed = cx.background_executor().spawn(async move { zotero::libraries(&listing) }).await;
+            this.update(cx, |this, cx| {
+                // Closed meanwhile, or another library opened: nothing goes on.
+                if this.lib.as_ref().is_none_or(|l| l.info.id != library) || !matches!(this.modal, Some(Modal::Zotero { .. })) { return }
+                let offered: Vec<zotero::Library> = listed.map(|all| all.into_iter().filter(|l| l.items > 0).collect()).unwrap_or_default();
+                if offered.len() < 2 { return this.import_zotero(path, None, cx) }
+                this.modal_error.clear();
+                this.modal = Some(Modal::ZoteroLibraries { path, chosen: Some(offered[0].id), libraries: offered });
+                cx.notify();
+            }).ok();
+        }).detach();
+    }
+
+    /// `only`: one library of the database (`zotero::Library::id`); `None` imports all of them.
+    fn import_zotero(&mut self, path: PathBuf, only: Option<i64>, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
         if lib.zotero.as_ref().is_some_and(|run| run.running) { return }
         let library = lib.info.id.clone();
@@ -5654,7 +5765,7 @@ impl Workspace {
         self.modal = Some(Modal::ZoteroReport);
         cx.notify();
         cx.spawn(async move |this, cx| {
-            let parsed = cx.background_executor().spawn(async move { zotero::read(&path) }).await;
+            let parsed = cx.background_executor().spawn(async move { zotero::read(&path, only) }).await;
             let entries = this.update(cx, |this, cx| {
                 let run = this.lib.as_mut().filter(|l| l.info.id == library)?.zotero.as_mut().filter(|r| r.id == run_id)?;
                 let entries = match parsed {
@@ -7986,6 +8097,10 @@ impl Workspace {
                 if form.chosen.is_some() { self.complete_apply(window, cx) } else if form.by_id { self.complete_lookup(cx) } else { self.complete_find(cx) }
             }
             Modal::Zotero { .. } => self.run(Cmd::PickZotero, window, cx),
+            Modal::ZoteroLibraries { path, chosen, .. } => {
+                let (path, chosen) = (path.clone(), *chosen);
+                self.import_zotero(path, chosen, cx);
+            }
             Modal::ZoteroReport => self.run(Cmd::CloseModal, window, cx),
             Modal::FetchReport => self.run(Cmd::CloseModal, window, cx),
             Modal::Library { editing, name, topic, color, .. } => {
@@ -8321,6 +8436,7 @@ impl Workspace {
                     "delete-paper" => self.lib.as_ref().and_then(|lib| lib.selected.clone()).map(Cmd::AskDeletePaper),
                     // The trash page's head: 全部恢复 and the dialog of 清空回收站.
                     "restore-all" => Some(Cmd::RestoreAll),
+                    "trash-all" => Some(Cmd::ChooseAllTrash(true)),
                     "empty-trash" => Some(Cmd::AskEmptyTrash),
                     "guide" => Some(Cmd::OpenGuide(true)),
                     "guide-search" => Some(Cmd::OpenGuide(false)),
@@ -8681,7 +8797,8 @@ impl Workspace {
                 // `report` shows what came of the last import.
                 "report" => Some(Cmd::ShowImport),
                 "zotero" => {
-                    self.import_zotero(PathBuf::from(arg), cx);
+                    self.modal = Some(Modal::Zotero { open: false });
+                    self.zotero_picked(PathBuf::from(arg), cx);
                     None
                 }
                 "zotero-report" => Some(Cmd::ShowZotero),
@@ -8896,6 +9013,12 @@ impl Workspace {
                     self.lib.as_ref().and_then(|l| l.gallery.items.get(n.parse::<usize>().unwrap_or(0))).map(|figure| if source { Cmd::FigureSource(figure.id.clone()) } else { Cmd::OpenFigure(figure.id.clone()) })
                 }
                 "figtag" => Some(Cmd::FigureTag(arg.to_string())),
+                // `tag:<tag>` is a click on a tag of the sidebar, `tag:+<tag>` one with ⌘ / Ctrl, `tag:-<tag>` one with ⌥ / Alt.
+                "tag" => Some(match (arg.strip_prefix('+'), arg.strip_prefix('-')) {
+                    (Some(tag), _) => Cmd::ClickTag(tag.to_string(), true),
+                    (_, Some(tag)) => Cmd::ExcludeTag(tag.to_string()),
+                    _ => Cmd::ClickTag(arg.to_string(), false),
+                }),
                 "figfind" => {
                     if let Some(lib) = self.lib.as_ref() { lib.gallery.search.update(cx, |input, cx| input.insert(arg, cx)) }
                     return;

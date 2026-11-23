@@ -111,9 +111,20 @@ pub fn catalog() -> Vec<ToolDef> {
         scoped("import_references", "导入 BibTeX / RIS", "读取本地 BibTeX 或 RIS 文件，按内容自动识别格式并导入参考文献记录。按 DOI、PMID、题目去重，回收站条目也会跳过；不自动导入 PDF，不联网。返回新增和跳过的数量及文献 ID。", json!({
             "path": {"type": "string", "description": "本机 BibTeX / RIS 文件路径，建议使用绝对路径。"},
         }), &["path"]),
-        scoped("import_zotero", "导入 Zotero", "从本机 Zotero 6 / 7 的 zotero.sqlite 导入个人库和群组库的文献、标签、笔记及可访问的本地 PDF。只读源数据库、复制附件；已有文献保留原记录并补 PDF，回收站条目跳过。不联网。建议先退出 Zotero；返回逐项结果，必须检查 failed 和 results 中的 problems。", json!({
+        scoped("import_zotero", "导入 Zotero", "从本机 Zotero 6 / 7 的 zotero.sqlite 导入文献、标签、笔记及可访问的本地 PDF：默认是个人库（我的文库）和所有群组库，zoteroLibrary 只导入其中一个（先用 list_zotero_libraries 看有哪些）。只读源数据库、复制附件；已有文献保留原记录并补 PDF，回收站条目跳过。不联网。建议先退出 Zotero；返回逐项结果，必须检查 failed 和 results 中的 problems。", json!({
             "path": {"type": "string", "description": "本机 Zotero 数据目录中的 zotero.sqlite 路径；storage 目录应在它旁边。"},
+            "zoteroLibrary": {"type": "string", "description": "只导入这一个 Zotero 文献库：「我的文库」，群组的名称，或 list_zotero_libraries 给出的 id；省略或「全部」时导入全部。"},
         }), &["path"]),
+        ToolDef {
+            name: "list_zotero_libraries",
+            title: "列出 Zotero 文献库",
+            description: "列出本机 zotero.sqlite 里可以导入的文献库：个人库（我的文库）和每个群组库，各有 id、名称和 import_zotero 会导入的条目数（不含笔记、附件和 Zotero 回收站里的）。只读，不联网；建议先退出 Zotero。",
+            input_schema: json!({"type": "object", "properties": {
+                "path": {"type": "string", "description": "本机 Zotero 数据目录中的 zotero.sqlite 路径。"},
+            }, "required": ["path"], "additionalProperties": false}),
+            writes: false,
+            confirm: false,
+        },
         ToolDef {
             name: "sync_searches",
             title: "更新检索式",
@@ -164,6 +175,8 @@ pub fn catalog() -> Vec<ToolDef> {
                 "reading": {"type": "string", "enum": keys(&READINGS), "description": "阅读状态。"},
                 "fulltext": {"type": "string", "enum": keys(&FULLTEXTS), "description": "全文状态：stored 表示已保存 PDF 并读出了文字，textless 表示有 PDF 但没有读出文字。"},
                 "tag": {"type": "string", "description": "带有这个标签。"},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "这几个标签都要有（与 tag 一起时也算上 tag）。"},
+                "notTags": {"type": "array", "items": {"type": "string"}, "description": "带有其中任何一个标签的文献不返回。"},
                 "year": {"type": "integer", "description": "发表年份。"},
                 "yearFrom": {"type": "integer", "description": "发表年份不早于这一年；与 yearTo 合成一个区间，两头可以只给一头。不与 year 同用。"},
                 "yearTo": {"type": "integer", "description": "发表年份不晚于这一年。"},
@@ -675,6 +688,7 @@ pub fn call_with(root: &Path, name: &str, args: &Value, fetch: Fetch, download: 
     checked(name, args)?;
     if name == "create_library" { return local::create_library(root, args).map_err(|e| format!("{e:#}")) }
     if name == "import_library" { return local::import_library(root, args).map_err(|e| format!("{e:#}")) }
+    if name == "list_zotero_libraries" { return local::zotero_libraries(args).map_err(|e| format!("{e:#}")) }
     if name == "sync_searches" { return sync_searches(root, args, fetch, crate::time::now_millis()).map_err(|e| format!("{e:#}")) }
     if name == "list_libraries" {
         let all: Vec<Value> = libraries::shelved(root).iter().map(|l| json!({"id": l.id, "name": l.name, "topic": l.topic, "papers": l.paper_count, "autoSyncHours": l.auto_sync_hours})).collect();
@@ -713,6 +727,7 @@ fn dispatch(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fet
         "import_pdf" => local::import_pdf(store, args),
         "import_references" => local::import_references(store, args),
         "import_zotero" => local::import_zotero(store, args),
+        "list_zotero_libraries" => local::zotero_libraries(args),
         "find_pdf" => find_pdf(store, args, fetch, download),
         "import_url" => web::import_url(store, args, fetch, download),
         "find_citations" => find_citations(store, args),
@@ -813,6 +828,17 @@ fn text<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
     }
 }
 
+/// A list of strings; one string alone is a list of one. Blank items are left out.
+fn texts(args: &Value, key: &str) -> Result<Vec<String>> {
+    let items = match &args[key] {
+        Value::Null => return Ok(vec![]),
+        Value::String(value) => vec![value.trim().to_string()],
+        Value::Array(items) => items.iter().map(|item| item.as_str().map(|v| v.trim().to_string()).ok_or_else(|| anyhow!("参数 {key} 应是一组字符串。"))).collect::<Result<_>>()?,
+        _ => bail!("参数 {key} 应是一组字符串。"),
+    };
+    Ok(items.into_iter().filter(|v| !v.is_empty()).collect())
+}
+
 fn number(args: &Value, key: &str, default: usize, max: usize) -> Result<usize> {
     match &args[key] {
         Value::Null => Ok(default),
@@ -873,12 +899,17 @@ fn list_papers(store: &mut Store, info: &LibraryInfo, args: &Value) -> Result<Va
     };
     let zone = text(args, "zone")?;
     if !zone.is_empty() && filter::zone_parts(zone).is_none() { bail!("参数 zone 应写成「分区表:最后一区」，例如 cas:1、cas:2、xr:1、jcr:2：分区表是 cas（中科院）、xr（新锐）、jcr（JCR），区是 1–4。") }
+    // `tag` is one tag as before; `tags` asks for several at once, `notTags` leaves papers out.
+    let mut tags = texts(args, "tags")?;
+    let tag = text(args, "tag")?;
+    if !tag.is_empty() && !tags.iter().any(|t| t == tag) { tags.insert(0, tag.to_string()) }
     let filters = Filters {
         search: text(args, "query")?.into(),
         screening: choice(args, "screening", &SCREENINGS)?.into(),
         reading: choice(args, "reading", &READINGS)?.into(),
         fulltext: choice(args, "fulltext", &FULLTEXTS)?.into(),
-        tag: text(args, "tag")?.into(),
+        tags,
+        not_tags: texts(args, "notTags")?,
         year,
         impact,
         zone: zone.into(),
@@ -2118,6 +2149,12 @@ pub(crate) mod tests {
         // A span of years, and the journal's numbers: the sample's papers name no journal, so those keep none.
         assert_eq!((call(&root, "list_papers", &json!({"yearFrom": 2020})).unwrap()["total"].as_u64(), call(&root, "list_papers", &json!({"yearFrom": 2015, "yearTo": 2020})).unwrap()["total"].as_u64(), call(&root, "list_papers", &json!({"yearTo": 2021})).unwrap()["total"].as_u64()), (Some(1), Some(0), Some(1)));
         assert_eq!((call(&root, "list_papers", &json!({"minImpact": 5})).unwrap()["total"].as_u64(), call(&root, "list_papers", &json!({"zone": "cas:2"})).unwrap()["total"].as_u64()), (Some(0), Some(0)));
+        // One tag as before, several that must all be held, and tags that leave papers out.
+        assert_eq!(call(&root, "list_papers", &json!({"tag": "atlas"})).unwrap()["total"], 1);
+        assert_eq!(call(&root, "list_papers", &json!({"tag": "atlas", "tags": ["none"]})).unwrap()["total"], 0);
+        assert_eq!(call(&root, "list_papers", &json!({"tags": "atlas"})).unwrap()["total"], 1);
+        assert_eq!(call(&root, "list_papers", &json!({"notTags": ["atlas"]})).unwrap()["total"], 0);
+        assert!(call(&root, "list_papers", &json!({"notTags": [1]})).unwrap_err().contains("notTags"));
         let paged = call(&root, "list_papers", &json!({"limit": 1, "offset": 1})).unwrap();
         assert_eq!((paged["total"].as_u64(), paged["papers"].as_array().map(Vec::len)), (Some(1), Some(0)));
 

@@ -74,10 +74,36 @@ impl Workspace {
                     // Zotero keeps its database to itself while it runs: said before the steps, not only in one of them.
                     .child(div().px(px(10.)).py(px(7.)).rounded(px(8.)).bg(Theme::hover()).text_color(Theme::warning()).line_height(text_px(21.)).child(if *open { t("Zotero 正在运行，数据库被它占用，现在无法导入。请先在 Zotero 中选择「退出」（只关窗口不够），再选择文件。") } else { t("导入前请先退出 Zotero（只关窗口不够）：它运行时占用数据库，无法读取。") }))
                     .child(div().line_height(text_px(23.)).child(t("1. 在 Zotero 的「设置 › 高级 › 文件和文件夹」中打开数据目录。\n2. 等同步完成，下载需要的 PDF，然后退出 Zotero。\n3. 点击下方按钮，选择该目录中的 zotero.sqlite。")))
-                    .child(div().text_color(Theme::text_secondary()).line_height(text_px(21.)).child(t("导入本机个人库和群组库的文献信息、标签、笔记与 PDF。分类转为 Zotero/分类路径 标签；原数据库和 PDF 保留。已有文献保留原记录，并补充 PDF。")))
-                    .child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).line_height(text_px(19.)).child(t("这是一次本地复制，不会持续同步。暂不迁移独立笔记、PDF 批注、网页快照及其他非 PDF 附件；相对链接附件会在结果中提示手动处理。只迁移部分文献时，可从 Zotero 导出 BibTeX / RIS，再使用对应入口。")))
+                    .child(div().text_color(Theme::text_secondary()).line_height(text_px(21.)).child(t("导入本机个人库（我的文库）和群组库的文献信息、标签、笔记与 PDF；数据库里有不止一个文献库时，选好文件后可以只导入其中一个。分类转为 Zotero/分类路径 标签；原数据库和 PDF 保留。已有文献保留原记录，并补充 PDF。")))
+                    .child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).line_height(text_px(19.)).child(t("这是一次本地复制，不会持续同步。暂不迁移独立笔记、PDF 批注、网页快照及其他非 PDF 附件；相对链接附件会在结果中提示手动处理。只迁移某个分类或几篇文献时，可从 Zotero 导出 BibTeX / RIS，再使用对应入口。")))
                     .child(error))
                 .child(footer(t("选择 zotero.sqlite…"), false, self, cx)),
+            Modal::ZoteroLibraries { libraries, chosen, .. } => {
+                // Each library with what it holds, then all of them together, a line apart.
+                let mut row = |id: ElementId, name: SharedString, items: usize, this: Option<i64>| {
+                    let picked = *chosen == this;
+                    div().id(id).flex().flex_none().items_center().gap(px(10.)).px(px(10.)).py(px(7.)).rounded(px(8.)).cursor_pointer()
+                        .when(picked, |d| d.bg(Theme::accent_soft()))
+                        .when(!picked, |d| d.hover(|s| s.bg(Theme::hover())))
+                        .child(div().flex_1().min_w_0().font_weight(if picked { FontWeight::SEMIBOLD } else { FontWeight::NORMAL }).child(ui::one_line(&name)))
+                        .child(div().flex_none().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tf!("{} 条", "{} items", items)))
+                        .on_click(self.on(Cmd::ChooseZoteroLibrary(this), cx))
+                };
+                let rows = libraries.iter().enumerate().map(|(i, library)| {
+                    let name: SharedString = if library.is_user() { t("我的文库").into() } else { library.name.clone().into() };
+                    row(ElementId::from(("zotero-library", i)), name, library.items, Some(library.id))
+                }).collect::<Vec<_>>();
+                let all = libraries.iter().map(|l| l.items).sum();
+                ui::dialog(460.)
+                    .child(ui::dialog_title(t("从 Zotero 导入")))
+                    .child(body()
+                        .child(div().text_color(Theme::text_secondary()).line_height(text_px(21.)).child(tf!("这个数据库里有 {} 个文献库有条目，选择要导入的：", "{} libraries in this database hold items. Choose what to import:", libraries.len())))
+                        .child(div().flex().flex_col().gap(px(2.)).children(rows)
+                            .child(div().h(px(1.)).my(px(4.)).bg(Theme::line()))
+                            .child(row("zotero-library-all".into(), t("全部").into(), all, None)))
+                        .child(error))
+                    .child(footer(t("导入"), false, self, cx))
+            }
             Modal::ZoteroReport => {
                 let run = self.lib.as_ref()?.zotero.as_ref()?;
                 let rows = run.rows.iter().enumerate().map(|(i, row)| {
