@@ -143,6 +143,9 @@ pub struct Settings {
     pub pdf_tools_floating: bool,
     /// Where the reader dragged that column: its distance from the PDF's right edge and from its top (`floating::tools_at`); None is under 标注.
     pub pdf_tools_at: Option<(f32, f32)>,
+    /// 分屏 自由 (#245): the band between the halves is dragged, and the same file split is two viewers, each zoomed
+    /// on its own; false (固定) is two halves of one size that zoom together.
+    pub pdf_split_free: bool,
     /// 译文 replaces the paragraphs on the pages themselves (原地替换) instead of standing beside them as a second copy of the pages (对照).
     pub facing_in_place: bool,
     /// The paper's conversation over its PDF instead of beside it, and where its window was left.
@@ -173,7 +176,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let providers = provider::DEFAULT_PRESETS.iter().filter_map(|key| provider::preset(key)).map(Provider::from_preset).collect();
-        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), play_speed: 1., commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, library_order: vec![], days_used: 0, last_used_day: String::new(), star_answered: false };
+        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), play_speed: 1., commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, pdf_split_free: false, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, library_order: vec![], days_used: 0, last_used_day: String::new(), star_answered: false };
         settings.tidy();
         settings
     }
@@ -744,6 +747,10 @@ mod tests {
         let loaded: Settings = serde_json::from_str(&saved).unwrap();
         assert!(loaded.pdf_first);
         assert!(saved.contains(r#""pdfToolsFloating":true"#) && loaded.pdf_tools_floating);
+        // 分屏 is 固定 in old settings; 自由 is kept once chosen.
+        assert!(!loaded.pdf_split_free);
+        let free: Settings = serde_json::from_str(&serde_json::to_string(&Settings { pdf_split_free: true, ..loaded.clone() }).unwrap()).unwrap();
+        assert!(free.pdf_split_free);
         // 译文 beside the pages is what old settings mean; in place is kept once chosen.
         assert!(!loaded.facing_in_place);
         let in_place: Settings = serde_json::from_str(&serde_json::to_string(&Settings { facing_in_place: true, ..loaded.clone() }).unwrap()).unwrap();

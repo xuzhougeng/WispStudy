@@ -103,6 +103,8 @@ impl Render for Workspace {
             // While an edge is held (the sidebar's, the detail panel's, the one between a conversation and its PDF), a layer over everything hears the pointer
             // wherever it goes: an element only hears the moves made over it.
             .children(self.resizing.map(|edge| {
+                // The band between halves one over the other is dragged up and down.
+                let rows = edge == Edge::Halves && self.lib.as_ref().and_then(|lib| lib.beside.as_ref()).is_some_and(|beside| beside.split == crate::pdf::Split::Stacked);
                 div()
                     .id("resize-layer")
                     .absolute()
@@ -110,13 +112,15 @@ impl Render for Workspace {
                     .left_0()
                     .size_full()
                     .occlude()
-                    .cursor_col_resize()
+                    .when(rows, |d| d.cursor_row_resize())
+                    .when(!rows, |d| d.cursor_col_resize())
                     .on_mouse_move(cx.listener(move |this, event: &MouseMoveEvent, window, cx| match edge {
                         Edge::Sidebar => this.drag_sidebar(event, window, cx),
                         Edge::Detail => this.drag_detail(event, window, cx),
                         Edge::Split => this.drag_split(event, window, cx),
                         Edge::Manuscript => this.drag_manuscript(event, window, cx),
                         Edge::Column => this.drag_column(event, cx),
+                        Edge::Halves => this.drag_halves(event, cx),
                     }))
                     .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| this.end_drag(cx)))
             }))

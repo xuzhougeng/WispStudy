@@ -84,6 +84,8 @@ pub enum Edge {
     Manuscript,
     /// Between two columns of the paper table (`Workspace::column_drag` says which).
     Column,
+    /// Between the two halves of a split PDF, while they are 自由 (`Library::halves_drag`).
+    Halves,
 }
 
 /// The edge between two columns of the paper table, as it was when the pointer took it.
@@ -523,6 +525,8 @@ pub enum Cmd {
     SwapPanes,
     /// The PDF's tools float at the page's right edge, or stand in its toolbar (`Settings::pdf_tools_floating`).
     FloatPdfTools(bool),
+    /// 分屏 自由 or 固定 (`Settings::pdf_split_free`, #245): halves of any width, each zoomed on its own, or of one size zoomed together.
+    PdfSplitFree(bool),
     /// Out of the layout for asking about a paper: the tab it was come to from, with the library around it.
     LeaveAsk,
     /// The paper's conversation floats over its PDF, or stands beside it (`Settings::floating`).
@@ -1748,8 +1752,12 @@ pub struct Library {
     pub seek_bar: (f32, f32),
     pub seek_held: Option<f32>,
     pdf_events: Option<Subscription>,
-    /// Another file of the paper in the other half of the viewer (#185), while there is one.
+    /// Another file of the paper in the other half of the viewer (#185), while there is one; 分屏 自由, the same file too.
     pub beside: Option<Beside>,
+    /// 分屏 自由: the first half's share of the room the two halves have (0.5 is even); 固定 is always even.
+    pub split_share: f32,
+    /// The band between the halves as the pointer took it: where along the split it was, the share then, the room the halves have.
+    pub halves_drag: Option<(f32, f32, f32)>,
     /// Papers pinned beside the one on show, in the order of their panes.
     pub pins: Vec<Pinned>,
     /// Papers read in windows of their own.
@@ -2290,6 +2298,14 @@ impl Library {
     /// Put the viewer away, both its halves while it shows two files.
     pub fn close_pdf(&mut self) {
         (self.pdf, self.pdf_events, self.beside) = (None, None, None);
+        // The next paper opens with even halves.
+        self.split_share = 0.5;
+    }
+
+    /// The other half shows the same file as the half worked in: 分屏 自由 on one file, two viewers of it.
+    pub fn beside_itself(&self, cx: &App) -> bool {
+        let (Some(pdf), Some(beside)) = (&self.pdf, &self.beside) else { return false };
+        pdf.read(cx).resource_id() == beside.view.read(cx).resource_id()
     }
 
     /// The paper of a viewer that is not the panel's: one kept beside, or read in a window of its own.
@@ -2300,7 +2316,9 @@ impl Library {
     /// Note where the files on show are read at, here and in the library's database, before they are put
     /// away: another paper opened, the library closed or the app quit (#194).
     pub fn keep_places(&mut self, cx: &App) {
-        let views = self.pdf.iter().chain(self.beside.as_ref().map(|beside| &beside.view)).chain(self.pins.iter().map(|pin| &pin.view)).chain(self.windows.iter().map(|w| &w.view));
+        // The same file in both halves (分屏 自由) is read at where the half worked in is.
+        let beside = self.beside.as_ref().filter(|_| !self.beside_itself(cx)).map(|beside| &beside.view);
+        let views = self.pdf.iter().chain(beside).chain(self.pins.iter().map(|pin| &pin.view)).chain(self.windows.iter().map(|w| &w.view));
         let mut places: Vec<(String, (usize, f32))> = views.map(|view| { let view = view.read(cx); (view.resource_id().to_string(), view.place()) }).collect();
         // A kept podcast is read at a sample of its sound.
         places.extend(self.podcast_place());
@@ -2670,6 +2688,9 @@ impl Workspace {
         for (label, split) in [("不分屏", Split::Off), ("左右分屏", Split::Side), ("上下分屏", Split::Stacked)] {
             items.push(MenuItem { label: t(label).into(), checked: current == split, note: None, cmd: Cmd::PdfSplit(split) });
         }
+        // 固定 or 自由: the same as the button on the bar beside 分屏, kept from paper to paper.
+        let free = self.settings.pdf_split_free;
+        items.push(MenuItem { label: t("自由调整：拖动分隔线，每一半各自缩放").into(), checked: free, note: None, cmd: Cmd::PdfSplitFree(!free) });
         // What the other half shows: the same file, or another of the paper's (a supplementary figure beside the text).
         // The translation has the other half while it is on.
         let choices = lib.selected.as_deref().map(|paper| lib.pdf_choices(paper)).unwrap_or_default();
@@ -3854,6 +3875,11 @@ impl Workspace {
                     if split == Split::Off { self.close_beside(cx) } else if let Some(beside) = self.lib.as_mut().and_then(|lib| lib.beside.as_mut()) { beside.split = split }
                     return cx.notify();
                 }
+                // 自由: the file again in a viewer of its own beside it (with 译文 on, the split says where the translation stands).
+                if split != Split::Off && self.settings.pdf_split_free && self.lib.as_ref().is_some_and(|lib| !lib.facing_shown()) {
+                    self.split_itself(split, None, false, cx);
+                    return;
+                }
                 // It is for this paper: the next one opens whole.
                 if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.choose_split(split, cx)) }
             }
@@ -3884,6 +3910,7 @@ impl Workspace {
                 self.settings.pdf_first = !self.settings.pdf_first;
                 self.save_settings(cx);
             }
+            Cmd::PdfSplitFree(free) => self.set_split_free(free, cx),
             Cmd::FloatPdfTools(on) => {
                 // Only where the tools are drawn changes; a tool in use stays in use.
                 self.settings.pdf_tools_floating = on;
@@ -4922,6 +4949,8 @@ impl Workspace {
             seek_held: None,
             pdf_events: None,
             beside: None,
+            split_share: 0.5,
+            halves_drag: None,
             pins: vec![],
             windows: vec![],
             main_at: 0,
@@ -5335,14 +5364,19 @@ impl Workspace {
 
     /// A viewer of a file of the selected paper, with its own marks, at the place it was left, and what it says heard.
     pub(crate) fn pdf_view(&mut self, file: &PaperFile, cx: &mut Context<Self>) -> Option<(Entity<PdfView>, Subscription)> {
+        self.pdf_view_at(file, None, None, cx)
+    }
+
+    /// A viewer of a file at a zoom and a place of its own (`None`: the fit papers open at, where the file was left).
+    pub(crate) fn pdf_view_at(&mut self, file: &PaperFile, zoom: Option<Zoom>, place: Option<(usize, f32)>, cx: &mut Context<Self>) -> Option<(Entity<PdfView>, Subscription)> {
         let lib = self.lib.as_mut()?;
         let path = lib.store.file_path(file);
         let annotations = match lib.store.pdf_annotations(&file.paper_id, &file.id) {
             Ok(annotations) => annotations,
             Err(error) => { self.fail(format!("{error:#}"), cx); return None }
         };
-        let zoom = lib.zoom;
-        let place = lib.file_places.get(&file.id).copied();
+        let zoom = zoom.unwrap_or(lib.zoom);
+        let place = place.or_else(|| lib.file_places.get(&file.id).copied());
         let pdf = cx.new(|cx| {
             let mut pdf = PdfView::new(&path, zoom, file, annotations, cx);
             // A file read before, of this paper, opens where it was left.
@@ -5380,6 +5414,11 @@ impl Workspace {
         // As the halves stand now; split anew, side by side where there is room for two pages.
         let split = crate::pdf::beside_split(lib.beside.as_ref().map(|beside| beside.split), inner, width);
         if file == shown {
+            // 自由: the file again in a viewer of its own beside it.
+            if self.settings.pdf_split_free {
+                self.split_itself(split, None, false, cx);
+                return;
+            }
             self.close_beside(cx);
             return pdf.update(cx, |pdf, cx| pdf.set_split(split, cx));
         }
@@ -5554,9 +5593,52 @@ impl Workspace {
 
     pub(crate) fn close_beside(&mut self, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
+        // The same file in the other half: its place is the half worked in's, which stays.
+        let itself = lib.beside_itself(cx);
         let Some(beside) = lib.beside.take() else { return };
         let view = beside.view.read(cx);
-        lib.file_places.insert(view.resource_id().to_string(), view.place());
+        if !itself { lib.file_places.insert(view.resource_id().to_string(), view.place()); }
+        cx.notify();
+    }
+
+    /// 分屏 自由 on one file (#245): the file worked in is shown again in the other half, a viewer of its own at
+    /// the same zoom, so each half is zoomed on its own and the band between them is dragged. The other half opens
+    /// at `place` (where the half worked in is, without one) and is the first, at the left or the top, when `first`.
+    /// Its viewer, or `None` when there is no file to show twice.
+    fn split_itself(&mut self, split: Split, place: Option<(usize, f32)>, first: bool, cx: &mut Context<Self>) -> Option<Entity<PdfView>> {
+        let lib = self.lib.as_ref()?;
+        let pdf = lib.pdf.clone()?;
+        let paper = lib.selected.clone()?;
+        if split == Split::Off || lib.facing_shown() { return None }
+        if lib.beside_itself(cx) { return lib.beside.as_ref().map(|beside| beside.view.clone()) }
+        let (file, zoom, here) = { let view = pdf.read(cx); (view.resource_id().to_string(), view.zoom(), view.place()) };
+        let paper_file = lib.paper_files(&paper).into_iter().find(|f| f.id == file && f.format == "pdf").cloned()?;
+        self.close_beside(cx);
+        pdf.update(cx, |pdf, cx| pdf.set_split(Split::Off, cx));
+        let (view, events) = self.pdf_view_at(&paper_file, Some(zoom), Some(place.unwrap_or(here)), cx)?;
+        let lib = self.lib.as_mut()?;
+        lib.beside = Some(Beside { view: view.clone(), _events: events, split, first });
+        cx.notify();
+        Some(view)
+    }
+
+    /// 分屏 自由 or 固定 (#245). A file split on itself changes how it is drawn and stays where it is: 自由 is two
+    /// viewers of it, each with its own zoom; 固定 is one viewer showing it twice, its halves even and zoomed together.
+    fn set_split_free(&mut self, free: bool, cx: &mut Context<Self>) {
+        self.settings.pdf_split_free = free;
+        self.save_settings(cx);
+        let Some(lib) = self.lib.as_mut() else { return };
+        let Some(pdf) = lib.pdf.clone() else { return };
+        if free {
+            if lib.beside.is_some() || lib.facing_shown() { return cx.notify() }
+            if let Some((split, place, first)) = pdf.update(cx, |pdf, cx| pdf.part(cx)) { self.split_itself(split, Some(place), first, cx); }
+        } else {
+            lib.split_share = 0.5;
+            if !lib.beside_itself(cx) { return cx.notify() }
+            let Some(beside) = lib.beside.take() else { return };
+            let place = beside.view.read(cx).place();
+            pdf.update(cx, |pdf, cx| pdf.join(beside.split, place, beside.first, cx));
+        }
         cx.notify();
     }
 
@@ -5587,7 +5669,7 @@ impl Workspace {
         };
         let wanted = lib.pdf_file(paper).map(|f| f.id.clone());
         // A file in the other half is gone to there; the half worked in keeps its own.
-        if lib.selected.as_deref() == Some(paper) && let Some(other) = lib.beside.as_ref().map(|beside| beside.view.clone()) && wanted.as_deref() == Some(other.read(cx).resource_id()) {
+        if lib.selected.as_deref() == Some(paper) && let Some(other) = lib.beside.as_ref().map(|beside| beside.view.clone()) && wanted.as_deref() == Some(other.read(cx).resource_id()) && !lib.beside_itself(cx) {
             self.work_in(&other, cx);
             return cx.notify();
         }
@@ -5653,6 +5735,11 @@ impl Workspace {
                 let main = lib.pdf.as_ref() == Some(&view);
                 let (inner, width) = { let pdf = view.read(cx); (pdf.split(), pdf.width()) };
                 let split = crate::pdf::beside_split(lib.beside.as_ref().filter(|_| main).map(|beside| beside.split), inner, width);
+                // 自由: the other half is a viewer of the same file, there at the figure.
+                if main && self.settings.pdf_split_free && !lib.facing_shown() {
+                    if let Some(other) = self.split_itself(split, None, false, cx) { other.update(cx, |pdf, cx| pdf.arrive(vec![], Some((*page, *top)), mark.clone(), cx)) }
+                    return;
+                }
                 if main { self.close_beside(cx) }
                 view.update(cx, |pdf, cx| pdf.keep_beside(split, *page, *top, mark.clone(), cx));
             }
@@ -9168,6 +9255,13 @@ impl Workspace {
                 "swap" => Some(Cmd::SwapPanes),
                 // `pdftools` / `pdftools:bar`: the PDF's tools floating at the page's right edge, or back in its toolbar.
                 "pdftools" => Some(Cmd::FloatPdfTools(arg != "bar")),
+                // `pdffree`, `pdffree:off`: 分屏 自由 or 固定. `halves:0.3`: 自由, the first half's share of the room.
+                "pdffree" => Some(Cmd::PdfSplitFree(arg != "off")),
+                "halves" => {
+                    if let Some(lib) = self.lib.as_mut() { lib.split_share = crate::pdf::dragged_share(arg.parse().unwrap_or(0.5), 0., (lib.pdf_area(cx).0 - crate::pdf::DIVIDER).max(0.)) }
+                    cx.notify();
+                    return;
+                }
                 // `float` / `float:off`: the paper's conversation over its PDF, or beside it; `fold` / `fold:off` folds it up or opens it.
                 "float" => Some(Cmd::FloatChat(arg != "off")),
                 "fold" => Some(Cmd::FoldChat(arg != "off")),
