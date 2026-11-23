@@ -764,6 +764,23 @@ impl Formatter {
         out
     }
 
+    /// How each group of `text` that is written for a reader reads, by where the group is written: what a
+    /// manuscript being written shows in a group's place while the caret is not in it. A group a style raises
+    /// (a numbered journal style) is put in brackets, as it stands on the line there. A group with a key
+    /// nothing has is not among them: it stays as written.
+    pub fn labels(&self, text: &str, index: &Index) -> Vec<(Range<usize>, String)> {
+        written_groups(text, index)
+            .into_iter()
+            .filter_map(|group| {
+                let place = group.first()?.group.clone();
+                let rich = cited_ids(&group, |id| self.numbers.contains_key(id)).and_then(|ids| self.written(&ids))?;
+                let raised = !rich.looks.is_empty() && rich.looks.iter().all(|(_, look)| look.sup);
+                let words = rich.text.trim();
+                Some((place, if raised { format!("[{words}]") } else { words.to_string() }))
+            })
+            .collect()
+    }
+
     /// `rich` as words alone.
     pub fn apply(&self, text: &str, index: &Index) -> String {
         self.rich(text, index).text
@@ -1139,5 +1156,25 @@ mod tests {
         assert_eq!(format.apply(two, &index), "Again 1–4 (Zhang et al., 2024).");
         assert_eq!(format.references().len(), 4);
         assert!(format.references()[0].1.text.starts_with("1. Zhang, W., Li, Q. & Wang, F."), "{:?}", format.references()[0]);
+    }
+
+    #[test]
+    fn what_a_manuscript_shows_in_a_citations_place() {
+        let papers = library();
+        let index = Index::new(&papers, [], &BTreeMap::new());
+        let one = "Roots [@Zhang2024 p.2 \"quoted\"] and shoots [@Smith2019; @Zhang2024b] [@Gone2000].";
+        let two = "Again [@DeNovo2020].";
+        let placed = |format: &Formatter, text: &str| format.labels(text, &index).into_iter().map(|(range, label)| (text[range].to_string(), label)).collect::<Vec<_>>();
+        let pair = |written: &str, label: &str| (written.to_string(), label.to_string());
+        // The group whole, quotation and all; a key nothing has stays as it is written.
+        let format = Formatter::new(&[one, two], &index, &Style::AuthorYear, "en");
+        assert_eq!(placed(&format, one), [pair("[@Zhang2024 p.2 \"quoted\"]", "(Zhang et al., 2024a)"), pair("[@Smith2019; @Zhang2024b]", "(Smith & Jones, 2019; Zhang et al., 2024b)")]);
+        // Numbered through the whole manuscript, not the part on show.
+        let format = Formatter::new(&[one, two], &index, &Style::Numeric, "en");
+        assert_eq!(placed(&format, two), [pair("[@DeNovo2020]", "[4]")]);
+        // A raised number is put in brackets on the line.
+        let nature = Style::Csl(std::sync::Arc::new(crate::csl::load("csl:nature", std::path::Path::new("/nowhere")).unwrap()));
+        let format = Formatter::new(&[one, two], &index, &nature, "en");
+        assert_eq!(placed(&format, one), [pair("[@Zhang2024 p.2 \"quoted\"]", "[1]"), pair("[@Smith2019; @Zhang2024b]", "[2,3]")]);
     }
 }

@@ -95,6 +95,7 @@ impl Workspace {
         if moving { window.request_animation_frame() }
         let bars = self.render_revise_bars(&bars, cx);
         let links = self.citation_links();
+        let folds = self.lib.as_ref().map(|lib| lib.citing.read.here.clone()).unwrap_or_default();
         // What the search over the manuscript found here, last: a click on words is a comment's before it is anything else.
         let found = self.seek_marks(&text, cx);
         // The pictures the text shows (write_figures.rs): those of the section being written, or of every section read through.
@@ -107,6 +108,7 @@ impl Workspace {
         lib.writing.editor.update(cx, |input, _| {
             input.set_marks(noted.into_iter().chain(changed).chain(found).collect());
             input.set_links(links);
+            input.set_folds(folds);
             input.set_pictures(pictures);
             input.set_placeholder(if agent { PLACEHOLDER_AGENT } else { PLACEHOLDER });
         });

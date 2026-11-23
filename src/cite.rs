@@ -37,6 +37,22 @@ pub struct Citing {
     pub read_scroll: ScrollHandle,
     /// Where in its paper each citation is from (write_source.rs).
     pub sources: crate::write_source::Sourcing,
+    /// How the citations read for a reader, which the manuscript shows in their place.
+    pub read: Read,
+}
+
+/// How a manuscript's citations read for a reader, in the style chosen for export (`Settings::cite_style`): what the
+/// editor shows in a citation's place while the caret is not in it, so a paragraph reads as it will in the file.
+/// Made anew only when the manuscript, the style or the library changes; a frame in between reads what was made.
+#[derive(Default)]
+pub struct Read {
+    /// The style and the key it was read by: a CSL file is read once, not every frame.
+    style: Option<(String, cite::Style)>,
+    /// A fingerprint of what the formatter was made from; 0 is nothing yet (`Library::reload` sets it so).
+    pub made_from: u64,
+    formatter: Option<cite::Formatter>,
+    /// Each citation group of the part being written that names papers: where it is written, and how it reads.
+    pub here: Vec<(std::ops::Range<usize>, String)>,
 }
 
 /// What the manuscript cites. Worked out once before the writing page is
@@ -122,13 +138,38 @@ impl Citing {
             InputEvent::Cancel => input.update(cx, |input, cx| input.set_text("", cx)),
             _ => {}
         }));
-        Citing { find, kept: store.cite_keys().unwrap_or_default(), whole: false, listed: Listed::default(), read_scroll: ScrollHandle::new(), sources: crate::write_source::Sourcing::new(store.passages(manuscript).unwrap_or_default()) }
+        Citing { find, kept: store.cite_keys().unwrap_or_default(), whole: false, listed: Listed::default(), read_scroll: ScrollHandle::new(), sources: crate::write_source::Sourcing::new(store.passages(manuscript).unwrap_or_default()), read: Read::default() }
     }
 }
 
 /// Every paper of the open library, the trash's included, with its key.
 pub(crate) fn index(lib: &Library) -> Index<'_> {
     Index::new(&lib.papers, lib.trash.iter().map(|entry| &entry.paper), &lib.citing.kept)
+}
+
+/// How the citations of the part being written read in the style kept under `key`; a style that cannot be read is author and year.
+fn read_here(lib: &mut Library, key: &str, root: &std::path::Path, cx: &App) -> Vec<(std::ops::Range<usize>, String)> {
+    use std::hash::{Hash, Hasher};
+    if lib.citing.read.style.as_ref().is_none_or(|(kept, _)| kept != key) {
+        lib.citing.read.style = Some((key.to_string(), wisp_core::csl::style(key, root).unwrap_or_default()));
+        lib.citing.read.made_from = 0;
+    }
+    let Some(manuscript) = lib.writing.current() else { return vec![] };
+    let section = lib.writing.section_id.as_str();
+    let current = lib.writing.editor.read(cx).text();
+    let texts: Vec<&str> = manuscript.sections.iter().map(|part| if part.id == section { current } else { part.body.as_str() }).collect();
+    let language = lib.writing.language();
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (key, language, &texts, lib.papers.len(), lib.trash.len(), lib.citing.kept.len()).hash(&mut hasher);
+    let made_from = hasher.finish().max(1);
+    if made_from != lib.citing.read.made_from {
+        let style = lib.citing.read.style.as_ref().map(|(_, style)| style.clone()).unwrap_or_default();
+        let formatter = cite::Formatter::new(&texts, &index(lib), &style, language);
+        lib.citing.read.formatter = Some(formatter);
+        lib.citing.read.made_from = made_from;
+    }
+    let current = lib.writing.editor.read(cx).text();
+    lib.citing.read.formatter.as_ref().map(|formatter| formatter.labels(current, &index(lib))).unwrap_or_default()
 }
 
 /// What the manuscript on show cites, section by section.
@@ -199,9 +240,10 @@ fn listed(lib: &Library, cx: &App) -> Listed {
 impl Workspace {
     /// Before the writing page is drawn: what the manuscript cites.
     pub(crate) fn cite_refresh(&mut self, cx: &App) {
-        let Some(lib) = self.lib.as_ref() else { return };
-        let listed = listed(lib, cx);
-        if let Some(lib) = self.lib.as_mut() { lib.citing.listed = listed }
+        let (style, root) = (self.settings.cite_style.clone(), self.data_root());
+        let Some(lib) = self.lib.as_mut() else { return };
+        lib.citing.listed = listed(lib, cx);
+        lib.citing.read.here = read_here(lib, &style, &root, cx);
     }
 
     /// 引用: the paper's key at the caret, kept so it stays the paper's.
