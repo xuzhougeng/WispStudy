@@ -111,14 +111,15 @@ pub fn catalog() -> Vec<ToolDef> {
         scoped("import_references", "导入 BibTeX / RIS", "读取本地 BibTeX 或 RIS 文件，按内容自动识别格式并导入参考文献记录。按 DOI、PMID、题目去重，回收站条目也会跳过；不自动导入 PDF，不联网。返回新增和跳过的数量及文献 ID。", json!({
             "path": {"type": "string", "description": "本机 BibTeX / RIS 文件路径，建议使用绝对路径。"},
         }), &["path"]),
-        scoped("import_zotero", "导入 Zotero", "从本机 Zotero 6 / 7 的 zotero.sqlite 导入文献、标签、笔记及可访问的本地 PDF：默认是个人库（我的文库）和所有群组库，zoteroLibrary 只导入其中一个（先用 list_zotero_libraries 看有哪些）。只读源数据库、复制附件；已有文献保留原记录并补 PDF，回收站条目跳过。不联网。建议先退出 Zotero；返回逐项结果，必须检查 failed 和 results 中的 problems。", json!({
+        scoped("import_zotero", "导入 Zotero", "从本机 Zotero 6 / 7 的 zotero.sqlite 导入文献、标签、笔记及可访问的本地 PDF：默认是个人库（我的文库）和所有群组库，zoteroLibrary 只导入其中一个，zoteroCollections 只导入其中几个分类（先用 list_zotero_libraries 看有哪些）。只读源数据库、复制附件；已有文献保留原记录并补 PDF，回收站条目跳过。不联网。建议先退出 Zotero；返回逐项结果，必须检查 failed 和 results 中的 problems。", json!({
             "path": {"type": "string", "description": "本机 Zotero 数据目录中的 zotero.sqlite 路径；storage 目录应在它旁边。"},
             "zoteroLibrary": {"type": "string", "description": "只导入这一个 Zotero 文献库：「我的文库」，群组的名称，或 list_zotero_libraries 给出的 id；省略或「全部」时导入全部。"},
+            "zoteroCollections": {"type": "array", "items": {"type": "string"}, "description": "只导入这几个 Zotero 分类里的条目，每个分类含其子分类：分类路径（如「植物/根」）、只有一个分类叫它时的名称，或 list_zotero_libraries 给出的分类 id。同时给了 zoteroLibrary 时只能是那个文献库的分类。省略时导入整个文献库。"},
         }), &["path"]),
         ToolDef {
             name: "list_zotero_libraries",
             title: "列出 Zotero 文献库",
-            description: "列出本机 zotero.sqlite 里可以导入的文献库：个人库（我的文库）和每个群组库，各有 id、名称和 import_zotero 会导入的条目数（不含笔记、附件和 Zotero 回收站里的）。只读，不联网；建议先退出 Zotero。",
+            description: "列出本机 zotero.sqlite 里可以导入的文献库：个人库（我的文库）和每个群组库，各有 id、名称和 import_zotero 会导入的条目数（不含笔记、附件和 Zotero 回收站里的）；以及每个文献库的分类（collections，按 Zotero 里的顺序，子分类跟在父分类后），各有 id、所属文献库的 id（library）、路径（path）、层级（depth）和含子分类的条目数。只读，不联网；建议先退出 Zotero。",
             input_schema: json!({"type": "object", "properties": {
                 "path": {"type": "string", "description": "本机 Zotero 数据目录中的 zotero.sqlite 路径。"},
             }, "required": ["path"], "additionalProperties": false}),

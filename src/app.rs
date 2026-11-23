@@ -388,6 +388,8 @@ pub enum Cmd {
     PickZotero,
     /// One library of the Zotero database chosen to import (`zotero::Library::id`), or `None`: all of them.
     ChooseZoteroLibrary(Option<i64>),
+    /// A collection of the Zotero database ticked or unticked (`zotero::Collection::id`).
+    ChooseZoteroCollection(i64),
     ShowZotero,
     ImportPdfs,
     ImportFolder,
@@ -1623,8 +1625,9 @@ pub enum Modal {
     ImportReport,
     /// `open`: Zotero holds its database right now, as far as the usual place of it tells.
     Zotero { open: bool },
-    /// The database picked holds more than one library with items: which of them to import (`None`: all).
-    ZoteroLibraries { path: PathBuf, libraries: Vec<zotero::Library>, chosen: Option<i64> },
+    /// The database picked holds more than one library with items, or collections: which library to import (`None`: all),
+    /// and which of its collections (`picked`, `zotero::Collection::id`; none: the whole library).
+    ZoteroLibraries { path: PathBuf, libraries: Vec<zotero::Library>, chosen: Option<i64>, collections: Vec<zotero::Collection>, picked: Vec<i64> },
     ZoteroReport,
     /// What came of looking for each paper's open full text (`Library::fetching`).
     FetchReport,
@@ -3407,7 +3410,21 @@ impl Workspace {
             }
             Cmd::PickZotero => self.pick_zotero(cx),
             Cmd::ChooseZoteroLibrary(id) => {
-                if let Some(Modal::ZoteroLibraries { chosen, .. }) = self.modal.as_mut() { *chosen = id }
+                if let Some(Modal::ZoteroLibraries { chosen, collections, picked, .. }) = self.modal.as_mut() {
+                    *chosen = id;
+                    // Ticks in another library than the one now chosen would import nothing of it.
+                    picked.retain(|p| id.is_none_or(|l| collections.iter().any(|c| c.id == *p && c.library == l)));
+                }
+            }
+            Cmd::ChooseZoteroCollection(id) => {
+                if let Some(Modal::ZoteroLibraries { collections, picked, .. }) = self.modal.as_mut() {
+                    if let Some(at) = picked.iter().position(|p| *p == id) { picked.remove(at); }
+                    else if !zotero::under_picked(collections, picked, id) {
+                        // A collection takes in what is under it: ticks there are now part of this one.
+                        picked.retain(|p| !zotero::under_picked(collections, &[id], *p));
+                        picked.push(id);
+                    }
+                }
             }
             Cmd::ShowZotero => {
                 self.modal_error.clear();
@@ -5895,21 +5912,25 @@ impl Workspace {
         let library = lib.info.id.clone();
         let listing = path.clone();
         cx.spawn(async move |this, cx| {
-            let listed = cx.background_executor().spawn(async move { zotero::libraries(&listing) }).await;
+            // Collections that cannot be listed leave the choice of a library, as before there were any.
+            let (listed, collections) = cx.background_executor().spawn(async move { (zotero::libraries(&listing), zotero::collections(&listing).unwrap_or_default()) }).await;
             this.update(cx, |this, cx| {
                 // Closed meanwhile, or another library opened: nothing goes on.
                 if this.lib.as_ref().is_none_or(|l| l.info.id != library) || !matches!(this.modal, Some(Modal::Zotero { .. })) { return }
                 let offered: Vec<zotero::Library> = listed.map(|all| all.into_iter().filter(|l| l.items > 0).collect()).unwrap_or_default();
-                if offered.len() < 2 { return this.import_zotero(path, None, cx) }
+                // An empty collection imports nothing, and neither does what is under it.
+                let collections: Vec<zotero::Collection> = collections.into_iter().filter(|c| c.items > 0 && offered.iter().any(|l| l.id == c.library)).collect();
+                if offered.is_empty() || (offered.len() < 2 && collections.is_empty()) { return this.import_zotero(path, None, vec![], cx) }
                 this.modal_error.clear();
-                this.modal = Some(Modal::ZoteroLibraries { path, chosen: Some(offered[0].id), libraries: offered });
+                this.modal = Some(Modal::ZoteroLibraries { path, chosen: Some(offered[0].id), libraries: offered, collections, picked: vec![] });
                 cx.notify();
             }).ok();
         }).detach();
     }
 
     /// `only`: one library of the database (`zotero::Library::id`); `None` imports all of them.
-    fn import_zotero(&mut self, path: PathBuf, only: Option<i64>, cx: &mut Context<Self>) {
+    /// `collections`: only the items in these (`zotero::Collection::id`) and what is under them; none, the whole library.
+    fn import_zotero(&mut self, path: PathBuf, only: Option<i64>, collections: Vec<i64>, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
         if lib.zotero.as_ref().is_some_and(|run| run.running) { return }
         let library = lib.info.id.clone();
@@ -5920,7 +5941,7 @@ impl Workspace {
         self.modal = Some(Modal::ZoteroReport);
         cx.notify();
         cx.spawn(async move |this, cx| {
-            let parsed = cx.background_executor().spawn(async move { zotero::read(&path, only) }).await;
+            let parsed = cx.background_executor().spawn(async move { zotero::read(&path, only, &collections) }).await;
             let entries = this.update(cx, |this, cx| {
                 let run = this.lib.as_mut().filter(|l| l.info.id == library)?.zotero.as_mut().filter(|r| r.id == run_id)?;
                 let entries = match parsed {
@@ -8298,9 +8319,9 @@ impl Workspace {
                 if form.chosen.is_some() { self.complete_apply(window, cx) } else if form.by_id { self.complete_lookup(cx) } else { self.complete_find(cx) }
             }
             Modal::Zotero { .. } => self.run(Cmd::PickZotero, window, cx),
-            Modal::ZoteroLibraries { path, chosen, .. } => {
-                let (path, chosen) = (path.clone(), *chosen);
-                self.import_zotero(path, chosen, cx);
+            Modal::ZoteroLibraries { path, chosen, picked, .. } => {
+                let (path, chosen, picked) = (path.clone(), *chosen, picked.clone());
+                self.import_zotero(path, chosen, picked, cx);
             }
             Modal::ZoteroReport => self.run(Cmd::CloseModal, window, cx),
             Modal::FetchReport => self.run(Cmd::CloseModal, window, cx),
