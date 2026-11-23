@@ -5339,6 +5339,18 @@ impl Workspace {
         let events = cx.subscribe(&pdf, |this, view, event: &PdfEvent, cx| this.pdf_event(view, event, cx));
         let (figures, collecting) = self.figure_frames(&file.id);
         pdf.update(cx, |pdf, cx| pdf.set_figures(figures, collecting, cx));
+        // The paper's other PDFs: a figure's number in this file may name a figure in one of them (#229).
+        if let Some(lib) = self.lib.as_ref() {
+            let main = lib.main_pdf(&file.paper_id).map(|f| f.id.clone());
+            let named = |f: &PaperFile, n: usize| if main.as_deref() == Some(f.id.as_str()) { t("正文").to_string() } else { tf!("附件 S{}", "Attachment S{}", n) };
+            let all: Vec<(&PaperFile, String)> = lib.main_pdf(&file.paper_id).into_iter().map(|f| (f, named(f, 0))).chain(lib.attachments(&file.paper_id).into_iter().enumerate().map(|(n, f)| (f, named(f, n + 1)))).collect();
+            let own = all.iter().find(|(f, _)| f.id == file.id).map(|(_, label)| label.clone());
+            let siblings: Vec<crate::pdf::Sibling> = all.iter().filter(|(f, _)| f.id != file.id).map(|(f, label)| crate::pdf::Sibling { resource: f.id.clone(), label: label.clone(), path: lib.store.file_path(f), main: main.as_deref() == Some(f.id.as_str()) }).collect();
+            if let (Some(label), false) = (own, siblings.is_empty()) {
+                let is_main = main.as_deref() == Some(file.id.as_str());
+                pdf.update(cx, |pdf, cx| pdf.set_siblings(label, is_main, siblings, cx));
+            }
+        }
         Some((pdf, events))
     }
 
@@ -5577,6 +5589,24 @@ impl Workspace {
         cx.notify();
     }
 
+    /// Whether a viewer is the panel's, which can show another file of its paper; one in a window of its own
+    /// or kept beside cannot, and says so.
+    fn panel_viewer(&mut self, view: &Entity<PdfView>, cx: &mut Context<Self>) -> bool {
+        let panel = self.lib.as_ref().is_some_and(|lib| lib.pdf.as_ref() == Some(view));
+        if !panel { self.say(t("这张图在这篇文献的另一个文件里：在文献库窗口里读这篇，才能固定对照或前往。"), cx) }
+        panel
+    }
+
+    /// Read another PDF of the selected paper in the half worked in (`show_file`), and hand back its viewer
+    /// when it is the one on show now.
+    fn read_in_panel(&mut self, file: &str, cx: &mut Context<Self>) -> Option<Entity<PdfView>> {
+        let lib = self.lib.as_ref()?;
+        let paper = lib.selected.clone()?;
+        let main = lib.main_pdf(&paper).map(|f| f.id.clone());
+        self.show_file(&paper, (main.as_deref() != Some(file)).then(|| file.to_string()), cx);
+        self.lib.as_ref()?.pdf.clone().filter(|pdf| pdf.read(cx).resource_id() == file)
+    }
+
     /// What the PDF viewer reports: its selection copied, or handed to a conversation.
     fn pdf_event(&mut self, view: Entity<PdfView>, event: &PdfEvent, cx: &mut Context<Self>) {
         match event {
@@ -5605,13 +5635,38 @@ impl Workspace {
             PdfEvent::RestyleText { resource, id, style } => self.change_pdf_annotation(resource, |store| store.restyle_pdf_text(resource, id, style), cx),
             PdfEvent::OpenFigure(id) => self.open_figure_on_page(id, cx),
             // 固定对照: the figure stays in the other half of this viewer. A file of the paper shown there gives it up.
-            PdfEvent::FigureBeside { page, top } => {
+            PdfEvent::FigureBeside { file: None, page, top } => {
                 let Some(lib) = self.lib.as_ref() else { return };
                 let main = lib.pdf.as_ref() == Some(&view);
                 let (inner, width) = { let pdf = view.read(cx); (pdf.split(), pdf.width()) };
                 let split = crate::pdf::beside_split(lib.beside.as_ref().filter(|_| main).map(|beside| beside.split), inner, width);
                 if main { self.close_beside(cx) }
                 view.update(cx, |pdf, cx| pdf.keep_beside(split, *page, *top, cx));
+            }
+            // A figure in another file of the paper: that file is shown in the other half, at the figure.
+            PdfEvent::FigureBeside { file: Some(file), page, top } => {
+                if !self.panel_viewer(&view, cx) { return }
+                // The translation keeps the other half while it is on, even written on the pages themselves.
+                if self.lib.as_ref().is_some_and(|lib| lib.facing_shown()) { return self.say(t("开着「译文」时另一半不能换成别的文件：先关掉译文，或者用「前往原位置」。"), cx) }
+                self.show_beside(file.clone(), cx);
+                let Some(other) = self.lib.as_ref().and_then(|lib| lib.beside.as_ref()).map(|beside| beside.view.clone()).filter(|other| other.read(cx).resource_id() == file) else { return };
+                other.update(cx, |pdf, cx| pdf.arrive(vec![], Some((*page, *top)), cx));
+            }
+            // 前往原位置 of a figure in another file: the half worked in shows that file at the figure, and is
+            // handed the places to come back to.
+            PdfEvent::FigureGo { file, page, top, trail } => {
+                if !self.panel_viewer(&view, cx) {
+                    // It stays where it is, with the places it had before this one.
+                    let kept = trail[..trail.len().saturating_sub(1)].to_vec();
+                    return view.update(cx, |pdf, cx| pdf.arrive(kept, None, cx));
+                }
+                if let Some(pdf) = self.read_in_panel(file, cx) { pdf.update(cx, |pdf, cx| pdf.arrive(trail.clone(), Some((*page, *top)), cx)) }
+            }
+            // 返回刚才位置 to a place in another file: that file again, where it was left and as large.
+            PdfEvent::FigureReturn { back, trail } => {
+                let Some((file, _)) = back.from.clone() else { return };
+                if !self.panel_viewer(&view, cx) { return }
+                if let Some(pdf) = self.read_in_panel(&file, cx) { pdf.update(cx, |pdf, cx| pdf.restore(back.clone(), Some(trail.clone()), cx)) }
             }
             PdfEvent::Reframe { page, bbox, png } => {
                 let resource = view.read(cx).resource_id().to_string();
@@ -8927,13 +8982,15 @@ impl Workspace {
                 }
                 // `pdffig:<page>;<n>` shows the figure the n-th mention (from 0) of a 1-based page of the PDF on show leads to,
                 // as a click on the number does (after a `shot:` has drawn the page and the file's figures are read);
-                // `pdffig:pin` keeps it in the other half, `pdffig:go` goes to it, `pdffig:back` comes back.
+                // `pdffig:pin` keeps it in the other half, `pdffig:go` goes to it, `pdffig:back` comes back;
+                // `pdffig:pick;<n>` chooses the n-th of the figures the card lists.
                 "pdffig" => {
                     let Some(pdf) = self.lib.as_ref().and_then(|l| l.pdf.clone()) else { return };
                     match arg {
                         "pin" => pdf.update(cx, |pdf, cx| pdf.pin_figure(cx)),
                         "go" => pdf.update(cx, |pdf, cx| pdf.go_to_figure(cx)),
                         "back" => pdf.update(cx, |pdf, cx| pdf.return_back(cx)),
+                        _ if arg.starts_with("pick;") => pdf.update(cx, |pdf, cx| pdf.pick_figure(arg[5..].parse().unwrap_or(0), cx)),
                         _ => {
                             let numbers: Vec<usize> = arg.split(';').filter_map(|n| n.parse().ok()).collect();
                             if let [page, n] = numbers.as_slice() && !pdf.update(cx, |pdf, cx| pdf.open_figure_mention(page.saturating_sub(1), *n, cx)) {
