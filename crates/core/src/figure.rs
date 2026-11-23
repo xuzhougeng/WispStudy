@@ -552,23 +552,33 @@ pub fn caption(marks: &[Mark], piece: [f32; 4]) -> Option<Caption> {
         .enumerate()
         .filter_map(|(at, line)| Some((at, opening(&line.text)?, away(line)?)))
         .min_by(|a, b| a.2.total_cmp(&b.2))?;
-    Some(read_caption(&lines, start, opened))
+    Some(read_caption(&lines, start, opened).0)
 }
 
 /// Every caption a page shows, in the order the page draws them.
 pub fn captions(marks: &[Mark]) -> Vec<Caption> {
     let lines = pdftext::lines(marks);
-    (0..lines.len()).filter_map(|at| Some(read_caption(&lines, at, opening(&lines[at].text)?))).collect()
+    (0..lines.len()).filter_map(|at| Some(read_caption(&lines, at, opening(&lines[at].text)?).0)).collect()
 }
 
-/// The caption that opens at a line: its number, and the legend through the lines that go on under it.
-fn read_caption(lines: &[Line], start: usize, (label_end, legend_start): (usize, usize)) -> Caption {
+/// Every caption among a page's lines with the lines it takes: the line it opens at, and the one after its last.
+pub(crate) fn caption_spans(lines: &[Line]) -> Vec<(usize, usize, Caption)> {
+    (0..lines.len()).filter_map(|at| {
+        let (caption, end) = read_caption(lines, at, opening(&lines[at].text)?);
+        Some((at, end, caption))
+    }).collect()
+}
+
+/// The caption that opens at a line: its number, and the legend through the lines that go on under it; and
+/// the line after its last.
+fn read_caption(lines: &[Line], start: usize, (label_end, legend_start): (usize, usize)) -> (Caption, usize) {
     let first = &lines[start];
     let label = first.text[..label_end].split_whitespace().collect::<Vec<_>>().join(" ");
     let mut legend = String::new();
     join_line(&mut legend, &first.text[legend_start..]);
     // The lines that go on under it: set alike, in its column, at a paragraph's leading.
     let mut last = first;
+    let mut end = start + 1;
     for next in &lines[start + 1..] {
         let leading = next.y - last.y;
         let size = last.size.max(next.size);
@@ -578,9 +588,10 @@ fn read_caption(lines: &[Line], start: usize, (label_end, legend_start): (usize,
         if opening(&next.text).is_some() { break }
         join_line(&mut legend, &next.text);
         last = next;
+        end += 1;
         if legend.len() > LEGEND_BYTES { break }
     }
-    Caption { label, legend }
+    (Caption { label, legend }, end)
 }
 
 #[cfg(test)]

@@ -11,7 +11,7 @@ use hayro_interpret::font::{Glyph, GlyphRun};
 use hayro_interpret::hayro_cmap::BfString;
 use hayro_interpret::hayro_syntax::page::Page;
 use hayro_interpret::hayro_syntax::{DecryptionError, LoadPdfError, Pdf};
-use hayro_interpret::kurbo::{BezPath, Point, Rect};
+use hayro_interpret::kurbo::{BezPath, Point, Rect, Shape};
 use hayro_interpret::{BlendMode, ClipPath, Context, Device, DrawMode, DrawProps, Image, ImageDrawProps, InterpreterCache, InterpreterSettings, SoftMask, TransformExt, interpret_page};
 
 /// One glyph as the page draws it, in points from the top left.
@@ -33,6 +33,30 @@ struct Marks {
     marks: Vec<Mark>,
     /// Glyphs the font gives no character for.
     unreadable: usize,
+    /// Where the page draws something that is not text: the box of every picture and path, as far as the
+    /// clip in force lets it show. Read only when asked for (`shapes`), since most readers want the text alone.
+    shapes: Option<Vec<[f32; 4]>>,
+    /// The clips in force, each within the one before it; `None` is one that lets nothing through.
+    clips: Vec<Option<Rect>>,
+}
+
+/// The part of a box a clip lets show; none when they do not meet. A line (no width or no height) is kept.
+fn within(rect: Rect, clip: Rect) -> Option<Rect> {
+    let (x0, y0, x1, y1) = (rect.x0.max(clip.x0), rect.y0.max(clip.y0), rect.x1.min(clip.x1), rect.y1.min(clip.y1));
+    (x1 >= x0 && y1 >= y0).then(|| Rect::new(x0, y0, x1, y1))
+}
+
+impl Marks {
+    /// Note a box something is drawn in, cut to the clip in force.
+    fn drawn(&mut self, rect: Rect) {
+        if self.shapes.is_none() || !rect.is_finite() { return }
+        let shown = match self.clips.last() {
+            Some(None) => return,
+            Some(Some(clip)) => within(rect, *clip),
+            None => Some(rect),
+        };
+        if let (Some(shown), Some(shapes)) = (shown, self.shapes.as_mut()) { shapes.push([shown.x0 as f32, shown.y0 as f32, shown.x1 as f32, shown.y1 as f32]) }
+    }
 }
 
 impl<'a> Device<'a> for Marks {
@@ -74,11 +98,29 @@ impl<'a> Device<'a> for Marks {
             self.marks.push(Mark { text, x0: origin.x as f32, x1: right.x as f32, y: origin.y as f32, size, bold: bold.unwrap_or(false) });
         }
     }
-    fn draw_path(&mut self, _: &BezPath, _: DrawProps<'a>, _: &DrawMode) {}
-    fn push_clip_path(&mut self, _: &ClipPath) {}
+    fn draw_path(&mut self, path: &BezPath, props: DrawProps<'a>, mode: &DrawMode) {
+        if self.shapes.is_none() || matches!(mode, DrawMode::Invisible) { return }
+        self.drawn(props.transform.transform_rect_bbox(path.bounding_box()));
+    }
+    fn push_clip_path(&mut self, clip: &ClipPath) {
+        if self.shapes.is_none() { return }
+        // A clip is given in the page's own space, and holds within the clips around it.
+        let own = clip.path.bounding_box();
+        let inner = match self.clips.last() {
+            Some(None) => None,
+            Some(Some(outer)) => within(own, *outer),
+            None => Some(own),
+        };
+        self.clips.push(inner);
+    }
     fn push_transparency_group(&mut self, _: f32, _: Option<SoftMask<'a>>, _: BlendMode) {}
-    fn draw_image(&mut self, _: Image<'a, '_>, _: ImageDrawProps<'a>) {}
-    fn pop_clip(&mut self) {}
+    fn draw_image(&mut self, image: Image<'a, '_>, props: ImageDrawProps<'a>) {
+        if self.shapes.is_none() { return }
+        self.drawn(props.transform.transform_rect_bbox(Rect::new(0., 0., image.width() as f64, image.height() as f64)));
+    }
+    fn pop_clip(&mut self) {
+        self.clips.pop();
+    }
     fn pop_transparency_group(&mut self) {}
 }
 
@@ -106,9 +148,14 @@ pub fn pages(data: Vec<u8>) -> Result<Vec<String>, String> {
 
 /// The glyphs of a page as it is interpreted; none when the interpreter gives up on it.
 fn read_marks<'a>(page: &Page<'a>, cache: &InterpreterCache<'a>) -> Marks {
+    read_page(page, cache, false)
+}
+
+/// A page as it is interpreted: its glyphs and, when `shapes` asks, where it draws pictures and paths.
+fn read_page<'a>(page: &Page<'a>, cache: &InterpreterCache<'a>, shapes: bool) -> Marks {
     let (width, height) = page.render_dimensions();
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let mut marks = Marks::default();
+        let mut marks = Marks { shapes: shapes.then(Vec::new), ..Marks::default() };
         let mut context = Context::new(page.initial_transform(true).to_kurbo(), Rect::new(0., 0., width as f64, height as f64), cache, page.xref(), InterpreterSettings::default());
         interpret_page(page, &mut context, &mut marks);
         marks
@@ -122,15 +169,39 @@ pub fn page_marks<'a>(page: &Page<'a>, cache: &InterpreterCache<'a>) -> Vec<Mark
     read_marks(page, cache).marks
 }
 
+/// The glyphs of one page and the boxes of what it draws beside text (pictures, lines, fills), in points
+/// from the top left: what `figref` finds a figure's place from.
+pub fn page_drawn<'a>(page: &Page<'a>, cache: &InterpreterCache<'a>) -> (Vec<Mark>, Vec<[f32; 4]>) {
+    let read = read_page(page, cache, true);
+    (read.marks, read.shapes.unwrap_or_default())
+}
+
+/// A page as `figref` reads it: its glyphs, the boxes of what it draws beside text, and its size.
+pub type Drawn = (Vec<Mark>, Vec<[f32; 4]>, (f32, f32));
+
+/// Every page's glyphs and shapes (`page_drawn`); `None` when the file cannot be parsed.
+pub fn file_drawn(data: Vec<u8>) -> Option<Vec<Drawn>> {
+    std::panic::catch_unwind(|| {
+        let pdf = Pdf::new(data).ok()?;
+        let cache = InterpreterCache::new();
+        Some(pdf.pages().iter().map(|page| {
+            let (marks, shapes) = page_drawn(page, &cache);
+            (marks, shapes, page.render_dimensions())
+        }).collect())
+    })
+    .ok()
+    .flatten()
+}
+
 /// Whether a mark starts another line than the one before it stands on.
-fn starts_line(last: &Mark, next: &Mark) -> bool {
+pub(crate) fn starts_line(last: &Mark, next: &Mark) -> bool {
     let size = last.size.max(next.size);
     // Another baseline, or back to the left: a new line.
     (next.y - last.y).abs() > size * 0.55 || next.x0 < last.x1 - size * 2.
 }
 
 /// The box a mark takes on the page: from above its capitals to below its descenders.
-fn mark_box(mark: &Mark) -> [f32; 4] {
+pub(crate) fn mark_box(mark: &Mark) -> [f32; 4] {
     [mark.x0, mark.y - mark.size * 0.8, mark.x1, mark.y + mark.size * 0.25]
 }
 
@@ -181,7 +252,7 @@ pub fn marks_text(marks: &[Mark]) -> String {
 }
 
 /// Whether the page sets two marks of a line apart by a gap, not by a space glyph.
-fn spaced(last: &Mark, next: &Mark) -> bool {
+pub(crate) fn spaced(last: &Mark, next: &Mark) -> bool {
     let gap = next.x0 - last.x1;
     gap > last.size.max(next.size) * 0.11 || gap < -last.size
 }
@@ -212,9 +283,9 @@ pub(crate) struct Line {
     pub(crate) x1: f32,
     pub(crate) y: f32,
     pub(crate) size: f32,
-    bold: bool,
+    pub(crate) bold: bool,
     /// When the line opens in bold and goes on in regular: the bytes of the bold opening.
-    bold_opening: usize,
+    pub(crate) bold_opening: usize,
 }
 
 /// Whether a raised run of small glyphs is a citation: numbers, commas and dashes only.

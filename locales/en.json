@@ -1727,5 +1727,9 @@
   "移过去": "Move",
   "选一个文献库。": "Choose a library.",
   "PDF、标注、读到的位置和关于它的对话都一起过去；这段对话里不再有它。": "Its PDFs, annotations, reading position and conversations about it go along; it leaves this conversation.",
-  "PDF、标注、读到的位置和关于它的对话都一起过去，收录状态回到待判断；原来的那条留在本库的回收站里。": "Its PDFs, annotations, reading position and conversations about it go along, and its screening goes back to pending; the original stays in this library's trash."
+  "PDF、标注、读到的位置和关于它的对话都一起过去，收录状态回到待判断；原来的那条留在本库的回收站里。": "Its PDFs, annotations, reading position and conversations about it go along, and its screening goes back to pending; the original stays in this library's trash.",
+  "固定对照": "Pin beside",
+  "前往原位置": "Go to figure",
+  "返回刚才位置": "Back to where you were",
+  "不回去了": "Stay here"
 }
