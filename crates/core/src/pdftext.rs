@@ -176,6 +176,24 @@ pub fn page_drawn<'a>(page: &Page<'a>, cache: &InterpreterCache<'a>) -> (Vec<Mar
     (read.marks, read.shapes.unwrap_or_default())
 }
 
+/// Every page of a PDF in turn, as `page_drawn` reads it: `each` is handed the 0-based page, its glyphs,
+/// the boxes of what it draws beside text and its size, for the first `most` pages. The sizes of all pages
+/// come back; `None` when the file cannot be parsed. A page is let go of before the next is read.
+pub fn pages_drawn(data: Vec<u8>, most: usize, each: &mut dyn FnMut(usize, &[Mark], &[[f32; 4]], (f32, f32))) -> Option<Vec<(f32, f32)>> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let pdf = Pdf::new(data).ok()?;
+        let cache = InterpreterCache::new();
+        let pages = pdf.pages();
+        for (index, page) in pages.iter().enumerate().take(most) {
+            let (marks, shapes) = page_drawn(page, &cache);
+            each(index, &marks, &shapes, page.render_dimensions());
+        }
+        Some(pages.iter().map(|page| page.render_dimensions()).collect())
+    }))
+    .ok()
+    .flatten()
+}
+
 /// A page as `figref` reads it: its glyphs, the boxes of what it draws beside text, and its size.
 pub type Drawn = (Vec<Mark>, Vec<[f32; 4]>, (f32, f32));
 

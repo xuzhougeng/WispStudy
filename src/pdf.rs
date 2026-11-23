@@ -63,7 +63,15 @@ pub enum PdfEvent {
     Reframe { page: usize, bbox: [f32; 4], png: Vec<u8> },
     /// 固定对照 of a figure's preview: keep what stands `top` points down a 0-based page in the viewer's other
     /// half. The owner knows what that half holds now (another file of the paper) and answers with `keep_beside`.
-    FigureBeside { page: usize, top: f32 },
+    /// `file` is another PDF of the paper (its id) when the figure is in that one: it is shown in the other half.
+    FigureBeside { file: Option<String>, page: usize, top: f32 },
+    /// 前往原位置 of a figure in another PDF of the paper: show that file in the half worked in, at this place
+    /// of a 0-based page. `trail` are the places to come back to, the one just left last, each naming its file;
+    /// the viewer that arrives is handed them (`PdfView::arrive`).
+    FigureGo { file: String, page: usize, top: f32, trail: Vec<Return> },
+    /// 返回刚才位置 to a place in another PDF of the paper: show that file again and `PdfView::restore` it
+    /// there, with the places left before it.
+    FigureReturn { back: Return, trail: Vec<Return> },
 }
 
 /// The names of the colours, in the order of `annotation::COLORS`.
@@ -287,11 +295,57 @@ fn card_place(anchor: [f32; 4], width: f32, tall: f32, (view_w, view_h): (f32, f
     }
 }
 
-/// The preview of a figure whose number was clicked in the text (#229): where the file shows it, and the
-/// mention it stands by.
+/// Another PDF of the paper a viewer's file belongs to (#229, step 2): a number in the file on show may name
+/// a figure in it, as the main text's "Supplementary Fig. S2" names one of the supplement.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Sibling {
+    /// The file's id.
+    pub resource: String,
+    /// As the reader knows it: 正文, 附件 S1.
+    pub label: String,
+    pub path: PathBuf,
+    /// The paper's main text, else an attachment.
+    pub main: bool,
+}
+
+/// Where a file shows its figures, and the sizes of its pages in points.
+struct FileFigures {
+    index: figref::Index,
+    sizes: Vec<(f32, f32)>,
+}
+
+/// The files read for their figures lately, by path: a paper's supplement is read once, not each time one
+/// of its files is opened. A library's files do not change under their names.
+static FILE_FIGURES: std::sync::Mutex<Vec<(PathBuf, Arc<FileFigures>)>> = std::sync::Mutex::new(Vec::new());
+const KEEP_FILE_FIGURES: usize = 12;
+
+/// Where a PDF shows its figures (`figref::file_index`), from what was read before or from the file.
+fn file_figures(path: &Path) -> Option<Arc<FileFigures>> {
+    if let Some(known) = FILE_FIGURES.lock().ok().and_then(|kept| kept.iter().find(|(of, _)| of == path).map(|(_, figures)| figures.clone())) { return Some(known) }
+    let (index, sizes) = figref::file_index(std::fs::read(path).ok()?, FIGURE_PAGES)?;
+    let figures = Arc::new(FileFigures { index, sizes });
+    if let Ok(mut kept) = FILE_FIGURES.lock() {
+        kept.retain(|(of, _)| of != path);
+        kept.push((path.to_path_buf(), figures.clone()));
+        if kept.len() > KEEP_FILE_FIGURES { kept.remove(0); }
+    }
+    Some(figures)
+}
+
+/// A figure a number in the text may mean: the file it is in (`None` the one on show, else its place among
+/// the viewer's `siblings`) and where that file shows it.
+#[derive(Clone)]
+struct Target {
+    file: Option<usize>,
+    place: figref::Place,
+}
+
+/// The card of a figure's number clicked in the text (#229): the figures it may mean, the one on show
+/// (`None` while they are listed to choose from), and the mention it stands by.
 #[derive(Clone)]
 struct FigureCard {
-    place: figref::Place,
+    targets: Vec<Target>,
+    at: Option<usize>,
     /// The 0-based page of the mention clicked, and the box of its words in that page's points.
     page: usize,
     anchor: [f32; 4],
@@ -305,20 +359,45 @@ const FIGURE_TALL: f32 = 640.;
 const FIGURE_SCALE: f32 = 1.6;
 /// The narrowest it is: its header and buttons need this much.
 const FIGURE_W_MIN: f32 = 300.;
+/// How wide the list of the figures a number may mean is.
+const CHOICES_W: f32 = 420.;
 /// Pages read at a time for where the file shows its figures, and the pages of a long file that are read.
 const FIGURE_CHUNK: usize = 4;
 const FIGURE_PAGES: usize = 400;
 /// Places 前往原位置 keeps to come back to.
 const RETURNS: usize = 8;
+/// Pages of the paper's other files kept as pictures for a figure's card.
+const KEEP_FOREIGN: usize = 6;
 
 /// A place left for a figure by 前往原位置: the half, the page at its top and how far down it in points
-/// (`PdfView::place`), how far across in points, and the zoom.
-#[derive(Clone, Copy, Debug, PartialEq)]
-struct Return {
+/// (`PdfView::place`), how far across in points, and the zoom. `from` is the file it is in when that is not
+/// the one on show: its id, and what the reader calls it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Return {
     pane: usize,
     place: (usize, f32),
     across: f32,
     zoom: Zoom,
+    pub from: Option<(String, String)>,
+}
+
+/// A page of a PDF as a picture, `scale` pixels to the point: its size in pixels and its bytes as GPUI wants
+/// them (BGRA). For a page of a file no viewer has open.
+fn page_picture(path: &Path, index: usize, scale: f32) -> Option<(u32, u32, Vec<u8>)> {
+    use hayro::hayro_interpret::InterpreterSettings;
+    use hayro::hayro_syntax::Pdf;
+    use hayro::vello_cpu::color::palette::css::WHITE;
+    use hayro::{PixmapSettings, RenderCache, RenderSettings, render};
+    let pdf = Pdf::new(std::fs::read(path).ok()?).ok()?;
+    let pages = pdf.pages();
+    let page = pages.get(index)?;
+    let (cache, interpreter, settings) = (RenderCache::new(), InterpreterSettings::default(), RenderSettings::default());
+    let pixmap = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| render(page, &cache, &interpreter, &settings, &PixmapSettings { x_scale: scale, y_scale: scale, bg_color: WHITE }))).ok()?;
+    let mut bytes = pixmap.data_as_u8_slice().to_vec();
+    for pixel in bytes.as_chunks_mut::<4>().0 {
+        pixel.swap(0, 2);
+    }
+    Some((pixmap.width() as u32, pixmap.height() as u32, bytes))
 }
 
 /// A stretch of one page's glyphs, from where the pointer went down to where it is.
@@ -970,6 +1049,15 @@ pub struct PdfView {
     figure_card: Option<FigureCard>,
     /// The places left by 前往原位置, the latest last.
     returns: Vec<Return>,
+    /// What the reader calls this file among the paper's PDFs (正文, 附件 S1), and whether it is the main
+    /// text; the label is empty when the paper has no other PDF, and nothing need be said.
+    label: String,
+    main: bool,
+    /// The paper's other PDFs, and where each shows its figures once it is read (`set_siblings`).
+    siblings: Vec<(Sibling, Option<Arc<FileFigures>>)>,
+    /// Pages of those files as pictures, for a figure's card: by sibling and 0-based page, the latest last.
+    foreign: Vec<((usize, usize), Arc<RenderImage>)>,
+    foreign_pending: HashSet<(usize, usize)>,
 }
 
 /// The piece of a page in the figure dialog on show: one just cut out (`figure` is `None`) or a figure kept,
@@ -1025,6 +1113,7 @@ impl PdfView {
         // A page's picture stays in the window's atlas until it is let go of there: dropping the view alone would leave every page it drew.
         cx.on_release(|this: &mut Self, cx| {
             for (_, (image, ..)) in this.images.drain() { cx.drop_image(image, None) }
+            for (_, image) in this.foreign.drain(..) { cx.drop_image(image, None) }
         })
         .detach();
         PdfView {
@@ -1098,6 +1187,31 @@ impl PdfView {
             pressed_figure: None,
             figure_card: None,
             returns: vec![],
+            label: String::new(),
+            main: true,
+            siblings: vec![],
+            foreign: vec![],
+            foreign_pending: HashSet::new(),
+        }
+    }
+
+    /// The paper's other PDFs, with what this one is called among them: a figure's number here may name a
+    /// figure there. Each is read for its figures in the background, once (`file_figures`).
+    pub fn set_siblings(&mut self, label: String, main: bool, siblings: Vec<Sibling>, cx: &mut Context<Self>) {
+        (self.label, self.main) = (label, main);
+        for (_, image) in self.foreign.drain(..) { cx.drop_image(image, None) }
+        self.foreign_pending.clear();
+        self.siblings = siblings.into_iter().map(|sibling| (sibling, None)).collect();
+        for (sibling, _) in &self.siblings {
+            let (path, resource) = (sibling.path.clone(), sibling.resource.clone());
+            cx.spawn(async move |this, cx| {
+                let figures = cx.background_executor().spawn(async move { file_figures(&path) }).await;
+                let _ = this.update(cx, |this, cx| {
+                    if let Some(slot) = this.siblings.iter_mut().find(|(sibling, _)| sibling.resource == resource) { slot.1 = figures }
+                    cx.notify();
+                });
+            })
+            .detach();
         }
     }
 
@@ -2093,7 +2207,7 @@ impl PdfView {
         let spoken: Vec<Div> = self.spoken.boxes.iter().filter(|_| self.spoken.page == index).map(|line| div().absolute().left(px(line[0] * scale - 1.)).top(px(line[1] * scale - 1.)).w(px((line[2] - line[0]) * scale + 2.)).h(px((line[3] - line[1]) * scale + 3.)).bg(Theme::spoken()).border_b_2().border_color(Theme::spoken_line())).collect();
         // The numbers of figures in the text that lead to a figure of this file: the pointer says they can be
         // clicked, and a line shows under the one it is over. Nothing is drawn on them otherwise.
-        let refs: Vec<Div> = if free { self.figure_mentions(index).into_iter().flat_map(|(_, boxes)| boxes).map(|line| div().absolute().left(px(line[0] * scale)).top(px(line[1] * scale)).w(px((line[2] - line[0]) * scale)).h(px((line[3] - line[1]) * scale + 1.)).cursor_pointer().border_b_1().border_color(gpui::transparent_black()).hover(|s| s.border_color(Theme::accent()))).collect() } else { vec![] };
+        let refs: Vec<Div> = if free { self.figure_mentions(index).into_iter().flat_map(|(_, boxes)| boxes.iter().copied()).map(|line| div().absolute().left(px(line[0] * scale)).top(px(line[1] * scale)).w(px((line[2] - line[0]) * scale)).h(px((line[3] - line[1]) * scale + 1.)).cursor_pointer().border_b_1().border_color(gpui::transparent_black()).hover(|s| s.border_color(Theme::accent()))).collect() } else { vec![] };
         // What the find bar found on this page: the place gone to stronger.
         let found: Vec<Div> = self
             .finder
@@ -2381,46 +2495,95 @@ impl PdfView {
         cx.notify();
     }
 
-    /// The mentions of figures on a 0-based page that lead somewhere in this file, each with the boxes of
-    /// its words: not a caption's own number, nor a mention within the figure it names.
-    fn figure_mentions(&self, page: usize) -> Vec<(&figref::Place, Vec<[f32; 4]>)> {
+    /// Where a mention on a 0-based page may lead, among the paper's files: the file (`None` this one, else
+    /// its place among `siblings`) and the place in it. Not a caption's own number, nor a mention within the
+    /// figure it names. More than one is a choice: the same number in two files, or the figures a run names.
+    fn figure_leads(&self, marks: &[Mark], mention: &figref::Mention, page: usize) -> Vec<(Option<usize>, &figref::Place)> {
+        // This file first, then the others that have been read, each remembering its place among them.
+        let read: Vec<(usize, &FileFigures, bool)> = self.siblings.iter().enumerate().filter_map(|(n, (sibling, figures))| Some((n, &**figures.as_ref()?, sibling.main))).collect();
+        let mut files = vec![figref::File { index: &self.figure_places, main: self.main }];
+        files.extend(read.iter().map(|(_, figures, main)| figref::File { index: &figures.index, main: *main }));
+        mention.keys().flat_map(|key| figref::places(key, &files, 0)).filter(|(at, place)| *at != 0 || !figref::own(marks, mention, page, place)).map(|(at, place)| (at.checked_sub(1).map(|n| read[n].0), place)).collect()
+    }
+
+    /// The mentions of figures on a 0-based page that lead somewhere, each with the boxes of its words.
+    fn figure_mentions(&self, page: usize) -> Vec<(&figref::Mention, &Vec<[f32; 4]>)> {
         let (Some(marks), Some(mentions)) = (self.marks.get(&page), self.mentions.get(&page)) else { return vec![] };
-        mentions.iter().filter_map(|(mention, boxes)| {
-            let place = self.figure_places.find(mention.key)?;
-            (!figref::own(marks, mention, page, place)).then(|| (place, boxes.clone()))
-        }).collect()
+        mentions.iter().filter(|(mention, _)| !self.figure_leads(marks, mention, page).is_empty()).map(|(mention, boxes)| (mention, boxes)).collect()
+    }
+
+    /// The card a click on a mention opens: the one figure it means, or the list of those it may mean.
+    fn figure_card_of(&self, page: usize, mention: &figref::Mention, boxes: &[[f32; 4]]) -> Option<FigureCard> {
+        let targets: Vec<Target> = self.figure_leads(self.marks.get(&page)?, mention, page).into_iter().map(|(file, place)| Target { file, place: place.clone() }).collect();
+        let anchor = boxes.iter().copied().reduce(|a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])])?;
+        Some(FigureCard { at: (targets.len() == 1).then_some(0), targets, page, anchor, scroll: ScrollHandle::new() })
     }
 
     /// The figure a point of a 0-based page speaks of, as the card a click there opens.
     fn figure_at(&self, page: usize, x: f32, y: f32) -> Option<FigureCard> {
-        let (place, boxes) = self.figure_mentions(page).into_iter().find(|(_, boxes)| boxes.iter().any(|b| x >= b[0] - 1. && x <= b[2] + 1. && y >= b[1] - 1. && y <= b[3] + 1.))?;
-        let anchor = boxes.iter().copied().reduce(|a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])])?;
-        Some(FigureCard { place: place.clone(), page, anchor, scroll: ScrollHandle::new() })
+        let (mention, boxes) = self.figure_mentions(page).into_iter().find(|(_, boxes)| boxes.iter().any(|b| x >= b[0] - 1. && x <= b[2] + 1. && y >= b[1] - 1. && y <= b[3] + 1.))?;
+        self.figure_card_of(page, mention, boxes)
     }
 
     /// Show the figure the n-th mention of a 0-based page leads to, as a click on it does (a debug step);
     /// false when the page's glyphs or the file's figures are not read yet, or it has no such mention.
     pub fn open_figure_mention(&mut self, page: usize, n: usize, cx: &mut Context<Self>) -> bool {
-        let Some((place, boxes)) = self.figure_mentions(page).into_iter().nth(n) else { return false };
-        let Some(anchor) = boxes.iter().copied().reduce(|a, b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])]) else { return false };
-        self.figure_card = Some(FigureCard { place: place.clone(), page, anchor, scroll: ScrollHandle::new() });
+        let Some(card) = self.figure_mentions(page).into_iter().nth(n).and_then(|(mention, boxes)| self.figure_card_of(page, mention, boxes)) else { return false };
+        self.figure_card = Some(card);
         self.held = self.active;
         cx.notify();
         true
     }
 
-    /// Where a figure's place begins: the 0-based page, and how far down and across it in points.
-    fn figure_start(&self, place: &figref::Place) -> (usize, f32, f32) {
-        let sizes = &self.sizes;
-        let (page, rect) = place.pieces(|page| sizes.get(page).copied().unwrap_or((595., 842.))).into_iter().next().unwrap_or((place.page, place.shown.caption));
+    /// Choose the n-th of the figures the card lists (a debug step; a click on its row does the same).
+    pub fn pick_figure(&mut self, n: usize, cx: &mut Context<Self>) {
+        if let Some(card) = self.figure_card.as_mut().filter(|card| n < card.targets.len()) { card.at = Some(n) }
+        cx.notify();
+    }
+
+    /// The sizes of the pages of the file a figure is in.
+    fn sizes_of(&self, file: Option<usize>) -> &[(f32, f32)] {
+        match file {
+            None => &self.sizes,
+            Some(n) => self.siblings.get(n).and_then(|(_, figures)| figures.as_ref()).map_or(&[], |figures| &figures.sizes),
+        }
+    }
+
+    /// What the reader calls the file a figure is in; nothing for a paper of one PDF.
+    fn file_label(&self, file: Option<usize>) -> Option<String> {
+        match file {
+            None => (!self.label.is_empty()).then(|| self.label.clone()),
+            Some(n) => self.siblings.get(n).map(|(sibling, _)| sibling.label.clone()),
+        }
+    }
+
+    /// What to look at of a figure, in reading order (`figref::Place::pieces`), by the sizes of its file's pages.
+    fn pieces_of(&self, target: &Target) -> Vec<(usize, [f32; 4])> {
+        let sizes = self.sizes_of(target.file);
+        target.place.pieces(|page| sizes.get(page).copied().unwrap_or((595., 842.)))
+    }
+
+    /// Where a figure begins in its file: the 0-based page, and how far down and across it in points.
+    fn figure_start(&self, target: &Target) -> (usize, f32, f32) {
+        let (page, rect) = self.pieces_of(target).into_iter().next().unwrap_or((target.place.page, target.place.shown.caption));
         (page, rect[1], rect[0])
     }
 
+    /// The figure on show in the card, taken out of it: what its buttons act on.
+    fn take_figure(&mut self) -> Option<Target> {
+        let card = self.figure_card.as_ref()?;
+        let target = card.targets.get(card.at?)?.clone();
+        self.figure_card = None;
+        Some(target)
+    }
+
     /// 固定对照: the figure of the card stays in the viewer's other half, and the text is read on in this one.
+    /// One in another file of the paper has that file shown there.
     pub fn pin_figure(&mut self, cx: &mut Context<Self>) {
-        let Some(card) = self.figure_card.take() else { return };
-        let (page, top, _) = self.figure_start(&card.place);
-        cx.emit(PdfEvent::FigureBeside { page, top });
+        let Some(target) = self.take_figure() else { return };
+        let (page, top, _) = self.figure_start(&target);
+        let file = target.file.and_then(|n| self.siblings.get(n)).map(|(sibling, _)| sibling.resource.clone());
+        cx.emit(PdfEvent::FigureBeside { file, page, top });
         cx.notify();
     }
 
@@ -2435,15 +2598,45 @@ impl PdfView {
         cx.notify();
     }
 
-    /// 前往原位置: the half worked in goes to the card's figure, and the place it leaves is kept to come back to.
-    pub fn go_to_figure(&mut self, cx: &mut Context<Self>) {
-        let Some(card) = self.figure_card.take() else { return };
-        if self.sizes.is_empty() { return }
+    /// Where the half worked in is read at now, as a place to come back to.
+    fn here(&self) -> Return {
         let top = self.list().logical_scroll_top();
         let scale = self.scale_of(top.item_ix).max(0.01);
-        self.returns.push(Return { pane: self.active, place: (top.item_ix, f32::from(top.offset_in_item) / scale), across: self.panes[self.active].scroll_x / scale, zoom: self.zoom });
+        Return { pane: self.active, place: (top.item_ix, f32::from(top.offset_in_item) / scale), across: self.panes[self.active].scroll_x / scale, zoom: self.zoom, from: None }
+    }
+
+    /// The places to come back to, each naming its file, to be handed to the viewer of another file.
+    fn trail(&mut self) -> Vec<Return> {
+        let mut trail = std::mem::take(&mut self.returns);
+        for back in trail.iter_mut().filter(|back| back.from.is_none()) { back.from = Some((self.resource_id.clone(), self.label.clone())) }
+        trail
+    }
+
+    /// Take the places to come back to as another viewer handed them: those in this file are its own again.
+    fn take_trail(&mut self, mut trail: Vec<Return>) {
+        for back in &mut trail {
+            if back.from.as_ref().is_some_and(|(file, _)| *file == self.resource_id) { back.from = None }
+        }
+        if trail.len() > RETURNS { trail.drain(..trail.len() - RETURNS); }
+        self.returns = trail;
+    }
+
+    /// 前往原位置: the half worked in goes to the card's figure, and the place it leaves is kept to come back
+    /// to. A figure in another file of the paper is the owner's to show (`PdfEvent::FigureGo`).
+    pub fn go_to_figure(&mut self, cx: &mut Context<Self>) {
+        let Some(target) = self.take_figure() else { return };
+        if self.sizes.is_empty() { return }
+        let (page, down, across) = self.figure_start(&target);
+        let here = self.here();
+        if let Some((sibling, _)) = target.file.and_then(|n| self.siblings.get(n)) {
+            let file = sibling.resource.clone();
+            self.returns.push(here);
+            let trail = self.trail();
+            cx.emit(PdfEvent::FigureGo { file, page, top: down, trail });
+            return cx.notify();
+        }
+        self.returns.push(here);
         if self.returns.len() > RETURNS { self.returns.remove(0); }
-        let (page, down, across) = self.figure_start(&card.place);
         let index = page.min(self.sizes.len() - 1);
         let scale = self.scale_of(index);
         self.citation.clear();
@@ -2452,10 +2645,40 @@ impl PdfView {
         cx.notify();
     }
 
-    /// 返回刚才位置: back to the place the last 前往原位置 left, in its half, at the zoom it was read at.
+    /// This viewer was shown for a figure another file's text named: it has the places to come back to, and
+    /// goes to what stands `top` points down a 0-based page (now, or once the file has opened). With no
+    /// place, it only takes the trail back: the file asked for could not be shown.
+    pub fn arrive(&mut self, trail: Vec<Return>, place: Option<(usize, f32)>, cx: &mut Context<Self>) {
+        self.take_trail(trail);
+        if let Some((page, top)) = place {
+            self.citation.clear();
+            let gap = PAGE_GAP / self.scale_of(page).max(0.01);
+            self.resume((page, (top - gap).max(0.)), cx);
+        }
+        cx.notify();
+    }
+
+    /// 返回刚才位置: back to the place the last 前往原位置 left, in its half, at the zoom it was read at. A
+    /// place in another file of the paper is the owner's to show (`PdfEvent::FigureReturn`).
     pub fn return_back(&mut self, cx: &mut Context<Self>) {
         let Some(back) = self.returns.pop() else { return };
-        if self.sizes.is_empty() { return }
+        if back.from.is_some() {
+            let trail = self.trail();
+            cx.emit(PdfEvent::FigureReturn { back, trail });
+            return cx.notify();
+        }
+        self.restore(back, None, cx);
+    }
+
+    /// Read on at a place left before: its zoom, its half, its page and how far down and across. With a
+    /// trail, this viewer was shown for it and takes the places left before that one.
+    pub fn restore(&mut self, back: Return, trail: Option<Vec<Return>>, cx: &mut Context<Self>) {
+        if let Some(trail) = trail { self.take_trail(trail) }
+        // Not open yet: it opens there.
+        if self.sizes.is_empty() {
+            (self.zoom, self.resume) = (back.zoom, Some(back.place));
+            return cx.notify();
+        }
         if back.zoom != self.zoom { self.set_zoom(back.zoom, None, cx) }
         let pane = if self.split == Split::Off { 0 } else { back.pane };
         self.active = pane;
@@ -2466,66 +2689,82 @@ impl PdfView {
         cx.notify();
     }
 
+    /// A page of another file of the paper as a picture for the card, asked for once: it is drawn in the
+    /// background from the file itself, since no viewer of it need be open.
+    fn want_foreign(&mut self, file: usize, page: usize, scale: f32, cx: &mut Context<Self>) {
+        if !self.foreign_pending.insert((file, page)) { return }
+        let Some((sibling, figures)) = self.siblings.get(file) else { return };
+        let size = figures.as_ref().and_then(|figures| figures.sizes.get(page).copied()).unwrap_or((595., 842.));
+        let (path, resource, scale) = (sibling.path.clone(), sibling.resource.clone(), render_scale(size, scale * self.device_scale));
+        cx.spawn(async move |this, cx| {
+            let picture = cx.background_executor().spawn(async move { page_picture(&path, page, scale) }).await;
+            let _ = this.update(cx, |this, cx| {
+                // The paper's files may have changed meanwhile: the picture is of the file it was asked of. One
+                // that could not be drawn stays asked for, so it is not tried again and again.
+                let Some(file) = this.siblings.iter().position(|(sibling, _)| sibling.resource == resource) else { return };
+                let Some(buffer) = picture.and_then(|(width, height, bytes)| image::RgbaImage::from_raw(width, height, bytes)) else { return };
+                this.foreign_pending.remove(&(file, page));
+                this.foreign.push(((file, page), Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]))));
+                while this.foreign.len() > KEEP_FOREIGN { cx.drop_image(this.foreign.remove(0).1, None) }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// A piece of a page drawn `scale` pixels to the point: the page's picture behind a window of the
     /// piece's size. A page with no picture yet is asked for, and its place kept meanwhile.
-    fn figure_piece(&mut self, page: usize, [x0, y0, x1, y1]: [f32; 4], scale: f32) -> Div {
-        let (w, h) = self.sizes.get(page).copied().unwrap_or((595., 842.));
+    fn figure_piece(&mut self, file: Option<usize>, page: usize, [x0, y0, x1, y1]: [f32; 4], scale: f32, cx: &mut Context<Self>) -> Div {
+        let (w, h) = self.sizes_of(file).get(page).copied().unwrap_or((595., 842.));
         let frame = div().relative().flex_none().w(px((x1 - x0) * scale)).h(px((y1 - y0) * scale)).overflow_hidden().bg(gpui::white());
-        match self.images.get(&page).map(|(image, ..)| image.clone()) {
-            Some(image) => {
-                self.touch(page);
-                frame.child(img(image).absolute().left(px(-x0 * scale)).top(px(-y0 * scale)).w(px(w * scale)).h(px(h * scale)))
-            }
-            None => {
-                if !self.broken.contains(&page) && self.pending.insert(page) { let _ = self.requests.send(Request::Page(page, render_scale((w, h), scale * self.device_scale))); }
-                // Said at its top: a tall piece's middle may be out of the card's sight.
-                frame.flex().justify_center().pt(px(28.)).text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(if self.broken.contains(&page) { tf!("第 {} 页无法渲染", "Cannot render page {}", page + 1) } else { tf!("第 {} 页", "Page {}", page + 1) })
-            }
+        let picture = match file {
+            None => self.images.get(&page).map(|(image, ..)| image.clone()),
+            Some(n) => self.foreign.iter().find(|(of, _)| *of == (n, page)).map(|(_, image)| image.clone()),
+        };
+        if let Some(image) = picture {
+            if file.is_none() { self.touch(page) }
+            return frame.child(img(image).absolute().left(px(-x0 * scale)).top(px(-y0 * scale)).w(px(w * scale)).h(px(h * scale)));
+        }
+        match file {
+            None => if !self.broken.contains(&page) && self.pending.insert(page) { let _ = self.requests.send(Request::Page(page, render_scale((w, h), scale * self.device_scale))); },
+            Some(n) => self.want_foreign(n, page, scale, cx),
+        }
+        // Said at its top: a tall piece's middle may be out of the card's sight.
+        frame.flex().justify_center().pt(px(28.)).text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(if file.is_none() && self.broken.contains(&page) { tf!("第 {} 页无法渲染", "Cannot render page {}", page + 1) } else { tf!("第 {} 页", "Page {}", page + 1) })
+    }
+
+    /// Where a figure is, in a line: its file when the paper has several, the figure's page, and the
+    /// caption's when that is another.
+    fn figure_whereabouts(&self, target: &Target) -> String {
+        let place = &target.place;
+        let pages = match (place.apart, place.pictured()) {
+            (Some((figure, _)), _) => tf!("图在第 {} 页，图注在第 {} 页", "Figure on page {}, caption on page {}", figure + 1, place.page + 1),
+            (None, true) => tf!("第 {} 页", "Page {}", place.page + 1),
+            (None, false) => tf!("第 {} 页 · 只找到图注", "Page {} · caption only", place.page + 1),
+        };
+        match self.file_label(target.file) {
+            Some(file) => format!("{file} · {pages}"),
+            None => pages,
         }
     }
 
     /// The figure whose number was clicked, by the number: the piece of the page it takes with its caption
     /// (the figure and then the caption, when they are on two pages), and under it what else can be done:
-    /// keep it in the other half, or go there.
+    /// keep it in the other half, or go there. A number that may mean several figures (the same one in two
+    /// of the paper's files, those a run names) lists them first, each with its file and page.
     fn figure_card(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if self.selecting { return None }
         let card = self.figure_card.clone()?;
         let (x, y) = self.sheet_place(card.page)?;
         let at = self.scale_of(card.page);
-        let sizes = self.sizes.clone();
-        let pieces = card.place.pieces(|page| sizes.get(page).copied().unwrap_or((595., 842.)));
-        // One scale for all of it: the widest piece fills the card, and a narrow one is not blown up.
-        let widest = pieces.iter().map(|(_, rect)| rect[2] - rect[0]).fold(1., f32::max);
-        let room = FIGURE_W.min(self.width - 2. * CARD_EDGE).max(120.);
-        let scale = (room / widest).min(FIGURE_SCALE);
-        let width = (widest * scale).max(FIGURE_W_MIN.min(room));
-        let tall: f32 = pieces.iter().map(|(_, rect)| (rect[3] - rect[1]) * scale + 1.).sum::<f32>() + 34. + 38.;
         let anchor = [x + card.anchor[0] * at, y + card.anchor[1] * at, x + card.anchor[2] * at, y + card.anchor[3] * at];
-        let place = card_place(anchor, width + 2., tall.min(FIGURE_TALL), (self.width, self.height));
-        // Which page, in a line: the figure's, and the caption's when it is another.
-        let shown = &card.place.shown;
-        let pages = match (card.place.apart, card.place.pictured()) {
-            (Some((figure, _)), _) => tf!("图在第 {} 页，图注在第 {} 页", "Figure on page {}, caption on page {}", figure + 1, card.place.page + 1),
-            (None, true) => tf!("第 {} 页", "Page {}", card.place.page + 1),
-            (None, false) => tf!("第 {} 页 · 只找到图注", "Page {} · caption only", card.place.page + 1),
-        };
-        let header = div().flex().flex_none().items_center().gap(px(8.)).h(text_px(34.)).pl(px(12.)).pr(px(4.)).border_b_1().border_color(Theme::line())
-            .child(div().flex_none().text_color(Theme::text()).font_weight(FontWeight::MEDIUM).child(ui::one_line(&shown.label)))
-            .child(div().flex_1().min_w_0().truncate().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(pages))
-            .child(div().id("pdf-figure-close").flex().flex_none().items_center().justify_center().size(px(24.)).rounded(px(6.)).cursor_pointer().hover(|s| s.bg(Theme::hover())).child(ui::icon("x", 13., Theme::text_tertiary())).on_click(cx.listener(|this, _, _, cx| {
-                this.figure_card = None;
-                cx.notify();
-            })));
-        let last = pieces.len().saturating_sub(1);
-        let pictures: Vec<Div> = pieces.iter().enumerate().map(|(n, (page, rect))| {
-            let piece = self.figure_piece(*page, *rect, scale);
-            div().w_full().flex().justify_center().bg(gpui::white()).when(n < last, |d| d.border_b_1().border_color(Theme::line())).child(piece)
-        }).collect();
-        let button = |id: &'static str, label: &'static str| div().id(id).flex().flex_none().items_center().h(text_px(26.)).px(px(9.)).rounded(px(6.)).cursor_pointer().text_color(Theme::accent()).hover(|s| s.bg(Theme::hover())).child(label);
-        // The translation has the other half while it stands beside the pages.
-        let pin = (!self.facing_beside()).then(|| button("pdf-figure-pin", t("固定对照")).on_click(cx.listener(|this, _, _, cx| this.pin_figure(cx))));
-        let go = button("pdf-figure-go", t("前往原位置")).on_click(cx.listener(|this, _, _, cx| this.go_to_figure(cx)));
-        Some(
+        let room = FIGURE_W.min(self.width - 2. * CARD_EDGE).max(120.);
+        let close = div().id("pdf-figure-close").flex().flex_none().items_center().justify_center().size(px(24.)).rounded(px(6.)).cursor_pointer().hover(|s| s.bg(Theme::hover())).child(ui::icon("x", 13., Theme::text_tertiary())).on_click(cx.listener(|this, _, _, cx| {
+            this.figure_card = None;
+            cx.notify();
+        }));
+        let header = || div().flex().flex_none().items_center().gap(px(8.)).h(text_px(34.)).pl(px(12.)).pr(px(4.)).border_b_1().border_color(Theme::line());
+        let frame = |place: CardPlace| {
             div()
                 .id("pdf-figure")
                 .absolute()
@@ -2548,6 +2787,56 @@ impl PdfView {
                 .occlude()
                 // A press on the card is not a press on the page.
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        };
+        let Some(target) = card.at.and_then(|at| card.targets.get(at)) else {
+            // Which of them: a row each, the number and where it is, and how its legend begins.
+            let rows: Vec<Stateful<Div>> = card.targets.iter().enumerate().map(|(n, target)| {
+                let legend = ui::one_line(&target.place.shown.legend);
+                div().id(("pdf-figure-choice", n)).flex().flex_col().flex_none().px(px(12.)).py(px(7.)).cursor_pointer().hover(|s| s.bg(Theme::hover())).when(n > 0, |d| d.border_t_1().border_color(Theme::line()))
+                    .child(div().flex().items_center().gap(px(8.))
+                        .child(div().flex_none().text_color(Theme::text()).font_weight(FontWeight::MEDIUM).child(ui::one_line(&target.place.shown.label)))
+                        .child(div().flex_1().min_w_0().truncate().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(self.figure_whereabouts(target))))
+                    .when(!legend.is_empty(), |d| d.child(div().truncate().text_size(text_px(12.)).text_color(Theme::text_secondary()).child(legend)))
+                    .on_click(cx.listener(move |this, _, _, cx| this.pick_figure(n, cx)))
+            }).collect();
+            let width = CHOICES_W.min(room);
+            let place = card_place(anchor, width, (34. + rows.len() as f32 * 52.).min(FIGURE_TALL), (self.width, self.height));
+            let title = tf!("这里可能指 {} 张图", "{} figures it may mean", card.targets.len());
+            return Some(
+                frame(place)
+                    .child(header().child(div().flex_1().min_w_0().truncate().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(title)).child(close))
+                    .child(div().id("pdf-figure-choices").flex().flex_col().flex_shrink().min_h_0().overflow_y_scroll().track_scroll(&card.scroll).children(rows))
+                    .into_any_element(),
+            );
+        };
+        let pieces = self.pieces_of(target);
+        // One scale for all of it: the widest piece fills the card, and a narrow one is not blown up.
+        let widest = pieces.iter().map(|(_, rect)| rect[2] - rect[0]).fold(1., f32::max);
+        let scale = (room / widest).min(FIGURE_SCALE);
+        let width = (widest * scale).max(FIGURE_W_MIN.min(room));
+        let tall: f32 = pieces.iter().map(|(_, rect)| (rect[3] - rect[1]) * scale + 1.).sum::<f32>() + 34. + 38.;
+        let place = card_place(anchor, width + 2., tall.min(FIGURE_TALL), (self.width, self.height));
+        // Back to the list it was chosen from, where there was one.
+        let back = (card.targets.len() > 1).then(|| div().id("pdf-figure-back").flex().flex_none().items_center().justify_center().size(px(24.)).ml(px(-6.)).rounded(px(6.)).cursor_pointer().hover(|s| s.bg(Theme::hover())).tooltip(ui::tip(t("回到候选"))).child(ui::icon("chevron-left", 14., Theme::text_tertiary())).on_click(cx.listener(|this, _, _, cx| {
+            if let Some(card) = this.figure_card.as_mut() { card.at = None }
+            cx.notify();
+        })));
+        let header = header()
+            .children(back)
+            .child(div().flex_none().text_color(Theme::text()).font_weight(FontWeight::MEDIUM).child(ui::one_line(&target.place.shown.label)))
+            .child(div().flex_1().min_w_0().truncate().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(self.figure_whereabouts(target)))
+            .child(close);
+        let (file, last) = (target.file, pieces.len().saturating_sub(1));
+        let pictures: Vec<Div> = pieces.iter().enumerate().map(|(n, (page, rect))| {
+            let piece = self.figure_piece(file, *page, *rect, scale, cx);
+            div().w_full().flex().justify_center().bg(gpui::white()).when(n < last, |d| d.border_b_1().border_color(Theme::line())).child(piece)
+        }).collect();
+        let button = |id: &'static str, label: &'static str| div().id(id).flex().flex_none().items_center().h(text_px(26.)).px(px(9.)).rounded(px(6.)).cursor_pointer().text_color(Theme::accent()).hover(|s| s.bg(Theme::hover())).child(label);
+        // The translation has the other half while it stands beside the pages.
+        let pin = (!self.facing_beside()).then(|| button("pdf-figure-pin", t("固定对照")).on_click(cx.listener(|this, _, _, cx| this.pin_figure(cx))));
+        let go = button("pdf-figure-go", t("前往原位置")).on_click(cx.listener(|this, _, _, cx| this.go_to_figure(cx)));
+        Some(
+            frame(place)
                 .child(header)
                 .child(div().id("pdf-figure-pieces").flex().flex_col().flex_shrink().min_h_0().overflow_y_scroll().track_scroll(&card.scroll).children(pictures))
                 .child(div().flex().flex_none().items_center().justify_end().gap(px(2.)).h(text_px(38.)).px(px(6.)).border_t_1().border_color(Theme::line()).children(pin).child(go))
@@ -2555,16 +2844,21 @@ impl PdfView {
         )
     }
 
-    /// 返回刚才位置, at the foot of the half that was left: where the last 前往原位置 came from. It stays
-    /// until it is used or put away.
+    /// 返回刚才位置, at the foot of the half that was left: where the last 前往原位置 came from, with its
+    /// file when that is another of the paper's. It stays until it is used or put away.
     fn return_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let back = self.returns.last()?;
-        let pane = if self.split == Split::Off { 0 } else { back.pane };
+        let pane = if self.split == Split::Off || back.from.is_some() { self.active } else { back.pane };
         let (half_w, half_h) = self.pane_size();
         let (left, top) = match (self.split, pane) {
             (Split::Side, 1) => (half_w + DIVIDER, 0.),
             (Split::Stacked, 1) => (0., half_h + DIVIDER),
             _ => (0., 0.),
+        };
+        let page = tf!("第 {} 页", "Page {}", back.place.0 + 1);
+        let whence = match &back.from {
+            Some((_, file)) if !file.is_empty() => format!("{file} · {page}"),
+            _ => page,
         };
         Some(
             div()
@@ -2587,7 +2881,7 @@ impl PdfView {
                     div().id("pdf-return").flex().items_center().gap(px(6.)).h_full().pl(px(9.)).pr(px(6.)).rounded_l(px(8.)).cursor_pointer().hover(|s| s.bg(Theme::hover()))
                         .child(ui::icon("undo-2", 13., Theme::accent()))
                         .child(div().text_color(Theme::accent()).child(t("返回刚才位置")))
-                        .child(div().text_color(Theme::text_tertiary()).child(tf!("第 {} 页", "Page {}", back.place.0 + 1)))
+                        .child(div().text_color(Theme::text_tertiary()).child(whence))
                         .on_click(cx.listener(|this, _, _, cx| this.return_back(cx))),
                 )
                 .child(
