@@ -397,7 +397,7 @@ pub fn window_controls(window: &Window) -> Option<Div> {
             .right_0()
             .flex()
             .child(button("window-minimize", WindowControlArea::Min, "minus", false))
-            .child(button("window-maximize", WindowControlArea::Max, if window.is_maximized() { "copy" } else { "expand" }, false))
+            .child(button("window-maximize", WindowControlArea::Max, if window.is_maximized() { "copy" } else { "square" }, false))
             .child(button("window-close", WindowControlArea::Close, "x", true)),
     )
 }
