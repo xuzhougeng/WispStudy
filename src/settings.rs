@@ -120,7 +120,17 @@ pub struct SettingsView {
     recording: Option<String>,
     /// A shortcut and why the key pressed for it was refused.
     shortcut_error: Option<(String, String)>,
+    /// What the account of the provider on show holds, by the provider's id: asked of a service that says (DeepSeek's `/user/balance`).
+    balance: Option<(String, Held)>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// What is known of an account's balance.
+enum Held {
+    Asking,
+    Known(wisp_core::usage::Balance),
+    /// Why the service did not say.
+    Unknown(String),
 }
 
 impl SettingsView {
@@ -292,6 +302,11 @@ pub(crate) fn button(id: impl Into<ElementId>, label: impl Into<SharedString>) -
 }
 
 /// A text button in the accent (恢复默认 …).
+/// A model's window as it is named: 128K, 1M.
+pub(crate) fn context_label(tokens: usize) -> String {
+    if tokens >= 1_000_000 { format!("{}M", tokens / 1_000_000) } else { format!("{}K", tokens / 1_000) }
+}
+
 fn link_button(id: impl Into<ElementId>, label: &'static str) -> Stateful<Div> {
     div().id(id).flex().flex_none().items_center().h(text_px(26.)).px(px(8.)).rounded(px(7.)).cursor_pointer().text_size(text_px(12.)).text_color(Theme::accent()).hover(|s| s.bg(Theme::hover())).child(label)
 }
@@ -391,7 +406,8 @@ impl Workspace {
                         }
                     }),
                 ];
-                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, author, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, recording: None, shortcut_error: None, _subscriptions: subscriptions });
+                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, author, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, recording: None, shortcut_error: None, balance: None, _subscriptions: subscriptions });
+                self.read_balance_shown(cx);
             }
         }
         window.focus(&self.focus);
@@ -758,6 +774,16 @@ impl Workspace {
         cx.notify();
     }
 
+    /// How many tokens the n-th model of the provider on show takes in: when a conversation with it is compacted.
+    pub fn set_model_context(&mut self, index: usize, tokens: usize, cx: &mut Context<Self>) {
+        let Some(view) = self.settings_view.as_ref() else { return };
+        let Some(model) = self.settings.providers.get_mut(view.provider).and_then(|p| p.models.get_mut(index)) else { return };
+        if model.context == tokens { return }
+        model.context = tokens;
+        self.save_settings(cx);
+        cx.notify();
+    }
+
     /// Show a provider's fields at the right of 模型.
     pub fn select_provider(&mut self, index: usize, cx: &mut Context<Self>) {
         if index >= self.settings.providers.len() { return }
@@ -769,7 +795,36 @@ impl Workspace {
         let shown = self.settings.providers.get(index).cloned().unwrap_or_default();
         let fields = ProviderFields::new(&shown, cx);
         if let Some(view) = self.settings_view.as_mut() { (view.provider, view.protocol, view.fields) = (index, shown.protocol, fields) }
+        self.read_balance_shown(cx);
         cx.notify();
+    }
+
+    /// Ask what the account of the provider on show holds, where the service has an address for that and a key is set
+    /// (DeepSeek): on showing the provider, and when its balance is clicked. Another provider shows none.
+    pub fn read_balance_shown(&mut self, cx: &mut Context<Self>) {
+        let Some(view) = self.settings_view.as_mut() else { return };
+        view.balance = None;
+        let Some(provider) = self.settings.providers.get(view.provider) else { return };
+        let profile = provider.profile(&provider::Model::default());
+        if !wisp_core::usage::is_deepseek(&profile) { return }
+        let Ok(request) = wisp_core::usage::balance_request(&profile) else { return };
+        let id = provider.id.clone();
+        view.balance = Some((id.clone(), Held::Asking));
+        let reply = cx.background_executor().spawn(async move { wisp_net::balance(&request).and_then(|body| wisp_core::usage::read_balance(&body)) });
+        cx.spawn(async move |this, cx| {
+            let reply = reply.await;
+            this.update(cx, |this, cx| {
+                // Another provider is on show by now, or the settings are closed: the answer is not wanted.
+                let Some((_, held)) = this.settings_view.as_mut().and_then(|view| view.balance.as_mut()).filter(|(shown, _)| *shown == id) else { return };
+                *held = match reply {
+                    Ok(balance) => Held::Known(balance),
+                    Err(err) => Held::Unknown(err),
+                };
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// One more provider, from a preset (`""` is a service set up by hand), and its fields on show.
@@ -1353,6 +1408,16 @@ impl Workspace {
             .pb(px(12.))
             .child(provider_tile(&provider.preset, 40.))
             .child(div().flex().flex_col().flex_1().min_w_0().gap(px(1.)).child(div().truncate().text_size(text_px(16.)).line_height(text_px(22.)).font_weight(FontWeight::SEMIBOLD).child(provider.title())).child(div().truncate().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(format!("{} · {}", protocol_name(view.protocol), provider.base_url.trim()))))
+            // What the account holds, where the service says: a click asks again.
+            .children(view.balance.as_ref().filter(|(id, _)| *id == provider.id).map(|(_, held)| {
+                let (text, color, tip) = match held {
+                    Held::Asking => (t("余额 …").to_string(), Theme::text_tertiary(), t("正在向 DeepSeek 查询余额").to_string()),
+                    Held::Known(balance) if balance.available => (tf!("余额 {}", "Balance {}", balance.text()), Theme::text_secondary(), t("账户余额，来自 DeepSeek 的余额接口。点击刷新").to_string()),
+                    Held::Known(balance) => (tf!("余额 {}（不足）", "Balance {} (insufficient)", balance.text()), Theme::danger(), t("余额不足以调用 API，需要充值。点击刷新").to_string()),
+                    Held::Unknown(err) => (t("余额未取得").to_string(), Theme::text_tertiary(), tf!("{err} 点击重试", "{err} Click to retry")),
+                };
+                div().id("provider-balance").flex_none().px(px(8.)).h(text_px(24.)).flex().items_center().rounded(px(6.)).cursor_pointer().hover(|s| s.bg(Theme::hover())).text_size(text_px(12.)).text_color(color).child(text).tooltip(ui::tip(tip)).on_click(self.on(Cmd::ReadBalance, cx))
+            }))
             .children(console.map(|url| link_button("provider-console", t("获取 API Key")).on_click(self.on(Cmd::OpenUrl(url.to_string()), cx))));
 
         // The models, each with its thinking and the tasks it does.
@@ -1395,7 +1460,7 @@ impl Workspace {
                             .bg(Theme::hover())
                             .hover(|s| s.bg(Theme::pressed()))
                             .on_click(self.on_menu(MenuKind::ModelEffort(i), cx))
-                            .child(if judges { t("类型").to_string() } else if draws { tf!("接口 · {asked}", "Interface · {asked}") } else { tf!("思考 · {effort}", "Thinking · {effort}") })
+                            .child(if judges { t("类型").to_string() } else if draws { tf!("接口 · {asked}", "Interface · {asked}") } else if model.context > 0 { tf!("思考 · {effort} · {}", "Thinking · {effort} · {}", context_label(model.context)) } else { tf!("思考 · {effort}", "Thinking · {effort}") })
                             .child(ui::icon("chevron-down", 12., Theme::text_tertiary())),
                     )
                     .child(ui::ghost_button(("model-remove", i), Some("x"), None).tooltip(|_, cx| cx.new(|_| crate::write_assist::Tip(t("删除这个模型").to_string())).into()).on_click(self.on(Cmd::RemoveModel(i), cx)))

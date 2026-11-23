@@ -178,6 +178,7 @@ impl Workspace {
                             card.note = tf!("模型服务暂时没有回应（{why}），正在重试，第 {attempt} 次…", "The model service has not responded ({why}). Retrying, attempt {attempt}…");
                             true
                         }
+                        ChatEvent::Used(_) => true,
                         ChatEvent::Error(error) => {
                             (card.busy, card.error) = (false, error);
                             card.note.clear();

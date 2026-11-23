@@ -1682,5 +1682,21 @@
   "停止：还没生成完的播客不会存下": "Stop: a podcast not yet made in full is not kept",
   "停止：下次点「播客」从这里接着放": "Stop: Podcast goes on from here next time",
   "还在生成：长度是已生成的部分，可以拖到其中任何地方": "Still being made: the length is what was made so far, and you can go anywhere in it",
-  "播放这篇存下的播客，从上次停下的地方接着放；要重新生成，在播放器的 ⋯ 里": "Play this paper's kept podcast from where you left it; to make it again, use ⋯ in the player"
+  "播放这篇存下的播客，从上次停下的地方接着放；要重新生成，在播放器的 ⋯ 里": "Play this paper's kept podcast from where you left it; to make it again, use ⋯ in the player",
+  "把较早的对话压缩成摘要，腾出模型的上下文": "Compact the earlier conversation into a summary to free the model's context",
+  "对话超出了模型的上下文长度，回答可能不完整。用 /compact 压缩对话后再问，或缩小提问范围。": "The conversation is longer than the model's context, so the answer may be incomplete. Compact it with /compact and ask again, or narrow the question.",
+  "请先等回答结束，再压缩对话。": "Wait for the answer to finish before compacting.",
+  "上次压缩之后还没有新的回答，不需要再压缩。": "Nothing new has been answered since the last compaction.",
+  "还没有可以压缩的对话。": "There is nothing to compact yet.",
+  "模型没有写出摘要。": "The model wrote no summary.",
+  "上下文 · 自动": "Context · Auto",
+  "对话太长，正在把较早的部分压缩成摘要…": "The conversation is long: compacting its earlier part into a summary…",
+  "以上对话已压缩成摘要": "The conversation above is now a summary",
+  "复制摘要": "Copy the summary",
+  "余额 …": "Balance …",
+  "正在向 DeepSeek 查询余额": "Asking DeepSeek for the balance",
+  "账户余额，来自 DeepSeek 的余额接口。点击刷新": "The account's balance, from DeepSeek's balance endpoint. Click to refresh",
+  "余额不足以调用 API，需要充值。点击刷新": "The balance is too low for API calls and needs a top-up. Click to refresh",
+  "余额未取得": "Balance unavailable",
+  "这次提问的 token 用量，由 DeepSeek 返回。费用按它公布的价格估算（高峰时段全价，其余半价，未计节假日），以账单为准；余额来自它的余额接口。": "The tokens this question used, as DeepSeek reports them. The cost is estimated from its listed prices (full price at peak hours, half otherwise; public holidays are not counted), so the bill is what holds. The balance comes from its balance endpoint."
 }

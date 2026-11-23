@@ -275,6 +275,28 @@ fn elapsed(chat: &Chat) -> String {
 }
 
 /// The tools of a run of calls in a few words: 「检索全文 ×2 · 阅读全文」.
+/// What a question used at DeepSeek, as one line: the tokens of its requests (how many were read from the cache and
+/// how many were not), those of the answer, about what that cost, and what the account still holds once that is known.
+fn render_spent(side: &str, spent: &crate::app::Spent) -> AnyElement {
+    use wisp_core::usage::{count, money};
+    let used = &spent.usage;
+    let (input, hit, miss, output, requests) = (count(used.input), count(used.cached.unwrap_or(0)), count(used.missed()), count(used.output), spent.requests);
+    let mut line = if used.cached.is_some() { tf!("输入 {input}（缓存命中 {hit} · 未命中 {miss}）· 输出 {output}", "Input {input} (cache hit {hit} · miss {miss}) · Output {output}") } else { tf!("输入 {input} · 输出 {output}", "Input {input} · Output {output}") };
+    if requests > 1 { line = tf!("{requests} 次请求 · {line}", "{requests} requests · {line}") }
+    if let Some(cost) = spent.cost.map(money) { line.push_str(&tf!(" · 约 {cost}", " · about {cost}")) }
+    if let Some(balance) = &spent.balance {
+        let held = balance.text();
+        line.push_str(&if balance.available { tf!(" · 余额 {held}", " · Balance {held}") } else { tf!(" · 余额 {held}（不足）", " · Balance {held} (insufficient)") });
+    }
+    div()
+        .id(SharedString::from(format!("spent-{side}")))
+        .text_size(text_px(12.))
+        .text_color(Theme::text_tertiary())
+        .child(format!("DeepSeek · {line}"))
+        .tooltip(ui::tip(t("这次提问的 token 用量，由 DeepSeek 返回。费用按它公布的价格估算（高峰时段全价，其余半价，未计节假日），以账单为准；余额来自它的余额接口。")))
+        .into_any_element()
+}
+
 fn tools_summary(calls: &[&str]) -> String {
     let mut counted: Vec<(&str, usize)> = vec![];
     for call in calls {
@@ -1135,6 +1157,8 @@ impl Workspace {
         let offered = review.is_some_and(|review| !chat.busy && chat.pending.is_none() && review_offer(&chat.messages, chat.review_mark, review).is_some());
         let mut i = 0;
         while i < chat.messages.len() {
+            // Where a compacted conversation goes on from its summary: above the first thing the model still has as it was said.
+            if chat.compacted.as_ref().is_some_and(|compacted| compacted.at == i) { items.push(self.render_compacted(talk, chat, cx)) }
             let content = match &chat.messages[i] {
                 ChatItem::User { text, images, files, .. } => {
                     // What can be done with a question shows under it while the pointer is over it: quiet otherwise, and nothing while an answer is on its way.
@@ -1376,8 +1400,14 @@ impl Workspace {
             );
             i += 1;
         }
+        // All that was said is summarised: the line stands under it.
+        if chat.compacted.as_ref().is_some_and(|compacted| compacted.at >= chat.messages.len()) { items.push(self.render_compacted(talk, chat, cx)) }
+        // The summary is being written: the answer waits for it.
+        if chat.compacting {
+            items.push(div().flex().items_center().gap(px(8.)).h(text_px(18.)).child(ui::spinner(SharedString::from(format!("compacting-{side}")), 13., Theme::accent())).child(div().text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(t("对话太长，正在把较早的部分压缩成摘要…"))).into_any_element());
+        }
         // Text has arrived and more is on its way (a tool call being written, the next piece): the mark keeps turning under it.
-        if chat.busy && chat.pending.is_none() && matches!(chat.messages.last(), Some(ChatItem::Answer(text)) if !text.is_empty()) {
+        if chat.busy && !chat.compacting && chat.pending.is_none() && matches!(chat.messages.last(), Some(ChatItem::Answer(text)) if !text.is_empty()) {
             items.push(div().flex().items_center().gap(px(8.)).h(text_px(18.)).child(ui::spinner(SharedString::from(format!("working-{side}")), 13., Theme::accent())).child(div().text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(elapsed(chat))).into_any_element());
         }
         if let Some(pending) = &chat.pending {
@@ -1421,6 +1451,8 @@ impl Workspace {
                     .into_any_element(),
             );
         }
+        // What the question used, where the service says what it read from its cache (DeepSeek): one quiet line under the answer.
+        if let Some(spent) = chat.spent.as_ref().filter(|_| !chat.busy) { items.push(render_spent(side, spent)) }
         if !chat.note.is_empty() {
             items.push(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(chat.note.clone()).into_any_element());
         }
@@ -1452,6 +1484,69 @@ impl Workspace {
         items.extend(offered);
         if draft && idle && !had_offer && matches!(chat.messages.last(), Some(ChatItem::Answer(_))) { items.extend(self.render_promote_offer(cx)) }
         items
+    }
+
+    /// The line where a compacted conversation goes on from its summary (`Chat::compacted`): what is above it the model no longer
+    /// has word for word. Quiet, like a run of tool calls; the summary itself on request.
+    fn render_compacted(&self, talk: Talk, chat: &Chat, cx: &mut Context<Self>) -> AnyElement {
+        let side = talk.side();
+        let Some(compacted) = &chat.compacted else { return div().into_any_element() };
+        let open = chat.compacted_open && !compacted.summary.is_empty();
+        let (before, after, dropped) = (compacted.before, compacted.after, compacted.dropped);
+        let label = if compacted.summary.is_empty() {
+            tf!("以上 {dropped} 轮对话不再发给模型", "The {dropped} turn(s) above are no longer sent to the model")
+        } else if dropped > 0 {
+            tf!("以上对话已压缩成摘要，其中 {dropped} 轮没有计入", "The conversation above is now a summary; {dropped} turn(s) are not in it")
+        } else {
+            t("以上对话已压缩成摘要").to_string()
+        };
+        let rule = || div().flex_1().h(px(1.)).bg(Theme::line());
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .child(
+                div().flex().items_center().gap(px(10.)).child(rule()).child(
+                    div()
+                        .id(SharedString::from(format!("compacted-{side}")))
+                        .flex()
+                        .flex_none()
+                        .items_center()
+                        .gap(px(4.))
+                        .h(text_px(22.))
+                        .text_size(text_px(12.))
+                        .text_color(Theme::text_tertiary())
+                        .child(label)
+                        .when(!compacted.summary.is_empty(), |d| d.cursor_pointer().hover(|s| s.text_color(Theme::text_secondary())).on_click(self.on(Cmd::ToggleCompacted(talk), cx)).child(ui::icon(if open { "chevron-down" } else { "chevron-right" }, 12., Theme::text_tertiary()))),
+                )
+                .child(rule()),
+            )
+            .when(open, |d| {
+                d.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(6.))
+                        .px(px(14.))
+                        .py(px(10.))
+                        .rounded(px(12.))
+                        .bg(Theme::bg_sunken())
+                        .text_size(text_px(12.))
+                        .line_height(text_px(19.))
+                        .text_color(Theme::text_secondary())
+                        .child(
+                            div()
+                                .flex()
+                                .items_start()
+                                .gap(px(8.))
+                                .child(div().flex_1().min_w_0().text_color(Theme::text_tertiary()).child(tf!("模型从这份摘要接着对话（约 {before} → {after} token）；上面的原话仍在这里，但它不再逐字读到。", "The model goes on from this summary (about {before} → {after} tokens). What was said above is still here, but it no longer reads it word for word.")))
+                                .child(ui::icon_action(SharedString::from(format!("compacted-copy-{side}")), "copy", Theme::text_tertiary(), t("复制摘要")).on_click(self.on(Cmd::CopyText(compacted.summary.clone()), cx))),
+                        )
+                        // A long summary scrolls in its box: the conversation under it stays in reach.
+                        .child(div().id(SharedString::from(format!("compacted-box-{side}"))).max_h(px(280.)).overflow_y_scroll().child(crate::markdown::render(&format!("compacted-summary-{side}"), &compacted.summary, None, None))),
+                )
+            })
+            .into_any_element()
     }
 
     /// The card the assistant put under its answer (`offer_action`): its sentence, the buttons that can be pressed here, and a × that puts it away.

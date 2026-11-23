@@ -25,7 +25,7 @@ use wisp_core::screening::{Before, Confirming, Round};
 use wisp_core::settings::{Language, Session, Settings, Task, session_file, settings_file};
 use wisp_core::store::{Conversation, ConversationInfo, ImportBatch, SavedSearch, Store, StructureInfo, Suggestion, TrashEntry};
 use wisp_core::manuscript::{Manuscript, Snapshot};
-use wisp_core::{archive, complete, export, fulltext, import, pdftext, structure, time, tools, zotero};
+use wisp_core::{archive, compact, complete, export, fulltext, import, pdftext, structure, time, tools, usage, zotero};
 pub use crate::manuscripts::ManuscriptExport;
 
 /// What the middle of an open library shows.
@@ -342,6 +342,8 @@ pub enum Cmd {
     PickProtocol(Protocol),
     /// Show another provider's settings on 设置 › AI › 模型.
     SelectProvider(usize),
+    /// Ask again what the account of the provider on show holds.
+    ReadBalance,
     /// One more provider, from a `provider::Preset` key; empty is a service set up by hand.
     AddProvider(String),
     AskRemoveProvider(usize),
@@ -351,6 +353,8 @@ pub enum Cmd {
     RemoveModel(usize),
     /// How hard the n-th model of the provider on show thinks, a key of `ai::EFFORTS`.
     SetEffort(usize, String),
+    /// How many tokens the n-th model of the provider on show takes in; 0 leaves it to its name.
+    SetModelContext(usize, usize),
     /// What kind the n-th model of the provider on show is: one that answers in words (empty), draws, or judges.
     SetModelKind(usize, String),
     /// How the n-th model of the provider on show is asked for a picture, a key of `imagegen::INTERFACES`.
@@ -560,6 +564,8 @@ pub enum Cmd {
     AnswerTools(Talk, Consent),
     /// Unfold or fold the tool calls that start at this place in the conversation.
     ToggleTools(Talk, usize),
+    /// Show or put away the summary a compacted conversation goes on from.
+    ToggleCompacted(Talk),
     CopyText(String),
     /// 撤回: the question at this place in the conversation and all after it are taken back; its words and pictures return to the box.
     Retract(Talk, usize),
@@ -1426,6 +1432,50 @@ pub struct Chat {
     /// The card the assistant put under its answer (`offer_action`), with how many messages there were then: it is drawn while no question came
     /// after it, and goes once a button of it is pressed or it is put away (`Cmd::Offer`). Not kept with the conversation.
     pub offer: Option<(usize, wisp_core::offer::Offer)>,
+    /// The summary the model is given in place of the first of `messages`, once the conversation outgrew its window or the person asked
+    /// (`/compact`, `compact_chat`). The person still sees every message; a line marks where the summary stands.
+    pub compacted: Option<compact::Compaction>,
+    /// That summary is on show under its line.
+    pub compacted_open: bool,
+    /// A summary of the earlier conversation is being written.
+    pub compacting: bool,
+    /// No summary could be had for the question being answered: the oldest turns are left out instead.
+    no_summary: bool,
+    /// How the service's own count of a request compares with the estimate of it (`ChatEvent::Used`): the next estimate is scaled by it.
+    /// It is the model's and the estimate's, not the conversation's: a new conversation keeps it.
+    calibration: f32,
+    /// The estimate of the request in flight.
+    sent_estimate: usize,
+    /// The service refused the last request as too long, in these words: the next step compacts whatever the estimate says.
+    overflow: Option<String>,
+    /// That was already tried for the question being answered.
+    squeezed: bool,
+    /// What the question last asked used, where the service says what it read from its cache (DeepSeek): the line under the answer.
+    pub spent: Option<Spent>,
+}
+
+/// What a question used, over all the requests it took: the service's own counts (`wisp_core::usage`), about what
+/// that cost at its listed prices, and what the account holds, asked once the answer is in. Not kept with the conversation.
+#[derive(Default)]
+pub struct Spent {
+    pub usage: usage::Usage,
+    pub requests: usize,
+    /// In US dollars; `None` for a model without a listed price.
+    pub cost: Option<f64>,
+    pub balance: Option<usage::Balance>,
+}
+
+/// What an item of a conversation is kept as; nothing for an answer piece without text.
+fn said(item: &ChatItem) -> Option<ai::Said> {
+    match item {
+        ChatItem::User { text, images, prompt, files } => Some(ai::Said::User { text: text.clone(), images: images.iter().map(|picture| picture.id.clone()).collect(), files: files.clone(), prompt: prompt.clone() }),
+        ChatItem::Answer(text) if !text.is_empty() => Some(ai::Said::Answer { text: text.clone() }),
+        ChatItem::Answer(_) => None,
+        ChatItem::Tool { call, result } => {
+            let (result, failed) = result.clone().unwrap_or_default();
+            Some(ai::Said::Tool { call: call.clone(), result, failed })
+        }
+    }
 }
 
 /// Where `Chat::key` comes from.
@@ -1853,6 +1903,15 @@ impl Chat {
             drawn_width: 0.,
             key: CHAT_KEYS.fetch_add(1, Ordering::Relaxed),
             offer: None,
+            compacted: None,
+            compacted_open: false,
+            compacting: false,
+            no_summary: false,
+            calibration: 1.,
+            sent_estimate: 0,
+            overflow: None,
+            squeezed: false,
+            spent: None,
         }
     }
 
@@ -1909,12 +1968,24 @@ impl Chat {
         self.history = None;
         self.wire.clear();
         self.protocol = None;
+        // A summary that stood for more than is left stands for nothing: what is left is sent as it was said.
+        if self.compacted.as_ref().is_some_and(|compacted| compacted.at > at) {
+            self.compacted = None;
+            self.compacted_open = false;
+        }
         tail
+    }
+
+    /// The place among `messages` of the n-th question from `from` on; their end when there are fewer.
+    fn question_at(&self, from: usize, n: usize) -> usize {
+        self.messages.iter().enumerate().skip(from).filter(|(_, item)| matches!(item, ChatItem::User { .. })).nth(n).map_or(self.messages.len(), |(i, _)| i)
     }
 
     /// The question has been answered, or given up on.
     fn end_run(&mut self) {
         self.busy = false;
+        self.compacting = false;
+        self.overflow = None;
         self.started = None;
         self.pending = None;
         self.running.clear();
@@ -1929,20 +2000,17 @@ impl Chat {
         let items = self
             .messages
             .iter()
-            .filter_map(|item| match item {
-                ChatItem::User { text, images, prompt, files } => Some(ai::Said::User { text: text.clone(), images: images.iter().map(|picture| picture.id.clone()).collect(), files: files.clone(), prompt: prompt.clone() }),
-                ChatItem::Answer(text) if !text.is_empty() => {
-                    cited.extend(ai::citations(text).into_iter().map(|citation| citation.label));
-                    Some(ai::Said::Answer { text: text.clone() })
-                }
-                ChatItem::Answer(_) => None,
-                ChatItem::Tool { call, result } => {
-                    let (result, failed) = result.clone().unwrap_or_default();
-                    Some(ai::Said::Tool { call: call.clone(), result, failed })
-                }
+            .filter_map(|item| {
+                if let ChatItem::Answer(text) = item { cited.extend(ai::citations(text).into_iter().map(|citation| citation.label)) }
+                said(item)
             })
             .collect();
-        ai::Transcript { items, sources: self.sources().iter().filter(|source| cited.contains(&source.label)).cloned().collect() }
+        // Where the summary stands is counted in what is kept: an answer piece without text is not.
+        let compacted = self.compacted.clone().map(|mut compacted| {
+            compacted.at = self.messages[..compacted.at.min(self.messages.len())].iter().filter_map(said).count();
+            compacted
+        });
+        ai::Transcript { items, sources: self.sources().iter().filter(|source| cited.contains(&source.label)).cloned().collect(), compacted }
     }
 
     pub(crate) fn reset(&mut self, cx: &mut App) {
@@ -1981,6 +2049,13 @@ impl Chat {
         self.checks.clear();
         self.started = None;
         self.retracted = None;
+        self.compacted = None;
+        self.compacted_open = false;
+        self.compacting = false;
+        self.no_summary = false;
+        self.overflow = None;
+        self.squeezed = false;
+        self.spent = None;
         self.input.update(cx, |input, cx| {
             input.choosing = false;
             input.set_text("", cx);
@@ -2849,6 +2924,13 @@ impl Workspace {
                     for (key, name) in ai::EFFORTS {
                         items.push(MenuItem { label: t(name).into(), checked: model.effort == key, note: None, cmd: Cmd::SetEffort(index, key.to_string()) });
                     }
+                    // How much it takes in: a conversation is compacted before it outgrows this.
+                    breaks.push(items.len());
+                    let guessed = compact::window(&self.settings.providers[view.provider()].profile(&wisp_core::provider::Model { context: 0, ..model.clone() }));
+                    items.push(MenuItem { label: t("上下文 · 自动").into(), checked: model.context == 0, note: Some(crate::settings::context_label(guessed).into()), cmd: Cmd::SetModelContext(index, 0) });
+                    for tokens in wisp_core::provider::CONTEXTS {
+                        items.push(MenuItem { label: tf!("上下文 · {}", "Context · {}", crate::settings::context_label(tokens)).into(), checked: model.context == tokens, note: None, cmd: Cmd::SetModelContext(index, tokens) });
+                    }
                 }
                 if !items.is_empty() { breaks.push(items.len()) }
                 // What kind of model it is: the name tells when it is added, and here it can be said otherwise.
@@ -3109,6 +3191,7 @@ impl Workspace {
             Cmd::PickProtocol(value) => self.pick_protocol(value, cx),
             Cmd::AiTab(tab) => self.open_ai_tab(tab, window, cx),
             Cmd::SelectProvider(index) => self.select_provider(index, cx),
+            Cmd::ReadBalance => self.read_balance_shown(cx),
             Cmd::AddProvider(preset) => self.add_provider(&preset, cx),
             Cmd::AskRemoveProvider(index) => {
                 let Some(provider) = self.settings.providers.get(index) else { return };
@@ -3124,6 +3207,7 @@ impl Workspace {
             Cmd::AddModel => self.add_model(cx),
             Cmd::RemoveModel(index) => self.remove_model(index, cx),
             Cmd::SetEffort(index, value) => self.set_effort(index, value, cx),
+            Cmd::SetModelContext(index, tokens) => self.set_model_context(index, tokens, cx),
             Cmd::SetModelKind(index, kind) => {
                 let Some(provider) = self.settings_view.as_ref().map(|view| view.provider()) else { return };
                 self.settings.set_model_kind(provider, index, &kind);
@@ -3901,6 +3985,14 @@ impl Workspace {
                 if let Some(lib) = self.lib.as_mut() {
                     let chat = lib.chat_mut(paper);
                     if !chat.tools_open.remove(&at) { chat.tools_open.insert(at); }
+                }
+            }
+            Cmd::ToggleCompacted(talk) => {
+                if let Some(lib) = self.lib.as_mut() {
+                    let chat = lib.chat_mut(talk);
+                    chat.compacted_open = !chat.compacted_open;
+                    // A summary under all that was said unfolds below the fold.
+                    if chat.compacted_open && chat.compacted.as_ref().is_some_and(|compacted| compacted.at >= chat.messages.len()) { chat.scroll.scroll_to_bottom() }
                 }
             }
             Cmd::AnswerToManuscript(question, answer) => self.answer_to_manuscript(question, answer, window, cx),
@@ -4846,7 +4938,7 @@ impl Workspace {
                 if ended { return None }
                 let whole = match events.recv_blocking() {
                     Ok(wisp_core::ai::ChatEvent::Text(text)) => reader.push(&text),
-                    Ok(wisp_core::ai::ChatEvent::Retrying(..)) => continue,
+                    Ok(wisp_core::ai::ChatEvent::Retrying(..) | wisp_core::ai::ChatEvent::Used(_)) => continue,
                     Ok(wisp_core::ai::ChatEvent::Error(error)) => {
                         ended = true;
                         return Some(vec![Err(tf!("播客稿没有写成：{}", "The podcast script was not written: {}", error))]);
@@ -6137,6 +6229,11 @@ impl Workspace {
                 cx.notify();
                 return false;
             }
+            Ok(ai::Input::Compact) => {
+                chat.input.update(cx, |input, cx| input.set_text("", cx));
+                self.compact_chat(talk, true, cx);
+                return false;
+            }
             Err(err) => {
                 chat.error = err;
                 cx.notify();
@@ -6204,8 +6301,16 @@ impl Workspace {
         if replay {
             // Questions with their pictures, as they were sent (what a slash command stood for then); the pieces of one answer as one turn.
             let mut wire: Vec<Value> = vec![];
+            // A compacted conversation begins at its summary: what the summary stands for is not sent again.
+            let from = match &chat.compacted {
+                Some(compacted) => {
+                    if !compacted.summary.is_empty() { wire = compact::summary_messages(&compacted.summary) }
+                    compacted.at.min(chat.messages.len())
+                }
+                None => 0,
+            };
             let mut answer = String::new();
-            for item in &chat.messages {
+            for item in &chat.messages[from..] {
                 match item {
                     ChatItem::User { text, images, prompt, .. } => {
                         if !answer.is_empty() { wire.push(ai::assistant_message(&std::mem::take(&mut answer))) }
@@ -6261,6 +6366,7 @@ impl Workspace {
         let sent = if prompt == question { String::new() } else { prompt };
         chat.messages.push(ChatItem::User { text: question, images, prompt: sent, files });
         chat.steps = 0;
+        (chat.no_summary, chat.squeezed, chat.overflow, chat.spent) = (false, false, None, None);
         chat.started = Some(Instant::now());
         // What the last question changed in the manuscript has been seen: the next changes are this one's.
         if talk == Talk::Write {
@@ -6404,15 +6510,57 @@ impl Workspace {
         let outside: Vec<_> = self.outside_tools().into_iter().map(|(tool, _)| tool).collect();
         let Some(lib) = self.lib.as_mut() else { return false };
         let chat = chat_of!(lib, talk);
-        let Some(ctx) = chat.ctx.as_ref() else { return false };
-        let request = match ai::chat_request_with(&profile, ctx, &chat.wire, &tools::library_catalog(), &outside) {
-            Ok(request) => request,
-            Err(err) => {
+        if chat.ctx.is_none() { return false }
+        let catalog = tools::library_catalog();
+        let build = |chat: &Chat| ai::chat_request_with(&profile, chat.ctx.as_ref()?, &chat.wire, &catalog, &outside).ok();
+        let mut request = match chat.ctx.as_ref().map(|ctx| ai::chat_request_with(&profile, ctx, &chat.wire, &catalog, &outside)) {
+            Some(Ok(request)) => request,
+            Some(Err(err)) => {
                 chat.error = err;
                 chat.end_run();
                 return false;
             }
+            None => return false,
         };
+        // A conversation that has outgrown the model's window is compacted before it is sent (`wisp_core::compact`): first by rule, the
+        // tool results of earlier turns cut to their head and tail; then by a summary of what was said before this question, which the
+        // model writes (`compact_chat`, which takes this step once it has it); the oldest turns are left out only when no summary came.
+        let estimate = compact::tokens(&request.body);
+        let overflow = chat.overflow.take();
+        if let Some(protocol) = chat.protocol.filter(|_| overflow.is_some() || (estimate as f32 * chat.calibration) as usize > compact::limit(&profile)) {
+            // What the request holds besides the conversation: the instructions, the documents, the tools.
+            let fixed = estimate.saturating_sub(compact::wire_tokens(&chat.wire));
+            let (limit, scale, forced) = (compact::limit(&profile), chat.calibration, overflow.is_some());
+            // The service said too long where the estimate says it fits: the estimate is no guide, every layer is tried.
+            let over = |wire: &[Value]| forced || ((fixed + compact::wire_tokens(wire)) as f32 * scale) as usize > limit;
+            let before = compact::wire_tokens(&chat.wire);
+            match compact::make_room(protocol, &mut chat.wire, (limit as f32 / scale) as usize / 10, over) {
+                compact::Room::Summarise if !chat.no_summary => {
+                    chat.overflow = overflow;
+                    self.compact_chat(talk, false, cx);
+                    return true;
+                }
+                compact::Room::Summarise => {
+                    let dropped = compact::drop_turns(&mut chat.wire, over);
+                    if dropped > 0 {
+                        let (from, summary, earlier) = chat.compacted.take().map_or((0, String::new(), 0), |compacted| (compacted.at, compacted.summary, compacted.dropped));
+                        chat.compacted = Some(compact::Compaction { at: chat.question_at(from, dropped), summary, before, after: compact::wire_tokens(&chat.wire), dropped: earlier + dropped });
+                    }
+                    compact::tighten(protocol, &mut chat.wire, over);
+                }
+                compact::Room::Done => {}
+            }
+            if compact::wire_tokens(&chat.wire) != before {
+                let Some(shorter) = build(chat) else { return false };
+                request = shorter;
+            } else if let Some(error) = overflow {
+                // Nothing could be taken out: the service's refusal stands.
+                chat.error = error;
+                chat.end_run();
+                return false;
+            }
+        }
+        chat.sent_estimate = compact::tokens(&request.body);
         chat.messages.push(ChatItem::Answer(String::new()));
         chat.busy = true;
         chat.steps += 1;
@@ -6422,6 +6570,8 @@ impl Workspace {
 
         let (sender, events) = async_channel::unbounded();
         let protocol = profile.protocol;
+        // DeepSeek says what it read from its cache, and its prices are listed: the question's use is shown under the answer.
+        let deepseek = usage::is_deepseek(&profile).then(|| profile.model.clone());
         cx.background_executor().spawn(async move { wisp_net::stream_chat(request, protocol, sender) }).detach();
         cx.spawn(async move |this, cx| {
             while let Ok(event) = events.recv().await {
@@ -6433,6 +6583,7 @@ impl Workspace {
                     // Keep following the answer while the reader is at the bottom.
                     let at_bottom = chat.scroll.offset().y <= -chat.scroll.max_offset().height + px(40.);
                     let mut calls = None;
+                    let mut again = false;
                     let more = match event {
                         ChatEvent::Text(text) => {
                             chat.note.clear();
@@ -6442,6 +6593,28 @@ impl Workspace {
                         ChatEvent::Retrying(attempt, why) => {
                             chat.note = tf!("模型服务暂时没有回应（{why}），正在重试，第 {attempt} 次…", "The model service has not responded ({why}). Retrying, attempt {attempt}…");
                             true
+                        }
+                        ChatEvent::Used(used) => {
+                            // The service's own count corrects the estimate the next step is measured with.
+                            if chat.sent_estimate > 0 && used.input > 0 { chat.calibration = (used.input as f32 / chat.sent_estimate as f32).clamp(0.5, 3.) }
+                            if let Some(model) = &deepseek {
+                                let spent = chat.spent.get_or_insert_with(Spent::default);
+                                spent.usage.add(&used);
+                                spent.requests += 1;
+                                // Priced request by request: the hour it was made in decides the rate.
+                                if let Some(cost) = usage::deepseek_cost(model, &used, time::now_millis() / 1000) { spent.cost = Some(spent.cost.unwrap_or(0.) + cost) }
+                            }
+                            true
+                        }
+                        // Too long for the model after all (its window is smaller than assumed): the conversation is compacted and the step taken again, once for a question.
+                        ChatEvent::Error(error) if compact::context_exceeded(&error) && !chat.squeezed => {
+                            chat.note.clear();
+                            chat.squeezed = true;
+                            chat.overflow = Some(error);
+                            chat.drop_empty_answer();
+                            chat.steps = chat.steps.saturating_sub(1);
+                            again = true;
+                            false
                         }
                         ChatEvent::Error(error) => {
                             chat.note.clear();
@@ -6476,7 +6649,8 @@ impl Workspace {
                     if at_bottom { chat.scroll.scroll_to_bottom() }
                     let ended = !chat.busy;
                     if let Some(calls) = calls { this.run_tools(talk, calls, cx) }
-                    if ended { this.save_chat(talk, cx) }
+                    if ended || (again && !this.chat_step(talk, cx)) { this.save_chat(talk, cx) }
+                    if ended { this.read_balance(talk, cx) }
                     cx.notify();
                     more
                 }).unwrap_or(false)).unwrap_or(false));
@@ -6677,6 +6851,8 @@ impl Workspace {
         let chat = lib.chat_mut(talk);
         if !chat.busy { return }
         chat.generation += 1;
+        // A summary asked for by the person, with no answer awaited: the conversation is as it was.
+        let idle = chat.compacting && chat.started.is_none();
         let unanswered: Vec<String> = match chat.pending.take() {
             Some(pending) => pending.calls.into_iter().map(|call| call.id).collect(),
             None => std::mem::take(&mut chat.running),
@@ -6685,7 +6861,7 @@ impl Workspace {
             if !unanswered.is_empty() {
                 let results: Vec<(String, String, bool)> = unanswered.into_iter().map(|id| (id, t("用户中止了这次提问，这个工具的结果没有交回。").to_string(), true)).collect();
                 chat.wire.extend(ai::tool_results(protocol, &results));
-            } else if let Some(ChatItem::Answer(text)) = chat.messages.last() && !text.is_empty() {
+            } else if !idle && let Some(ChatItem::Answer(text)) = chat.messages.last() && !text.is_empty() {
                 chat.wire.push(ai::assistant_message(text));
             }
         }
@@ -6695,6 +6871,115 @@ impl Workspace {
         chat.note = t("已停止。").into();
         chat.end_run();
         self.save_chat(talk, cx);
+        cx.notify();
+    }
+
+    /// Have the model write a summary of the conversation, and give it that in place of what was said from then on
+    /// (`wisp_core::compact`). While a question is being answered (`chat_step` found the conversation too long) the summary
+    /// stands for everything before that question, and the step is taken once it is in; asked for by the person (`/compact`)
+    /// it stands for everything said. The summary is made from what the conversation shows (questions, answers, the lines of
+    /// the tool calls), not from the wire: that is what a conversation taken up again is sent, and it needs no tools or
+    /// thinking blocks to be valid. The conversation on show keeps every message; a line marks where the summary stands.
+    fn compact_chat(&mut self, talk: Talk, manual: bool, cx: &mut Context<Self>) {
+        let profile = self.settings.profile_for_or_default(Task::Chat);
+        let Some(lib) = self.lib.as_mut() else { return };
+        let library = lib.info.id.clone();
+        let chat = chat_of!(lib, talk);
+        if manual && chat.busy {
+            chat.error = t("请先等回答结束，再压缩对话。").into();
+            return cx.notify();
+        }
+        let at = if manual { chat.messages.len() } else { chat.messages.iter().rposition(|item| matches!(item, ChatItem::User { .. })).unwrap_or(0) };
+        // An earlier summary goes into the new one with what was said since.
+        let (from, earlier) = match &chat.compacted {
+            Some(compacted) if compacted.at <= at => (compacted.at, compacted.summary.clone()),
+            _ => (0, String::new()),
+        };
+        let items: Vec<ai::Said> = chat.messages[from..at].iter().filter_map(said).collect();
+        (chat.error, chat.note) = (String::new(), String::new());
+        if manual && !items.iter().any(|item| matches!(item, ai::Said::Answer { .. })) {
+            chat.note = if from > 0 { t("上次压缩之后还没有新的回答，不需要再压缩。") } else { t("还没有可以压缩的对话。") }.into();
+            return cx.notify();
+        }
+        // What the summary takes the place of, as the model would be sent it.
+        let prompt = compact::summary_prompt(&items, &earlier, compact::window(&profile) / 2);
+        let before = if chat.wire.is_empty() { compact::text_tokens(&prompt) } else if manual { compact::wire_tokens(&chat.wire) } else { compact::wire_tokens(&chat.wire[..compact::turn_starts(&chat.wire).last().copied().unwrap_or(0)]) };
+        let request = ai::plain_request(&profile, compact::SUMMARY_SYSTEM, &prompt);
+        chat.busy = true;
+        chat.compacting = true;
+        chat.history = None;
+        chat.scroll.scroll_to_bottom();
+        let (generation, key, protocol) = (chat.generation, chat.key, profile.protocol);
+        let reply = cx.background_executor().spawn(async move { wisp_net::complete(request?, protocol) });
+        cx.spawn(async move |this, cx| {
+            let reply = reply.await;
+            this.update(cx, |this, cx| this.in_library(&library, cx, |this, cx| this.in_chat(talk, key, cx, |this, cx| this.summary_arrived(talk, generation, at, before, manual, reply, cx)))).ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// An answer from DeepSeek is in: ask what the account still holds, for the line under the answer (`Chat::spent`).
+    /// Asked once per question, and not at all for another service; an answer that does not come leaves the line without it.
+    fn read_balance(&mut self, talk: Talk, cx: &mut Context<Self>) {
+        let profile = self.settings.profile_for_or_default(Task::Chat);
+        let Some(lib) = self.lib.as_ref() else { return };
+        let chat = lib.chat(talk);
+        if chat.spent.is_none() || !usage::is_deepseek(&profile) { return }
+        let Ok(request) = usage::balance_request(&profile) else { return };
+        let (library, generation, key) = (lib.info.id.clone(), chat.generation, chat.key);
+        let reply = cx.background_executor().spawn(async move { wisp_net::balance(&request).and_then(|body| usage::read_balance(&body)) });
+        cx.spawn(async move |this, cx| {
+            let Ok(balance) = reply.await else { return };
+            this.update(cx, |this, cx| {
+                this.in_library(&library, cx, |this, cx| {
+                    let Some(lib) = this.lib.as_mut() else { return };
+                    let chat = chat_of!(lib, talk);
+                    if chat.key == key && chat.generation == generation && let Some(spent) = chat.spent.as_mut() { spent.balance = Some(balance) }
+                    cx.notify();
+                })
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// The summary `compact_chat` asked for is in, or could not be had.
+    fn summary_arrived(&mut self, talk: Talk, generation: u64, at: usize, before: usize, manual: bool, reply: Result<String, String>, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        let chat = chat_of!(lib, talk);
+        if chat.generation != generation || !chat.compacting { return }
+        chat.compacting = false;
+        let summary = reply.and_then(|reply| compact::read_summary(&reply).ok_or_else(|| t("模型没有写出摘要。").to_string()));
+        if manual { chat.busy = false }
+        match summary {
+            Ok(summary) => {
+                let pair = compact::summary_messages(&summary);
+                let after = compact::wire_tokens(&pair);
+                if manual {
+                    // Written again from the summary with the next question, as after a cut.
+                    chat.wire.clear();
+                    chat.protocol = None;
+                } else {
+                    let current = compact::turn_starts(&chat.wire).last().copied().unwrap_or(0);
+                    chat.wire.splice(..current, pair);
+                }
+                chat.compacted = Some(compact::Compaction { at, summary, before, after, dropped: 0 });
+                chat.compacted_open = false;
+                // The line that says so stands under all that was said: it is brought into view.
+                if manual { chat.scroll.scroll_to_bottom() }
+                // A refusal as too long is answered by this summary: the step after it goes by the estimate again.
+                chat.overflow = None;
+                if manual { self.say(tf!("已压缩：约 {before} → {after} token", "Compacted: about {before} → {after} tokens"), cx) }
+            }
+            Err(err) if manual => chat.error = tf!("对话没有压缩成：{err}", "The conversation was not compacted: {err}"),
+            Err(err) => {
+                // The question is still answered: `chat_step` leaves the oldest turns out instead.
+                chat.no_summary = true;
+                self.say(tf!("摘要没有写成（{err}），较早的对话这次不再发给模型", "No summary could be written ({err}); the earlier conversation is left out this time"), cx);
+            }
+        }
+        if manual || !self.chat_step(talk, cx) { self.save_chat(talk, cx) }
         cx.notify();
     }
 
@@ -6799,6 +7084,7 @@ impl Workspace {
             });
         }
         chat.known = conversation.transcript.sources;
+        chat.compacted = conversation.transcript.compacted.filter(|compacted| compacted.at <= chat.messages.len());
         (chat.id, chat.created_at) = (conversation.id, conversation.created_at);
         chat.kept = true;
         chat.scroll = ScrollHandle::new();
@@ -8525,6 +8811,8 @@ impl Workspace {
                     if let Some(lib) = self.lib.as_ref() { lib.write_chat.input.update(cx, |input, cx| input.set_text(arg, cx)) }
                     Some(Cmd::Ask(Talk::Write))
                 }
+                // `compacted` shows or puts away the summary a compacted conversation with the library goes on from.
+                "compacted" => Some(Cmd::ToggleCompacted(Talk::Library)),
                 "history-write" => Some(Cmd::ToggleHistory(Talk::Write)),
                 // The same of the selected paper.
                 "askpaper" => {

@@ -253,7 +253,22 @@ pub fn stream_chat(request: HttpRequest, protocol: Protocol, events: async_chann
             }
         }
     }
+    if let Some(used) = reader.used() && !send(ChatEvent::Used(used)) { return }
     send(ChatEvent::Done(reader.finish()));
+}
+
+/// GET what an account holds at a model service (`wisp_core::usage::balance_request`): the answer as text, for
+/// `usage::read_balance`. Asked once, after an answer; a service that does not answer in twenty seconds is not waited for.
+pub fn balance(request: &HttpRequest) -> Result<String, String> {
+    let mut call = agent(Some(Duration::from_secs(20)), &request.proxy)?.get(&request.url);
+    for (name, value) in &request.headers {
+        call = call.header(name, value);
+    }
+    let mut response = call.call().map_err(network_error)?;
+    let status = response.status().as_u16();
+    let body = response.body_mut().with_config().limit(1 << 20).read_to_string().map_err(|e| format!("无法读取余额接口的返回内容：{e}"))?;
+    if !(200..300).contains(&status) { return Err(ai::error_message(status, &body)) }
+    Ok(body)
 }
 
 /// What `complete` says of an answer without a word in it. Where nothing
@@ -270,7 +285,7 @@ pub fn complete(request: HttpRequest, protocol: Protocol) -> Result<String, Stri
     while let Ok(event) = events.try_recv() {
         match event {
             ChatEvent::Text(more) => text.push_str(&more),
-            ChatEvent::Retrying(..) => {}
+            ChatEvent::Retrying(..) | ChatEvent::Used(_) => {}
             ChatEvent::Error(error) => return Err(error),
             // A reply that was cut off or declined is not one to parse.
             ChatEvent::Done(turn) => {
@@ -369,6 +384,21 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use wisp_core::ai::{Context, Profile, chat_request, user_message};
+
+    #[test]
+    fn the_balance_of_an_account() {
+        let (base, server) = serve("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{\"is_available\": true, \"balance_infos\": [{\"currency\": \"CNY\", \"total_balance\": \"110.00\"}]}");
+        let profile = Profile { protocol: Protocol::OpenAI, base_url: format!("{base}/v1"), api_key: "k".into(), proxy: "direct".into(), ..Default::default() };
+        let body = balance(&wisp_core::usage::balance_request(&profile).unwrap()).unwrap();
+        assert_eq!(wisp_core::usage::read_balance(&body).unwrap().text(), "¥110.00");
+        let asked = server.join().unwrap().to_lowercase();
+        assert!(asked.starts_with("get /user/balance ") && asked.contains("authorization: bearer k"), "{asked}");
+        // A refusal is said in the service's words.
+        let (base, server) = serve("HTTP/1.1 401 Unauthorized\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{\"error\": {\"message\": \"Authentication Fails\"}}");
+        let refused = balance(&wisp_core::usage::balance_request(&Profile { base_url: base, ..profile }).unwrap()).unwrap_err();
+        server.join().unwrap();
+        assert!(refused.contains("401") && refused.contains("Authentication Fails"), "{refused}");
+    }
 
     /// Serve one canned HTTP response on a local port; returns the base URL and the request it received.
     pub(crate) fn serve(response: &'static str) -> (String, std::thread::JoinHandle<String>) {

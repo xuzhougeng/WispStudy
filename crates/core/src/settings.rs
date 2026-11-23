@@ -461,6 +461,12 @@ impl Settings {
         self.font_size = font_size(self.font_size);
         self.font_family = self.font_family.trim().to_string();
         self.cjk_font_family = self.cjk_font_family.trim().to_string();
+        // DeepSeek used to be set up with its larger model first, and a task without a model of its own takes the first
+        // (`profile_for`): the smaller, cheaper one is the default now. A list still as it was set up is put in the new
+        // order; one the person changed is theirs, and so is every task bound to a model, which goes by the model's id.
+        for provider in self.providers.iter_mut().filter(|provider| provider.preset == "deepseek") {
+            if let [first, second] = provider.models.as_slice() && first.model == "deepseek-v4-pro" && matches!(second.model.as_str(), "deepseek-flash" | "deepseek-v4-flash") { provider.models.swap(0, 1) }
+        }
         let mut seen = std::collections::HashSet::new();
         for p in 0..self.providers.len() {
             let id = self.providers[p].id.trim().to_string();
@@ -861,7 +867,7 @@ mod tests {
         let ids: Vec<String> = s.profiles().into_iter().map(|p| p.id).collect();
         assert_eq!(ids, ["m1", "m2", "m3", "m4", "m5"]);
         let uses = |s: &Settings, task: Task| s.profile_for(task).unwrap().model.clone();
-        assert_eq!(uses(&s, Task::Chat), "deepseek-v4-pro");
+        assert_eq!(uses(&s, Task::Chat), "deepseek-flash");
         s.providers[1].api_key = "k".into();
         assert_eq!(uses(&s, Task::Screen), "kimi-k2.6");
         s.providers[1].api_key.clear();
@@ -869,14 +875,14 @@ mod tests {
         s.tasks.set(Task::Chat, "m4");
         assert_eq!(Task::WORDS.map(|task| uses(&s, task)), ["glm-5.3", "glm-5.3", "glm-5.3", "glm-5.3"]);
         s.tasks.set(Task::Translate, "m2");
-        assert_eq!(Task::WORDS.map(|task| uses(&s, task)), ["glm-5.3", "glm-5.3", "deepseek-flash", "glm-5.3"]);
+        assert_eq!(Task::WORDS.map(|task| uses(&s, task)), ["glm-5.3", "glm-5.3", "deepseek-v4-pro", "glm-5.3"]);
         // A removed model or provider takes its bindings along; an id is not handed out twice while in use.
         s.remove_provider(2);
-        assert_eq!((s.tasks.chat.as_str(), s.tasks.translate.as_str(), uses(&s, Task::Chat).as_str()), ("", "m2", "deepseek-v4-pro"));
+        assert_eq!((s.tasks.chat.as_str(), s.tasks.translate.as_str(), uses(&s, Task::Chat).as_str()), ("", "m2", "deepseek-flash"));
         assert_eq!(s.add_model(1, " kimi-k3 "), Some("m4".into()));
         assert_eq!(s.profile("m4").map(|p| (p.model, p.provider)), Some(("kimi-k3".into(), "Kimi".into())));
         s.remove_model(0, 1);
-        assert_eq!((s.tasks.translate.as_str(), uses(&s, Task::Translate).as_str()), ("", "deepseek-v4-pro"));
+        assert_eq!((s.tasks.translate.as_str(), uses(&s, Task::Translate).as_str()), ("", "deepseek-flash"));
         // A provider added from a preset gets ids of its own, whatever it came with.
         let claude = s.add_provider(Provider::from_preset(provider::preset("claude").unwrap()));
         assert_eq!(s.providers[claude].models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["m2", "m5", "m6"]);
@@ -891,7 +897,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("wisp-settings-{}", crate::model::new_id("T")));
         let path = dir.join("settings.json");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(&path, r#"{"activeProfile":1,"screenWorkers":40,"translateWorkers":0,"tasks":{"screen":"gone"},"profiles":[{"name":"Claude"},{"name":"b","effort":"off","model":"claude-haiku-5-5"},{"protocol":"openai","baseUrl":"https://api.deepseek.com/","model":"deepseek-v4-pro","id":"m1"}]}"#).unwrap();
+        std::fs::write(&path, r#"{"activeProfile":1,"screenWorkers":40,"translateWorkers":0,"tasks":{"screen":"gone"},"profiles":[{"name":"Claude"},{"name":"b","effort":"off","model":"claude-haiku-5-5"},{"protocol":"openai","baseUrl":"https://api.deepseek.com/","model":"deepseek-flash","id":"m1"}]}"#).unwrap();
         let old = Settings::load(&path).unwrap();
         assert_eq!((old.tasks.chat.as_str(), old.tasks.screen.as_str(), old.screen_workers, old.translate_workers), ("m3", "", MAX_SCREEN_WORKERS, 1));
         assert_eq!(old.profile_for(Task::Screen).map(|p| (p.model, p.effort, p.provider)), Some(("claude-haiku-5-5".into(), "off".into(), "Claude".into())));
@@ -920,7 +926,7 @@ mod tests {
         // Its model that answers in words is the first with a key, so questions go to it; never to its drawing one.
         assert_eq!(s.profile_for(Task::Chat).map(|p| (p.model, p.provider)), Some(("gpt-6.2-sol".into(), "OpenAI".into())));
         s.providers[openai].api_key.clear();
-        assert_eq!(s.profile_for(Task::Chat).map(|p| p.model), Some("deepseek-v4-pro".into()));
+        assert_eq!(s.profile_for(Task::Chat).map(|p| p.model), Some("deepseek-flash".into()));
         // A task bound to a model of the other kind lets go of it, on reading and when a model changes its kind.
         s.tasks.set(Task::Chat, &seedream);
         s.tidy();
@@ -929,7 +935,7 @@ mod tests {
         s.set_model_kind(0, 2, "");
         assert_eq!((s.tasks.image.as_str(), s.providers[0].models[2].interface.as_str(), s.profiles().len()), ("", "", 7));
         s.set_model_kind(0, 0, crate::imagegen::KIND);
-        assert_eq!((s.providers[0].models[0].draws(), s.profile_for(Task::Chat).map(|p| p.model)), (true, Some("deepseek-flash".into())));
+        assert_eq!((s.providers[0].models[0].draws(), s.profile_for(Task::Chat).map(|p| p.model)), (true, Some("deepseek-v4-pro".into())));
         // Kept in the file, and read back as it was.
         let dir = std::env::temp_dir().join(format!("wisp-settings-{}", crate::model::new_id("T")));
         let path = dir.join("settings.json");
@@ -941,27 +947,46 @@ mod tests {
     }
 
     #[test]
+    fn deepseek_starts_with_its_smaller_model() {
+        // A settings file from before the order changed: the list as it was set up, a task bound to the larger model.
+        let mut s = Settings::default();
+        assert_eq!(s.providers[0].models.iter().map(|m| m.model.as_str()).collect::<Vec<_>>(), ["deepseek-flash", "deepseek-v4-pro"]);
+        s.providers[0].models.swap(0, 1);
+        let pro = s.providers[0].models[0].id.clone();
+        s.tasks.set(Task::Translate, &pro);
+        s.tidy();
+        // The smaller one is first, so what has no model of its own falls to it; ids and bindings are as they were.
+        assert_eq!(s.providers[0].models.iter().map(|m| m.model.as_str()).collect::<Vec<_>>(), ["deepseek-flash", "deepseek-v4-pro"]);
+        assert_eq!((s.profile_for(Task::Chat).unwrap().model.as_str(), s.profile_for(Task::Translate).unwrap().model.as_str(), s.providers[0].models[1].id.as_str()), ("deepseek-flash", "deepseek-v4-pro", pro.as_str()));
+        // A list the person changed stays in their order.
+        s.providers[0].models.swap(0, 1);
+        s.add_model(0, "deepseek-next");
+        s.tidy();
+        assert_eq!(s.providers[0].models.iter().map(|m| m.model.as_str()).collect::<Vec<_>>(), ["deepseek-v4-pro", "deepseek-flash", "deepseek-next"]);
+    }
+
+    #[test]
     fn models_that_judge() {
         let mut s = Settings::default();
         let typesafe = s.add_provider(Provider::from_preset(provider::preset("typesafe").unwrap()));
         s.providers[typesafe].api_key = "k".into();
         let jev = s.providers[typesafe].models[0].id.clone();
         // It is the only model with a key, and still no task falls to it by itself.
-        assert_eq!(Task::WORDS.map(|task| s.profile_for(task).unwrap().model), ["deepseek-v4-pro"; 4]);
+        assert_eq!(Task::WORDS.map(|task| s.profile_for(task).unwrap().model), ["deepseek-flash"; 4]);
         assert!(s.profiles().iter().all(|p| !p.judges()) && s.profile_for(Task::Image).is_none());
         // Screening can be given to it; nothing else can, and what shares screening's model keeps to words.
         for task in Task::ALL { s.tasks.set(task, &jev) }
         s.tidy();
         assert_eq!((s.tasks.screen.as_str(), s.tasks.chat.as_str(), s.tasks.translate.as_str(), s.tasks.image.as_str()), (jev.as_str(), "", "", ""));
         assert_eq!(s.profile_for(Task::Screen).map(|p| (p.model.clone(), p.judges())), Some(("jev-latest".into(), true)));
-        assert_eq!(s.speaking_profile_for(Task::Screen).model, "deepseek-v4-pro");
-        assert_eq!(s.speaking_profile_for(Task::Translate).model, "deepseek-v4-pro");
+        assert_eq!(s.speaking_profile_for(Task::Screen).model, "deepseek-flash");
+        assert_eq!(s.speaking_profile_for(Task::Translate).model, "deepseek-flash");
         // A name that says so makes a judging model; made a model of words, it lets go of screening only if it must.
         assert!(s.add_model(0, "jev-1.13.0").and_then(|id| s.model(&id).map(|(_, m)| m.judges())).unwrap());
         s.set_model_kind(typesafe, 0, "");
         assert_eq!((s.tasks.screen.as_str(), s.profile_for(Task::Screen).map(|p| p.judges())), (jev.as_str(), Some(false)));
         s.set_model_kind(typesafe, 0, crate::imagegen::KIND);
-        assert_eq!((s.tasks.screen.as_str(), s.profile_for(Task::Screen).map(|p| p.model)), ("", Some("deepseek-v4-pro".into())));
+        assert_eq!((s.tasks.screen.as_str(), s.profile_for(Task::Screen).map(|p| p.model)), ("", Some("deepseek-flash".into())));
     }
 
     #[test]
