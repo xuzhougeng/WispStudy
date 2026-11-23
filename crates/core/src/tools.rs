@@ -164,6 +164,8 @@ pub fn catalog() -> Vec<ToolDef> {
                 "reading": {"type": "string", "enum": keys(&READINGS), "description": "阅读状态。"},
                 "fulltext": {"type": "string", "enum": keys(&FULLTEXTS), "description": "全文状态：stored 表示已保存 PDF 并读出了文字，textless 表示有 PDF 但没有读出文字。"},
                 "tag": {"type": "string", "description": "带有这个标签。"},
+                "tags": {"type": "array", "items": {"type": "string"}, "description": "这几个标签都要有（与 tag 一起时也算上 tag）。"},
+                "notTags": {"type": "array", "items": {"type": "string"}, "description": "带有其中任何一个标签的文献不返回。"},
                 "year": {"type": "integer", "description": "发表年份。"},
                 "sort": {"type": "string", "description": "newest（默认），或 title / year / journal / authors 加上 -asc、-desc，例如 year-desc。"},
                 "limit": {"type": "integer", "description": "最多返回多少篇，默认 50，最大 500。"},
@@ -809,6 +811,17 @@ fn text<'a>(args: &'a Value, key: &str) -> Result<&'a str> {
     }
 }
 
+/// A list of strings; one string alone is a list of one. Blank items are left out.
+fn texts(args: &Value, key: &str) -> Result<Vec<String>> {
+    let items = match &args[key] {
+        Value::Null => return Ok(vec![]),
+        Value::String(value) => vec![value.trim().to_string()],
+        Value::Array(items) => items.iter().map(|item| item.as_str().map(|v| v.trim().to_string()).ok_or_else(|| anyhow!("参数 {key} 应是一组字符串。"))).collect::<Result<_>>()?,
+        _ => bail!("参数 {key} 应是一组字符串。"),
+    };
+    Ok(items.into_iter().filter(|v| !v.is_empty()).collect())
+}
+
 fn number(args: &Value, key: &str, default: usize, max: usize) -> Result<usize> {
     match &args[key] {
         Value::Null => Ok(default),
@@ -856,12 +869,17 @@ fn library_status(store: &mut Store, info: &LibraryInfo) -> Result<Value> {
 }
 
 fn list_papers(store: &mut Store, info: &LibraryInfo, args: &Value) -> Result<Value> {
+    // `tag` is one tag as before; `tags` asks for several at once, `notTags` leaves papers out.
+    let mut tags = texts(args, "tags")?;
+    let tag = text(args, "tag")?;
+    if !tag.is_empty() && !tags.iter().any(|t| t == tag) { tags.insert(0, tag.to_string()) }
     let filters = Filters {
         search: text(args, "query")?.into(),
         screening: choice(args, "screening", &SCREENINGS)?.into(),
         reading: choice(args, "reading", &READINGS)?.into(),
         fulltext: choice(args, "fulltext", &FULLTEXTS)?.into(),
-        tag: text(args, "tag")?.into(),
+        tags,
+        not_tags: texts(args, "notTags")?,
         year: if args["year"].is_null() { String::new() } else { number(args, "year", 0, 9999)?.to_string() },
         sort: text(args, "sort")?.into(),
         ..Default::default()
@@ -2096,6 +2114,12 @@ pub(crate) mod tests {
         assert_eq!(call(&root, "list_papers", &json!({"screening": "irrelevant"})).unwrap()["papers"][0]["title"], "Leaf development");
         assert_eq!(call(&root, "list_papers", &json!({"query": "wox5 niche", "year": 2021})).unwrap()["total"], 1);
         assert_eq!(call(&root, "list_papers", &json!({"query": "wox5", "year": 2019})).unwrap()["total"], 0);
+        // One tag as before, several that must all be held, and tags that leave papers out.
+        assert_eq!(call(&root, "list_papers", &json!({"tag": "atlas"})).unwrap()["total"], 1);
+        assert_eq!(call(&root, "list_papers", &json!({"tag": "atlas", "tags": ["none"]})).unwrap()["total"], 0);
+        assert_eq!(call(&root, "list_papers", &json!({"tags": "atlas"})).unwrap()["total"], 1);
+        assert_eq!(call(&root, "list_papers", &json!({"notTags": ["atlas"]})).unwrap()["total"], 0);
+        assert!(call(&root, "list_papers", &json!({"notTags": [1]})).unwrap_err().contains("notTags"));
         let paged = call(&root, "list_papers", &json!({"limit": 1, "offset": 1})).unwrap();
         assert_eq!((paged["total"].as_u64(), paged["papers"].as_array().map(Vec::len)), (Some(1), Some(0)));
 
