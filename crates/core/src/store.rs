@@ -278,7 +278,19 @@ CREATE TABLE IF NOT EXISTS file_origins (
     version TEXT NOT NULL DEFAULT '',
     fetched_at TEXT NOT NULL
 );
+
+-- The bytes a file held before it was made smaller (`Store::replace_file`): the original still knows it.
+CREATE TABLE IF NOT EXISTS former_files (
+    resource_id TEXT NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+    sha256 TEXT NOT NULL,
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    replaced_at TEXT NOT NULL,
+    PRIMARY KEY (resource_id, sha256)
+);
 "#;
+
+/// The files known by the fingerprint `?1`: by the bytes they hold, or by those they held before they were made smaller.
+const HOLDING: &str = "(sha256 = ?1 OR id IN (SELECT resource_id FROM former_files WHERE sha256 = ?1))";
 
 const PAPER_COLUMNS: &str = "id, title, abstract, authors_json, journal, year, publication_state, url, source, \
     screening_status, screening_reason, reviewed_at, reading_status, starred, tags_json, notes, first_seen_at, updated_at, volume, issue, pages";
@@ -934,7 +946,7 @@ impl Store {
         let target = self.root.join(&relative);
         std::fs::create_dir_all(self.root.join("papers"))?;
         let (size, sha) = copy_hashed(source, &target).with_context(|| format!("无法复制文件 {}", source.display()))?;
-        let same: Option<String> = self.db.query_row("SELECT id FROM resources WHERE paper_id = ?1 AND sha256 = ?2", params![paper_id, sha], |r| r.get(0)).optional()?;
+        let same: Option<String> = self.db.query_row(&format!("SELECT id FROM resources WHERE paper_id = ?2 AND {HOLDING}"), params![sha, paper_id], |r| r.get(0)).optional()?;
         if let Some(same) = same {
             let _ = std::fs::remove_file(&target);
             return self.read_files("WHERE id = ?1", [same])?.pop().ok_or_else(|| anyhow!("附件记录丢失"));
@@ -957,13 +969,13 @@ impl Store {
     /// trash counts, as it does for a record.
     pub fn paper_holding(&self, source: &Path) -> Result<Option<String>> {
         let sha = file_hash(source).with_context(|| format!("无法读取文件 {}", source.display()))?;
-        Ok(self.db.query_row("SELECT paper_id FROM resources WHERE sha256 = ?1 ORDER BY added_at, id LIMIT 1", [sha], |r| r.get(0)).optional()?)
+        Ok(self.db.query_row(&format!("SELECT paper_id FROM resources WHERE {HOLDING} ORDER BY added_at, id LIMIT 1"), [sha], |r| r.get(0)).optional()?)
     }
 
     /// `paper_holding` for a file still in memory: a PDF fetched from an address.
     pub fn paper_holding_bytes(&self, bytes: &[u8]) -> Result<Option<String>> {
         let sha: String = Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect();
-        Ok(self.db.query_row("SELECT paper_id FROM resources WHERE sha256 = ?1 ORDER BY added_at, id LIMIT 1", [sha], |r| r.get(0)).optional()?)
+        Ok(self.db.query_row(&format!("SELECT paper_id FROM resources WHERE {HOLDING} ORDER BY added_at, id LIMIT 1"), [sha], |r| r.get(0)).optional()?)
     }
 
     /// Whether a paper is in the trash.
@@ -997,6 +1009,54 @@ impl Store {
     /// The absolute path of a stored file.
     pub fn file_path(&self, file: &PaperFile) -> PathBuf {
         self.root.join(file.local_path.replace('/', std::path::MAIN_SEPARATOR_STR))
+    }
+
+    /// Put `bytes` in place of a stored file's own: the same document made
+    /// smaller (`shrink`). The file keeps its id, so its text, marks and the
+    /// place it was read at stay with it; the bytes it held move to
+    /// `removed/`, and their fingerprint still knows the file, so taking in
+    /// the original again finds this paper. Gives the file as it is now and
+    /// where the original went.
+    pub fn replace_file(&mut self, id: &str, bytes: &[u8]) -> Result<(PaperFile, PathBuf)> {
+        let file = self.read_files("WHERE id = ?1", [id])?.pop().ok_or_else(|| anyhow!("附件不存在：{id}"))?;
+        let former: String = self.db.query_row("SELECT sha256 FROM resources WHERE id = ?1", [id], |r| r.get(0))?;
+        let path = self.file_path(&file);
+        let former = if former.is_empty() { file_hash(&path).with_context(|| format!("无法读取文件 {}", path.display()))? } else { former };
+        let sha: String = Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect();
+        // Written beside it first, so that a full disk leaves the file as it was.
+        let fresh = path.with_extension("smaller");
+        std::fs::write(&fresh, bytes).with_context(|| format!("无法写入 {}", fresh.display()))?;
+        let aside = match self.put_aside(&path) {
+            Ok(aside) => aside,
+            Err(err) => { let _ = std::fs::remove_file(&fresh); return Err(err) }
+        };
+        if let Err(err) = std::fs::rename(&fresh, &path) {
+            let _ = std::fs::rename(&aside, &path);
+            let _ = std::fs::remove_file(&fresh);
+            return Err(anyhow!(err).context(format!("无法写入 {}", path.display())));
+        }
+        let tx = self.db.transaction()?;
+        tx.execute("INSERT INTO former_files(resource_id, sha256, size_bytes, replaced_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT DO NOTHING", params![id, former, file.size_bytes as i64, now_iso()])?;
+        tx.execute("UPDATE resources SET size_bytes = ?2, sha256 = ?3 WHERE id = ?1", params![id, bytes.len() as i64, sha])?;
+        tx.commit()?;
+        Ok((PaperFile { size_bytes: bytes.len() as u64, ..file }, aside))
+    }
+
+    /// The files made smaller before (`replace_file`).
+    pub fn shrunk_files(&self) -> Result<std::collections::HashSet<String>> {
+        let mut stmt = self.db.prepare("SELECT DISTINCT resource_id FROM former_files")?;
+        let ids = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        Ok(ids)
+    }
+
+    /// Move a stored file into `removed/` under a name no earlier one there has; where it went.
+    fn put_aside(&self, path: &Path) -> Result<PathBuf> {
+        let dir = self.root.join("removed");
+        std::fs::create_dir_all(&dir)?;
+        let (stem, extension) = (path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default(), path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default());
+        let target = (0..).map(|n| dir.join(if n == 0 { format!("{stem}{extension}") } else { format!("{stem}-{n}{extension}") })).find(|p| !p.exists()).unwrap_or_default();
+        std::fs::rename(path, &target).with_context(|| format!("无法把原文件移到 {}", dir.display()))?;
+        Ok(target)
     }
 
     /// Detach a file. It moves to `removed/` inside the library folder.
@@ -2145,6 +2205,37 @@ mod tests {
         assert!(!store.file_path(&file).exists());
         assert!(dir.join("removed").read_dir().unwrap().count() == 1);
         assert!(store.list_files().unwrap().is_empty());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_file_made_smaller_keeps_its_id_and_its_original_is_known() {
+        let dir = temp_dir("replace-file");
+        let mut store = Store::open(&dir).unwrap();
+        let p = store.add_paper(paper("Heavy figures", "")).unwrap();
+        let source = dir.join("heavy.pdf");
+        std::fs::write(&source, b"%PDF-1.4 heavy heavy heavy").unwrap();
+        let file = store.import_file(&p.id, &source, "fulltext").unwrap();
+        store.save_fulltext_pages(&file.id, &Ok(vec!["page one".into()])).unwrap();
+        let (smaller, aside) = store.replace_file(&file.id, b"%PDF-1.4 light").unwrap();
+        assert_eq!((smaller.id.as_str(), smaller.size_bytes), (file.id.as_str(), 14));
+        assert_eq!(std::fs::read(store.file_path(&smaller)).unwrap(), b"%PDF-1.4 light");
+        assert_eq!(store.paper_files(&p.id).unwrap()[0].size_bytes, 14);
+        // The original is in `removed/`, and its text stays with the file.
+        assert_eq!(std::fs::read(&aside).unwrap(), b"%PDF-1.4 heavy heavy heavy");
+        assert!(aside.starts_with(dir.join("removed")));
+        assert_eq!(store.fulltext_pages(&file.id).unwrap().unwrap().unwrap().len(), 1);
+        // Both the original and the smaller file are this paper's.
+        assert_eq!(store.paper_holding(&source).unwrap().as_deref(), Some(p.id.as_str()));
+        assert_eq!(store.paper_holding_bytes(b"%PDF-1.4 light").unwrap().as_deref(), Some(p.id.as_str()));
+        assert_eq!(store.import_file(&p.id, &source, "fulltext").unwrap().id, file.id);
+        assert_eq!(store.paper_files(&p.id).unwrap().len(), 1);
+        assert!(store.shrunk_files().unwrap().contains(&file.id));
+        // Made smaller again, the first original is not overwritten.
+        let (_, again) = store.replace_file(&file.id, b"%PDF-1.4 l").unwrap();
+        assert_ne!(again, aside);
+        assert!(aside.exists() && again.exists());
+        assert_eq!(store.paper_holding(&source).unwrap().as_deref(), Some(p.id.as_str()));
         std::fs::remove_dir_all(dir).ok();
     }
 

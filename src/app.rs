@@ -462,6 +462,8 @@ pub enum Cmd {
     RemoveFile(String),
     /// Try once more to get the text of a stored file.
     RereadFile(String),
+    /// Make a stored PDF smaller: its pictures written anew (#242).
+    CompressFile(String),
     /// Have a model that sees pictures read the pages of a file that gave no text.
     ReadPages(String),
     SetTab(Tab),
@@ -1780,6 +1782,12 @@ pub struct Library {
     pub detail_scroll: ScrollHandle,
     /// Files whose text is being extracted.
     pub extracting: HashSet<String>,
+    /// PDFs being made smaller (`Cmd::CompressFile`).
+    pub shrinking: HashSet<String>,
+    /// PDFs made smaller before (`Store::shrunk_files`), and those found in this window to get no smaller:
+    /// neither is offered the button again.
+    pub shrunk: HashSet<String>,
+    pub no_smaller: HashSet<String>,
     /// The file of each paper chosen to read, when it is not the main text (`Cmd::ReadFile`).
     pub read_file: HashMap<String, String>,
     /// Where each file was read at when another took its place or its paper was left (`PdfView::place`):
@@ -2532,6 +2540,7 @@ impl Library {
         // A paper's record may have changed: how its citations read is worked out again.
         self.citing.read.made_from = 0;
         self.origins = self.store.file_origins()?;
+        self.shrunk = self.store.shrunk_files()?;
         self.gallery.items = self.store.list_figures()?;
         self.extract.proposals = wisp_core::extract::Proposals::new(self.store.list_proposals()?);
         self.extract_settle();
@@ -3706,6 +3715,7 @@ impl Workspace {
                 }
             }
             Cmd::RereadFile(id) => self.reread_file(id, cx),
+            Cmd::CompressFile(id) => self.compress_file(id, cx),
             Cmd::ReadPages(id) => self.write_run_start(true, Some(id), cx),
             Cmd::SetTab(tab) => {
                 // Without a model the question box is not drawn: the keyboard stays with the window, so Esc is still heard.
@@ -4938,6 +4948,9 @@ impl Workspace {
             table_scroll: UniformListScrollHandle::new(),
             detail_scroll: ScrollHandle::new(),
             extracting: HashSet::new(),
+            shrinking: HashSet::new(),
+            shrunk: HashSet::new(),
+            no_smaller: HashSet::new(),
             read_file: HashMap::new(),
             file_places,
             back: vec![],
@@ -6217,6 +6230,52 @@ impl Workspace {
             this.ensure_pdf(cx);
             this.import_next_url(queue, cx);
         });
+    }
+
+    /// Make a stored PDF smaller (`shrink`), out of the window's way, and keep the result when it is worth it.
+    fn compress_file(&mut self, id: String, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        let Some(file) = lib.files.iter().find(|f| f.id == id) else { return };
+        if file.format != "pdf" || !lib.shrinking.insert(id.clone()) { return }
+        let (library, path) = (lib.info.id.clone(), lib.store.file_path(file));
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let shrunk = cx.background_executor().spawn(async move { std::fs::read(&path).map_err(|e| anyhow::anyhow!(tf!("无法读取文件：{e}", "Cannot read file: {e}"))).and_then(|data| wisp_core::shrink::shrink(&data)) }).await;
+            this.update(cx, |this, cx| {
+                let Some(lib) = this.lib.as_mut().filter(|l| l.info.id == library) else { return };
+                lib.shrinking.remove(&id);
+                let (before, after) = match &shrunk { Ok(s) => (file_size(s.before as u64), file_size(s.bytes.len() as u64)), Err(_) => Default::default() };
+                match shrunk {
+                    Ok(shrunk) if shrunk.worth() => {
+                        let kept = lib.store.replace_file(&id, &shrunk.bytes).and_then(|_| lib.reload());
+                        match kept {
+                            Ok(()) => {
+                                // The viewer reads the file anew, at the place it was left.
+                                let showing = lib.pdf.as_ref().is_some_and(|view| view.read(cx).resource_id() == id);
+                                if showing {
+                                    lib.keep_places(cx);
+                                    lib.close_pdf();
+                                    this.ensure_pdf(cx);
+                                }
+                                this.say(tf!("已压缩：{before} → {after}。原文件移到了 removed 文件夹。", "Compressed: {before} → {after}. The original moved to the removed folder."), cx);
+                            }
+                            Err(err) => this.fail(format!("{err:#}"), cx),
+                        }
+                    }
+                    Ok(_) => {
+                        lib.no_smaller.insert(id);
+                        this.say(tf!("压缩后是 {after}（原来 {before}），小不到一成，文件保持原样。", "Compressed it would be {after} (now {before}): less than a tenth smaller, so the file stays as it is."), cx);
+                    }
+                    Err(err) => {
+                        lib.no_smaller.insert(id);
+                        this.fail(tf!("没有压缩：{err:#}", "Not compressed: {err:#}"), cx);
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Try once more to get the text of a stored file: after the reader has
@@ -8814,9 +8873,9 @@ impl Workspace {
                 "notedestination" => Some(Cmd::NoteDestination(arg != "local")),
                 "notepick" => arg.parse().ok().map(Cmd::NotePick),
                 "submit" => Some(Cmd::SubmitModal),
-                "reread" | "byeye" => {
+                "reread" | "byeye" | "compress" => {
                     let Some(file) = self.lib.as_ref().and_then(|lib| lib.selected.as_deref().and_then(|id| lib.pdf_file(id)).map(|file| file.id.clone())) else { return };
-                    Some(if name == "reread" { Cmd::RereadFile(file) } else { Cmd::ReadPages(file) })
+                    Some(match name { "reread" => Cmd::RereadFile(file), "compress" => Cmd::CompressFile(file), _ => Cmd::ReadPages(file) })
                 }
                 "width" => {
                     self.settings.detail_width = arg.parse().unwrap_or(0.);

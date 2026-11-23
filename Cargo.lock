@@ -8118,6 +8118,8 @@ dependencies = [
  "hayagriva",
  "hayro-interpret",
  "icu_segmenter",
+ "image",
+ "lopdf",
  "pdf-extract",
  "rusqlite",
  "serde",
