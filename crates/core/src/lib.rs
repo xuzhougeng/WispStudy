@@ -15,6 +15,7 @@
 //! - `lookup`   Crossref / Europe PMC records → `Paper`
 //! - `fulltext` page text of a stored PDF
 //! - `pdftext`  that text read off a PDF's glyphs, with the breaks the page shows
+//! - `handles`  a rectangle chosen on a PDF page (a box, a mark, a frame): its eight handles, sizing and moving it
 //! - `structure` that text sorted into the parts of a paper and cut into sentences, for 写作
 //! - `cite`     citations in a manuscript: keys, finding them, the reference list and BibTeX
 //! - `headings` headings guessed by their look in a Word file without heading styles, for the person to confirm
@@ -56,6 +57,7 @@ pub mod figure;
 pub mod filter;
 pub mod floating;
 pub mod fulltext;
+pub mod handles;
 pub mod headings;
 pub mod imagegen;
 pub mod import;

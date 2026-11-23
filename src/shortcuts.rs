@@ -90,6 +90,8 @@ pub fn rebuild(custom: &BTreeMap<String, String>, cx: &mut App) {
     let context = Some("Workspace");
     // Copying what is selected in a PDF or in an answer: the text fields have the same key for their own selection.
     let mut bindings = vec![KeyBinding::new("escape", Dismiss, context), KeyBinding::new("secondary-c", crate::pdf::CopySelection, Some("PdfView")), KeyBinding::new("secondary-c", CopyPicked, context)];
+    // A mark chosen on a PDF page is removed with Delete or Backspace; with none chosen the key goes on (`TrashSelected`).
+    bindings.extend(["delete", "backspace"].map(|key| KeyBinding::new(key, crate::pdf::RemoveChosen, Some("PdfView"))));
     // Moving in the list of papers and in an open menu: fixed keys, as the text field's are. A text field
     // with the keyboard hears its own arrows, Enter and Delete first.
     bindings.extend([

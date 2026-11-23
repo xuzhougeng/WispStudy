@@ -13,9 +13,10 @@ use crate::ui;
 use crate::input::{InputEvent, TextInput};
 use gpui::{prelude::FluentBuilder, *};
 use wisp_core::annotation::{Annotation, COLORS, Kind};
+use wisp_core::handles::{self, Grab};
 use wisp_core::pdftext::{self, Mark};
 
-actions!(pdf, [CopySelection, FindInPdf]);
+actions!(pdf, [CopySelection, FindInPdf, RemoveChosen]);
 
 /// What the viewer tells whoever shows it.
 pub enum PdfEvent {
@@ -70,50 +71,78 @@ pub enum Tool {
 
 /// The side of a sticky note's icon on screen, whatever the zoom.
 const NOTE_ICON: f32 = 22.;
-/// How near the pointer must be to a box's edge, or to one of its corners, in screen pixels.
+/// How near the pointer must be to a box's edge to take hold of it, in screen pixels whatever the zoom.
 const EDGE_REACH: f32 = 5.;
-const GRIP: f32 = 8.;
+/// A chosen rectangle's handles: the side of the square drawn, and how near the pointer must be to one to
+/// take it, in screen pixels whatever the zoom, so they stay easy to hit on a page zoomed out.
+const HANDLE: f32 = 9.;
+const GRIP: f32 = 7.;
 /// The note card's width.
 const NOTE_W: f32 = 280.;
 
-/// A box or a note held by the pointer: its id, 0-based page and place when it was taken, the corner held
-/// (none: the whole of it moves), where on the page it was taken, and whether it has moved yet.
+/// A mark placed on a page (a box, a note, a piece marked to be cut out) or the figure dialog's frame, held
+/// by the pointer: its id, 0-based page and place when it was taken, where it is held (`Grab::Body` moves the
+/// whole of it, a handle sizes it), where on the page it was taken, and whether it has moved yet.
 struct ShapeDrag {
     id: String,
     page: usize,
     rect: [f32; 4],
-    corner: Option<usize>,
+    grab: Grab,
     from: (f32, f32),
     moved: bool,
 }
 
 impl ShapeDrag {
-    /// The pointer held it to a point of a 0-based page of `size` points: where it stands now, its corners in
-    /// order; `None` off its page or before the pointer went far enough to be a drag.
-    fn follow(&mut self, page: usize, x: f32, y: f32, scale: f32, (w, h): (f32, f32)) -> Option<[f32; 4]> {
-        if page != self.page { return None }
+    /// The pointer held it to a point of its page, of `size` points: where it stands now; `None` before the
+    /// pointer went far enough to be a drag. Sized, it keeps `handles::MIN_SIDE`; either way it stays on the page.
+    fn follow(&mut self, x: f32, y: f32, scale: f32, size: (f32, f32)) -> Option<[f32; 4]> {
         let (dx, dy) = (x - self.from.0, y - self.from.1);
         if !self.moved && dx.abs().max(dy.abs()) * scale < 3. { return None }
         self.moved = true;
-        let [x0, y0, x1, y1] = self.rect;
-        let rect = match self.corner {
-            // The corner held goes with the pointer, the one across from it stays.
-            Some(corner) => {
-                let (x, y) = (x.clamp(0., w), y.clamp(0., h));
-                match corner { 0 => [x, y, x1, y1], 1 => [x0, y, x, y1], 2 => [x0, y0, x, y], _ => [x, y0, x1, y] }
-            }
-            None => {
-                let dx = dx.clamp(-x0, (w - x1).max(-x0));
-                let dy = dy.clamp(-y0, (h - y1).max(-y0));
-                [x0 + dx, y0 + dy, x1 + dx, y1 + dy]
-            }
-        };
-        Some([rect[0].min(rect[2]), rect[1].min(rect[3]), rect[0].max(rect[2]), rect[1].max(rect[3])])
+        Some(handles::drag(self.rect, self.grab, self.from, (x, y), size, handles::MIN_SIDE))
     }
 }
 
+/// A mark that is one rectangle on its page, so it can be chosen with a click and sized by its handles: a
+/// box, a piece marked to be cut out. A new kind of the same sort (a text box) is added here, and `shape_at`,
+/// `rect_grips`, the menu and the drag layer serve it as they are.
+fn sizable(kind: Kind) -> bool {
+    matches!(kind, Kind::Box | Kind::Cut)
+}
+
+/// The pointer's look over a part of a rectangle: a closed hand moving it, the arrows of the way a handle sizes it.
+fn grab_cursor(grab: Grab) -> CursorStyle {
+    match grab {
+        Grab::Body => CursorStyle::ClosedHand,
+        Grab::Handle(0, _) => CursorStyle::ResizeUpDown,
+        Grab::Handle(_, 0) => CursorStyle::ResizeLeftRight,
+        Grab::Handle(x, y) if x == y => CursorStyle::ResizeUpLeftDownRight,
+        Grab::Handle(..) => CursorStyle::ResizeUpRightDownLeft,
+    }
+}
+
+/// What a rectangle placed on a page shows the pointer, laid over it on a page drawn at `scale`: its edge
+/// says it can be taken (a pointing hand, an open hand once chosen) and, chosen, its handles show
+/// (`handles::handles`), each with the arrows of the way it sizes. It draws no outline of its own and takes
+/// no press: the viewer's press finds what is under the pointer (`shape_at`, `frame_at`), with the same reaches.
+fn rect_grips(rect: [f32; 4], scale: f32, chosen: bool) -> Div {
+    let [x0, y0, x1, y1] = handles::normal(rect);
+    let (w, h) = ((x1 - x0) * scale, (y1 - y0) * scale);
+    let edge = if chosen { CursorStyle::OpenHand } else { CursorStyle::PointingHand };
+    let strip = |left: f32, top: f32, width: f32, height: f32| div().absolute().left(px(left)).top(px(top)).w(px(width)).h(px(height)).cursor(edge);
+    let r = EDGE_REACH;
+    let strips = [strip(-r, -r, w + 2. * r, 2. * r), strip(-r, h - r, w + 2. * r, 2. * r), strip(-r, r, 2. * r, (h - 2. * r).max(0.)), strip(w - r, r, 2. * r, (h - 2. * r).max(0.))];
+    let grips = chosen.then(|| handles::handles(rect, GRIP / scale).map(|handle| {
+        let (hx, hy) = handles::handle_point(rect, handle);
+        let (left, top) = ((hx - x0) * scale - HANDLE / 2., (hy - y0) * scale - HANDLE / 2.);
+        div().absolute().left(px(left)).top(px(top)).size(px(HANDLE)).rounded(px(2.)).bg(Theme::handle_fill()).border_1().border_color(Theme::handle_ring()).shadow_sm().cursor(grab_cursor(Grab::Handle(handle.0, handle.1)))
+    }).collect::<Vec<_>>());
+    div().absolute().left(px(x0 * scale)).top(px(y0 * scale)).w(px(w)).h(px(h)).children(strips).children(grips.into_iter().flatten())
+}
+
 /// A highlight that was clicked, and the menu beside it: the highlight's id, its 0-based page, and in that page's points
-/// where the click was across and the top and bottom of the line clicked. A box clicked has the same menu.
+/// where the click was across and the top and bottom of the line clicked. A box chosen has the same menu (`PdfView::chosen`).
+#[derive(Clone)]
 struct MarkMenu {
     id: String,
     page: usize,
@@ -793,8 +822,11 @@ pub struct PdfView {
     annotation_note: Entity<TextInput>,
     /// The highlight the pointer went down on, and where in the window: a release close by is a click on it.
     pressed_mark: Option<(MarkMenu, Point<Pixels>)>,
-    /// The menu of a highlight or a box clicked: its colours and 删除.
+    /// The menu of a highlight clicked: its colours and 删除.
     mark_menu: Option<MarkMenu>,
+    /// The box or marked piece chosen with a click (`sizable`): its handles show and size it, its edge moves
+    /// it, its menu stands under it, and Delete removes it. A press anywhere else in the pages lets it go, as Esc does.
+    chosen: Option<String>,
     /// What the pointer does on a page; cutting is apart from it (`cutting`).
     tool: Tool,
     /// The box being drawn: its page, and two corners in the page's points.
@@ -914,6 +946,7 @@ impl PdfView {
             annotation_note: cx.new(|cx| TextInput::new("写下这段原文的笔记…", cx).multiline(3)),
             pressed_mark: None,
             mark_menu: None,
+            chosen: None,
             tool: Tool::Select,
             drawing: None,
             shape_drag: None,
@@ -939,7 +972,7 @@ impl PdfView {
     /// Draw boxes, place notes, or go back to selecting text; a second click on the same tool goes back too.
     pub fn set_tool(&mut self, tool: Tool, cx: &mut Context<Self>) {
         self.tool = if self.tool == tool { Tool::Select } else { tool };
-        (self.cutting, self.cut, self.drawing, self.selection, self.selecting, self.translation, self.mark_menu) = (false, None, None, None, false, None, None);
+        (self.cutting, self.cut, self.drawing, self.selection, self.selecting, self.translation, self.mark_menu, self.chosen) = (false, None, None, None, false, None, None, None);
         self.close_note();
         cx.notify();
     }
@@ -952,27 +985,28 @@ impl PdfView {
         }
     }
 
-    /// The note or box under a point of a 0-based page, and the corner of a box held when it is the one chosen.
-    /// A note is its icon; a box is its edge, or anywhere within it once chosen. The last made is on top.
-    fn shape_at(&self, page: usize, x: f32, y: f32) -> Option<(String, Option<usize>)> {
+    /// The mark placed on the page under a point of a 0-based page, and where it is held: the chosen one by a
+    /// handle or its edge (`handles::grab_at`), before any other since its handles stand out of it; a note by
+    /// its icon (`NOTE_ICON` screen pixels whatever the zoom); a box or a marked piece by its edge. Inside a box
+    /// is the page's, to select its text. The last made is on top.
+    fn shape_at(&self, page: usize, x: f32, y: f32) -> Option<(String, Grab)> {
         let scale = self.scale_of(page);
-        let chosen = self.mark_menu.as_ref().map(|menu| menu.id.as_str());
+        let (reach, grip) = (EDGE_REACH / scale, GRIP / scale);
+        if let Some(a) = self.chosen_mark().filter(|a| a.page == page + 1) && let Some(grab) = handles::grab_at(self.rect_of(a), (x, y), grip, reach) { return Some((a.id.clone(), grab)) }
         self.annotations.iter().rev().filter(|a| a.page == page + 1 && a.kind.shape()).find_map(|a| {
-            let [x0, y0, x1, y1] = self.rect_of(a);
+            let rect = self.rect_of(a);
             if a.kind == Kind::Note {
                 let side = NOTE_ICON / scale;
-                return (x >= x0 && x <= x0 + side && y >= y0 && y <= y0 + side).then(|| (a.id.clone(), None));
+                return (x >= rect[0] && x <= rect[0] + side && y >= rect[1] && y <= rect[1] + side).then(|| (a.id.clone(), Grab::Body));
             }
-            let (reach, grip) = (EDGE_REACH / scale, GRIP / scale);
-            if chosen == Some(a.id.as_str()) {
-                let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
-                if let Some(corner) = corners.iter().position(|(cx, cy)| (x - cx).abs() <= grip && (y - cy).abs() <= grip) { return Some((a.id.clone(), Some(corner))) }
-                if x >= x0 - reach && x <= x1 + reach && y >= y0 - reach && y <= y1 + reach { return Some((a.id.clone(), None)) }
-                return None;
-            }
-            let inside = |x: f32, y: f32, grow: f32| x >= x0 - grow && x <= x1 + grow && y >= y0 - grow && y <= y1 + grow;
-            (inside(x, y, reach) && !inside(x, y, -reach)).then(|| (a.id.clone(), None))
+            handles::on_edge(rect, (x, y), reach).then(|| (a.id.clone(), Grab::Body))
         })
+    }
+
+    /// The mark chosen, while it is there.
+    fn chosen_mark(&self) -> Option<&Annotation> {
+        let id = self.chosen.as_deref()?;
+        self.annotations.iter().find(|a| a.id == id)
     }
 
     /// Put the note card away, and a note not yet kept with it.
@@ -983,7 +1017,7 @@ impl PdfView {
     /// Open a note's card, to read or (`edit`) to write.
     fn open_note(&mut self, id: String, edit: bool, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.annotations.iter().find(|a| a.id == id).map(|a| a.note.clone()).unwrap_or_default();
-        (self.note_open, self.note_draft, self.note_editing, self.mark_menu) = (Some(id), None, edit, None);
+        (self.note_open, self.note_draft, self.note_editing, self.mark_menu, self.chosen) = (Some(id), None, edit, None, None);
         self.note_input.update(cx, |input, cx| input.set_text(&text, cx));
         if edit { self.note_input.read(cx).focus(window) }
         cx.notify();
@@ -1097,6 +1131,8 @@ impl PdfView {
         self.annotation_edit = None;
         self.mark_menu = None;
         (self.shape_drag, self.shape_shown, self.drawing) = (None, None, None);
+        // A box sized or recoloured stays chosen, to go on with it; one removed goes.
+        if self.chosen_mark().is_none() { self.chosen = None }
         // A note just kept, or one whose text was saved, stays open to read; one gone goes with its card.
         if self.note_open.as_ref().is_some_and(|id| !self.annotations.iter().any(|a| &a.id == id)) { self.note_open = None }
         (self.note_draft, self.note_editing) = (None, false);
@@ -1707,23 +1743,24 @@ impl PdfView {
             };
             div().absolute().left(px(line[0] * scale)).top(px(top)).w(px((line[2] - line[0]) * scale)).h(px(height)).bg(color).when(a.kind == Kind::Highlight && !cutting, |d| d.cursor_pointer())
         })).collect();
-        // Boxes, hollow so what they frame stays clear; the one chosen with its four corners to size it by.
-        let chosen = self.mark_menu.as_ref().map(|menu| menu.id.clone());
+        // Boxes, hollow so what they frame stays clear. Over each, while the pointer selects, what its edge and
+        // (the one chosen) its eight handles do (`rect_grips`), drawn after every mark so a handle is on top.
+        let chosen = self.chosen.as_deref();
         let free = self.tool == Tool::Select && !cutting;
         // A piece marked to be cut out later is a dashed frame in the accent, and says it can be clicked; one kept
         // in the figure library since is in the colour of a figure kept.
-        let shapes: Vec<Div> = self.annotations.iter().filter(|a| a.page == index + 1 && matches!(a.kind, Kind::Box | Kind::Cut)).map(|a| {
+        let rects: Vec<&Annotation> = self.annotations.iter().filter(|a| a.page == index + 1 && sizable(a.kind)).collect();
+        let shapes: Vec<Div> = rects.iter().map(|a| {
             let [x0, y0, x1, y1] = self.rect_of(a);
             let marked = a.kind == Kind::Cut;
             let color = if !marked { Theme::highlight_swatch(&a.color) } else if self.kept_at(index, [x0, y0, x1, y1]) { Theme::success() } else { Theme::accent() };
-            let picked = chosen.as_deref() == Some(a.id.as_str());
-            let grips = picked.then(|| [(0., 0.), (1., 0.), (1., 1.), (0., 1.)].map(|(fx, fy)| {
-                div().absolute().left(px((x1 - x0) * scale * fx - GRIP / 2. + 1.)).top(px((y1 - y0) * scale * fy - GRIP / 2. + 1.)).size(px(GRIP)).rounded(px(2.)).bg(gpui::white()).border_1().border_color(color)
-            }));
+            let picked = chosen == Some(a.id.as_str());
             div().absolute().left(px(x0 * scale - 1.)).top(px(y0 * scale - 1.)).w(px((x1 - x0) * scale + 2.)).h(px((y1 - y0) * scale + 2.)).border_2().border_color(color).rounded(px(2.))
                 .when(marked, |d| d.border_dashed().when(self.tool == Tool::Select, |d| d.cursor_pointer()).when(picked, |d| d.bg(Theme::selection())))
-                .children(grips.into_iter().flatten())
         }).collect();
+        // The chosen one's last, so its handles stand over a box that overlaps it.
+        let mut grips: Vec<Div> = if free { rects.iter().filter(|a| chosen != Some(a.id.as_str())).map(|a| rect_grips(self.rect_of(a), scale, false)).collect() } else { vec![] };
+        if free && let Some(a) = rects.iter().find(|a| chosen == Some(a.id.as_str())) { grips.push(rect_grips(self.rect_of(a), scale, true)) }
         // The figures kept from this page: a dashed frame in the colour of a figure kept, its number on the corner.
         // It takes no clicks: what it frames is still the page's, to select and copy. A mark at the same place draws it.
         // Its number is what is clicked to open the figure again, to change it, frame it anew or take it out.
@@ -1739,15 +1776,13 @@ impl PdfView {
                 .when(!f.label.is_empty(), |d| d.child(div().min_w_0().truncate().child(f.label.clone())));
             div().absolute().left(px(x0 * scale - 1.)).top(px(y0 * scale - 1.)).w(px((x1 - x0) * scale + 2.)).h(px((y1 - y0) * scale + 2.)).border_2().border_dashed().border_color(Theme::success()).rounded(px(2.)).child(chip)
         }).collect();
-        // The piece in the figure dialog, as it was cut, until the dialog is put away; its corners size it and its
-        // edge moves it while text is selected (`frame_at`).
+        // The piece in the figure dialog, as it was cut, until the dialog is put away; it is chosen the whole time:
+        // its handles size it and its edge moves it while text is selected (`frame_at`).
         let collecting = self.collecting.as_ref().filter(|c| c.page == index + 1).map(|c| {
             let [x0, y0, x1, y1] = c.rect;
-            let grips = free.then(|| [(0., 0.), (1., 0.), (1., 1.), (0., 1.)].map(|(fx, fy)| {
-                div().absolute().left(px((x1 - x0) * scale * fx - GRIP / 2. - 2.)).top(px((y1 - y0) * scale * fy - GRIP / 2. - 2.)).size(px(GRIP)).rounded(px(2.)).bg(gpui::white()).border_1().border_color(Theme::accent())
-            }));
-            div().absolute().left(px(x0 * scale)).top(px(y0 * scale)).w(px((x1 - x0) * scale)).h(px((y1 - y0) * scale)).border_2().border_color(Theme::accent()).bg(Theme::selection()).children(grips.into_iter().flatten())
+            div().absolute().left(px(x0 * scale)).top(px(y0 * scale)).w(px((x1 - x0) * scale)).h(px((y1 - y0) * scale)).border_2().border_color(Theme::accent()).bg(Theme::selection())
         });
+        if free && let Some(c) = self.collecting.as_ref().filter(|c| c.page == index + 1) { grips.push(rect_grips(c.rect, scale, true)) }
         // A box being drawn.
         let drawing = self.drawing.filter(|(page, _)| *page == index).map(|(_, [x0, y0, x1, y1])| div().absolute().left(px(x0.min(x1) * scale)).top(px(y0.min(y1) * scale)).w(px((x1 - x0).abs() * scale)).h(px((y1 - y0).abs() * scale)).border_2().border_color(Theme::highlight_swatch(wisp_core::annotation::BOX_COLOR)).rounded(px(2.)));
         // Sticky notes, folded to an icon at their spot; the open one ringed. A note being written shows where it will go.
@@ -1802,7 +1837,7 @@ impl PdfView {
             return div().w_full().flex().pb(px(PAGE_GAP)).child(sheet).into_any_element();
         }
         let sheet = match image {
-            Some((image, _)) => sheet.when(cutting || !free, |d| d.cursor_crosshair()).when(free, |d| d.cursor_text()).child(img(image).w(px(width)).h(px(height))).children(annotations).children(spoken).children(selected).children(marks).children(found).children(kept).children(collecting).children(cut).children(shapes).children(drawing).children(notes),
+            Some((image, _)) => sheet.when(cutting || !free, |d| d.cursor_crosshair()).when(free, |d| d.cursor_text()).child(img(image).w(px(width)).h(px(height))).children(annotations).children(spoken).children(selected).children(marks).children(found).children(kept).children(collecting).children(cut).children(shapes).children(drawing).children(notes).children(grips),
             None => sheet.flex().items_center().justify_center().text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(if self.broken.contains(&index) { tf!("第 {} 页无法渲染", "Cannot render page {}", index + 1) } else { tf!("第 {} 页", "Page {}", index + 1) }),
         };
         // Draw over the image without changing its size or covering the text.
@@ -1829,6 +1864,15 @@ impl PdfView {
         Some((f32::from(item.left() - view.left()) + left, f32::from(item.top() - view.top())))
     }
 
+    /// A point of the window in a page's own points, wherever the pointer is: off the page too, while the page
+    /// is laid out in that view.
+    fn point_on(&self, pane: usize, page: usize, position: Point<Pixels>) -> Option<(f32, f32)> {
+        let bounds = self.item_bounds(pane, page)?;
+        let scale = self.scale_of(page);
+        let left = f32::from(bounds.left()) + self.sheet_left(pane, self.sizes.get(page)?.0 * scale);
+        Some(((f32::from(position.x) - left) / scale, f32::from(position.y - bounds.top()) / scale))
+    }
+
     /// The page under a point of the window in one of the views, and the point in that page's own points.
     fn locate(&self, pane: usize, position: Point<Pixels>) -> Option<(usize, f32, f32)> {
         let top = self.panes[pane].list.logical_scroll_top().item_ix;
@@ -1847,8 +1891,7 @@ impl PdfView {
         window.focus(&self.focus);
         cx.emit(PdfEvent::Worked);
         cx.emit(PdfEvent::Pressed);
-        let chosen = self.mark_menu.take();
-        (self.selection, self.selecting, self.translation, self.pressed_mark, self.shape_drag, self.frame_drag) = (None, false, None, None, None, None);
+        (self.selection, self.selecting, self.translation, self.pressed_mark, self.shape_drag, self.frame_drag, self.mark_menu) = (None, false, None, None, None, None, None);
         // The half pressed in is the one worked in; a drag stays in it. The line between the two is neither.
         let Some(pane) = self.pane_under(event.position) else {
             if self.cutting { self.cut = None }
@@ -1856,6 +1899,7 @@ impl PdfView {
         };
         (self.active, self.held) = (pane, pane);
         if self.cutting {
+            self.chosen = None;
             // A piece of the page is cut out from here.
             self.cut = self.locate(pane, event.position).map(|(page, x, y)| (page, [x, y, x, y]));
             self.selecting = self.cut.is_some();
@@ -1865,6 +1909,7 @@ impl PdfView {
         }
         let Some((page, x, y)) = self.locate(pane, event.position) else {
             self.close_note();
+            self.chosen = None;
             return cx.notify();
         };
         match self.tool {
@@ -1883,22 +1928,23 @@ impl PdfView {
             }
             Tool::Select => {}
         }
-        // The frame of the figure in the dialog: its corners size it, its edge moves it.
-        if let Some(corner) = self.frame_at(page, x, y) && let Some(c) = self.collecting.as_ref() {
-            self.frame_drag = Some(ShapeDrag { id: String::new(), page, rect: c.rect, corner, from: (x, y), moved: false });
+        // The frame of the figure in the dialog: its handles size it, its edge moves it.
+        if let Some(grab) = self.frame_at(page, x, y) && let Some(c) = self.collecting.as_ref() {
+            self.frame_drag = Some(ShapeDrag { id: String::new(), page, rect: c.rect, grab, from: (x, y), moved: false });
             self.selecting = true;
             return cx.notify();
         }
-        // A box or a note is taken hold of: dragged it moves (or, by a corner, changes size), clicked it opens.
-        self.mark_menu = chosen;
-        if let Some((id, corner)) = self.shape_at(page, x, y) && let Some(a) = self.annotations.iter().find(|a| a.id == id) {
+        // A mark placed on the page is taken hold of. A box or a marked piece is chosen at once, so its handles
+        // show while it is dragged: by a handle it is sized, by its edge moved. A note dragged moves, clicked opens.
+        if let Some((id, grab)) = self.shape_at(page, x, y) && let Some(a) = self.annotations.iter().find(|a| a.id == id) {
             let rect = self.rect_of(a);
-            if self.mark_menu.as_ref().is_none_or(|menu| menu.id != id) { self.mark_menu = None }
-            self.shape_drag = Some(ShapeDrag { id, page, rect, corner, from: (x, y), moved: false });
+            self.chosen = sizable(a.kind).then(|| id.clone());
+            self.shape_drag = Some(ShapeDrag { id, page, rect, grab, from: (x, y), moved: false });
             self.selecting = true;
             return cx.notify();
         }
-        self.mark_menu = None;
+        // A press anywhere else on the page lets the chosen mark go.
+        self.chosen = None;
         if self.note_draft.is_none() && !self.note_editing { self.note_open = None }
         self.pressed_mark = self.highlight_at(page, x, y).map(|(id, line)| MarkMenu { id, page, x, line }).or_else(|| self.cut_mark_at(page, x, y)).map(|menu| (menu, event.position));
         if let Some((marks, at)) = self.marks.get(&page).and_then(|marks| Some((marks, pdftext::mark_at(marks, x, y)?))) {
@@ -1937,19 +1983,21 @@ impl PdfView {
     fn drag(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         if !self.selecting { return }
         if event.pressed_button != Some(MouseButton::Left) { return self.release(None, cx) }
+        // A mark or the dialog's frame held follows the pointer on its own page, wherever the pointer goes
+        // (off the page, onto the next, out of the viewer): it stays on its page, at the page's edge.
+        if let Some(held_page) = self.shape_drag.as_ref().or(self.frame_drag.as_ref()).map(|held| held.page) {
+            let Some((x, y)) = self.point_on(self.held, held_page, event.position) else { return };
+            let (scale, size) = (self.scale_of(held_page), self.sizes.get(held_page).copied().unwrap_or((595., 842.)));
+            if let Some(held) = self.shape_drag.as_mut() {
+                let Some(rect) = held.follow(x, y, scale, size) else { return };
+                self.shape_shown = Some((held.id.clone(), rect));
+            } else if let Some(held) = self.frame_drag.as_mut() {
+                let Some(rect) = held.follow(x, y, scale, size) else { return };
+                if let Some(c) = self.collecting.as_mut() { c.rect = rect }
+            }
+            return cx.notify();
+        }
         let Some((page, x, y)) = self.locate(self.held, event.position) else { return };
-        // A box or note held follows the pointer on its own page, kept inside the page.
-        let (scale, (w, h)) = (self.scale_of(page), self.sizes.get(page).copied().unwrap_or((595., 842.)));
-        if let Some(held) = self.shape_drag.as_mut() {
-            let Some(rect) = held.follow(page, x, y, scale, (w, h)) else { return };
-            self.shape_shown = Some((held.id.clone(), rect));
-            return cx.notify();
-        }
-        if let Some(held) = self.frame_drag.as_mut() {
-            let Some(rect) = held.follow(page, x, y, scale, (w, h)) else { return };
-            if let Some(c) = self.collecting.as_mut() { c.rect = rect }
-            return cx.notify();
-        }
         if let Some((draw_page, corners)) = self.drawing.as_mut() {
             if *draw_page == page {
                 (corners[2], corners[3]) = (x, y);
@@ -1985,22 +2033,17 @@ impl PdfView {
             }
             return cx.notify();
         }
-        // A box or note let go of: moved, it is kept where it is now (shown there until the owner has saved it);
-        // clicked, a note opens and a box shows its menu.
+        // A mark let go of: moved or sized, it is kept where it is now in the page's points (shown there until
+        // the owner has saved it); clicked, a note opens, and a box stays chosen (it was on the press).
         if let Some(held) = self.shape_drag.take() {
             match (held.moved, self.shape_shown.clone()) {
-                (true, Some((id, rect))) if id == held.id => cx.emit(PdfEvent::MoveShape { resource: self.resource_id.clone(), id, rect }),
-                (true, _) => {}
-                (false, _) => match self.annotations.iter().find(|a| a.id == held.id).map(|a| a.kind) {
-                    Some(Kind::Note) => {
+                (true, Some((id, rect))) if id == held.id && rect != held.rect => cx.emit(PdfEvent::MoveShape { resource: self.resource_id.clone(), id, rect }),
+                (true, _) => self.shape_shown = None,
+                (false, _) => {
+                    if self.annotations.iter().any(|a| a.id == held.id && a.kind == Kind::Note) {
                         if self.note_open.as_deref() == Some(held.id.as_str()) { self.close_note() } else { (self.note_open, self.note_draft, self.note_editing) = (Some(held.id.clone()), None, false) }
                     }
-                    Some(_) => {
-                        let [x0, y0, _, y1] = held.rect;
-                        self.mark_menu = Some(MarkMenu { id: held.id, page: held.page, x: x0, line: (y0, y1) });
-                    }
-                    None => {}
-                },
+                }
             }
             return cx.notify();
         }
@@ -2013,31 +2056,39 @@ impl PdfView {
         // A piece too small to show anything was a slip of the hand.
         if self.cut.is_some_and(|(_, [x0, y0, x1, y1])| (x1 - x0).abs() < 8. || (y1 - y0).abs() < 8.) { self.cut = None }
         if let (Some((menu, from)), Some(at)) = (pressed, at) && self.selection.is_none() && self.cut.is_none() && f32::from((at.x - from.x).abs()).max(f32::from((at.y - from.y).abs())) <= 4. {
-            self.mark_menu = Some(menu);
+            // A marked piece clicked within is chosen, as by its edge; a highlight has its menu.
+            if self.annotations.iter().any(|a| a.id == menu.id && sizable(a.kind)) { self.chosen = Some(menu.id) } else { self.mark_menu = Some(menu) }
         }
         cx.notify();
     }
 
-    /// The highlight of the menu takes another colour.
+    /// The mark the menu is for: the highlight clicked, else the mark chosen.
+    fn menu_id(&self) -> Option<String> {
+        self.mark_menu.as_ref().map(|menu| menu.id.clone()).or_else(|| self.chosen.clone())
+    }
+
+    /// The highlight of the menu, or the box chosen, takes another colour. A box stays chosen.
     fn recolor(&mut self, color: &'static str, cx: &mut Context<Self>) {
-        let Some(menu) = self.mark_menu.take() else { return };
-        if self.annotations.iter().any(|a| a.id == menu.id && a.color != color) {
-            cx.emit(PdfEvent::RecolorAnnotation { resource: self.resource_id.clone(), id: menu.id, color });
+        let Some(id) = self.menu_id() else { return };
+        self.mark_menu = None;
+        if self.annotations.iter().any(|a| a.id == id && a.color != color) {
+            cx.emit(PdfEvent::RecolorAnnotation { resource: self.resource_id.clone(), id, color });
         }
         cx.notify();
     }
 
-    /// The highlight of the menu goes, and only that one.
+    /// The highlight of the menu, or the mark chosen, goes, and only that one.
     fn remove_mark(&mut self, cx: &mut Context<Self>) {
-        let Some(menu) = self.mark_menu.take() else { return };
-        cx.emit(PdfEvent::RemoveAnnotation { resource: self.resource_id.clone(), id: menu.id });
+        let Some(id) = self.menu_id() else { return };
+        (self.mark_menu, self.chosen) = (None, None);
+        cx.emit(PdfEvent::RemoveAnnotation { resource: self.resource_id.clone(), id });
         cx.notify();
     }
 
     /// Cut pieces out of pages with the pointer, or go back to selecting text.
     pub fn toggle_cutting(&mut self, cx: &mut Context<Self>) {
         self.cutting = !self.cutting;
-        (self.tool, self.drawing, self.mark_menu) = (Tool::Select, None, None);
+        (self.tool, self.drawing, self.mark_menu, self.chosen) = (Tool::Select, None, None, None);
         self.close_note();
         (self.cut, self.selection, self.selecting, self.translation) = (None, None, false, None);
         cx.notify();
@@ -2116,16 +2167,12 @@ impl PdfView {
         cx.notify();
     }
 
-    /// The frame of the dialog's piece under a point of a 0-based page: a corner (to size it) or its edge (to move it).
-    fn frame_at(&self, page: usize, x: f32, y: f32) -> Option<Option<usize>> {
+    /// The frame of the dialog's piece under a point of a 0-based page: a handle (to size it) or its edge (to
+    /// move it). The frame is always chosen while the dialog is open.
+    fn frame_at(&self, page: usize, x: f32, y: f32) -> Option<Grab> {
         let c = self.collecting.as_ref().filter(|c| c.page == page + 1)?;
-        let [x0, y0, x1, y1] = c.rect;
         let scale = self.scale_of(page);
-        let (reach, grip) = (EDGE_REACH / scale, GRIP / scale);
-        let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
-        if let Some(corner) = corners.iter().position(|(cx, cy)| (x - cx).abs() <= grip && (y - cy).abs() <= grip) { return Some(Some(corner)) }
-        let inside = |grow: f32| x >= x0 - grow && x <= x1 + grow && y >= y0 - grow && y <= y1 + grow;
-        (inside(reach) && !inside(-reach)).then_some(None)
+        handles::grab_at(c.rect, (x, y), GRIP / scale, EDGE_REACH / scale)
     }
 
     /// A figure of the library stands at this place of a 0-based page.
@@ -2143,8 +2190,8 @@ impl PdfView {
 
     /// The piece of the menu's mark, with its 0-based page and its place there.
     fn marked_piece(&self) -> Option<(Vec<u8>, usize, [f32; 4])> {
-        let menu = self.mark_menu.as_ref()?;
-        let mark = self.annotations.iter().find(|a| a.id == menu.id && a.kind == Kind::Cut)?;
+        let id = self.menu_id()?;
+        let mark = self.annotations.iter().find(|a| a.id == id && a.kind == Kind::Cut)?;
         let (page, rect) = (mark.page.checked_sub(1)?, self.rect_of(mark));
         Some((self.picture_of(page, rect)?, page, rect))
     }
@@ -2152,7 +2199,7 @@ impl PdfView {
     /// Hand the piece of the menu's mark to the figure library, as `collect_cut` does a piece just cut. The mark stays.
     fn collect_mark(&mut self, cx: &mut Context<Self>) {
         let Some((png, page, bbox)) = self.marked_piece() else { return };
-        self.mark_menu = None;
+        (self.mark_menu, self.chosen) = (None, None);
         let caption = self.marks.get(&page).and_then(|marks| wisp_core::figure::caption(marks, bbox));
         cx.emit(PdfEvent::Figure(Piece { png, page: page + 1, bbox, caption }));
         cx.notify();
@@ -2161,7 +2208,7 @@ impl PdfView {
     /// Hand the piece of the menu's mark to a conversation as a picture, and go back to selecting text. The mark stays.
     fn send_mark(&mut self, to_library: bool, cx: &mut Context<Self>) {
         let Some((png, ..)) = self.marked_piece() else { return };
-        (self.mark_menu, self.cut, self.cutting) = (None, None, false);
+        (self.mark_menu, self.chosen, self.cut, self.cutting) = (None, None, None, false);
         cx.emit(PdfEvent::Picture(png, to_library));
         cx.notify();
     }
@@ -2431,19 +2478,44 @@ impl PdfView {
         )
     }
 
+    /// While a mark or the figure's frame is held, a layer over the whole window hears the pointer: an element
+    /// hears only the moves made over itself, and a handle is often dragged past the viewer's edge. It keeps the
+    /// pointer's look of what is done (a closed hand moving, the arrows of the way it is sized) wherever it goes.
+    fn drag_layer(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let grab = self.shape_drag.as_ref().or(self.frame_drag.as_ref())?.grab;
+        let size = window.viewport_size();
+        let layer = div()
+            .id("pdf-drag-layer")
+            .w(size.width)
+            .h(size.height)
+            .occlude()
+            .cursor(grab_cursor(grab))
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| this.drag(event, cx)))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, event: &MouseUpEvent, _, cx| this.release(Some(event.position), cx)));
+        Some(deferred(anchored().position(point(px(0.), px(0.))).child(layer)).with_priority(3).into_any_element())
+    }
+
     /// What can be done with a highlight clicked, under the line clicked (over it at the viewer's foot):
     /// its colours, the one it has ringed, and 删除高亮. The same small bar as the selection's. A piece marked
     /// to be cut out has what a piece just cut has instead of colours: the figure library, a question.
     fn mark_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let menu = self.mark_menu.as_ref()?;
+        // A chosen mark's menu stands under it where it is now, clear of its handles, and steps aside while it is dragged.
+        let (menu, gap) = match (&self.mark_menu, self.chosen_mark()) {
+            (Some(menu), _) => (menu.clone(), 6.),
+            (None, Some(a)) if self.shape_drag.as_ref().is_none_or(|held| !held.moved) => {
+                let [x0, y0, _, y1] = self.rect_of(a);
+                (MarkMenu { id: a.id.clone(), page: a.page.checked_sub(1)?, x: x0, line: (y0, y1) }, HANDLE + 4.)
+            }
+            _ => return None,
+        };
         let mark = self.annotations.iter().find(|a| a.id == menu.id)?;
         let scale = self.scale_of(menu.page);
         let (x, y) = self.sheet_place(menu.page)?;
         const HEIGHT: f32 = 34.;
         let marked = mark.kind == Kind::Cut;
         let button = |id: &'static str, label: &'static str| div().id(id).flex().flex_none().items_center().h(text_px(26.)).px(px(9.)).rounded(px(6.)).cursor_pointer().hover(|s| s.bg(Theme::hover())).child(label);
-        let below = y + menu.line.1 * scale + 6.;
-        let top = if below + HEIGHT + 8. <= self.height { below } else { y + menu.line.0 * scale - 6. - HEIGHT };
+        let below = y + menu.line.1 * scale + gap;
+        let top = if below + HEIGHT + 8. <= self.height { below } else { y + menu.line.0 * scale - gap - HEIGHT };
         let swatches = COLORS.iter().zip(COLOR_NAMES).map(|(&key, name)| {
             div()
                 .id(SharedString::from(format!("pdf-mark-{key}")))
@@ -2645,10 +2717,13 @@ impl Render for PdfView {
             .on_mouse_down(MouseButton::Left, cx.listener(Self::press))
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| this.drag(event, cx)))
             .on_mouse_up(MouseButton::Left, cx.listener(|this, event: &MouseUpEvent, _, cx| this.release(Some(event.position), cx)))
+            // Delete (or Backspace) removes the mark chosen, or the highlight whose menu is open; with neither, the key
+            // goes on to the window (the paper selected to the trash). A text field of the viewer hears its own first.
+            .on_action(cx.listener(|this, _: &RemoveChosen, _, cx| if this.menu_id().is_some() { this.remove_mark(cx) } else { cx.propagate() }))
             // Esc puts a highlight's menu away before it does anything else.
-            // Then a note's card, then a tool in use.
+            // Then lets a chosen mark go, then a note's card, then a tool in use.
             .on_action(cx.listener(|this, _: &crate::shortcuts::Dismiss, window, cx| {
-                if this.mark_menu.take().is_some() {
+                if this.mark_menu.take().is_some() || this.chosen.take().is_some() {
                 } else if this.note_open.is_some() || this.note_draft.is_some() {
                     this.close_note();
                 } else if this.finder.is_some() {
@@ -2698,6 +2773,7 @@ impl Render for PdfView {
             }))
             .children(finder)
             .child(self.annotation_panel(window, cx))
+            .children(self.drag_layer(window, cx))
             .into_any_element()
     }
 }
