@@ -166,8 +166,12 @@ impl Theme {
     /// Under words a search found, in the manuscript and on a PDF page; stronger on the one gone to.
     pub fn found() -> Hsla { if dark() { hsla(0.15, 0.9, 0.55, 0.26) } else { hsla(0.15, 1., 0.5, 0.3) } }
     pub fn found_current() -> Hsla { if dark() { hsla(0.07, 0.95, 0.55, 0.5) } else { hsla(0.07, 1., 0.55, 0.5) } }
-    /// Under the sentence being read aloud on a PDF page: the page is white in either set, so the same in both.
-    pub fn spoken() -> Hsla { Self::accent().opacity(0.2) }
+    /// The sentence being read aloud on a PDF page: a rule of neutral ink under each of its lines over a
+    /// faint wash of it. Not a fill of the accent (a selection's), of a highlight's colours or a search
+    /// hit's yellow, so what is read and what is selected, marked or found tell apart where they meet.
+    /// The page is white in either set, so the same in both.
+    pub fn spoken() -> Hsla { hsla(220. / 360., 0.18, 0.28, 0.08) }
+    pub fn spoken_line() -> Hsla { hsla(220. / 360., 0.18, 0.28, 0.62) }
     pub fn selection() -> Hsla { Self::accent().opacity(if dark() { 0.36 } else { 0.22 }) }
     /// A highlight on a PDF page, by a key of `annotation::COLORS` (anything else as the first): the page is white in either set, so the same in both.
     pub fn highlight(key: &str) -> Hsla { let (h, s, l) = highlight_hue(key); hsla(h / 360., s, l, 0.32) }
