@@ -53,7 +53,6 @@ struct PdfBar {
     split: Split,
     pen: Tool,
     facing: bool,
-    reading: bool,
     /// The tools float at the page's edge (`Settings::pdf_tools_floating`).
     floating: bool,
     can_pin: bool,
@@ -126,6 +125,20 @@ impl Workspace {
                 .on_click(this.on(Cmd::SetTab(value), cx))
                 .child(label)
         };
+        // The paper's own two buttons, the last of its header in the panel and in reading mode alike, as a window's
+        // are: the paper takes the window or gives it back, then the paper is closed. The way out of reading mode is
+        // where the way in was, so the pointer need not move. An id of each: the tooltip is made anew after the click.
+        let corner = {
+            let key = crate::shortcuts::key_of("reading", &self.settings.shortcuts);
+            let (id, icon, tip) = if reading {
+                ("reading-leave", "shrink", tf!("退出阅读模式 {}", "Leave reading mode {}", crate::shortcuts::pretty("escape")))
+            } else {
+                ("reading-enter", "expand", tf!("阅读模式：整个窗口留给这篇文献 {}", "Reading mode: the whole window for this paper {}", crate::shortcuts::pretty(&key)).trim_end().to_string())
+            };
+            div().flex().flex_none().items_center().gap(px(6.))
+                .child(ui::ghost_button(id, Some(icon), None).occlude().tooltip(ui::tip(tip)).on_click(self.on(Cmd::ToggleReading, cx)))
+                .child(ui::ghost_button("detail-close", Some("x"), None).occlude().on_click(self.on(Cmd::CloseDetail, cx)))
+        };
         // Reading mode, and a paper that is asked about, keep one line over the paper: what is read, the three tabs, and the way back.
         let header = if reading || asking {
             (if in_strip { ui::title_strip() } else { div().flex().flex_none().items_center().h(text_px(36.)) })
@@ -142,9 +155,9 @@ impl Workspace {
                 .child(layout)
                 .when_some(swap, |d, swap| d.child(swap))
                 .child(if reading {
-                    ui::ghost_button("reading-leave", Some("x"), Some(tf!("退出阅读 {}", "Leave reading {}", crate::shortcuts::pretty("escape")).into())).h(text_px(26.)).text_size(text_px(12.)).occlude().on_click(self.on(Cmd::ToggleReading, cx))
+                    corner
                 } else {
-                    ui::ghost_button("ask-leave", Some("x"), Some(tf!("退出提问 {}", "Leave chat {}", crate::shortcuts::pretty("escape")).into())).h(text_px(26.)).text_size(text_px(12.)).occlude().on_click(self.on(Cmd::LeaveAsk, cx))
+                    div().flex_none().child(ui::ghost_button("ask-leave", Some("x"), Some(tf!("退出提问 {}", "Leave chat {}", crate::shortcuts::pretty("escape")).into())).h(text_px(26.)).text_size(text_px(12.)).occlude().on_click(self.on(Cmd::LeaveAsk, cx)))
                 })
         } else {
             // The title fills the band the column beside it uses for its header, and the tabs the band of the
@@ -174,8 +187,7 @@ impl Workspace {
                             .items_start()
                             .gap(px(6.))
                             .child(self.selectable("detail-title", title.clone(), cx).flex_1().min_w_0().line_clamp(if beside_table { 3 } else { 2 }).text_size(text_px(ui::HEAD_TITLE)).line_height(text_px(22.)).font_weight(FontWeight::SEMIBOLD))
-                            .child(ui::ghost_button("detail-wide", Some(if lib.wide { "panel-left-open" } else { "expand" }), None).on_click(self.on(Cmd::ToggleWide, cx)))
-                            .child(ui::ghost_button("detail-close", Some("x"), None).on_click(self.on(Cmd::CloseDetail, cx))),
+                            .child(corner),
                     ),
             )
             .child(
@@ -693,7 +705,6 @@ impl Workspace {
         let beside = lib.split && lib.tab == Tab::Ask;
         let can_pin = lib.pins.len() < crate::app::MAX_PINS && !lib.pins.iter().any(|pin| pin.paper == p.id);
         let facing = lib.facing;
-        let reading = lib.reading;
         // 朗读 or 播客: how the reading of this file stands, while it is read.
         let aloud = lib.aloud.as_ref().filter(|r| r.resource == file_id).and_then(|r| Some((r.kind, lib.aloud_shown.clone()?)));
         // With the library's conversation on show as well, a selection can go to either.
@@ -728,7 +739,7 @@ impl Workspace {
         };
         // The tools stand in the toolbar, or float at the page's right edge: a habit, kept for every paper.
         let floating = self.settings.pdf_tools_floating;
-        let bar = PdfBar { width, file_id: file_id.clone(), paper_id, file_title, others, page, count, percent, zoom, fit: lib.zoom, cutting, split, pen, facing, reading, floating, can_pin, keep: lib.keep, beside, aloud, paned, hidden: hidden.to_vec() };
+        let bar = PdfBar { width, file_id: file_id.clone(), paper_id, file_title, others, page, count, percent, zoom, fit: lib.zoom, cutting, split, pen, facing, floating, can_pin, keep: lib.keep, beside, aloud, paned, hidden: hidden.to_vec() };
         // One line whatever the width: what it has no room for gives way level by level, the last of them under ⋯.
         let mut level = 0;
         let parts = loop {
@@ -839,14 +850,6 @@ impl Workspace {
             let tip = if bar.keep { t("已留住：再选一篇文献，这篇留在旁边的一栏里。再点一下取消") } else { t("留住这篇：再选别的文献时，它留在旁边的一栏里，两篇并排对照") };
             let (keep, width) = button("pdf-pin", Some("pin"), "pin", t("留在旁边"), bar.keep, Some(tip.to_string()), named);
             put((keep.on_click(self.on(Cmd::KeepPane, cx)), width));
-        }
-        // The whole window for this paper; in reading mode the way back is at the top.
-        // Its shortcut in the tooltip: the way in from the list without opening the paper first.
-        if !bar.reading && tools {
-            let key = crate::shortcuts::key_of("reading", &self.settings.shortcuts);
-            let tip = if key.is_empty() { None } else { Some(tf!("阅读模式 {}", "Reading mode {}", crate::shortcuts::pretty(&key))) };
-            let (reading, width) = button("pdf-reading", None, "expand", t("阅读模式"), false, tip, named);
-            put((reading.on_click(self.on(Cmd::ToggleReading, cx)), width));
         }
         // This paper in a window of its own: the library's window is free for the list (#194).
         if has && tools {
