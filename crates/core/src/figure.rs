@@ -256,6 +256,34 @@ impl Store {
         Ok(())
     }
 
+    /// The piece of the page a figure was cut from was framed again: its picture, its 1-based page and its
+    /// box there are the new ones. The picture gets a file of its own (a card's picture read before is not
+    /// taken for it), and the one it replaces is set aside in `removed/`.
+    pub fn reframe_figure(&mut self, figure: &mut Figure, page: usize, bbox: [f32; 4], picture: &[u8]) -> Result<()> {
+        let Some(kind) = picture_kind(picture) else { bail!("这不是一张可以收藏的图片（支持 PNG、JPEG 和 WebP）。") };
+        if picture.len() > MAX_BYTES { bail!("这张图片太大了（{} MB），收藏不了。", picture.len() / 1_000_000) }
+        let old: Option<String> = self.db.query_row("SELECT local_path FROM figures WHERE id = ?1", [&figure.id], |r| r.get(0)).optional()?;
+        let Some(old) = old else { bail!("图片不存在：{}", figure.id) };
+        let stamp = new_id("R");
+        let path = format!("{FOLDER}/{}-{}.{kind}", figure.id, stamp.trim_start_matches("R-"));
+        let file = self.root().join(path.replace('/', std::path::MAIN_SEPARATOR_STR));
+        std::fs::create_dir_all(self.root().join(FOLDER)).with_context(|| format!("无法创建图片文件夹 {}", self.root().join(FOLDER).display()))?;
+        std::fs::write(&file, picture).with_context(|| format!("无法保存图片 {}", file.display()))?;
+        let (width, height) = png_size(picture).unwrap_or((0, 0));
+        let updated = now_iso();
+        let written = self.db.execute(
+            "UPDATE figures SET page = ?2, bbox = ?3, local_path = ?4, width = ?5, height = ?6, size_bytes = ?7, updated_at = ?8 WHERE id = ?1",
+            params![figure.id, page as i64, serde_json::to_string(&bbox)?, path, width, height, picture.len() as i64, updated],
+        );
+        if let Err(err) = written {
+            let _ = std::fs::remove_file(&file);
+            return Err(err.into());
+        }
+        self.set_aside(&old);
+        (figure.page, figure.bbox, figure.local_path, figure.width, figure.height, figure.size_bytes, figure.updated_at) = (page, Some(bbox), path, width, height, picture.len() as u64, updated);
+        Ok(())
+    }
+
     /// Every figure whose paper is outside the trash, and those a model drew, the newest first.
     pub fn list_figures(&self) -> Result<Vec<Figure>> {
         let mut stmt = self.db.prepare(&format!("SELECT {COLUMNS} FROM figures WHERE paper_id NOT IN (SELECT paper_id FROM trashed_papers) ORDER BY added_at DESC, id DESC"))?;
@@ -547,6 +575,18 @@ mod tests {
         let read = store.get_figure(&figure.id).unwrap();
         assert_eq!((read.legend.as_str(), read.notes.as_str(), read.page, read.bbox), ("Changed.", "compare with Fig. 4", 3, Some([40., 60., 300., 280.])));
 
+        // Framed again, it has the new picture in a file of its own; the one before is set aside.
+        let before = store.figure_path(&read);
+        let mut framed = read.clone();
+        store.reframe_figure(&mut framed, 4, [30., 50., 320., 300.], &png(800, 600)).unwrap();
+        assert_eq!(store.get_figure(&figure.id).unwrap(), framed);
+        assert_eq!((framed.page, framed.bbox, framed.width, framed.height, framed.legend.as_str()), (4, Some([30., 50., 320., 300.]), 800, 600, "Changed."));
+        assert!(store.figure_path(&framed).is_file() && store.figure_path(&framed) != before && !before.exists());
+        assert!(root.join("removed").join(format!("{}.png", figure.id)).is_file());
+        assert!(store.reframe_figure(&mut framed, 4, [0., 0., 10., 10.], b"%PDF").is_err());
+        assert_eq!(store.figure_path(&store.get_figure(&figure.id).unwrap()), store.figure_path(&framed));
+        let figure = framed;
+
         // A paper in the trash takes its figures out of the list; restored, they are back.
         store.trash_paper(&paper.id).unwrap();
         assert!(store.list_figures().unwrap().is_empty());
@@ -556,7 +596,7 @@ mod tests {
         // Removed, the picture is set aside, not deleted.
         store.remove_figure(&figure.id).unwrap();
         assert!(store.list_figures().unwrap().is_empty() && !store.figure_path(&figure).exists());
-        assert!(root.join("removed").join(format!("{}.png", figure.id)).is_file());
+        assert!(root.join("removed").join(figure.local_path.trim_start_matches("figures/")).is_file());
         assert!(store.save_figure(&mut changed).unwrap_err().to_string().contains("图片不存在"));
         std::fs::remove_dir_all(root).ok();
     }
