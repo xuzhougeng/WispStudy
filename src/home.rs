@@ -97,7 +97,7 @@ impl Render for Workspace {
             .child(page)
             .children(self.render_modal(window, cx))
             .children(self.render_palette(cx))
-            .children(self.render_menu(cx))
+            .children(self.render_menu(window, cx))
             .children(if self.settings_view.is_none() { self.podcast_bar(cx) } else { None })
             .children(self.render_toast())
             // While an edge is held (the sidebar's, the detail panel's, the one between a conversation and its PDF), a layer over everything hears the pointer
@@ -182,7 +182,7 @@ const STAR_WIDTH: f32 = 340.;
 const STAR_ROOM: f32 = 120.;
 
 impl Workspace {
-    fn render_menu(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn render_menu(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let menu = self.menu.as_ref()?;
         let mut rows: Vec<AnyElement> = vec![];
         for (i, item) in menu.items.iter().enumerate() {
@@ -190,7 +190,9 @@ impl Workspace {
             if menu.breaks.contains(&i) { rows.push(div().flex_none().h(px(1.)).mx(px(6.)).my(px(4.)).bg(Theme::line()).into_any_element()) }
             rows.push(ui::menu_row(("menu", i), item.label.clone(), item.checked, item.note.clone()).when(menu.active == Some(i), |d| d.bg(Theme::hover())).on_click(self.on(item.cmd.clone(), cx)).into_any_element());
         }
-        let at = menu.at;
+        // Opened by a button or a row, it stands by that (as tall as its rows, a line between groups, the shell's edge); by a right click, under the pointer.
+        let height = (text_px(30.) * menu.items.len() as f32 + px(9. * menu.breaks.len() as f32 + 10.)).min(px(520.));
+        let (corner, at) = menu.from.map_or((Corner::TopLeft, menu.at), |(from, side)| crate::app::menu_place(from, side, height, window.viewport_size().height));
         let close = |this: &mut Self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>| {
             this.menu = None;
             cx.notify();
@@ -205,7 +207,7 @@ impl Workspace {
                 .occlude()
                 .on_mouse_down(MouseButton::Left, cx.listener(close))
                 .on_mouse_down(MouseButton::Right, cx.listener(close))
-                .child(anchored().position(at).snap_to_window_with_margin(px(8.)).child(ui::popover().id("menu").max_h(px(520.)).overflow_y_scroll().on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation()).children(rows)))
+                .child(anchored().anchor(corner).position(at).snap_to_window_with_margin(px(8.)).child(ui::popover().id("menu").max_h(px(520.)).overflow_y_scroll().on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation()).children(rows)))
                 .into_any_element(),
         )
     }

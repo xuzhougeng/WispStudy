@@ -188,17 +188,30 @@ fn selected_in(draw: &Draw, piece: &str) -> Option<std::ops::Range<usize>> {
 /// selection's ground where it is selected.
 fn with_selection(marks: Vec<(std::ops::Range<usize>, HighlightStyle)>, selected: Option<std::ops::Range<usize>>) -> Vec<(std::ops::Range<usize>, HighlightStyle)> {
     let Some(selected) = selected else { return marks };
-    let mut edges: Vec<usize> = marks.iter().flat_map(|(range, _)| [range.start, range.end]).chain([selected.start, selected.end]).collect();
+    laid_over(marks, selected, |style| style.background_color = Some(Theme::selection()))
+}
+
+/// Marks that do not overlap, with one more laid over a stretch of them: every stretch between two edges keeps
+/// the mark it stands in, changed where it lies in `over`. In order, and still without overlap.
+fn laid_over(marks: Vec<(std::ops::Range<usize>, HighlightStyle)>, over: std::ops::Range<usize>, change: impl Fn(&mut HighlightStyle)) -> Vec<(std::ops::Range<usize>, HighlightStyle)> {
+    let mut edges: Vec<usize> = marks.iter().flat_map(|(range, _)| [range.start, range.end]).chain([over.start, over.end]).collect();
     edges.sort();
     edges.dedup();
     let mut out = vec![];
     for pair in edges.windows(2) {
         let (start, end) = (pair[0], pair[1]);
         let mut style = marks.iter().find(|(range, _)| range.start <= start && end <= range.end).map(|(_, style)| *style).unwrap_or_default();
-        if selected.start <= start && end <= selected.end { style.background_color = Some(Theme::selection()) }
+        if over.start <= start && end <= over.end { change(&mut style) }
         if style != HighlightStyle::default() { out.push((start..end, style)) }
     }
     out
+}
+
+/// The citations of a text that are drawn as citations and answer a click: all of them, in bold, in italics or in
+/// code as the model wrote them (it often sets `**[P3]**`), but for one that runs into a link, where a click
+/// already goes to the link's address.
+fn cited_ranges(cited: Vec<std::ops::Range<usize>>, links: &[std::ops::Range<usize>]) -> Vec<(usize, std::ops::Range<usize>)> {
+    cited.into_iter().enumerate().filter(|(_, range)| !links.iter().any(|link| link.start < range.end && range.start < link.end)).collect()
 }
 
 fn blocks(blocks: &[Block], links: &mut Draw) -> Vec<AnyElement> {
@@ -302,13 +315,14 @@ fn rich(rich: &Rich, draw: &mut Draw) -> AnyElement {
         }
         if style != HighlightStyle::default() { highlights.push((range, style)) }
     }
-    // Where the text cites: in the accent, and a click away from the page cited.
+    // Where the text cites: in the accent, and a click away from the page cited. The accent is laid over the marks
+    // the citation stands in, so one the model set in bold (`**[P3]**`) is a bold citation, not bold text.
     if draw.cite.is_some() {
-        for (range, cited) in ai::citation_spans(&rich.text) {
-            // Marks never overlap: a citation that runs into one (a bold word in its quotation) stays as it is.
-            if highlights.iter().any(|(marked, _)| marked.start < range.end && range.start < marked.end) { continue }
-            let Some(first) = cited.into_iter().next() else { continue };
-            highlights.push((range.clone(), HighlightStyle { color: Some(Theme::accent()), ..Default::default() }));
+        let spans = ai::citation_spans(&rich.text);
+        let mut cited: Vec<Option<Citation>> = spans.iter().map(|(_, cited)| cited.first().cloned()).collect();
+        for (at, range) in cited_ranges(spans.into_iter().map(|(range, _)| range).collect(), &ranges) {
+            let Some(first) = cited[at].take() else { continue };
+            highlights = laid_over(highlights, range.clone(), |style| style.color = Some(Theme::accent()));
             ranges.push(range);
             targets.push(Target::Cite(first));
         }
@@ -332,8 +346,10 @@ fn rich(rich: &Rich, draw: &mut Draw) -> AnyElement {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: that would bring in gpui's own `test` attribute.
-    use super::{text_between, texts, with_selection};
+    use super::{cited_ranges, laid_over, text_between, texts, with_selection};
     use gpui::{FontWeight, HighlightStyle};
+    use wisp_core::ai;
+    use wisp_core::markdown::{Block, parse};
 
     #[test]
     fn pieces_and_what_lies_between() {
@@ -355,5 +371,31 @@ mod tests {
         assert!(laid[1].1.background_color.is_some() && laid[1].1.font_weight.is_some());
         assert!(laid[2].1.background_color.is_none() && laid[2].1.font_weight.is_some());
         assert_eq!(with_selection(vec![(4..8, bold)], None).len(), 1);
+    }
+
+    #[test]
+    fn a_citation_in_bold_is_still_a_citation() {
+        // What a model writes: the label in bold, in italics, part of a bold sentence, plain, and inside a link.
+        let answer = "**[P20]** 用 10x，*[P5]* 是综述；**多数研究在拟南芥 [P7, P8]，水稻次之**，另见 [P3 p.4] 和 [原文 [P9]](https://example.org)。";
+        let blocks = parse(answer);
+        let Block::Paragraph(rich) = &blocks[0] else { panic!("a paragraph") };
+        let spans = ai::citation_spans(&rich.text);
+        assert_eq!(spans.iter().map(|(range, _)| &rich.text[range.clone()]).collect::<Vec<_>>(), ["[P20]", "[P5]", "[P7, P8]", "[P3 p.4]", "[P9]"]);
+        let links: Vec<_> = rich.spans().filter(|(_, marks)| marks.link.is_some()).map(|(range, _)| range).collect();
+        let kept = cited_ranges(spans.iter().map(|(range, _)| range.clone()).collect(), &links);
+        // All but the one inside the link, whatever marks they stand in.
+        assert_eq!(kept.iter().map(|(at, range)| (*at, &rich.text[range.clone()])).collect::<Vec<_>>(), [(0, "[P20]"), (1, "[P5]"), (2, "[P7, P8]"), (3, "[P3 p.4]")]);
+
+        // The accent is laid over the bold: the label keeps its weight and gains the colour, the words around it keep theirs.
+        let bold = HighlightStyle { font_weight: Some(FontWeight::SEMIBOLD), ..Default::default() };
+        let accent = gpui::red();
+        let laid = laid_over(vec![(0..5, bold), (20..40, bold)], 26..34, |style| style.color = Some(accent));
+        assert_eq!(laid.iter().map(|(range, _)| range.clone()).collect::<Vec<_>>(), [0..5, 20..26, 26..34, 34..40]);
+        assert!(laid[2].1.color == Some(accent) && laid[2].1.font_weight.is_some());
+        assert!(laid.iter().enumerate().all(|(at, (_, style))| at == 2 || (style.color.is_none() && style.font_weight.is_some())));
+        // Over plain text it is a mark of its own; marks stay in order and never overlap.
+        let laid = laid_over(laid, 8..12, |style| style.color = Some(accent));
+        assert_eq!(laid.iter().map(|(range, _)| range.clone()).collect::<Vec<_>>(), [0..5, 8..12, 20..26, 26..34, 34..40]);
+        assert!(laid[1].1.color == Some(accent) && laid[1].1.font_weight.is_none());
     }
 }

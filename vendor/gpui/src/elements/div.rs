@@ -2237,6 +2237,9 @@ impl Interactivity {
                                 let mouse_click = ClickEvent::Mouse(MouseClickEvent {
                                     down: mouse_down,
                                     up: event.clone(),
+                                    // quiet.md: a click says where the element clicked is, as a
+                                    // keyboard click does: a menu opens under its button.
+                                    bounds: hitbox.bounds,
                                 });
                                 for listener in &click_listeners {
                                     listener(&mouse_click, window, cx);
@@ -2305,12 +2308,22 @@ impl Interactivity {
                         pending_mouse_down.borrow().is_none() && hitbox.is_hovered(window)
                     }
                 });
+                let tooltip_source = element_state
+                    .tooltip_source
+                    .get_or_insert_with(Default::default)
+                    .clone();
+                *tooltip_source.borrow_mut() = Some(TooltipSource {
+                    hitbox: hitbox.id,
+                    build: build_tooltip.clone(),
+                    check_is_hovered_during_prepaint: check_is_hovered_during_prepaint.clone(),
+                });
                 register_tooltip_mouse_handlers(
                     &active_tooltip,
                     self.tooltip_id,
                     build_tooltip,
                     check_is_hovered,
                     check_is_hovered_during_prepaint,
+                    Some(tooltip_source),
                     window,
                 );
             }
@@ -2584,6 +2597,19 @@ pub struct InteractiveElementState {
     pub(crate) pending_mouse_down: Option<Rc<RefCell<Option<MouseDownEvent>>>>,
     pub(crate) scroll_offset: Option<Rc<RefCell<Point<Pixels>>>>,
     pub(crate) active_tooltip: Option<Rc<RefCell<Option<ActiveTooltip>>>>,
+    // quiet.md: the tooltip's element as last painted, see `TooltipSource`.
+    pub(crate) tooltip_source: Option<Rc<RefCell<Option<TooltipSource>>>>,
+}
+
+/// quiet.md: what the element with a tooltip was when it was last painted: its hitbox and what
+/// builds its tooltip. The wait for a tooltip is begun by one frame's handlers and ends half a
+/// second later; by then the element may say something else (a switch that was clicked) or lie
+/// under something opened meanwhile (a menu), so the tooltip is built from this, and only while
+/// that hitbox is still the one under the pointer.
+pub(crate) struct TooltipSource {
+    pub(crate) hitbox: HitboxId,
+    pub(crate) build: Rc<dyn Fn(&mut Window, &mut App) -> Option<(AnyView, bool)>>,
+    pub(crate) check_is_hovered_during_prepaint: Rc<dyn Fn(&Window) -> bool>,
 }
 
 /// Whether or not the element or a group that contains it is clicked by the mouse.
@@ -2665,6 +2691,7 @@ pub(crate) fn register_tooltip_mouse_handlers(
     build_tooltip: Rc<dyn Fn(&mut Window, &mut App) -> Option<(AnyView, bool)>>,
     check_is_hovered: Rc<dyn Fn(&Window) -> bool>,
     check_is_hovered_during_prepaint: Rc<dyn Fn(&Window) -> bool>,
+    source: Option<Rc<RefCell<Option<TooltipSource>>>>,
     window: &mut Window,
 ) {
     window.on_mouse_event({
@@ -2677,6 +2704,7 @@ pub(crate) fn register_tooltip_mouse_handlers(
                 &build_tooltip,
                 &check_is_hovered,
                 &check_is_hovered_during_prepaint,
+                &source,
                 phase,
                 window,
                 cx,
@@ -2687,6 +2715,16 @@ pub(crate) fn register_tooltip_mouse_handlers(
     window.on_mouse_event({
         let active_tooltip = active_tooltip.clone();
         move |_: &MouseDownEvent, _phase, window: &mut Window, _cx| {
+            // quiet.md: a press also ends the wait for a tooltip not shown yet. The press does
+            // something (opens a menu, turns a switch): a tooltip arriving after it would cover
+            // what it opened, or say what the element did before the press.
+            let waiting = matches!(
+                active_tooltip.borrow().as_ref(),
+                Some(ActiveTooltip::WaitingForShow { .. })
+            );
+            if waiting {
+                active_tooltip.borrow_mut().take();
+            }
             if !tooltip_id.is_some_and(|tooltip_id| tooltip_id.is_hovered(window)) {
                 clear_active_tooltip_if_not_hoverable(&active_tooltip, window);
             }
@@ -2719,6 +2757,7 @@ fn handle_tooltip_mouse_move(
     build_tooltip: &Rc<dyn Fn(&mut Window, &mut App) -> Option<(AnyView, bool)>>,
     check_is_hovered: &Rc<dyn Fn(&Window) -> bool>,
     check_is_hovered_during_prepaint: &Rc<dyn Fn(&Window) -> bool>,
+    source: &Option<Rc<RefCell<Option<TooltipSource>>>>,
     phase: DispatchPhase,
     window: &mut Window,
     cx: &mut App,
@@ -2765,9 +2804,25 @@ fn handle_tooltip_mouse_move(
                 let active_tooltip = active_tooltip.clone();
                 let build_tooltip = build_tooltip.clone();
                 let check_is_hovered_during_prepaint = check_is_hovered_during_prepaint.clone();
+                let source = source.clone();
                 async move |cx| {
                     cx.background_executor().timer(TOOLTIP_SHOW_DELAY).await;
                     cx.update(|window, cx| {
+                        // quiet.md: the element as it was last painted, not as it was when the
+                        // wait began; no tooltip if it is no longer what the pointer is over.
+                        let (build_tooltip, check_is_hovered_during_prepaint) = match &source {
+                            None => (build_tooltip, check_is_hovered_during_prepaint),
+                            Some(source) => match source.borrow().as_ref() {
+                                Some(source) if source.hitbox.is_hovered(window) => (
+                                    source.build.clone(),
+                                    source.check_is_hovered_during_prepaint.clone(),
+                                ),
+                                _ => {
+                                    active_tooltip.borrow_mut().take();
+                                    return;
+                                }
+                            },
+                        };
                         let new_tooltip =
                             build_tooltip(window, cx).map(|(view, tooltip_is_hoverable)| {
                                 let active_tooltip = active_tooltip.clone();

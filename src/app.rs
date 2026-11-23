@@ -791,7 +791,10 @@ pub struct MenuItem {
 }
 
 pub struct Menu {
+    /// Where the pointer was: a right-click's menu opens there.
     pub at: Point<Pixels>,
+    /// The button or row that opened it, when one did: the menu stands by it and leaves it in sight (`menu_place`).
+    pub from: Option<(Bounds<Pixels>, MenuSide)>,
     pub items: Vec<MenuItem>,
     /// The items a line is drawn above.
     pub breaks: Vec<usize>,
@@ -801,6 +804,27 @@ pub struct Menu {
     pub paper: Option<String>,
     /// A filter's choices: the card of all the filters stays open under it (`render_papers`).
     pub filter: bool,
+}
+
+/// Where a menu stands by what opened it: under a button, or to the right of a row of a column of rows (the sidebar),
+/// where a menu underneath would cover the rows that follow.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MenuSide {
+    Below,
+    Beside,
+}
+
+/// Where a menu of `height` opened from `from` stands in a window of `window` height: the corner of the menu
+/// that is fixed, and where. Under its opener, left edges in line; over it when there is no room underneath and
+/// there is above; beside a row, tops in line. Never over the opener: a second click on it is how the menu is
+/// put away, and it says what the menu belongs to.
+pub fn menu_place(from: Bounds<Pixels>, side: MenuSide, height: Pixels, window: Pixels) -> (Corner, Point<Pixels>) {
+    let (gap, margin) = (px(4.), px(8.));
+    match side {
+        MenuSide::Beside => (Corner::TopLeft, point(from.right() + gap, from.top())),
+        MenuSide::Below if from.bottom() + gap + height > window - margin && from.top() - gap - height >= margin => (Corner::BottomLeft, point(from.left(), from.top() - gap)),
+        MenuSide::Below => (Corner::TopLeft, point(from.left(), from.bottom() + gap)),
+    }
 }
 
 pub struct Toast {
@@ -2525,8 +2549,21 @@ impl Workspace {
         }
     }
 
+    /// A click on a button opens its menu under it, not under the pointer: the button stays in sight.
     pub fn on_menu(&self, kind: MenuKind, cx: &mut Context<Self>) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
-        cx.listener(move |this, ev: &ClickEvent, _, cx| this.open_menu(kind.clone(), ev.position(), cx))
+        self.on_menu_at(kind, MenuSide::Below, cx)
+    }
+
+    /// The same for a row among rows (the sidebar's): its menu opens to its right, over the page, and the rows under it stay in sight too.
+    pub fn on_menu_beside(&self, kind: MenuKind, cx: &mut Context<Self>) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+        self.on_menu_at(kind, MenuSide::Beside, cx)
+    }
+
+    fn on_menu_at(&self, kind: MenuKind, side: MenuSide, cx: &mut Context<Self>) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+        cx.listener(move |this, ev: &ClickEvent, _, cx| {
+            this.open_menu(kind.clone(), ev.position(), cx);
+            if let Some(menu) = this.menu.as_mut() { menu.from = Some((ev.bounds(), side)) }
+        })
     }
 
     pub fn say(&mut self, message: impl Into<SharedString>, cx: &mut Context<Self>) {
@@ -2808,7 +2845,7 @@ impl Workspace {
             }
         }
         if items.is_empty() { return }
-        self.menu = Some(Menu { at, items, breaks, active: None, paper, filter });
+        self.menu = Some(Menu { at, from: None, items, breaks, active: None, paper, filter });
         cx.notify();
     }
 
@@ -2982,16 +3019,24 @@ impl Workspace {
                 window.refresh();
             }
             Cmd::SetJournalZone(value) => {
-                // A list sorted by the other partition is sorted by this one.
-                if let Some(lib) = self.lib.as_mut() {
-                    let (key, desc) = wisp_core::filter::sort_parts(&lib.filters.sort);
-                    if ["cas", "xr", "jcr"].contains(&key) {
-                        lib.filters.sort = format!("{}-{}", if value.is_empty() { "cas" } else { value.as_str() }, if desc { "desc" } else { "asc" });
-                        lib.refilter();
-                    }
-                }
                 self.settings.journal_zone = value;
                 self.save_settings(cx);
+                // A list sorted by the other partition is sorted by this one, and the library keeps that sort: the
+                // 分区 header has the arrow whenever the list is in its order.
+                let mut failed = None;
+                if let Some(lib) = self.lib.as_mut() {
+                    let sort = crate::library::sort_in_zone(&lib.filters.sort, &self.settings);
+                    if sort != lib.filters.sort {
+                        lib.filters.sort = sort;
+                        lib.refilter();
+                    }
+                    let kept = crate::library::sort_in_zone(&lib.info.sort, &self.settings);
+                    if kept != lib.info.sort {
+                        lib.info.sort = kept;
+                        failed = libraries::save(&lib.info).err();
+                    }
+                }
+                if let Some(err) = failed { self.fail(format!("{err:#}"), cx) }
                 window.refresh();
             }
             Cmd::SetLanguage(language) => {
@@ -3121,7 +3166,7 @@ impl Workspace {
             Cmd::ShowTextless => {
                 if matches!(self.modal, Some(Modal::ImportReport)) { self.run(Cmd::CloseModal, window, cx) }
                 if let Some(lib) = self.lib.as_mut() {
-                    lib.filters = Filters { fulltext: "textless".into(), sort: lib.info.sort.clone(), ..Default::default() };
+                    lib.filters = Filters { fulltext: "textless".into(), sort: crate::library::sort_in_zone(&lib.info.sort, &self.settings), ..Default::default() };
                     lib.search.update(cx, |input, cx| input.set_text("", cx));
                     lib.page = Page::Papers;
                     lib.refilter();
@@ -4403,7 +4448,7 @@ impl Workspace {
             }),
         ];
         let library_chat = Chat::new("交代一件事或提一个问题，输入 / 选择命令，可以粘贴图片", cx);
-        let paper_chat = Chat::new("就这篇文献提问，输入 / 选择命令", cx);
+        let paper_chat = Chat::new(crate::chat::PAPER_PLACEHOLDER, cx);
         let write_chat = Chat::new("告诉助手写什么、改什么", cx);
         let mut subscriptions = subscriptions;
         for (chat, talk) in [(&library_chat, Talk::Library), (&paper_chat, Talk::Paper), (&write_chat, Talk::Write)] {
@@ -4452,7 +4497,9 @@ impl Workspace {
         let writing = Writing { manuscripts, manuscript, section_id, reading: false, title, typed: 0, editor, find, search: Default::default(), structures: BTreeMap::new(), sorting: Sorting::default(), scroll: ScrollHandle::new(), assist: Default::default(), revise, comments, editor_scroll: ScrollHandle::new(), side: Side::default(), side_open: false, agent: Default::default(), seek, away: false };
         let citing = crate::cite::Citing::new(&store, &writing.manuscript, &mut subscriptions, cx);
         let gallery = crate::figures::Gallery::new(&mut subscriptions, cx);
-        let filters = Filters { sort: info.sort.clone(), ..Default::default() };
+        // The sort kept with the library may name a partition the 分区 column no longer shows (the setting was changed while
+        // another library, or none, was open): the list is sorted by the column's, so its header says so.
+        let filters = Filters { sort: crate::library::sort_in_zone(&info.sort, &self.settings), ..Default::default() };
         let mut lib = Library {
             info,
             store,
@@ -7685,10 +7732,11 @@ impl Workspace {
         for step in steps.split(',') {
             // `8@shot:/tmp/a.png` takes the step eight seconds after the start: what it is
             // to show (an import, an answer) needs that long to come about.
-            match step.split_once('@').and_then(|(seconds, later)| Some((seconds.parse::<u64>().ok()?, later.to_string()))) {
+            // Parts of a second too (`3.2@shot:…`): a tooltip comes half a second after the pointer stops.
+            match step.split_once('@').and_then(|(seconds, later)| Some((seconds.parse::<f64>().ok().filter(|s| s.is_finite() && *s >= 0.)?, later.to_string()))) {
                 Some((seconds, later)) => {
                     cx.spawn_in(window, async move |this, cx| {
-                        cx.background_executor().timer(std::time::Duration::from_secs(seconds)).await;
+                        cx.background_executor().timer(std::time::Duration::from_secs_f64(seconds)).await;
                         this.update_in(cx, |this, window, cx| this.dev_step(&later, window, cx)).ok();
                     })
                     .detach();
@@ -8523,6 +8571,33 @@ fn pages_of(kept: Option<Vec<String>>, path: Option<std::path::PathBuf>) -> Resu
         (Some(pages), _) => Ok(pages),
         (None, Some(path)) => wisp_core::fulltext::file_pages(&path).map_err(|error| tf!("读不出这个 PDF 的文字：{}", "Could not read this PDF's text: {}", error)),
         (None, None) => Ok(vec![]),
+    }
+}
+
+#[cfg(test)]
+mod menu_tests {
+    // Not `super::*`: that would bring in gpui's own `test` attribute.
+    use super::{MenuSide, menu_place};
+    use gpui::{Bounds, Corner, point, px, size};
+
+    #[test]
+    fn a_menu_stands_by_what_opened_it_and_never_over_it() {
+        let window = px(860.);
+        // Under a button, left edges in line, a little apart.
+        let button = Bounds::new(point(px(100.), px(40.)), size(px(80.), px(30.)));
+        assert_eq!(menu_place(button, MenuSide::Below, px(200.), window), (Corner::TopLeft, point(px(100.), px(74.))));
+        // At the window's foot there is no room underneath: over it, the menu's foot a little above the button.
+        let low = Bounds::new(point(px(100.), px(800.)), size(px(80.), px(30.)));
+        assert_eq!(menu_place(low, MenuSide::Below, px(200.), window), (Corner::BottomLeft, point(px(100.), px(796.))));
+        // A menu that fits just under it stays under it.
+        let mid = Bounds::new(point(px(100.), px(600.)), size(px(80.), px(30.)));
+        assert_eq!(menu_place(mid, MenuSide::Below, px(218.), window).0, Corner::TopLeft);
+        assert_eq!(menu_place(mid, MenuSide::Below, px(219.), window).0, Corner::BottomLeft);
+        // No room either way: under it, where the window's margin moves it up as it must.
+        assert_eq!(menu_place(mid, MenuSide::Below, px(700.), window).0, Corner::TopLeft);
+        // A row of the sidebar: to its right, tops in line, the rows under it left alone.
+        let row = Bounds::new(point(px(10.), px(290.)), size(px(204.), px(30.)));
+        assert_eq!(menu_place(row, MenuSide::Beside, px(200.), window), (Corner::TopLeft, point(px(218.), px(290.))));
     }
 }
 

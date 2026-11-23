@@ -659,6 +659,8 @@ impl Workspace {
         }
         let lib = self.lib.as_ref().unwrap();
         let chat = lib.chat(talk);
+        // The paper's box says how many papers a question is about, as the empty conversation over it does.
+        if talk == Talk::Paper { chat.input.update(cx, |input, _| input.set_placeholder(paper_placeholder(lib.talk_papers().len()))) }
         let model = profile.title();
         // Ids of the two conversations' elements must differ: both can be on screen.
         let side = talk.side();
@@ -1923,10 +1925,34 @@ fn offer_label(action: &wisp_core::offer::Action) -> &'static str {
     }
 }
 
+/// What the empty question box of a paper's conversation says: one paper, or the papers kept side by side
+/// (`Library::talk_papers`). Both are keys of `locales/en.json`.
+pub(crate) fn paper_placeholder(papers: usize) -> &'static str {
+    if papers > 1 { "就这几篇文献提问，输入 / 选择命令" } else { PAPER_PLACEHOLDER }
+}
+
+/// The box of a paper's conversation as it is made, before a paper is on show.
+pub(crate) const PAPER_PLACEHOLDER: &str = "就这篇文献提问，输入 / 选择命令";
+
 #[cfg(test)]
 mod tests {
     // Not `super::*`: that would bring in gpui's own `test` attribute.
-    use super::{beside_selection, tools_summary};
+    use super::{beside_selection, paper_placeholder, tools_summary};
+    use crate::i18n::translate;
+    use wisp_core::settings::Language;
+
+    #[test]
+    fn the_box_says_how_many_papers_are_asked_about() {
+        // One paper, none yet, or several side by side; each has its own words in English.
+        assert_eq!(paper_placeholder(0), paper_placeholder(1));
+        assert_ne!(paper_placeholder(1), paper_placeholder(2));
+        assert_eq!(paper_placeholder(2), paper_placeholder(3));
+        for papers in [1, 2] {
+            let said = paper_placeholder(papers);
+            assert_ne!(translate(Language::En, said), said, "missing translation: {said}");
+        }
+        assert!(translate(Language::En, paper_placeholder(2)).contains("these papers"));
+    }
 
     #[test]
     fn the_bar_stands_by_the_selection_and_inside_the_view() {
