@@ -12,7 +12,7 @@ use crate::theme::{Theme, text_px};
 use crate::ui;
 use crate::input::{InputEvent, TextInput};
 use gpui::{prelude::FluentBuilder, *};
-use wisp_core::annotation::{Annotation, COLORS, Kind};
+use wisp_core::annotation::{Annotation, COLORS, Kind, TextPart, TextStyle};
 use wisp_core::handles::{self, Grab};
 use wisp_core::pdftext::{self, Mark};
 
@@ -47,6 +47,12 @@ pub enum PdfEvent {
     RemoveAnnotation { resource: String, id: String },
     /// A box drawn on a page, or a sticky note placed there (`rect` its spot twice) with its text.
     AddShape { paper: String, resource: String, page: usize, kind: Kind, rect: [f32; 4], note: String },
+    /// A text box written on a page: its edges (grown to what it says), its words and colours.
+    AddText { paper: String, resource: String, page: usize, rect: [f32; 4], text: String, style: TextStyle },
+    /// A text box written again: its words (none, and it goes), and its edges when they grew with them.
+    WriteText { resource: String, id: String, text: String, rect: Option<[f32; 4]> },
+    /// A text box takes other colours.
+    RestyleText { resource: String, id: String, style: TextStyle },
     /// A box moved or sized, a note moved, on its page.
     MoveShape { resource: String, id: String, rect: [f32; 4] },
     /// The number on the corner of a figure kept was clicked: its dialog, to change it or take it out.
@@ -67,6 +73,8 @@ pub enum Tool {
     Box,
     /// Click to put a sticky note there.
     Note,
+    /// Drag out a text box (or click for one of `TEXT_NEW` size) and write in it on the page.
+    Text,
 }
 
 /// The side of a sticky note's icon on screen, whatever the zoom.
@@ -79,6 +87,31 @@ const HANDLE: f32 = 9.;
 const GRIP: f32 = 7.;
 /// The note card's width.
 const NOTE_W: f32 = 280.;
+/// A text box's words, in the page's points so they grow and shrink with it: their size, the room between
+/// lines (times the size), the room kept inside the box's edge; and a box made with a click instead of a drag.
+const TEXT_PT: f32 = 11.;
+const TEXT_LEADING: f32 = 1.4;
+const TEXT_PAD: f32 = 4.;
+const TEXT_NEW: (f32, f32) = (180., 40.);
+/// The names of the text box's colours, by key.
+fn text_color_name(key: &str) -> &'static str {
+    match key {
+        "none" => "无", "white" => "白色", "black" => "黑色", "gray" => "灰色", "yellow" => "黄色", "green" => "绿色",
+        "blue" => "蓝色", "pink" => "粉色", "purple" => "紫色", "red" => "红色", _ => "橙色",
+    }
+}
+fn text_part_name(part: TextPart) -> &'static str {
+    match part { TextPart::Fill => "填充", TextPart::Border => "边框", TextPart::Ink => "文字" }
+}
+
+/// The text box being written: one already kept (`id`), or a new one not kept until something is written in it,
+/// with its 0-based page and edges.
+#[derive(Clone, Debug, PartialEq)]
+struct TextEdit {
+    id: Option<String>,
+    page: usize,
+    rect: [f32; 4],
+}
 
 /// A mark placed on a page (a box, a note, a piece marked to be cut out) or the figure dialog's frame, held
 /// by the pointer: its id, 0-based page and place when it was taken, where it is held (`Grab::Body` moves the
@@ -90,6 +123,8 @@ struct ShapeDrag {
     grab: Grab,
     from: (f32, f32),
     moved: bool,
+    /// It was chosen before this press: a text box clicked again is written in.
+    again: bool,
 }
 
 impl ShapeDrag {
@@ -104,10 +139,10 @@ impl ShapeDrag {
 }
 
 /// A mark that is one rectangle on its page, so it can be chosen with a click and sized by its handles: a
-/// box, a piece marked to be cut out. A new kind of the same sort (a text box) is added here, and `shape_at`,
+/// box, a piece marked to be cut out, a text box. A new kind of the same sort is added here, and `shape_at`,
 /// `rect_grips`, the menu and the drag layer serve it as they are.
 fn sizable(kind: Kind) -> bool {
-    matches!(kind, Kind::Box | Kind::Cut)
+    matches!(kind, Kind::Box | Kind::Cut | Kind::Text)
 }
 
 /// The pointer's look over a part of a rectangle: a closed hand moving it, the arrows of the way a handle sizes it.
@@ -125,10 +160,13 @@ fn grab_cursor(grab: Grab) -> CursorStyle {
 /// says it can be taken (a pointing hand, an open hand once chosen) and, chosen, its handles show
 /// (`handles::handles`), each with the arrows of the way it sizes. It draws no outline of its own and takes
 /// no press: the viewer's press finds what is under the pointer (`shape_at`, `frame_at`), with the same reaches.
-fn rect_grips(rect: [f32; 4], scale: f32, chosen: bool) -> Div {
+/// A text box's inside is its own (`body`): a pointing hand says a click chooses it, and chosen, the text
+/// cursor that a click there writes in it.
+fn rect_grips(rect: [f32; 4], scale: f32, chosen: bool, body: bool) -> Div {
     let [x0, y0, x1, y1] = handles::normal(rect);
     let (w, h) = ((x1 - x0) * scale, (y1 - y0) * scale);
     let edge = if chosen { CursorStyle::OpenHand } else { CursorStyle::PointingHand };
+    let inside = body.then(|| div().absolute().inset_0().cursor(if chosen { CursorStyle::IBeam } else { CursorStyle::PointingHand }));
     let strip = |left: f32, top: f32, width: f32, height: f32| div().absolute().left(px(left)).top(px(top)).w(px(width)).h(px(height)).cursor(edge);
     let r = EDGE_REACH;
     let strips = [strip(-r, -r, w + 2. * r, 2. * r), strip(-r, h - r, w + 2. * r, 2. * r), strip(-r, r, 2. * r, (h - 2. * r).max(0.)), strip(w - r, r, 2. * r, (h - 2. * r).max(0.))];
@@ -137,7 +175,7 @@ fn rect_grips(rect: [f32; 4], scale: f32, chosen: bool) -> Div {
         let (left, top) = ((hx - x0) * scale - HANDLE / 2., (hy - y0) * scale - HANDLE / 2.);
         div().absolute().left(px(left)).top(px(top)).size(px(HANDLE)).rounded(px(2.)).bg(Theme::handle_fill()).border_1().border_color(Theme::handle_ring()).shadow_sm().cursor(grab_cursor(Grab::Handle(handle.0, handle.1)))
     }).collect::<Vec<_>>());
-    div().absolute().left(px(x0 * scale)).top(px(y0 * scale)).w(px(w)).h(px(h)).children(strips).children(grips.into_iter().flatten())
+    div().absolute().left(px(x0 * scale)).top(px(y0 * scale)).w(px(w)).h(px(h)).children(inside).children(strips).children(grips.into_iter().flatten())
 }
 
 /// A highlight that was clicked, and the menu beside it: the highlight's id, its 0-based page, and in that page's points
@@ -840,6 +878,18 @@ pub struct PdfView {
     /// The open card's text is being written.
     note_editing: bool,
     note_input: Entity<TextInput>,
+    /// The text box being written in, on the page itself (`text_input`); what a new one is drawn in (the
+    /// colours last chosen for one); how tall each one's words stand, in points, by id ("" the new one), as
+    /// last drawn: a box is never shorter than its words; the colours of the chosen one being picked.
+    text_edit: Option<TextEdit>,
+    text_input: Entity<TextInput>,
+    text_style: TextStyle,
+    text_tall: HashMap<String, f32>,
+    text_palette: Option<(String, TextPart)>,
+    /// The text box written in a moment ago and put away with Esc: chosen once it is kept and has an id.
+    text_choose: Option<(usize, [f32; 4])>,
+    /// Hears the text box's field lose the keyboard: what was written is kept then.
+    text_blur: Option<Subscription>,
     focus: FocusHandle,
     finder: Option<Finder>,
     /// Counts the searches asked for, so a late answer to an older one is dropped.
@@ -889,6 +939,10 @@ impl EventEmitter<PdfEvent> for PdfView {}
 
 impl PdfView {
     pub fn new(path: &Path, zoom: Zoom, file: &wisp_core::model::PaperFile, annotations: Vec<Annotation>, cx: &mut Context<Self>) -> Self {
+        // A new text box takes the colours of the one last changed in this file.
+        let text_style = annotations.iter().filter(|a| a.kind == Kind::Text).max_by(|a, b| a.updated_at.cmp(&b.updated_at)).and_then(|a| a.style.clone()).unwrap_or_default();
+        let text_input = cx.new(|cx| TextInput::new("输入文字", cx).multiline(1));
+        cx.subscribe(&text_input, |this: &mut Self, _, event: &InputEvent, cx| if matches!(event, InputEvent::Cancel) { this.finish_text(true, cx) }).detach();
         let (requests, request_rx) = mpsc::channel();
         let (reply_tx, replies) = async_channel::unbounded();
         let worker_file = path.to_path_buf();
@@ -955,6 +1009,13 @@ impl PdfView {
             note_draft: None,
             note_editing: false,
             note_input: cx.new(|cx| TextInput::new("写下想法…", cx).multiline(4)),
+            text_edit: None,
+            text_input,
+            text_style,
+            text_tall: HashMap::new(),
+            text_palette: None,
+            text_choose: None,
+            text_blur: None,
             focus: cx.focus_handle(),
             finder: None,
             searches: 0,
@@ -969,20 +1030,127 @@ impl PdfView {
         self.tool
     }
 
-    /// Draw boxes, place notes, or go back to selecting text; a second click on the same tool goes back too.
+    /// Draw boxes, place notes, write text boxes, or go back to selecting text; a second click on the same tool goes back too.
     pub fn set_tool(&mut self, tool: Tool, cx: &mut Context<Self>) {
+        self.finish_text(false, cx);
         self.tool = if self.tool == tool { Tool::Select } else { tool };
         (self.cutting, self.cut, self.drawing, self.selection, self.selecting, self.translation, self.mark_menu, self.chosen) = (false, None, None, None, false, None, None, None);
         self.close_note();
         cx.notify();
     }
 
-    /// Where a box or note stands now: moved by the pointer, or as kept.
+    /// Where a box or note stands now: moved by the pointer, or as kept; a text box as tall as its words at least.
     fn rect_of(&self, a: &Annotation) -> [f32; 4] {
-        match &self.shape_shown {
+        let rect = match &self.shape_shown {
             Some((id, rect)) if *id == a.id => *rect,
             _ => a.boxes.first().copied().unwrap_or_default(),
+        };
+        if a.kind == Kind::Text { self.grown(&a.id, rect) } else { rect }
+    }
+
+    /// A text box's edges with its bottom as low as its words reach, as they were last drawn (`text_tall`, by
+    /// its id, "" for one not kept yet): a box is never shorter than what it says, as a slide's text box grows
+    /// with its text. Sized narrower, its words wrap onto more lines and it grows taller.
+    fn grown(&self, key: &str, rect: [f32; 4]) -> [f32; 4] {
+        let mut rect = handles::normal(rect);
+        if let Some(tall) = self.text_tall.get(key) { rect[3] = rect[3].max(rect[1] + tall) }
+        rect
+    }
+
+    /// How tall a text box's words stood when drawn, in points.
+    fn measured_text(&mut self, key: String, tall: f32, cx: &mut Context<Self>) {
+        if self.text_tall.get(&key).is_none_or(|was| (was - tall).abs() > 0.25) {
+            self.text_tall.insert(key, tall);
+            cx.notify();
         }
+    }
+
+    /// Write in a text box on its page: a new one (`id` none, kept once something is written), or one there.
+    fn start_text(&mut self, edit: TextEdit, window: &mut Window, cx: &mut Context<Self>) {
+        let kept = edit.id.as_ref().and_then(|id| self.annotations.iter().find(|a| &a.id == id));
+        let text = kept.map(|a| a.note.clone()).unwrap_or_default();
+        let ink = kept.and_then(|a| a.style.as_ref()).unwrap_or(&self.text_style).ink.clone();
+        self.text_input.update(cx, |input, cx| {
+            input.set_paper_ink(Theme::text_ink(&ink));
+            input.set_text(&text, cx);
+        });
+        (self.chosen, self.mark_menu, self.text_palette, self.selection, self.selecting) = (None, None, None, None, false);
+        self.close_note();
+        self.text_edit = Some(edit);
+        // Whatever takes the keyboard from the field (a press elsewhere, a button of the bar) ends the writing, and what was written is kept.
+        if self.text_blur.is_none() {
+            let handle = self.text_input.focus_handle(cx);
+            self.text_blur = Some(cx.on_blur(&handle, window, |this, window, cx| if !this.text_input.focus_handle(cx).is_focused(window) { this.finish_text(false, cx) }));
+        }
+        self.text_input.read(cx).focus(window);
+        cx.notify();
+    }
+
+    /// The text box being written in is done with: a new one is kept if something was written, one there keeps
+    /// its words anew (written empty, it goes), each as tall as its words. `choose`, it stays chosen (Esc), as a
+    /// slide's text box does after it is written in.
+    fn finish_text(&mut self, choose: bool, cx: &mut Context<Self>) {
+        let Some(edit) = self.text_edit.take() else { return };
+        let text = self.text_input.read(cx).text().trim().to_string();
+        match edit.id {
+            None => {
+                let rect = self.grown("", edit.rect);
+                self.text_tall.remove("");
+                if !text.is_empty() {
+                    if choose { self.text_choose = Some((edit.page, rect)) }
+                    cx.emit(PdfEvent::AddText { paper: self.paper_id.clone(), resource: self.resource_id.clone(), page: edit.page + 1, rect, text, style: self.text_style.clone() });
+                }
+            }
+            Some(id) => {
+                let Some(a) = self.annotations.iter().find(|a| a.id == id) else { return cx.notify() };
+                let (kept, rect) = (a.boxes.first().copied().unwrap_or_default(), self.rect_of(a));
+                let grew = (!same_place(kept, rect)).then_some(rect);
+                if text != a.note || grew.is_some() { cx.emit(PdfEvent::WriteText { resource: self.resource_id.clone(), id: id.clone(), text: text.clone(), rect: grew }) }
+                self.chosen = (choose && !text.is_empty()).then_some(id);
+            }
+        }
+        cx.notify();
+    }
+
+    /// The chosen text box takes another colour for one of its parts; a new one is drawn in these colours from now on.
+    fn restyle_text(&mut self, part: TextPart, key: &str, cx: &mut Context<Self>) {
+        let Some(a) = self.chosen_mark().filter(|a| a.kind == Kind::Text) else { return };
+        let style = a.style.clone().unwrap_or_default().with(part, key);
+        let (id, changed) = (a.id.clone(), a.style.as_ref() != Some(&style));
+        self.text_style = style.clone();
+        if changed { cx.emit(PdfEvent::RestyleText { resource: self.resource_id.clone(), id, style }) }
+        cx.notify();
+    }
+
+    /// Write in the text box being written as if typed (a debug step): `\n` breaks the line.
+    pub fn dev_write(&mut self, text: &str, cx: &mut Context<Self>) {
+        if self.text_edit.is_none() { return }
+        let text = text.replace("\\n", "\n");
+        self.text_input.update(cx, |input, cx| {
+            let text = format!("{}{text}", input.text());
+            input.set_text(&text, cx);
+        });
+    }
+
+    /// A text box as its page draws it at `scale`: filled, edged and written in its colours, its words wrapped
+    /// to its width (the field they are being written in, `writing`). What they take is measured as drawn
+    /// (`measured_text`), so the box stands as tall as they are.
+    fn text_box(&self, key: String, rect: [f32; 4], style: &TextStyle, text: Option<SharedString>, scale: f32, cx: &mut Context<Self>) -> Div {
+        let [x0, y0, x1, y1] = handles::normal(rect);
+        let border = (style.border != "none").then(|| (0.9 * scale).clamp(1., 3.));
+        let edge = border.unwrap_or(0.);
+        let (pad, width) = (TEXT_PAD * scale, ((x1 - x0) * scale - 2. * edge).max(2.));
+        let view = cx.entity().downgrade();
+        let measure = canvas(move |bounds, window, cx| {
+            let tall = (f32::from(bounds.size.height) + 2. * edge) / scale;
+            window.defer(cx, move |_, cx| { view.update(cx, |this, cx| this.measured_text(key, tall, cx)).ok(); });
+        }, |_, _, _, _| {}).absolute().top_0().left_0().size_full();
+        // The words' own width in pixels: a wrapping field under widths that are all percentages would be measured at 240.
+        let inner = div().w(px((width - 2. * pad).max(1.)));
+        let words = match text { Some(text) => inner.child(text), None => inner.child(self.text_input.clone()) };
+        div().absolute().left(px(x0 * scale)).top(px(y0 * scale)).w(px((x1 - x0) * scale)).h(px((y1 - y0) * scale)).overflow_hidden().rounded(px(2.)).bg(Theme::text_fill(&style.fill))
+            .when_some(border, |d, edge| d.border(px(edge)).border_color(Theme::text_border(&style.border)))
+            .child(div().relative().w(px(width)).p(px(pad)).text_size(px(TEXT_PT * scale)).line_height(px(TEXT_PT * TEXT_LEADING * scale)).text_color(Theme::text_ink(&style.ink)).child(words).child(measure))
     }
 
     /// The mark placed on the page under a point of a 0-based page, and where it is held: the chosen one by a
@@ -999,7 +1167,9 @@ impl PdfView {
                 let side = NOTE_ICON / scale;
                 return (x >= rect[0] && x <= rect[0] + side && y >= rect[1] && y <= rect[1] + side).then(|| (a.id.clone(), Grab::Body));
             }
-            handles::on_edge(rect, (x, y), reach).then(|| (a.id.clone(), Grab::Body))
+            // A text box is not hollow: what it holds is its own, so a press anywhere on it takes it.
+            let within = a.kind == Kind::Text && x >= rect[0] && x <= rect[2] && y >= rect[1] && y <= rect[3];
+            (within || handles::on_edge(rect, (x, y), reach)).then(|| (a.id.clone(), Grab::Body))
         })
     }
 
@@ -1131,8 +1301,10 @@ impl PdfView {
         self.annotation_edit = None;
         self.mark_menu = None;
         (self.shape_drag, self.shape_shown, self.drawing) = (None, None, None);
-        // A box sized or recoloured stays chosen, to go on with it; one removed goes.
+        // A box sized or recoloured stays chosen, to go on with it; one removed goes. A text box just written and put away with Esc is chosen.
+        if let Some((page, rect)) = self.text_choose.take() && let Some(a) = self.annotations.iter().rev().find(|a| a.kind == Kind::Text && a.page == page + 1 && a.boxes.first().is_some_and(|b| same_place(*b, rect))) { self.chosen = Some(a.id.clone()) }
         if self.chosen_mark().is_none() { self.chosen = None }
+        if self.text_palette.as_ref().is_some_and(|(id, _)| self.chosen.as_ref() != Some(id)) { self.text_palette = None }
         // A note just kept, or one whose text was saved, stays open to read; one gone goes with its card.
         if self.note_open.as_ref().is_some_and(|id| !self.annotations.iter().any(|a| &a.id == id)) { self.note_open = None }
         (self.note_draft, self.note_editing) = (None, false);
@@ -1749,8 +1921,11 @@ impl PdfView {
         let free = self.tool == Tool::Select && !cutting;
         // A piece marked to be cut out later is a dashed frame in the accent, and says it can be clicked; one kept
         // in the figure library since is in the colour of a figure kept.
-        let rects: Vec<&Annotation> = self.annotations.iter().filter(|a| a.page == index + 1 && sizable(a.kind)).collect();
-        let shapes: Vec<Div> = rects.iter().map(|a| {
+        // The text box being written in is drawn apart, with its field, and has no handles meanwhile.
+        let writing = self.text_edit.clone().filter(|edit| edit.page == index);
+        let written = writing.as_ref().and_then(|edit| edit.id.clone());
+        let rects: Vec<&Annotation> = self.annotations.iter().filter(|a| a.page == index + 1 && sizable(a.kind) && written.as_ref() != Some(&a.id)).collect();
+        let shapes: Vec<Div> = rects.iter().filter(|a| a.kind != Kind::Text).map(|a| {
             let [x0, y0, x1, y1] = self.rect_of(a);
             let marked = a.kind == Kind::Cut;
             let color = if !marked { Theme::highlight_swatch(&a.color) } else if self.kept_at(index, [x0, y0, x1, y1]) { Theme::success() } else { Theme::accent() };
@@ -1759,8 +1934,23 @@ impl PdfView {
                 .when(marked, |d| d.border_dashed().when(self.tool == Tool::Select, |d| d.cursor_pointer()).when(picked, |d| d.bg(Theme::selection())))
         }).collect();
         // The chosen one's last, so its handles stand over a box that overlaps it.
-        let mut grips: Vec<Div> = if free { rects.iter().filter(|a| chosen != Some(a.id.as_str())).map(|a| rect_grips(self.rect_of(a), scale, false)).collect() } else { vec![] };
-        if free && let Some(a) = rects.iter().find(|a| chosen == Some(a.id.as_str())) { grips.push(rect_grips(self.rect_of(a), scale, true)) }
+        let mut grips: Vec<Div> = if free { rects.iter().filter(|a| chosen != Some(a.id.as_str())).map(|a| rect_grips(self.rect_of(a), scale, false, a.kind == Kind::Text)).collect() } else { vec![] };
+        if free && let Some(a) = rects.iter().find(|a| chosen == Some(a.id.as_str())) { grips.push(rect_grips(self.rect_of(a), scale, true, a.kind == Kind::Text)) }
+        // Text boxes, their words on the page in their own colours, the last made on top; the one being written
+        // holds its field, ringed in the accent, and a press on it is the field's (to place the caret, select words).
+        let texts: Vec<Div> = rects.iter().filter(|a| a.kind == Kind::Text).map(|a| self.text_box(a.id.clone(), self.rect_of(a), &a.style.clone().unwrap_or_default(), Some(a.note.clone().into()), scale, cx)).collect();
+        let writing = writing.and_then(|edit| {
+            let (key, rect, style) = match &edit.id {
+                Some(id) => {
+                    let a = self.annotations.iter().find(|a| &a.id == id)?;
+                    (id.clone(), self.rect_of(a), a.style.clone().unwrap_or_default())
+                }
+                None => (String::new(), self.grown("", edit.rect), self.text_style.clone()),
+            };
+            let [x0, y0, x1, y1] = rect;
+            let ring = div().absolute().left(px(x0 * scale - 3.)).top(px(y0 * scale - 3.)).w(px((x1 - x0) * scale + 6.)).h(px((y1 - y0) * scale + 6.)).border_1().border_dashed().border_color(Theme::accent()).rounded(px(3.));
+            Some(div().absolute().inset_0().child(ring).child(self.text_box(key, rect, &style, None, scale, cx).cursor_text().on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())))
+        });
         // The figures kept from this page: a dashed frame in the colour of a figure kept, its number on the corner.
         // It takes no clicks: what it frames is still the page's, to select and copy. A mark at the same place draws it.
         // Its number is what is clicked to open the figure again, to change it, frame it anew or take it out.
@@ -1782,9 +1972,16 @@ impl PdfView {
             let [x0, y0, x1, y1] = c.rect;
             div().absolute().left(px(x0 * scale)).top(px(y0 * scale)).w(px((x1 - x0) * scale)).h(px((y1 - y0) * scale)).border_2().border_color(Theme::accent()).bg(Theme::selection())
         });
-        if free && let Some(c) = self.collecting.as_ref().filter(|c| c.page == index + 1) { grips.push(rect_grips(c.rect, scale, true)) }
-        // A box being drawn.
-        let drawing = self.drawing.filter(|(page, _)| *page == index).map(|(_, [x0, y0, x1, y1])| div().absolute().left(px(x0.min(x1) * scale)).top(px(y0.min(y1) * scale)).w(px((x1 - x0).abs() * scale)).h(px((y1 - y0).abs() * scale)).border_2().border_color(Theme::highlight_swatch(wisp_core::annotation::BOX_COLOR)).rounded(px(2.)));
+        if free && let Some(c) = self.collecting.as_ref().filter(|c| c.page == index + 1) { grips.push(rect_grips(c.rect, scale, true, false)) }
+        // A box being drawn; a text box being drawn in the colours it will have.
+        let drawing = self.drawing.filter(|(page, _)| *page == index).map(|(_, [x0, y0, x1, y1])| {
+            let frame = div().absolute().left(px(x0.min(x1) * scale)).top(px(y0.min(y1) * scale)).w(px((x1 - x0).abs() * scale)).h(px((y1 - y0).abs() * scale)).rounded(px(2.));
+            if self.tool == Tool::Text {
+                frame.bg(Theme::text_fill(&self.text_style.fill)).border_1().border_dashed().border_color(if self.text_style.border == "none" { Theme::accent() } else { Theme::text_border(&self.text_style.border) })
+            } else {
+                frame.border_2().border_color(Theme::highlight_swatch(wisp_core::annotation::BOX_COLOR))
+            }
+        });
         // Sticky notes, folded to an icon at their spot; the open one ringed. A note being written shows where it will go.
         let open = self.note_open.clone();
         let mut notes: Vec<Div> = self.annotations.iter().filter(|a| a.page == index + 1 && a.kind == Kind::Note).map(|a| {
@@ -1837,7 +2034,7 @@ impl PdfView {
             return div().w_full().flex().pb(px(PAGE_GAP)).child(sheet).into_any_element();
         }
         let sheet = match image {
-            Some((image, _)) => sheet.when(cutting || !free, |d| d.cursor_crosshair()).when(free, |d| d.cursor_text()).child(img(image).w(px(width)).h(px(height))).children(annotations).children(spoken).children(selected).children(marks).children(found).children(kept).children(collecting).children(cut).children(shapes).children(drawing).children(notes).children(grips),
+            Some((image, _)) => sheet.when(cutting || !free, |d| d.cursor_crosshair()).when(free, |d| d.cursor_text()).child(img(image).w(px(width)).h(px(height))).children(annotations).children(spoken).children(selected).children(marks).children(found).children(kept).children(collecting).children(cut).children(shapes).children(texts).children(drawing).children(notes).children(grips).children(writing),
             None => sheet.flex().items_center().justify_center().text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(if self.broken.contains(&index) { tf!("第 {} 页无法渲染", "Cannot render page {}", index + 1) } else { tf!("第 {} 页", "Page {}", index + 1) }),
         };
         // Draw over the image without changing its size or covering the text.
@@ -1889,6 +2086,8 @@ impl PdfView {
     /// starts there; on a box or a note, that is taken hold of.
     fn press(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.focus);
+        // A press beside the text box being written in ends the writing (one on it is the field's own).
+        self.finish_text(false, cx);
         cx.emit(PdfEvent::Worked);
         cx.emit(PdfEvent::Pressed);
         (self.selection, self.selecting, self.translation, self.pressed_mark, self.shape_drag, self.frame_drag, self.mark_menu) = (None, false, None, None, None, None, None);
@@ -1913,7 +2112,7 @@ impl PdfView {
             return cx.notify();
         };
         match self.tool {
-            Tool::Box => {
+            Tool::Box | Tool::Text => {
                 self.drawing = Some((page, [x, y, x, y]));
                 self.selecting = true;
                 return cx.notify();
@@ -1930,7 +2129,7 @@ impl PdfView {
         }
         // The frame of the figure in the dialog: its handles size it, its edge moves it.
         if let Some(grab) = self.frame_at(page, x, y) && let Some(c) = self.collecting.as_ref() {
-            self.frame_drag = Some(ShapeDrag { id: String::new(), page, rect: c.rect, grab, from: (x, y), moved: false });
+            self.frame_drag = Some(ShapeDrag { id: String::new(), page, rect: c.rect, grab, from: (x, y), moved: false, again: false });
             self.selecting = true;
             return cx.notify();
         }
@@ -1938,8 +2137,12 @@ impl PdfView {
         // show while it is dragged: by a handle it is sized, by its edge moved. A note dragged moves, clicked opens.
         if let Some((id, grab)) = self.shape_at(page, x, y) && let Some(a) = self.annotations.iter().find(|a| a.id == id) {
             let rect = self.rect_of(a);
+            // A text box clicked when chosen, or double-clicked, is written in once the button comes up (`release`): a
+            // field given the keyboard on the press loses it again before the press is over.
+            let again = self.chosen.as_deref() == Some(id.as_str()) || (a.kind == Kind::Text && event.click_count >= 2);
+            if !again { self.text_palette = None }
             self.chosen = sizable(a.kind).then(|| id.clone());
-            self.shape_drag = Some(ShapeDrag { id, page, rect, grab, from: (x, y), moved: false });
+            self.shape_drag = Some(ShapeDrag { id, page, rect, grab, from: (x, y), moved: false, again });
             self.selecting = true;
             return cx.notify();
         }
@@ -1980,9 +2183,9 @@ impl PdfView {
     }
 
     /// The pointer moved with the button held: the selection reaches to the glyph under it, on the page it began on.
-    fn drag(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+    fn drag(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
         if !self.selecting { return }
-        if event.pressed_button != Some(MouseButton::Left) { return self.release(None, cx) }
+        if event.pressed_button != Some(MouseButton::Left) { return self.release(None, window, cx) }
         // A mark or the dialog's frame held follows the pointer on its own page, wherever the pointer goes
         // (off the page, onto the next, out of the viewer): it stays on its page, at the page's edge.
         if let Some(held_page) = self.shape_drag.as_ref().or(self.frame_drag.as_ref()).map(|held| held.page) {
@@ -2021,7 +2224,7 @@ impl PdfView {
 
     /// The button came up, at `at` in the window when it is known: a pointer that never left its glyph
     /// selected nothing, and one that went down on a highlight and came up close by clicked it.
-    fn release(&mut self, at: Option<Point<Pixels>>, cx: &mut Context<Self>) {
+    fn release(&mut self, at: Option<Point<Pixels>>, window: &mut Window, cx: &mut Context<Self>) {
         let pressed = self.pressed_mark.take();
         if !std::mem::take(&mut self.selecting) && pressed.is_none() { return }
         // The dialog's frame let go of: the piece it frames now goes to the dialog.
@@ -2040,12 +2243,27 @@ impl PdfView {
                 (true, Some((id, rect))) if id == held.id && rect != held.rect => cx.emit(PdfEvent::MoveShape { resource: self.resource_id.clone(), id, rect }),
                 (true, _) => self.shape_shown = None,
                 (false, _) => {
-                    if self.annotations.iter().any(|a| a.id == held.id && a.kind == Kind::Note) {
+                    let kind = self.annotations.iter().find(|a| a.id == held.id).map(|a| a.kind);
+                    if kind == Some(Kind::Note) {
                         if self.note_open.as_deref() == Some(held.id.as_str()) { self.close_note() } else { (self.note_open, self.note_draft, self.note_editing) = (Some(held.id.clone()), None, false) }
                     }
+                    // A text box clicked once is chosen; clicked again, it is written in.
+                    if kind == Some(Kind::Text) && held.again { return self.start_text(TextEdit { id: Some(held.id), page: held.page, rect: held.rect }, window, cx) }
                 }
             }
             return cx.notify();
+        }
+        // A text box drawn is written in at once, one to a click of the tool, as a sticky note; a click makes one of
+        // `TEXT_NEW` size there, on the page.
+        if self.tool == Tool::Text && let Some((page, rect)) = self.drawing.take() {
+            let [x0, y0, x1, y1] = handles::normal(rect);
+            let rect = if x1 - x0 >= 8. && y1 - y0 >= 8. { [x0, y0, x1, y1] } else {
+                let (w, h) = self.sizes.get(page).copied().unwrap_or((595., 842.));
+                let (left, top) = (x0.min(w - TEXT_NEW.0).max(0.), y0.min(h - TEXT_NEW.1).max(0.));
+                [left, top, (left + TEXT_NEW.0).min(w), (top + TEXT_NEW.1).min(h)]
+            };
+            self.tool = Tool::Select;
+            return self.start_text(TextEdit { id: None, page, rect }, window, cx);
         }
         // A box drawn: one too small to frame anything was a slip of the hand. The tool stays on for the next one.
         if let Some((page, [x0, y0, x1, y1])) = self.drawing.take() && (x1 - x0).abs() >= 8. && (y1 - y0).abs() >= 8. {
@@ -2087,6 +2305,7 @@ impl PdfView {
 
     /// Cut pieces out of pages with the pointer, or go back to selecting text.
     pub fn toggle_cutting(&mut self, cx: &mut Context<Self>) {
+        self.finish_text(false, cx);
         self.cutting = !self.cutting;
         (self.tool, self.drawing, self.mark_menu, self.chosen) = (Tool::Select, None, None, None);
         self.close_note();
@@ -2490,8 +2709,8 @@ impl PdfView {
             .h(size.height)
             .occlude()
             .cursor(grab_cursor(grab))
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| this.drag(event, cx)))
-            .on_mouse_up(MouseButton::Left, cx.listener(|this, event: &MouseUpEvent, _, cx| this.release(Some(event.position), cx)));
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| this.drag(event, window, cx)))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, event: &MouseUpEvent, window, cx| this.release(Some(event.position), window, cx)));
         Some(deferred(anchored().position(point(px(0.), px(0.))).child(layer)).with_priority(3).into_any_element())
     }
 
@@ -2512,6 +2731,14 @@ impl PdfView {
         let scale = self.scale_of(menu.page);
         let (x, y) = self.sheet_place(menu.page)?;
         const HEIGHT: f32 = 34.;
+        if mark.kind == Kind::Text {
+            let open = self.text_palette.as_ref().filter(|(id, _)| *id == mark.id).map(|(_, part)| *part);
+            let tall = if open.is_some() { HEIGHT * 2. } else { HEIGHT };
+            let below = y + menu.line.1 * scale + gap;
+            let top = if below + tall + 8. <= self.height { below } else { y + menu.line.0 * scale - gap - tall };
+            let left = (x + menu.x * scale).clamp(8., (self.width - 400.).max(8.));
+            return Some(self.text_menu(mark, open, left, top.clamp(8., (self.height - tall - 8.).max(8.)), cx));
+        }
         let marked = mark.kind == Kind::Cut;
         let button = |id: &'static str, label: &'static str| div().id(id).flex().flex_none().items_center().h(text_px(26.)).px(px(9.)).rounded(px(6.)).cursor_pointer().hover(|s| s.bg(Theme::hover())).child(label);
         let below = y + menu.line.1 * scale + gap;
@@ -2562,6 +2789,61 @@ impl PdfView {
         )
     }
 
+    /// The menu of a text box chosen: its three colours, each a chip that opens its swatches in a row under it,
+    /// writing in it again, and 删除文本框.
+    fn text_menu(&self, mark: &Annotation, open: Option<TextPart>, left: f32, top: f32, cx: &mut Context<Self>) -> AnyElement {
+        let style = mark.style.clone().unwrap_or_default();
+        let button = |id: &'static str, label: &'static str| div().id(id).flex().flex_none().items_center().h(text_px(26.)).px(px(9.)).rounded(px(6.)).cursor_pointer().hover(|s| s.bg(Theme::hover())).child(label);
+        let rule = || div().flex_none().w(px(1.)).h(px(16.)).mx(px(4.)).bg(Theme::line());
+        let parts = TextPart::ALL.into_iter().map(|part| {
+            let key = style.get(part).to_string();
+            div().id(SharedString::from(format!("pdf-text-{}", text_part_name(part))))
+                .flex().flex_none().items_center().gap(px(5.)).h(text_px(26.)).px(px(7.)).rounded(px(6.)).cursor_pointer().hover(|s| s.bg(Theme::hover()))
+                .when(open == Some(part), |d| d.bg(Theme::hover()))
+                .child(text_swatch(part, &key, 14.)).child(t(text_part_name(part))).child(ui::icon("chevron-down", 12., Theme::text_tertiary()))
+                .tooltip(ui::tip(tf!("{}颜色：{}", "{} colour: {}", t(text_part_name(part)), t(text_color_name(&key)))))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    let Some(id) = this.chosen.clone() else { return };
+                    this.text_palette = if this.text_palette.as_ref().is_some_and(|(_, was)| *was == part) { None } else { Some((id, part)) };
+                    cx.notify();
+                }))
+        });
+        let palette = open.map(|part| {
+            let now = style.get(part).to_string();
+            div().flex().items_center().gap(px(1.)).pt(px(3.)).mt(px(2.)).border_t_1().border_color(Theme::line()).children(part.keys().iter().map(|&key| {
+                div().id(SharedString::from(format!("pdf-text-{key}"))).flex().flex_none().items_center().justify_center().size(px(26.)).rounded_full().cursor_pointer().hover(|s| s.bg(Theme::hover()))
+                    .when(now == key, |d| d.border_2().border_color(Theme::text_secondary()))
+                    .child(text_swatch(part, key, 16.)).tooltip(ui::tip(t(text_color_name(key))))
+                    .on_click(cx.listener(move |this, _, _, cx| this.restyle_text(part, key, cx)))
+            }))
+        });
+        let (id, page, rect) = (mark.id.clone(), mark.page.saturating_sub(1), self.rect_of(mark));
+        div()
+            .id("pdf-mark-menu")
+            .absolute()
+            .left(px(left))
+            .top(px(top))
+            .flex()
+            .flex_col()
+            .p(px(3.))
+            .rounded(px(8.))
+            .bg(Theme::bg_body())
+            .border_1()
+            .border_color(Theme::line_strong())
+            .shadow(crate::theme::shadow_card())
+            .text_size(text_px(12.))
+            .occlude()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(div().flex().items_center().gap(px(1.))
+                .children(parts)
+                .child(rule())
+                .child(button("pdf-text-write", t("编辑文字")).on_click(cx.listener(move |this, _, window, cx| this.start_text(TextEdit { id: Some(id.clone()), page, rect }, window, cx))))
+                .child(rule())
+                .child(button("pdf-mark-remove", t("删除文本框")).text_color(Theme::danger()).on_click(cx.listener(|this, _, _, cx| this.remove_mark(cx)))))
+            .children(palette)
+            .into_any_element()
+    }
+
     /// A bounded, scrollable list also lets a mark be found after reopening
     /// the file, without depending on a hit target over the PDF text.
     fn annotation_panel(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
@@ -2573,13 +2855,13 @@ impl PdfView {
                 let (page, top) = (annotation.page, annotation.boxes.first().map(|b| b[1]).unwrap_or(0.));
                 let note = annotation.note.clone();
                 let editing = self.annotation_edit.as_deref() == Some(id.as_str());
-                let kind = match annotation.kind { Kind::Underline => t("下划线"), Kind::Highlight => t("高亮"), Kind::Box => t("方框"), Kind::Note => t("便签"), Kind::Cut => t("截图标记") };
+                let kind = match annotation.kind { Kind::Underline => t("下划线"), Kind::Highlight => t("高亮"), Kind::Box => t("方框"), Kind::Note => t("便签"), Kind::Cut => t("截图标记"), Kind::Text => t("文本框") };
                 div().id(SharedString::from(id)).p(px(10.)).border_b_1().border_color(Theme::line()).flex().flex_col().gap(px(7.))
                     .child(div().flex().flex_wrap().items_center().gap(px(4.))
                         .children(matches!(annotation.kind, Kind::Highlight | Kind::Box).then(|| div().flex_none().size(px(8.)).mr(px(2.)).rounded_full().bg(Theme::highlight_swatch(&annotation.color))))
                         .child(div().flex_1().text_color(Theme::text_secondary()).child(tf!("第 {page} 页 · {kind}", "Page {page} · {kind}")))
                         .child(button("annotation-locate", t("定位")).on_click(cx.listener(move |this, _, _, cx| this.go_to_place(page, top, cx))))
-                        .child(button("annotation-edit", t("笔记")).on_click(cx.listener(move |this, _, _, cx| {
+                        .child(button("annotation-edit", if annotation.kind == Kind::Text { t("文字") } else { t("笔记") }).on_click(cx.listener(move |this, _, _, cx| {
                             this.annotation_edit = Some(edit_id.clone());
                             this.annotation_note.update(cx, |input, cx| input.set_text(&note, cx));
                             cx.notify();
@@ -2594,7 +2876,7 @@ impl PdfView {
                         .child(button("annotation-cancel", t("取消")).on_click(cx.listener(|this, _, _, cx| { this.annotation_edit = None; cx.notify(); })))))
             });
             div().id("pdf-annotations-list").w_full().max_h(px((self.height - 70.).max(0.))).overflow_y_scroll().bg(Theme::bg_body()).border_1().border_color(Theme::line_strong()).rounded(px(8.))
-                .when(self.annotations.is_empty(), |d| d.child(div().p(px(12.)).text_color(Theme::text_secondary()).child(t("选中 PDF 文字后，可添加下划线或高亮；「方框」「便签」两个工具可以框出区域、在任意位置记笔记。"))))
+                .when(self.annotations.is_empty(), |d| d.child(div().p(px(12.)).text_color(Theme::text_secondary()).child(t("选中 PDF 文字后，可添加下划线或高亮；「方框」「便签」「文本框」三个工具可以框出区域、在任意位置记笔记，或直接把字写在页面上。"))))
                 .children(rows)
         });
         div().absolute().top(px(8.)).right(px(8.)).max_w(px(width)).flex().flex_col().items_end().gap(px(6.)).text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text()).occlude()
@@ -2630,6 +2912,19 @@ impl PdfView {
         if (self.height - height).abs() <= 0.5 { return }
         self.resize((0., 0.), |this| this.height = height);
         cx.notify();
+    }
+}
+
+/// A colour of a text box to choose it by, `size` across: the fill as a disc, the border as a ring, the words as
+/// a letter; `none` an empty ring with a cross. Ringed in the menu's line, so white shows on a light menu and
+/// black on a dark one.
+fn text_swatch(part: TextPart, key: &str, size: f32) -> Div {
+    let chip = div().flex().flex_none().items_center().justify_center().size(px(size)).rounded_full();
+    if key == "none" { return chip.border_1().border_color(Theme::line_strong()).child(ui::icon("x", size * 0.7, Theme::text_tertiary())) }
+    match part {
+        TextPart::Fill => chip.bg(Theme::text_fill(key)).border_1().border_color(Theme::line_strong()),
+        TextPart::Border => chip.border(px((size / 5.).round())).border_color(Theme::text_border(key)),
+        TextPart::Ink => chip.bg(Theme::text_fill("white")).border_1().border_color(Theme::line_strong()).text_size(px(size * 0.72)).font_weight(FontWeight::BOLD).text_color(Theme::text_ink(key)).child("A"),
     }
 }
 
@@ -2715,15 +3010,17 @@ impl Render for PdfView {
             .on_action(cx.listener(|this, _: &CopySelection, _, cx| this.copy(cx)))
             .on_action(cx.listener(|this, _: &FindInPdf, window, cx| this.open_finder(None, false, window, cx)))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::press))
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| this.drag(event, cx)))
-            .on_mouse_up(MouseButton::Left, cx.listener(|this, event: &MouseUpEvent, _, cx| this.release(Some(event.position), cx)))
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| this.drag(event, window, cx)))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, event: &MouseUpEvent, window, cx| this.release(Some(event.position), window, cx)))
             // Delete (or Backspace) removes the mark chosen, or the highlight whose menu is open; with neither, the key
             // goes on to the window (the paper selected to the trash). A text field of the viewer hears its own first.
             .on_action(cx.listener(|this, _: &RemoveChosen, _, cx| if this.menu_id().is_some() { this.remove_mark(cx) } else { cx.propagate() }))
             // Esc puts a highlight's menu away before it does anything else.
             // Then lets a chosen mark go, then a note's card, then a tool in use.
             .on_action(cx.listener(|this, _: &crate::shortcuts::Dismiss, window, cx| {
-                if this.mark_menu.take().is_some() || this.chosen.take().is_some() {
+                if this.text_edit.is_some() {
+                    this.finish_text(true, cx);
+                } else if this.mark_menu.take().is_some() || this.text_palette.take().is_some() || this.chosen.take().is_some() {
                 } else if this.note_open.is_some() || this.note_draft.is_some() {
                     this.close_note();
                 } else if this.finder.is_some() {

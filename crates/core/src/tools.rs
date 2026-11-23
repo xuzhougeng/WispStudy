@@ -129,12 +129,12 @@ pub fn catalog() -> Vec<ToolDef> {
         scoped(
             "list_pdf_annotations",
             "读取 PDF 标注",
-            "读取用户在 PDF 上保存的下划线、高亮、方框、便签、截图标记（cut：用户圈出来准备截图的区域，多是图或表）及笔记。quote 是选中的原文（方框、便签和截图标记为空），note 是用户的笔记或便签内容，不是论文结论。返回文献和附件 ID、1-based 页码、boxes（从页面左上角起的 PDF 点坐标 [left, top, right, bottom]：下划线和高亮每行一个，方框和截图标记是框住的区域，便签是它所在的点）、类型、颜色（color：yellow、green、blue、pink、purple、red、orange，是用户自己的分类；下划线和便签为空）和时间。回收站中的文献不返回。",
+            "读取用户在 PDF 上保存的下划线、高亮、方框、便签、文本框（text：用户直接写在页面上的一段文字）、截图标记（cut：用户圈出来准备截图的区域，多是图或表）及笔记。quote 是选中的原文（方框、便签、文本框和截图标记为空），note 是用户的笔记、便签内容或文本框里写的字，不是论文结论。返回文献和附件 ID、1-based 页码、boxes（从页面左上角起的 PDF 点坐标 [left, top, right, bottom]：下划线和高亮每行一个，方框、文本框和截图标记是框住的区域，便签是它所在的点）、类型、颜色（color：yellow、green、blue、pink、purple、red、orange，是用户自己的分类；下划线、便签和文本框为空；文本框的填充、边框和文字颜色在 style 的 fill、border、ink 里，none 表示没有）和时间。回收站中的文献不返回。",
             json!({
                 "paperId": {"type": "string", "description": "只返回这篇文献的标注。"},
                 "resourceId": {"type": "string", "description": "只返回这个 PDF 附件的标注，附件 ID 见 get_paper 的 files。"},
                 "page": {"type": "integer", "minimum": 1, "description": "只返回 PDF 的这一页（从 1 开始）。"},
-                "kind": {"type": "string", "enum": ["underline", "highlight", "box", "note", "cut"], "description": "只返回下划线、高亮、方框、便签或截图标记（cut）。"},
+                "kind": {"type": "string", "enum": ["underline", "highlight", "box", "note", "text", "cut"], "description": "只返回下划线、高亮、方框、便签、文本框（text）或截图标记（cut）。"},
                 "query": {"type": "string", "description": "在原文摘录和用户笔记中搜索；空格分开的每个词都必须出现。"},
                 "limit": {"type": "integer", "description": "最多返回多少条，默认 50，最多 500。"},
                 "offset": {"type": "integer", "description": "跳过多少条，用于翻页。"},
@@ -910,7 +910,7 @@ fn list_figures(store: &mut Store, info: &LibraryInfo, args: &Value) -> Result<V
 
 fn list_pdf_annotations(store: &Store, args: &Value) -> Result<Value> {
     let (paper, resource, kind) = (text(args, "paperId")?, text(args, "resourceId")?, text(args, "kind")?);
-    if !["", "underline", "highlight", "box", "note", "cut"].contains(&kind) { bail!("不支持的标注类型：{kind}") }
+    if !["", "underline", "highlight", "box", "note", "text", "cut"].contains(&kind) { bail!("不支持的标注类型：{kind}") }
     let page = number(args, "page", 0, usize::MAX)?;
     if !args["page"].is_null() && page == 0 { bail!("页码从 1 开始。") }
     let words = crate::figure::search_words(text(args, "query")?);
@@ -1962,6 +1962,12 @@ pub(crate) mod tests {
         assert_eq!(found["annotations"][0]["quote"], "Root growth");
         assert_eq!(found["annotations"][0]["boxes"], json!([[10., 20., 100., 30.]]));
         assert_eq!(found["annotations"][0]["color"], "");
+        // A text box written on the page is read with the rest: what it says is its note, its colours its style.
+        store.add_pdf_text(&paper, &file.id, 2, [20., 300., 200., 360.], "WOX5 marks the niche", &crate::annotation::TextStyle::default()).unwrap();
+        let texts = call(&root, "list_pdf_annotations", &json!({"kind": "text"})).unwrap();
+        assert_eq!((&texts["total"], &texts["annotations"][0]["note"], &texts["annotations"][0]["style"]["fill"], &texts["annotations"][0]["boxes"]), (&json!(1), &json!("WOX5 marks the niche"), &json!("yellow"), &json!([[20., 300., 200., 360.]])));
+        assert_eq!(call(&root, "list_pdf_annotations", &json!({"query": "niche"})).unwrap()["total"], 1);
+        store.remove_pdf_annotation(&file.id, texts["annotations"][0]["id"].as_str().unwrap()).unwrap();
         let highlight = store.pdf_annotations(&paper, &file.id).unwrap().into_iter().find(|a| a.kind == Kind::Highlight).unwrap();
         store.recolor_pdf_annotation(&file.id, &highlight.id, "blue").unwrap();
         let highlights = call(&root, "list_pdf_annotations", &json!({"kind": "highlight", "page": 2})).unwrap();
