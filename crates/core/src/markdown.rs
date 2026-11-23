@@ -348,6 +348,9 @@ pub struct Line {
     pub rule: bool,
     /// A line of fenced code, or a fence.
     pub code: bool,
+    /// The line is a picture, `![caption](figures/G1.png)`: where its address is, in bytes of the text.
+    /// Its words are the caption's; one without a caption says nothing.
+    pub picture: Option<Range<usize>>,
     pub pieces: Vec<Piece>,
 }
 
@@ -386,6 +389,16 @@ pub fn lines(text: &str) -> Vec<Line> {
         let syntax = |line: &mut Line, from: usize, to: usize, part: Part| {
             if to > from { line.pieces.push(piece(range.start + from..range.start + to, part)) }
         };
+        // A picture has the line to itself: its caption is the line's words.
+        if let Some((caption, address)) = picture_line(raw) {
+            line.picture = Some(range.start + address.start..range.start + address.end);
+            // Two pieces of syntax even around no caption: between them is where one is written.
+            syntax(&mut line, 0, caption.start, Part::Syntax);
+            pieces_of(&raw[caption.clone()], range.start + caption.start, &Marks::default(), &mut line.pieces);
+            syntax(&mut line, caption.end, raw.len(), Part::Syntax);
+            out.push(line);
+            continue;
+        }
         // Indentation stays as written: it is how far a list is nested.
         let indent = raw.len() - raw.trim_start_matches([' ', '\t']).len();
         if indent > 0 && indent < raw.len() {
@@ -435,22 +448,43 @@ pub fn lines(text: &str) -> Vec<Line> {
 /// A text without its Markdown: what `lines` reads as words, each line as
 /// it is drawn (a bullet as `•`, a rule as nothing).
 pub fn plain(text: &str) -> String {
-    lines(text)
+    lines(text).iter().map(|line| plain_line(text, line)).collect::<Vec<_>>().join("\n")
+}
+
+/// One line of `text` without its Markdown, as `plain` says it.
+pub fn plain_line(text: &str, line: &Line) -> String {
+    line.pieces
         .iter()
-        .map(|line| {
-            line.pieces
-                .iter()
-                .map(|piece| match piece.part {
-                    Part::Text => &text[piece.range.clone()],
-                    Part::Bullet => "•",
-                    // Code is kept whole, fences and all.
-                    Part::Syntax if line.code && !line.rule => &text[piece.range.clone()],
-                    Part::Syntax => "",
-                })
-                .collect::<String>()
+        .map(|piece| match piece.part {
+            Part::Text => &text[piece.range.clone()],
+            Part::Bullet => "•",
+            // Code is kept whole, fences and all.
+            Part::Syntax if line.code && !line.rule => &text[piece.range.clone()],
+            Part::Syntax => "",
         })
-        .collect::<Vec<_>>()
-        .join("\n")
+        .collect()
+}
+
+/// A line that is a picture and nothing else, `![caption](address)` or
+/// `![caption](address "title")`: where the caption and the address are in
+/// it, in bytes. The caption may hold brackets of its own (a citation); the
+/// address has no blank and no bracket.
+pub fn picture_line(line: &str) -> Option<(Range<usize>, Range<usize>)> {
+    let lead = line.len() - line.trim_start().len();
+    let body = line.trim();
+    if !body.starts_with("![") || !body.ends_with(')') { return None }
+    let mid = body.rfind("](")?;
+    let caption = &body[2..mid.max(2)];
+    if mid < 2 || caption.contains("](") { return None }
+    let inner = &body[mid + 2..body.len() - 1];
+    let written = inner.split_whitespace().next()?;
+    let address = written.trim_matches(['<', '>']);
+    if address.is_empty() || address.contains(['(', ')', '[', ']']) { return None }
+    // What follows the address is its title, in quotes, or nothing.
+    let after = inner[inner.find(written)? + written.len()..].trim();
+    if !after.is_empty() && !(after.len() >= 2 && after.starts_with(['"', '\'']) && after.ends_with(['"', '\''])) { return None }
+    let start = lead + mid + 2 + inner.find(address)?;
+    Some((lead + 2..lead + mid, start..start + address.len()))
 }
 
 /// What Enter goes on with in a line of a list or a quote.
@@ -803,5 +837,32 @@ mod tests {
         assert_eq!(next("Plain words."), None);
         assert_eq!(next("---"), None);
         assert_eq!(next("-"), None);
+    }
+
+    #[test]
+    fn a_picture_on_a_line_of_its_own() {
+        let read = |line: &str| picture_line(line).map(|(caption, address)| (line[caption].to_string(), line[address].to_string()));
+        let picture = |caption: &str, address: &str| Some((caption.to_string(), address.to_string()));
+        assert_eq!(read("![Root length under salt.](figures/G-1.png)"), picture("Root length under salt.", "figures/G-1.png"));
+        assert_eq!(read("  ![](figures/G-1.png)  "), picture("", "figures/G-1.png"));
+        // A citation in the caption, as written and as a Word file says it; a title after the address.
+        assert_eq!(read("![WOX5 marks the centre [@Zhang2021].](figures/G-2.jpg)"), picture("WOX5 marks the centre [@Zhang2021].", "figures/G-2.jpg"));
+        assert_eq!(read("![a (Zhang et al., 2021) [1]](<figures/G-2.jpg> \"Fig. 1\")"), picture("a (Zhang et al., 2021) [1]", "figures/G-2.jpg"));
+        // Words beside it, two on a line, a link, no address: not a picture's line.
+        for line in ["See ![a](figures/x.png)", "![a](figures/x.png) and more.", "![a](x.png) ![b](y.png)", "[a](figures/x.png)", "![a]()", "![a](x.png and more)", "![a](x(1).png)"] {
+            assert_eq!(read(line), None, "{line}");
+        }
+
+        let text = "Before.\n![Root *length*.](figures/G-1.png)\n![](figures/G-2.png)\n```\n![code](x.png)\n```";
+        let read = lines(text);
+        assert_eq!(read.iter().map(|line| line.picture.clone().map(|address| &text[address])).collect::<Vec<_>>(), vec![None, Some("figures/G-1.png"), Some("figures/G-2.png"), None, None, None]);
+        // The caption is the line's words, set as it says; a picture without one says nothing.
+        assert_eq!(plain(text), "Before.\nRoot length.\n\n```\n![code](x.png)\n```");
+        assert_eq!(read[2].pieces.iter().map(|piece| (&text[piece.range.clone()], piece.part)).collect::<Vec<_>>(), vec![("![", Part::Syntax), ("](figures/G-2.png)", Part::Syntax)]);
+        assert!(read[1].pieces.iter().any(|piece| piece.marks.italic && &text[piece.range.clone()] == "length"));
+        // Every byte of the line is in one piece, in order.
+        for line in &read[1..3] {
+            assert_eq!(line.pieces.iter().map(|piece| &text[piece.range.clone()]).collect::<String>(), &text[line.range.clone()]);
+        }
     }
 }

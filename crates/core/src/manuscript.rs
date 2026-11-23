@@ -243,6 +243,69 @@ pub fn paragraphs(text: &str) -> impl Iterator<Item = &str> {
     text.lines().map(str::trim).filter(|line| !line.is_empty())
 }
 
+/// A picture a section's text has on a line of its own (`markdown::picture_line`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PictureLine {
+    /// The line, in bytes of the text.
+    pub line: Range<usize>,
+    /// Its caption as written, Markdown and citations included; empty when it has none.
+    pub caption: String,
+    pub address: String,
+}
+
+/// The pictures of a section's text, in order. Fenced code is not looked into.
+pub fn picture_lines(body: &str) -> Vec<PictureLine> {
+    markdown::lines(body)
+        .into_iter()
+        .filter_map(|line| {
+            let address = line.picture.clone()?;
+            let (caption, _) = markdown::picture_line(&body[line.range.clone()])?;
+            Some(PictureLine { caption: body[line.range.start + caption.start..line.range.start + caption.end].to_string(), address: body[address].to_string(), line: line.range })
+        })
+        .collect()
+}
+
+/// Whether an address names a picture of the figure library: a file right
+/// under `figures/` in the library folder, and nothing that leads elsewhere.
+pub fn library_picture(address: &str) -> bool {
+    address.strip_prefix(&format!("{}/", crate::figure::FOLDER)).is_some_and(|file| !file.is_empty() && !file.starts_with('.') && !file.contains(['/', '\\', ':']))
+}
+
+/// The pictures of the figure library a manuscript shows, each once, in the order they stand.
+pub fn pictures_used(manuscript: &Manuscript) -> Vec<String> {
+    let mut used: Vec<String> = vec![];
+    for picture in manuscript.sections.iter().flat_map(|section| picture_lines(&section.body)) {
+        if library_picture(&picture.address) && !used.contains(&picture.address) { used.push(picture.address) }
+    }
+    used
+}
+
+/// The line that puts a picture into a section's text: its caption, on one
+/// line and without what would end it early, and its address.
+pub fn picture_markdown(caption: &str, address: &str) -> String {
+    let caption = caption.split_whitespace().collect::<Vec<_>>().join(" ").replace("](", "] (");
+    format!("![{caption}]({address})")
+}
+
+/// Where a picture's line goes into a text being written, and what is
+/// written there: after the paragraph the caret is in, a blank line apart
+/// from what stands before and after it. The byte the words go in at, the
+/// words, and how far into them the picture's line begins.
+pub fn place_picture(text: &str, caret: usize, line: &str) -> (usize, String, usize) {
+    let caret = text.floor_char_boundary(caret.min(text.len()));
+    let at = caret + text[caret..].find('\n').unwrap_or(text.len() - caret);
+    let (before, after) = (&text[..at], &text[at..]);
+    // Nothing there, or a blank line already: none is added.
+    let lead = if before.trim().is_empty() || before.ends_with("\n\n") { "" } else if before.ends_with('\n') { "\n" } else { "\n\n" };
+    let tail = if after.trim().is_empty() || after.starts_with("\n\n") { "" } else if after.starts_with('\n') { "\n" } else { "\n\n" };
+    (at, format!("{lead}{line}{tail}"), lead.len())
+}
+
+/// Whether a line is a picture without a caption: it says nothing of its own.
+fn bare_picture(body: &str, line: &markdown::Line) -> bool {
+    line.picture.is_some() && markdown::picture_line(&body[line.range.clone()]).is_some_and(|(caption, _)| body[line.range.start + caption.start..line.range.start + caption.end].trim().is_empty())
+}
+
 /// A section's text as Markdown to stand under a heading of level
 /// `under`: each line a paragraph of its own, as the editor has them, the
 /// items of a list and the lines of fenced code kept together, and a
@@ -308,7 +371,9 @@ pub fn plain_text(manuscript: &Manuscript) -> String {
     let mut out = format!("{}\n", manuscript.shown_title());
     for (name, body) in sections_with_text(manuscript) {
         out.push_str(&format!("\n{name}\n\n"));
-        out.push_str(&paragraphs(&markdown::plain(body)).collect::<Vec<_>>().join("\n\n"));
+        // A picture is its caption here; one without a caption says nothing.
+        let said: Vec<String> = markdown::lines(body).iter().filter(|line| !bare_picture(body, line)).map(|line| markdown::plain_line(body, line).trim().to_string()).filter(|line| !line.is_empty()).collect();
+        out.push_str(&said.join("\n\n"));
         out.push('\n');
     }
     out
@@ -409,7 +474,8 @@ pub fn docx(manuscript: &Manuscript) -> Vec<u8> {
     let mut body = paragraph("Title", manuscript.shown_title());
     for (name, text) in sections_with_text(manuscript) {
         body.push_str(&paragraph("Heading1", name));
-        for line in markdown::lines(text) { body.push_str(&word_paragraph(text, &line)) }
+        // A picture's line is its caption: the picture itself is put over it when the file is written (`wanted`).
+        for line in markdown::lines(text).iter().filter(|line| !bare_picture(text, line)) { body.push_str(&word_paragraph(text, line)) }
     }
     let document = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>{body}<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\" w:header=\"708\" w:footer=\"708\" w:gutter=\"0\"/></w:sectPr></w:body></w:document>"
@@ -731,10 +797,17 @@ pub struct Cites<'a> {
 /// With `cites` the citations are written for a reader: each one leads to
 /// its paper's entry in the reference list, which stands after the last
 /// section under a heading of the manuscript's language.
-pub fn wanted(manuscript: &Manuscript, source: Option<&Source>, comments: &[Comment], cites: Option<&Cites>) -> Vec<docx::Wanted> {
+///
+/// A picture's line (`picture_lines`) is its caption, with the picture
+/// `pictures` reads at its address over it; one without a caption stands
+/// under the paragraph before it. A picture that cannot be read leaves its
+/// caption alone.
+pub fn wanted(manuscript: &Manuscript, source: Option<&Source>, comments: &[Comment], cites: Option<&Cites>, pictures: &dyn Fn(&str) -> Option<docx::Picture>) -> Vec<docx::Wanted> {
     let mut out: Vec<docx::Wanted> = vec![];
     // Where each section's paragraphs are in `out`: its heading, and its lines.
     let mut places: Vec<(&str, Option<usize>, Range<usize>)> = vec![];
+    // Pictures without a caption met before any paragraph: they go over the first one.
+    let mut waiting: Vec<docx::Picture> = vec![];
     let paragraph = |text: &str, role: docx::Role| docx::Wanted { text: text.to_string(), role, ..Default::default() };
     let set = |rich: cite::Rich| docx::Wanted { text: rich.text, looks: rich.looks, links: rich.links.into_iter().map(|(range, to)| docx::Link { range, to }).collect(), ..Default::default() };
     match source {
@@ -752,10 +825,29 @@ pub fn wanted(manuscript: &Manuscript, source: Option<&Source>, comments: &[Comm
         });
         let start = out.len();
         // What a paragraph says, as the editor draws it: a Word file has its own bold and headings.
-        out.extend(paragraphs(&markdown::plain(&section.body)).map(|line| match cites {
-            Some(cites) => set(cites.format.rich(line, cites.index)),
-            None => paragraph(line, docx::Role::Body),
-        }));
+        let body = section.body.as_str();
+        for line in &markdown::lines(body) {
+            let said = markdown::plain_line(body, line);
+            let said = said.trim();
+            let picture = line.picture.as_ref().and_then(|address| pictures(&body[address.clone()]));
+            if bare_picture(body, line) {
+                // No caption to stand over: under the paragraph before it, or over the first one there will be.
+                match (picture, out.last_mut()) {
+                    (Some(picture), Some(last)) => last.below.push(picture),
+                    (Some(picture), None) => waiting.push(picture),
+                    (None, _) => {}
+                }
+                continue;
+            }
+            if said.is_empty() { continue }
+            let mut made = match cites {
+                Some(cites) => set(cites.format.rich(said, cites.index)),
+                None => paragraph(said, docx::Role::Body),
+            };
+            made.above.append(&mut waiting);
+            made.above.extend(picture);
+            out.push(made);
+        }
         places.push((section.id.as_str(), heading, start..out.len()));
     }
     for comment in comments.iter().filter(|comment| comment.origin != comment::FILE && comment.state != comment::DONE) {
@@ -839,7 +931,17 @@ impl Store {
     /// they name are listed after the last section under a heading of the
     /// manuscript's language: the file is for a reader, who has no keys.
     /// Each citation is a field that jumps to its entry in that list.
+    ///
+    /// The pictures the manuscript shows (`pictures_used`) are put into the
+    /// file; one whose file is gone, or is a WebP (which Word does not read),
+    /// is named in `Rewritten::left_out` and leaves its caption alone.
     pub fn manuscript_word(&self, manuscript: &Manuscript, comments: &[Comment], track: bool, author: &str, style: cite::Style) -> Result<(docx::Rewritten, bool)> {
+        let held: std::collections::HashMap<String, Option<docx::Picture>> = pictures_used(manuscript).into_iter().map(|address| {
+            let read = std::fs::read(self.root().join(address.replace('/', std::path::MAIN_SEPARATOR_STR))).ok().and_then(|bytes| docx::Picture::read(bytes).ok());
+            (address, read)
+        }).collect();
+        let pictures = |address: &str| held.get(address).cloned().flatten();
+        let left_out: Vec<String> = pictures_used(manuscript).into_iter().filter(|address| pictures(address).is_none()).collect();
         let (papers, trash, kept) = (self.list_papers()?, self.list_trash()?, self.cite_keys()?);
         let index = cite::Index::new(&papers, trash.iter().map(|entry| &entry.paper), &kept);
         let bodies: Vec<&str> = manuscript.sections.iter().map(|section| section.body.as_str()).collect();
@@ -848,7 +950,7 @@ impl Store {
         let source = self.manuscript_source(&manuscript.id)?.filter(|source| source.kind == "docx" && !source.path.is_empty());
         if let Some(source) = &source && let Ok(bytes) = std::fs::read(self.source_file(source)) {
             let options = docx::Options { track, author: author.to_string(), date: word_date(&now_iso()) };
-            return Ok((docx::rewrite(&bytes, &wanted(manuscript, Some(source), comments, Some(&cites)), &options)?, true));
+            return Ok((docx::Rewritten { left_out, ..docx::rewrite(&bytes, &wanted(manuscript, Some(source), comments, Some(&cites), &pictures), &options)? }, true));
         }
         // The document made here says what `wanted` says, the list included: what is written into it is the fields and the looks.
         let mut said = manuscript.clone();
@@ -857,7 +959,7 @@ impl Store {
             let body = format.references().iter().map(|(_, entry)| escape_markdown(&entry.text)).collect::<Vec<_>>().join("\n\n");
             said.sections.push(Section { name: format.heading().to_string(), kind: "other".into(), body, ..Default::default() });
         }
-        Ok((docx::rewrite(&docx(&said), &wanted(manuscript, None, comments, Some(&cites)), &docx::Options::default())?, false))
+        Ok((docx::Rewritten { left_out, ..docx::rewrite(&docx(&said), &wanted(manuscript, None, comments, Some(&cites), &pictures), &docx::Options::default())? }, false))
     }
 }
 
@@ -1475,7 +1577,7 @@ mod tests {
     fn word_file() -> Vec<u8> {
         let section = |name: &str, body: &str| Section { name: name.into(), kind: "other".into(), body: body.into(), ..Default::default() };
         let written = Manuscript { title: "Roots".into(), language: "en".into(), sections: vec![section("Introduction", "Roots grow down into the soil.\n\nThey take up water."), section("Methods", "We grew plants.")], ..Default::default() };
-        let mut paragraphs = wanted(&written, None, &[], None);
+        let mut paragraphs = wanted(&written, None, &[], None, &|_| None);
         paragraphs[1 + 1].notes.push(docx::Note { range: 11..15, author: "Li Hua".into(), date: "2026-01-02T03:04:05Z".into(), body: "How far down?".into() });
         docx::rewrite(&docx(&written), &paragraphs, &docx::Options::default()).unwrap().bytes
     }
@@ -1681,6 +1783,79 @@ mod tests {
         assert!(set.contains(r#"<w:r><w:rPr><w:i/></w:rPr><w:t xml:space="preserve">Nature Plants</w:t></w:r>"#), "{set}");
         // The manuscript itself keeps its keys.
         assert!(store.manuscript(&made.id).unwrap().unwrap().sections[1].body.contains("[@Zhang2024 p.2"));
+    }
+
+    #[test]
+    fn pictures_stand_in_the_manuscript_and_in_its_word_file() {
+        let root = std::env::temp_dir().join(format!("wisp-manuscript-pictures-{}", new_id("T")));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut store = Store::in_memory(&root).unwrap();
+        let paper = store.add_paper(crate::model::Paper { title: "Single-cell atlas of roots".into(), authors: "Zhang, Wei".into(), year: Some(2024), ..Default::default() }).unwrap();
+        store.keep_cite_key(&paper.id, "Zhang2024").unwrap();
+        // A PNG's first bytes, saying it is 2000 by 1000: wider than a page.
+        let mut png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR".to_vec();
+        png.extend(2000u32.to_be_bytes());
+        png.extend(1000u32.to_be_bytes());
+        png.extend([8, 2, 0, 0, 0]);
+        let mut own = crate::figure::Figure { origin: crate::figure::UPLOADED.into(), file_name: "fig1.png".into(), ..Default::default() };
+        store.add_figure(&mut own, &png).unwrap();
+        let mut second = crate::figure::Figure { origin: crate::figure::UPLOADED.into(), ..Default::default() };
+        store.add_figure(&mut second, &png).unwrap();
+
+        let line = picture_markdown("Root  length\nunder salt [@Zhang2024].", &own.local_path);
+        assert_eq!(line, format!("![Root length under salt [@Zhang2024].]({})", own.local_path));
+        assert_eq!(picture_markdown("a](b", "figures/x.png"), "![a] (b](figures/x.png)");
+        assert!(library_picture(&own.local_path) && !library_picture("figures/../library.json") && !library_picture("papers/a.png") && !library_picture("figures/") && !library_picture("https://example.org/a.png"));
+
+        // The line goes after the paragraph at the caret, a blank line apart from its neighbours.
+        let put = |text: &str, caret: usize| {
+            let (at, words, _) = place_picture(text, caret, "![](p.png)");
+            format!("{}{words}{}", &text[..at], &text[at..])
+        };
+        assert_eq!(put("", 0), "![](p.png)");
+        assert_eq!(put("One. Two.\n\nThree.", 3), "One. Two.\n\n![](p.png)\n\nThree.");
+        assert_eq!(put("One.\nTwo.", 9), "One.\nTwo.\n\n![](p.png)");
+        assert_eq!(put("One.\n\n\n\nTwo.", 5), "One.\n\n![](p.png)\n\n\nTwo.");
+        assert_eq!(put("根尖。\n", 99), "根尖。\n\n![](p.png)");
+        assert_eq!(place_picture("One.", 2, "![](p.png)").2, 2);
+
+        let made = store.create_manuscript("Roots", "en").unwrap();
+        let body = format!("Roots grow.\n\n{line}\n\n![]({})\n\n![Gone.](figures/G-gone.png)\n\n```\n![code](figures/x.png)\n```\n\nThey take up water.", second.local_path);
+        store.save_section_body(&made.sections[1].id, &body).unwrap();
+        let now = store.manuscript(&made.id).unwrap().unwrap();
+        let read = picture_lines(&body);
+        assert_eq!(read.iter().map(|picture| (picture.caption.as_str(), picture.address.as_str())).collect::<Vec<_>>(), vec![("Root length under salt [@Zhang2024].", own.local_path.as_str()), ("", second.local_path.as_str()), ("Gone.", "figures/G-gone.png")]);
+        assert_eq!(&body[read[0].line.clone()], line);
+        assert_eq!(pictures_used(&now), vec![own.local_path.clone(), second.local_path.clone(), "figures/G-gone.png".to_string()]);
+        // Copied as text, a picture is its caption; one without says nothing. The Markdown keeps the lines as written.
+        assert!(plain_text(&now).contains("Roots grow.\n\nRoot length under salt [@Zhang2024].\n\nGone.\n\n```"));
+        assert!(markdown(&now).contains(&format!("{line}\n\n![]({})", second.local_path)));
+
+        let (out, _) = store.manuscript_word(&now, &[], false, "Xu", cite::Style::AuthorYear).unwrap();
+        assert_eq!((out.pictures, out.left_out.clone()), (2, vec!["figures/G-gone.png".to_string()]));
+        // The caption is a paragraph, cited as the rest; the picture without one, and the address, say nothing.
+        let said: Vec<String> = docx::read(&out.bytes).unwrap().paragraphs.into_iter().map(|p| p.text).collect();
+        assert_eq!(said[..5], ["Roots", "Introduction", "Roots grow.", "Root length under salt (Zhang, 2024).", "Gone."]);
+        assert!(!said.iter().any(|text| text.contains("figures/G")) && said[5..8] == ["```", "![code](figures/x.png)", "```"], "{said:?}");
+        let zip = docx::Zip::read(&out.bytes).unwrap();
+        let xml = zip.text("word/document.xml").unwrap();
+        // Each picture is a paragraph of its own: the first over its caption, the second under it, scaled to the page.
+        let (first, caption, second_at) = (xml.find("r:embed=\"rIdWisp1\"").unwrap(), xml.find("Root length under salt").unwrap(), xml.find("r:embed=\"rIdWisp2\"").unwrap());
+        assert!(first < caption && caption < second_at && second_at < xml.find("Gone.").unwrap(), "{xml}");
+        assert!(xml.contains("<wp:extent cx=\"5486400\" cy=\"2743200\"/>"), "{xml}");
+        assert_eq!((zip.get("word/media/wisp1.png").unwrap(), zip.has("word/media/wisp2.png")), (Some(png.clone()), true));
+        assert!(zip.text("word/_rels/document.xml.rels").unwrap().contains("Id=\"rIdWisp2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/wisp2.png\""));
+        assert!(zip.text("[Content_Types].xml").unwrap().contains("<Default Extension=\"png\" ContentType=\"image/png\"/>"));
+
+        // A manuscript that came from a Word file gets the pictures put into that file.
+        let draft = from_word(&docx::read(&word_file()).unwrap(), "roots.docx");
+        let taken = store.import_manuscript(&draft, "docx", "roots.docx", Some(&word_file())).unwrap();
+        store.save_section_body(&taken.sections[0].id, &format!("Roots grow down into the soil.\n\n![Our roots.]({})\n\nThey take up water.", own.local_path)).unwrap();
+        let (out, from_file) = store.manuscript_word(&store.manuscript(&taken.id).unwrap().unwrap(), &[], false, "Xu", cite::Style::AuthorYear).unwrap();
+        assert!(from_file && (out.pictures, out.added, out.changed, out.removed) == (1, 1, 0, 0) && out.left_out.is_empty());
+        let xml = docx::Zip::read(&out.bytes).unwrap().text("word/document.xml").unwrap();
+        assert!(xml.find("into the soil").unwrap() < xml.find("<w:drawing>").unwrap() && xml.find("<w:drawing>").unwrap() < xml.find("Our roots.").unwrap() && xml.find("Our roots.").unwrap() < xml.find("They take up water.").unwrap(), "{xml}");
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]

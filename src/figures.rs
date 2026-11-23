@@ -104,6 +104,10 @@ pub struct FigureForm {
     fresh: bool,
     /// 生图: the picture is a model's, drawn from what is written here.
     pub draw: Option<Drawing>,
+    /// Opened from 写作's 资料库: closing it goes back there.
+    pub back: bool,
+    /// Brought in by the person, and the name of the file it was.
+    uploaded: Option<String>,
     /// Opened from the page (a piece just cut out, or the number on a figure kept): it stands beside the page.
     from_pdf: bool,
     /// A figure kept was framed anew on its page: `png`, `page` and `bbox` are kept with the words.
@@ -132,14 +136,14 @@ pub struct Drawing {
 }
 
 /// How a card's picture stands.
-enum Thumb {
+pub(crate) enum Thumb {
     Ready(Arc<RenderImage>),
     Loading,
     Broken,
 }
 
 /// A picture's pixels the way GPUI draws them (BGRA), scaled down to `longest` when larger.
-fn pixels(bytes: &[u8], longest: u32) -> Option<image::RgbaImage> {
+pub(crate) fn pixels(bytes: &[u8], longest: u32) -> Option<image::RgbaImage> {
     let picture = image::load_from_memory(bytes).ok()?;
     let picture = if picture.width().max(picture.height()) > longest { picture.resize(longest, longest, image::imageops::FilterType::Triangle) } else { picture };
     let mut pixels = picture.into_rgba8();
@@ -150,7 +154,7 @@ fn pixels(bytes: &[u8], longest: u32) -> Option<image::RgbaImage> {
 }
 
 /// The size a picture of `natural` pixels is drawn at inside `room`: whole, and never larger than it is.
-fn fit(natural: (f32, f32), room: (f32, f32)) -> (f32, f32) {
+pub(crate) fn fit(natural: (f32, f32), room: (f32, f32)) -> (f32, f32) {
     if natural.0 <= 0. || natural.1 <= 0. { return (0., 0.) }
     let scale = (room.0 / natural.0).min(room.1 / natural.1).min(1.);
     ((natural.0 * scale).max(1.), (natural.1 * scale).max(1.))
@@ -164,7 +168,7 @@ fn grid(width: f32) -> (usize, f32) {
 }
 
 /// Where a figure is from, in a line: who and when, then the title.
-fn source_line(paper: Option<&Paper>) -> String {
+pub(crate) fn source_line(paper: Option<&Paper>) -> String {
     let Some(paper) = paper else { return t("文献已不在库里").into() };
     let mut who = crate::i18n::short_authors(paper);
     if let Some(year) = paper.year { who = if who.is_empty() { year.to_string() } else { format!("{who} {year}") } }
@@ -180,6 +184,8 @@ fn file_name(paper: Option<&Paper>, figure: &Figure) -> String {
         if let Some(year) = paper.year { parts.push(year.to_string()) }
     }
     if !figure.label.is_empty() { parts.push(figure.label.clone()) }
+    // One the person brought in goes out under the name it came with.
+    if parts.is_empty() && let Some(stem) = std::path::Path::new(&figure.file_name).file_stem().and_then(|stem| stem.to_str()).filter(|stem| !stem.is_empty()) { parts.push(stem.to_string()) }
     let name = if parts.is_empty() { "figure".to_string() } else { parts.join(" ") };
     let extension = figure.local_path.rsplit('.').next().unwrap_or("png");
     format!("{}.{extension}", name.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "-").trim_end_matches('.'))
@@ -234,7 +240,7 @@ impl Workspace {
             Cmd::OpenFigure(id) => self.figure_dialog(&id, cx),
             Cmd::FigureSource(id) => {
                 let Some(figure) = self.lib.as_ref().and_then(|lib| lib.gallery.figure(&id)).cloned() else { return };
-                if figure.drawn() { return }
+                if figure.paper_id.is_empty() { return }
                 self.run(Cmd::CloseModal, window, cx);
                 if self.lib.as_ref().is_some_and(|lib| lib.paper(&figure.paper_id).is_none()) { return self.fail(t("这张图的文献已不在库里。"), cx) }
                 // The file it was cut from: an attachment's figure opens there, in the half that shows it when one does.
@@ -246,7 +252,7 @@ impl Workspace {
                 }
             }
             Cmd::AskFigure(id) => {
-                let Some((paper_id, path)) = self.lib.as_ref().and_then(|lib| lib.gallery.figure(&id).filter(|figure| !figure.drawn()).map(|figure| (figure.paper_id.clone(), lib.store.figure_path(figure)))) else { return };
+                let Some((paper_id, path)) = self.lib.as_ref().and_then(|lib| lib.gallery.figure(&id).filter(|figure| !figure.paper_id.is_empty()).map(|figure| (figure.paper_id.clone(), lib.store.figure_path(figure)))) else { return };
                 self.run(Cmd::CloseModal, window, cx);
                 self.run(Cmd::OpenPaper(paper_id, Tab::Ask), window, cx);
                 self.attach_images(crate::app::Talk::Paper, vec![Picture::File(path)], cx);
@@ -352,6 +358,8 @@ impl Workspace {
             asking: HashSet::new(),
             fresh: true,
             draw: None,
+            back: false,
+            uploaded: from.uploaded().then(|| from.file_name.clone()),
             from_pdf: false,
             reframed: false,
         }
@@ -764,7 +772,12 @@ impl Workspace {
             None if self.modal_error.is_empty() => ui::spinner("figure-large", 18., Theme::text_tertiary()).into_any_element(),
             None => ui::icon("image-broken", 30., Theme::text_placeholder()).into_any_element(),
         };
-        let mut where_from = if drawn { t("模型生成的图片，不出自任何文献").to_string() } else { source_line(paper) };
+        let mut where_from = match &form.uploaded {
+            Some(name) if name.is_empty() => t("我上传的图片").to_string(),
+            Some(name) => tf!("我上传的图片 · {name}", "Uploaded by me · {name}"),
+            None if drawn => t("模型生成的图片，不出自任何文献").to_string(),
+            None => source_line(paper),
+        };
         if form.page > 0 { where_from = tf!("第 {} 页 · {where_from}", "Page {} · {where_from}", form.page) }
         let tool = |id: &'static str, label: &'static str, cmd: Cmd, this: &Self, cx: &mut Context<Self>| ui::ghost_button(id, None, Some(label.into())).flex_none().h(text_px(26.)).text_size(text_px(12.)).on_click(this.on(cmd, cx));
         let under = div()
@@ -932,7 +945,7 @@ impl Workspace {
     // ---- the page
 
     /// A card's picture: the one read before, or its reading started (a few at a time; the rest when these are back).
-    fn figure_thumb(&mut self, id: &str, cx: &mut Context<Self>) -> Thumb {
+    pub(crate) fn figure_thumb(&mut self, id: &str, cx: &mut Context<Self>) -> Thumb {
         let Some(lib) = self.lib.as_mut() else { return Thumb::Broken };
         let gallery = &mut lib.gallery;
         if let Some(image) = gallery.thumbs.get(id).cloned() {
@@ -1045,6 +1058,7 @@ impl Workspace {
         };
         let papers = shown.iter().map(|&at| gallery.items[at].paper_id.as_str()).filter(|id| !id.is_empty()).collect::<HashSet<_>>().len();
         let drawn = shown.iter().filter(|&&at| gallery.items[at].drawn()).count();
+        let uploaded = shown.iter().filter(|&&at| gallery.items[at].uploaded()).count();
         let focused = gallery.search.focus_handle(cx).is_focused(window);
         div()
             .flex()
@@ -1077,12 +1091,17 @@ impl Workspace {
                         t("图片库是空的").to_string()
                     } else if count != total {
                         tf!("显示 {count} / {total} 张", "Showing {count} / {total} images")
-                    } else if drawn == 0 {
+                    } else if drawn + uploaded == 0 {
                         tf!("共 {total} 张，来自 {papers} 篇文献", "{total} images from {papers} papers")
-                    } else if papers == 0 {
+                    } else if papers + uploaded == 0 {
                         tf!("共 {total} 张，都是模型生成的", "{total} images, all drawn by a model")
                     } else {
-                        tf!("共 {total} 张，来自 {papers} 篇文献，其中 {drawn} 张是模型生成的", "{total} images from {papers} papers, {drawn} of them drawn by a model")
+                        // Where they are from, each kind there is some of.
+                        let mut from = vec![];
+                        if papers > 0 { from.push(tf!("{} 张来自 {papers} 篇文献", "{} from {papers} papers", total - drawn - uploaded)) }
+                        if uploaded > 0 { from.push(tf!("{uploaded} 张是自己上传的", "{uploaded} uploaded")) }
+                        if drawn > 0 { from.push(tf!("{drawn} 张是模型生成的", "{drawn} drawn by a model")) }
+                        tf!("共 {total} 张：{}", "{total} images: {}", from.join(if crate::i18n::is_english() { ", " } else { "，" }))
                     }))
                     .child(div().min_w_0().truncate().child(t("点开图片查看和修改 · 右键更多操作 · 在 PDF 工具栏点「截图」收藏新的"))),
             )
@@ -1113,7 +1132,13 @@ impl Workspace {
             Thumb::Broken => ui::icon("image-broken", 24., Theme::text_placeholder()).into_any_element(),
         };
         // The number the paper gives it; without one, where it is from stands in its place.
-        let source = if figure.drawn() { t("模型生成").to_string() } else { source_line(paper) };
+        let source = if figure.uploaded() {
+            if figure.file_name.is_empty() { t("我上传的").to_string() } else { tf!("我上传的 · {}", "Uploaded · {}", figure.file_name) }
+        } else if figure.drawn() {
+            t("模型生成").to_string()
+        } else {
+            source_line(paper)
+        };
         let (head, below) = if figure.label.is_empty() { (source.clone(), String::new()) } else { (figure.label.clone(), source) };
         let said = if !figure.legend.is_empty() { figure.legend.clone() } else { figure.notes.clone() };
         let tags: Vec<Div> = figure.tags.iter().take(4).map(|tag| ui::chip(tag.clone(), Theme::text_secondary(), Theme::bg_sunken()).h(text_px(20.)).text_size(text_px(11.))).collect();
@@ -1165,9 +1190,10 @@ impl Workspace {
         let id = id.to_string();
         let mut items = vec![item(t("查看与修改…"), Cmd::OpenFigure(id.clone()))];
         // A picture a model drew leads back to no paper, and there is none to ask about with it.
-        if !figure.drawn() { items.push(item(&if figure.page > 0 { tf!("打开原文第 {} 页", "Open source at page {}", figure.page) } else { t("打开所属文献").to_string() }, Cmd::FigureSource(id.clone()))) }
+        let cut = !figure.paper_id.is_empty();
+        if cut { items.push(item(&if figure.page > 0 { tf!("打开原文第 {} 页", "Open source at page {}", figure.page) } else { t("打开所属文献").to_string() }, Cmd::FigureSource(id.clone()))) }
         let mut breaks = vec![items.len()];
-        if !figure.drawn() { items.push(item(t("用这张图提问"), Cmd::AskFigure(id.clone()))) }
+        if cut { items.push(item(t("用这张图提问"), Cmd::AskFigure(id.clone()))) }
         items.push(item(t("复制图片"), Cmd::CopyFigure(id.clone())));
         if !figure.legend.is_empty() { items.push(item(t("复制图注"), Cmd::CopyText(figure.legend.clone()))) }
         items.push(item(t("另存为…"), Cmd::SaveFigure(id.clone())));

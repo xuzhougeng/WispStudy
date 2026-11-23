@@ -26,6 +26,7 @@ mod home;
 mod input;
 mod library;
 mod manuscripts;
+mod write_figures;
 mod markdown;
 mod notes;
 mod open_file;

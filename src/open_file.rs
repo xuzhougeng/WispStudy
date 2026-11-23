@@ -53,6 +53,8 @@ impl Workspace {
     pub(crate) fn drop_paths(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
         let home = self.lib.is_none() && !self.home.open && self.settings_view.is_none();
         if home && let [one] = paths.as_slice() && is_pdf(one) { return self.read_pdf(one.clone(), window, cx) }
+        // Pictures dropped on a manuscript are its figures: kept in 资料库 and put in at the caret (write_figures.rs).
+        if Self::pictures_by_name(&paths) && self.modal.is_none() && self.settings_view.is_none() && self.lib.as_ref().is_some_and(|lib| lib.page == crate::app::Page::Write && lib.writing.current().is_some()) { return self.write_figures_add(paths, true, cx) }
         self.import_paths(paths, cx)
     }
 

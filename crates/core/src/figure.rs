@@ -5,7 +5,9 @@
 //! pictures are files under `figures/` in the library folder; one that is
 //! removed moves to `removed/` like any other file. A picture a model drew
 //! from a description (`imagegen`) is a figure too, one without a paper:
-//! its `paper_id` is empty and it leads back to nothing.
+//! its `paper_id` is empty and it leads back to nothing. So is a picture the
+//! person brought in from a file of their own (`origin` is `UPLOADED`, 写作's
+//! 资料库): a figure of their own work, to stand in a manuscript.
 //!
 //! The legend is not typed when the page says it: `caption` finds the
 //! caption that belongs to a piece of a page among the page's lines, for
@@ -50,7 +52,12 @@ CREATE TABLE IF NOT EXISTS figures (
     height INTEGER NOT NULL DEFAULT 0,
     size_bytes INTEGER NOT NULL DEFAULT 0,
     added_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    -- Where a figure without a paper is from: empty for one a model drew, `upload`
+    -- for a file the person brought in, whose name `file_name` keeps. Both are
+    -- added to a table of an earlier build by `store::add_columns`.
+    origin TEXT NOT NULL DEFAULT '',
+    file_name TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_figures_paper ON figures(paper_id);
 CREATE TRIGGER IF NOT EXISTS figures_follow_paper AFTER DELETE ON papers BEGIN
@@ -69,7 +76,8 @@ pub(crate) fn migrate(db: &mut rusqlite::Connection) -> Result<()> {
     let tx = db.transaction()?;
     tx.execute_batch("ALTER TABLE figures RENAME TO figures_referring; DROP INDEX IF EXISTS idx_figures_paper; DROP TRIGGER IF EXISTS figures_follow_paper;")?;
     tx.execute_batch(SCHEMA)?;
-    tx.execute_batch(&format!("INSERT INTO figures({COLUMNS}) SELECT {COLUMNS} FROM figures_referring; DROP TABLE figures_referring;"))?;
+    // The columns such a table has: those added since are not in it.
+    tx.execute_batch(&format!("INSERT INTO figures({FIRST_COLUMNS}) SELECT {FIRST_COLUMNS} FROM figures_referring; DROP TABLE figures_referring;"))?;
     tx.commit()?;
     Ok(())
 }
@@ -79,6 +87,9 @@ pub const FOLDER: &str = "figures";
 
 /// The most bytes a figure's picture may have: a piece of a page is far below it.
 pub const MAX_BYTES: usize = 40_000_000;
+
+/// The `origin` of a picture the person brought in from a file of their own.
+pub const UPLOADED: &str = "upload";
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -105,12 +116,21 @@ pub struct Figure {
     pub size_bytes: u64,
     pub added_at: String,
     pub updated_at: String,
+    /// Where one without a paper is from: empty for a model's picture, `UPLOADED` for the person's own file.
+    pub origin: String,
+    /// The name of the file an uploaded picture was; empty for one pasted, and for the others.
+    pub file_name: String,
 }
 
 impl Figure {
-    /// Whether a model drew it: it was cut from no paper.
+    /// Whether a model drew it: it was cut from no paper, and the person did not bring it in.
     pub fn drawn(&self) -> bool {
-        self.paper_id.is_empty()
+        self.paper_id.is_empty() && !self.uploaded()
+    }
+
+    /// Whether the person brought it in from a file of their own.
+    pub fn uploaded(&self) -> bool {
+        self.paper_id.is_empty() && self.origin == UPLOADED
     }
 
     /// What stands for the figure in a line: its number, else the start of its legend.
@@ -123,7 +143,7 @@ impl Figure {
     /// The words are lowercase already (`search_words`).
     pub fn matches(&self, paper: Option<&Paper>, words: &[String]) -> bool {
         if words.is_empty() { return true }
-        let mut hay = [self.label.as_str(), self.legend.as_str(), self.notes.as_str()].join("\n");
+        let mut hay = [self.label.as_str(), self.legend.as_str(), self.notes.as_str(), self.file_name.as_str()].join("\n");
         for tag in &self.tags { hay.push('\n'); hay.push_str(tag) }
         if let Some(paper) = paper { hay.push_str(&format!("\n{}\n{}\n{}\n{}", paper.title, paper.authors, paper.journal, paper.year.map(|y| y.to_string()).unwrap_or_default())) }
         let hay = hay.to_lowercase();
@@ -164,7 +184,9 @@ pub(crate) fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
     Some((number(16), number(20)))
 }
 
-const COLUMNS: &str = "id, paper_id, resource_id, page, bbox, label, legend, notes, tags_json, local_path, width, height, size_bytes, added_at, updated_at";
+/// The columns of the table as it was first made, and with those added since.
+const FIRST_COLUMNS: &str = "id, paper_id, resource_id, page, bbox, label, legend, notes, tags_json, local_path, width, height, size_bytes, added_at, updated_at";
+const COLUMNS: &str = "id, paper_id, resource_id, page, bbox, label, legend, notes, tags_json, local_path, width, height, size_bytes, added_at, updated_at, origin, file_name";
 
 fn row_to_figure(r: &rusqlite::Row) -> rusqlite::Result<Figure> {
     Ok(Figure {
@@ -183,7 +205,33 @@ fn row_to_figure(r: &rusqlite::Row) -> rusqlite::Result<Figure> {
         size_bytes: r.get::<_, i64>(12)?.max(0) as u64,
         added_at: r.get(13)?,
         updated_at: r.get(14)?,
+        origin: r.get(15)?,
+        file_name: r.get(16)?,
     })
+}
+
+/// The width and height a JPEG says it has: those of its frame header.
+pub(crate) fn jpeg_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    let mut at = 2;
+    loop {
+        let (marker, length) = (*bytes.get(at + 1)?, u16::from_be_bytes([*bytes.get(at + 2)?, *bytes.get(at + 3)?]) as usize);
+        if bytes[at] != 0xff { return None }
+        // A start of frame, of any kind of coding; C4, C8 and CC among them are tables.
+        if matches!(marker, 0xc0..=0xcf) && !matches!(marker, 0xc4 | 0xc8 | 0xcc) {
+            let number = |at: usize| Some(u16::from_be_bytes([*bytes.get(at)?, *bytes.get(at + 1)?]) as u32);
+            return Some((number(at + 7)?, number(at + 5)?));
+        }
+        at += 2 + length;
+    }
+}
+
+/// The width and height a PNG or a JPEG says it has.
+pub fn picture_size(bytes: &[u8]) -> Option<(u32, u32)> {
+    match picture_kind(bytes)? {
+        "png" => png_size(bytes),
+        "jpg" => jpeg_size(bytes),
+        _ => None,
+    }
 }
 
 /// What a person may write about a figure, tidied: one line for the number, no blank ends, no tag twice.
@@ -192,23 +240,27 @@ fn tidy(figure: &mut Figure) {
     figure.legend = figure.legend.trim().to_string();
     figure.notes = figure.notes.trim().to_string();
     figure.tags = clean_strings(figure.tags.iter());
+    figure.file_name = figure.file_name.trim().to_string();
+    // Only a figure without a paper is from somewhere else, and only from where this build knows.
+    if !figure.paper_id.is_empty() || figure.origin != UPLOADED { (figure.origin, figure.file_name) = (String::new(), String::new()) }
 }
 
 impl Store {
     /// Keep a picture as a figure of a paper, or, with no paper named, as one
-    /// a model drew. The figure gets its id, its file under `figures/` and
-    /// its dates; the bytes must be a PNG, JPEG or WebP.
+    /// a model drew or (`origin` is `UPLOADED`) the person brought in. The
+    /// figure gets its id, its file under `figures/` and its dates; the
+    /// bytes must be a PNG, JPEG or WebP.
     pub fn add_figure(&mut self, figure: &mut Figure, picture: &[u8]) -> Result<()> {
         let Some(kind) = picture_kind(picture) else { bail!("这不是一张可以收藏的图片（支持 PNG、JPEG 和 WebP）。") };
         if picture.len() > MAX_BYTES { bail!("这张图片太大了（{} MB），收藏不了。", picture.len() / 1_000_000) }
-        if !figure.drawn() {
+        if !figure.paper_id.is_empty() {
             let held: Option<String> = self.db.query_row("SELECT id FROM papers WHERE id = ?1", [&figure.paper_id], |r| r.get(0)).optional()?;
             if held.is_none() { bail!("文献不存在：{}", figure.paper_id) }
         }
         tidy(figure);
         figure.id = new_id("G");
         figure.local_path = format!("{FOLDER}/{}.{kind}", figure.id);
-        if let Some((width, height)) = png_size(picture) { (figure.width, figure.height) = (width, height) }
+        if let Some((width, height)) = picture_size(picture) { (figure.width, figure.height) = (width, height) }
         figure.size_bytes = picture.len() as u64;
         figure.added_at = now_iso();
         figure.updated_at = figure.added_at.clone();
@@ -216,7 +268,7 @@ impl Store {
         std::fs::create_dir_all(self.root().join(FOLDER)).with_context(|| format!("无法创建图片文件夹 {}", self.root().join(FOLDER).display()))?;
         std::fs::write(&path, picture).with_context(|| format!("无法保存图片 {}", path.display()))?;
         let written = self.db.execute(
-            &format!("INSERT INTO figures({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)"),
+            &format!("INSERT INTO figures({COLUMNS}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)"),
             params![
                 figure.id,
                 figure.paper_id,
@@ -232,7 +284,9 @@ impl Store {
                 figure.height,
                 figure.size_bytes as i64,
                 figure.added_at,
-                figure.updated_at
+                figure.updated_at,
+                figure.origin,
+                figure.file_name
             ],
         );
         if let Err(err) = written {
@@ -630,6 +684,29 @@ mod tests {
         assert_eq!(store.list_figures().unwrap(), vec![drawn.clone()]);
         store.remove_figure(&drawn.id).unwrap();
         assert!(root.join("removed").join(format!("{}.png", drawn.id)).is_file());
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn a_picture_the_person_brought_in_is_neither_cut_nor_drawn() {
+        let (root, mut store, _) = library("uploaded");
+        let paper = store.add_paper(Paper { title: "Cytokinin in the shoot".into(), ..Default::default() }).unwrap();
+        let mut own = Figure { origin: UPLOADED.into(), file_name: " fig3_final.png ".into(), legend: "Root length under salt.".into(), ..Default::default() };
+        store.add_figure(&mut own, &png(800, 600)).unwrap();
+        assert!(own.uploaded() && !own.drawn() && own.file_name == "fig3_final.png");
+        assert_eq!(store.get_figure(&own.id).unwrap(), own);
+        // It is found by the name of its file; a model's picture is still told from it.
+        assert!(own.matches(None, &search_words("fig3_final")));
+        let mut drawn = Figure::default();
+        store.add_figure(&mut drawn, &png(10, 10)).unwrap();
+        assert!(drawn.drawn() && !drawn.uploaded());
+        // A figure of a paper is from that paper, whatever else is said of it.
+        let mut cut = Figure { paper_id: paper.id.clone(), origin: UPLOADED.into(), file_name: "x.png".into(), ..Default::default() };
+        store.add_figure(&mut cut, &png(10, 10)).unwrap();
+        assert!(!cut.uploaded() && cut.origin.is_empty() && cut.file_name.is_empty());
+        // A JPEG says its size too.
+        let jpeg = [&b"\xff\xd8\xff\xe0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00"[..], &b"\xff\xdb\x00\x04\x00\x00"[..], &b"\xff\xc0\x00\x11\x08\x01\x2c\x03\x84\x03\x01\x22\x00\x02\x11\x01\x03\x11\x01"[..]].concat();
+        assert_eq!(picture_size(&jpeg), Some((900, 300)));
         std::fs::remove_dir_all(root).ok();
     }
 
