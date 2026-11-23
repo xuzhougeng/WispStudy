@@ -3,6 +3,7 @@
 
 use crate::journals;
 use crate::model::Paper;
+use crate::time;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
@@ -28,7 +29,15 @@ pub struct Filters {
     pub tags: Vec<String>,
     /// The tags excluded (反选): a paper holding any of them is hidden.
     pub not_tags: Vec<String>,
+    /// One year (`2024`), a span of years with either end left open (`2020-2026`, `2020-`, `-2010`), or the
+    /// last years up to this one (`last:3` is this year and the two before): `year_span`.
     pub year: String,
+    /// The journal's impact factor as a span like the years' (`5-` is 5 and more, `5-10`, `-3`): `impact_span`.
+    /// A paper whose journal the table (`journals`) has no factor for is left out.
+    pub impact: String,
+    /// The journal's zone: the partition (`journals::ZONES`) and the last zone kept, `cas:2` for 中科院 1–2 区,
+    /// `jcr:1` for Q1 (`zone_parts`, written by `zone_value`). A paper of a journal without a zone there is left out.
+    pub zone: String,
     pub screening: String,
     pub reading: String,
     pub fulltext: String,
@@ -44,7 +53,7 @@ pub struct Filters {
 impl Filters {
     /// How many filters (not counting the search and the view) are set.
     pub fn active(&self) -> usize {
-        [&self.year, &self.screening, &self.reading, &self.fulltext, &self.source, &self.preprint].iter().filter(|v| !v.is_empty()).count() + self.fields.len() + self.tags.len() + self.not_tags.len()
+        [&self.year, &self.impact, &self.zone, &self.screening, &self.reading, &self.fulltext, &self.source, &self.preprint].iter().filter(|v| !v.is_empty()).count() + self.fields.len() + self.tags.len() + self.not_tags.len()
     }
 
     /// Whether a paper holds every chosen tag and none of the excluded ones.
@@ -118,6 +127,59 @@ pub fn in_view(p: &Paper, view: View, now_ms: i64) -> bool {
     }
 }
 
+/// A span of numbers as a filter keeps it: `low-high` with either end left out, or one value alone, which is both ends.
+fn span<T: std::str::FromStr>(value: &str) -> Option<(Option<T>, Option<T>)> {
+    let end = |text: &str| if text.trim().is_empty() { Some(None) } else { text.trim().parse().ok().map(Some) };
+    match value.split_once('-') {
+        Some((low, high)) => Some((end(low)?, end(high)?)).filter(|(low, high)| low.is_some() || high.is_some()),
+        None => {
+            let one = value.trim();
+            Some((Some(one.parse().ok()?), Some(one.parse().ok()?)))
+        }
+    }
+}
+
+/// A span as `Filters::year` and `Filters::impact` keep it: `2020-`, `-10`, `5-10`; nothing when neither end is given.
+pub fn span_value<T: std::fmt::Display>(low: Option<T>, high: Option<T>) -> String {
+    if low.is_none() && high.is_none() { return String::new() }
+    format!("{}-{}", low.map(|v| v.to_string()).unwrap_or_default(), high.map(|v| v.to_string()).unwrap_or_default())
+}
+
+fn within<T: PartialOrd>(value: T, (low, high): &(Option<T>, Option<T>)) -> bool {
+    low.as_ref().is_none_or(|low| value >= *low) && high.as_ref().is_none_or(|high| value <= *high)
+}
+
+/// The first and the last year a `Filters::year` keeps, either left open; `None` for a value that says no years.
+/// `last:N` is the N calendar years up to the one `now_ms` falls in, and whatever is dated later.
+pub fn year_span(value: &str, now_ms: i64) -> Option<(Option<i32>, Option<i32>)> {
+    match value.strip_prefix("last:") {
+        Some(count) => count.trim().parse::<i32>().ok().filter(|n| (1..=1000).contains(n)).map(|n| (Some(time::year_of(now_ms) - n + 1), None)),
+        None => span(value),
+    }
+}
+
+/// The least and the most impact factor a `Filters::impact` keeps, either left open.
+pub fn impact_span(value: &str) -> Option<(Option<f64>, Option<f64>)> {
+    span::<f64>(value).filter(|(low, high)| low.is_none_or(f64::is_finite) && high.is_none_or(f64::is_finite))
+}
+
+/// The partition and the last zone kept of a `Filters::zone`.
+pub fn zone_parts(value: &str) -> Option<(&'static str, u8)> {
+    let (which, last) = value.split_once(':')?;
+    let which = journals::ZONES.iter().find(|(key, _)| *key == which)?.0;
+    Some((which, last.trim().parse().ok().filter(|z| (1..=4).contains(z))?))
+}
+
+/// What `Filters::zone` is for the zones 1 to `last` of a partition.
+pub fn zone_value(which: &str, last: u8) -> String {
+    format!("{which}:{last}")
+}
+
+/// A zone filter as it is under another partition: the same zones of that one. Anything else as it is.
+pub fn zone_in(value: &str, which: &str) -> String {
+    zone_parts(value).map_or_else(|| value.to_string(), |(_, last)| zone_value(which, last))
+}
+
 /// Everything the search box matches, lowercased.
 fn haystack(p: &Paper) -> String {
     let mut hay = [p.title.as_str(), &p.authors, &p.doi, &p.pmid, &p.journal, &p.abstract_text, &p.notes].join(" ");
@@ -143,7 +205,13 @@ pub fn matches(p: &Paper, f: &Filters, now_ms: i64) -> bool {
     if f.screening.is_empty() { if p.screening == "irrelevant" { return false } } else if p.screening != f.screening { return false }
     if !in_view(p, f.view, now_ms) { return false }
     if !f.tagged(p) { return false }
-    if !f.year.is_empty() && p.year.map(|y| y.to_string()).as_deref() != Some(f.year.as_str()) { return false }
+    if !f.year.is_empty() && !year_span(&f.year, now_ms).zip(p.year).is_some_and(|(span, year)| within(year, &span)) { return false }
+    if !f.impact.is_empty() || !f.zone.is_empty() {
+        // Both are the journal's, as the table that comes with the app has it.
+        let journal = journals::find(&p.journal);
+        if !f.impact.is_empty() && !impact_span(&f.impact).zip(journal.and_then(|j| j.impact)).is_some_and(|(span, impact)| within(impact, &span)) { return false }
+        if !f.zone.is_empty() && !zone_parts(&f.zone).zip(journal).is_some_and(|((which, last), j)| j.zone_number(which).is_some_and(|zone| zone <= last)) { return false }
+    }
     if !f.reading.is_empty() && p.reading != f.reading { return false }
     if !f.fulltext.is_empty() && p.fulltext != f.fulltext { return false }
     if !f.source.is_empty() && p.source != f.source { return false }
@@ -319,6 +387,14 @@ pub fn source_counts(papers: &[Paper]) -> Vec<(String, usize)> {
 
 pub fn field_counts(papers: &[Paper], field: &str) -> Vec<(String, usize)> {
     tally(active(papers).filter_map(|p| p.fields.get(field)).flat_map(|values| values.iter().map(String::as_str)))
+}
+
+/// How many papers a filter by itself would keep, those marked irrelevant apart: the number beside a choice in a
+/// filter's menu, which like `years` and `tag_counts` is of the whole library.
+pub fn count_with(papers: &[Paper], set: impl FnOnce(&mut Filters), now_ms: i64) -> usize {
+    let mut f = Filters::default();
+    set(&mut f);
+    papers.iter().filter(|p| matches(p, &f, now_ms)).count()
 }
 
 /// The years papers were published in, latest first.
@@ -534,5 +610,66 @@ mod tests {
         for view in VIEWS {
             assert_eq!(c.view(view), filter_papers(&papers, &Filters { view, ..f.clone() }, 0).len());
         }
+    }
+
+    #[test]
+    fn years_are_one_year_a_span_or_the_last_few() {
+        let papers = library();
+        let now = time::millis("2026-06-15T00:00:00.000Z");
+        let kept = |year: &str| {
+            let mut found: Vec<i32> = filter_papers(&papers, &Filters { year: year.into(), ..Default::default() }, now).into_iter().filter_map(|i| papers[i].year).collect();
+            found.sort();
+            found
+        };
+        // The irrelevant paper of 2020 stays out, and the one without a year passes no filter by year.
+        assert_eq!(kept("2024"), [2024]);
+        assert_eq!(kept("2021-2024"), [2021, 2024]);
+        assert_eq!(kept("2022-"), [2024]);
+        assert_eq!(kept("-2021"), [2021]);
+        assert_eq!(kept("2025-2021"), [] as [i32; 0]);
+        // 近 3 年 in 2026 is 2024, 2025 and 2026; 近 6 年 reaches 2021.
+        assert_eq!((kept("last:3"), kept("last:6")), (vec![2024], vec![2021, 2024]));
+        assert_eq!(year_span("last:3", now), Some((Some(2024), None)));
+        // What says no years keeps no paper, and does not pass for "everything".
+        for nonsense in ["soon", "-", "last:0", "last:x", "20x0-2024"] {
+            assert_eq!((year_span(nonsense, now), kept(nonsense).len()), (None, 0), "{nonsense}");
+        }
+        assert_eq!((span_value(Some(2020), None::<i32>), span_value(None, Some(2010)), span_value(Some(5.5), Some(10.)), span_value(None::<i32>, None)), ("2020-".into(), "-2010".into(), "5.5-10".into(), String::new()));
+        assert_eq!(year_span(&span_value(Some(2000), Some(2026)), now), Some((Some(2000), Some(2026))));
+    }
+
+    #[test]
+    fn impact_and_zone_are_the_journals() {
+        // A journal of the table in 中科院's zone 3 with a low factor, beside Nature.
+        let modest = journals::table().journals.iter().find(|j| j.cas == Some(3) && j.impact.is_some_and(|f| f < 5.) && j.quartile == "Q2" && journals::find(j.name()).is_some_and(|found| std::ptr::eq(found, *j))).unwrap();
+        let mut papers = library();
+        papers[0].journal = "Nature".into();
+        papers[1].journal = modest.name().to_string();
+        papers[2].journal = "Journal of Things Nobody Indexed".into();
+        let kept = |edit: fn(&mut Filters)| {
+            let mut f = Filters::default();
+            edit(&mut f);
+            titles(&papers, &f)
+        };
+        assert_eq!(kept(|f| f.impact = "10-".into()), ["Zebra fish atlas"]);
+        assert_eq!(kept(|f| f.impact = "-5".into()), ["apple genome"]);
+        assert_eq!(kept(|f| f.impact = "0-".into()), ["Zebra fish atlas", "apple genome"]);
+        assert_eq!(kept(|f| f.impact = "many".into()).len(), 0);
+        assert_eq!(impact_span("2.5-10"), Some((Some(2.5), Some(10.))));
+        assert_eq!((impact_span("inf-"), impact_span("-")), (None, None));
+        // 1 区 alone, then 1–3 区; JCR counts its quartiles the same way.
+        assert_eq!(kept(|f| f.zone = "cas:1".into()), ["Zebra fish atlas"]);
+        assert_eq!(kept(|f| f.zone = "cas:3".into()), ["Zebra fish atlas", "apple genome"]);
+        assert_eq!(kept(|f| f.zone = "jcr:1".into()), ["Zebra fish atlas"]);
+        assert_eq!(kept(|f| f.zone = "jcr:2".into()), ["Zebra fish atlas", "apple genome"]);
+        assert_eq!(kept(|f| f.zone = "cas:9".into()).len(), 0);
+        assert_eq!((zone_parts("xr:2"), zone_parts("cas"), zone_parts("abc:1")), (Some(("xr", 2)), None, None));
+        // The same zones under another partition, when the 分区 column changes to it.
+        assert_eq!((zone_in("cas:2", "jcr"), zone_in("", "jcr")), ("jcr:2".to_string(), String::new()));
+        // The filters work together, and each counts as one that is set.
+        let both = Filters { year: "2020-2022".into(), impact: "10-".into(), zone: "cas:1".into(), ..Default::default() };
+        assert_eq!((titles(&papers, &both), both.active()), (vec!["Zebra fish atlas".to_string()], 3));
+        assert_eq!(counts(&papers, &both, 0).view(View::All), 1);
+        assert_eq!((count_with(&papers, |f| f.impact = "10-".into(), 0), count_with(&papers, |f| f.zone = "cas:3".into(), 0), count_with(&papers, |_| {}, 0)), (1, 2, 3));
     }
 }

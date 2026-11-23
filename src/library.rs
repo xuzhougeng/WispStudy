@@ -163,6 +163,72 @@ pub(crate) fn sort_in_zone(sort: &str, settings: &wisp_core::settings::Settings)
     if ["cas", "xr", "jcr"].contains(&key) { format!("{}-{}", zone_sort(settings), if desc { "desc" } else { "asc" }) } else { sort.to_string() }
 }
 
+/// 近 N 年 as the filter by year offers it, and the impact factors a journal is asked to reach.
+pub(crate) const YEARS_BACK: [i32; 3] = [3, 5, 10];
+pub(crate) const IMPACTS: [f64; 4] = [3., 5., 10., 20.];
+
+/// A span as `Filters::year` and `Filters::impact` keep it, in its two ends; a value alone is both.
+fn ends(value: &str) -> (&str, &str) {
+    value.split_once('-').unwrap_or((value, value))
+}
+
+/// A filter by year as its chip and its menu say it: `2024`, 近 3 年, `2020–2026`, 2020 年起, 2010 年及以前.
+pub(crate) fn year_label(value: &str) -> String {
+    if let Some(count) = value.strip_prefix("last:") { return tf!("近 {count} 年", "Last {count} years") }
+    match ends(value) {
+        ("", "") => String::new(),
+        (low, "") => tf!("{low} 年起", "Since {low}"),
+        ("", high) => tf!("{high} 年及以前", "Up to {high}"),
+        (low, high) if low == high => low.to_string(),
+        (low, high) => format!("{low}–{high}"),
+    }
+}
+
+/// A filter by impact factor as its chip and its menu say it: `≥ 5`, `≤ 3`, `5–10`.
+pub(crate) fn impact_label(value: &str) -> String {
+    match ends(value) {
+        ("", "") => String::new(),
+        (low, "") => format!("≥ {low}"),
+        ("", high) => format!("≤ {high}"),
+        (low, high) if low == high => low.to_string(),
+        (low, high) => format!("{low}–{high}"),
+    }
+}
+
+/// A filter by zone as its chip and its menu say it: `中科院 1区`, `中科院 1–2区`, `JCR Q1–Q2`. The partition is
+/// named each time: the same words under another one are other papers.
+pub(crate) fn zone_label(value: &str) -> String {
+    let Some((which, last)) = filter::zone_parts(value) else { return value.to_string() };
+    let zones = match (which, last) {
+        ("jcr", 1) => "Q1".to_string(),
+        ("jcr", last) => format!("Q1–Q{last}"),
+        (_, 1) => tf!("{}区", "Zone {}", 1),
+        (_, last) => tf!("1–{last}区", "Zones 1–{last}"),
+    };
+    format!("{} {zones}", label(&wisp_core::journals::ZONES, which))
+}
+
+/// What 自定义区间… sets a filter to from its two boxes, either left empty (both: the filter is cleared), or why not.
+/// The ends typed the wrong way round are taken the right way.
+pub(crate) fn range_value(key: &FilterKey, low: &str, high: &str) -> Result<String, String> {
+    fn ordered<T: PartialOrd + std::fmt::Display>(low: Option<T>, high: Option<T>) -> String {
+        match (low, high) {
+            (Some(low), Some(high)) if low > high => filter::span_value(Some(high), Some(low)),
+            (low, high) => filter::span_value(low, high),
+        }
+    }
+    let end = |text: &str, read: &dyn Fn(&str) -> bool| text.is_empty() || read(text);
+    if *key == FilterKey::Impact {
+        let fine = |text: &str| text.parse::<f64>().is_ok_and(|n| n.is_finite() && n >= 0.);
+        if !end(low, &fine) || !end(high, &fine) { return Err(t("影响因子应为不小于 0 的数字，例如 5 或 9.5。").into()) }
+        Ok(ordered(low.parse::<f64>().ok(), high.parse::<f64>().ok()))
+    } else {
+        let fine = |text: &str| text.parse::<i32>().is_ok_and(|year| (1000..=9999).contains(&year));
+        if !end(low, &fine) || !end(high, &fine) { return Err(t("年份应为四位数字，例如 2020。").into()) }
+        Ok(ordered(low.parse::<i32>().ok(), high.parse::<i32>().ok()))
+    }
+}
+
 /// A journal's zone in one partition as the window writes it: `1区 Top`, `Zone 1 Top`, `Q2`.
 pub(crate) fn zone_text(j: &wisp_core::journals::Journal, which: &str) -> Option<String> {
     let zone = |z: Option<u8>, top: bool| z.map(|z| format!("{}{}", tf!("{}区", "Zone {}", z), if top { " Top" } else { "" }));
@@ -738,7 +804,9 @@ impl Workspace {
         let f = &lib.filters;
         // The filters: each a name, and what it is set to.
         let mut filters: Vec<(ElementId, String, String, FilterKey)> = vec![
-            ("f-year".into(), t("年份").into(), f.year.clone(), FilterKey::Year),
+            ("f-year".into(), t("年份").into(), year_label(&f.year), FilterKey::Year),
+            ("f-impact".into(), t("影响因子").into(), impact_label(&f.impact), FilterKey::Impact),
+            ("f-zone".into(), t("分区").into(), zone_label(&f.zone), FilterKey::Zone),
             ("f-reading".into(), t("阅读").into(), label(&READINGS, &f.reading).to_string(), FilterKey::Reading),
             ("f-screening".into(), t("收录").into(), label(&SCREENINGS, &f.screening).to_string(), FilterKey::Screening),
             ("f-fulltext".into(), t("全文").into(), label(&FULLTEXTS, &f.fulltext).to_string(), FilterKey::Fulltext),
@@ -1503,5 +1571,26 @@ mod tests {
         assert_eq!(split_chat_width(split_chat_reach(1340., 280., 1360., true), 1080.), SPLIT_CHAT_MIN);
         assert_eq!(split_chat_width(split_chat_reach(1340., 280., 1360., false), 1080.), 1080. - SPLIT_PDF_MIN);
         assert_eq!(split_chat_width(split_chat_reach(300., 280., 1360., true), 1080.), 1080. - SPLIT_PDF_MIN);
+    }
+
+    #[test]
+    fn the_filters_of_numbers_say_what_they_keep() {
+        use super::{impact_label, range_value, year_label, zone_label};
+        use crate::app::FilterKey;
+        // Unset, a chip says its name alone.
+        assert_eq!((year_label(""), impact_label(""), zone_label("")), (String::new(), String::new(), String::new()));
+        assert_eq!([year_label("2024"), year_label("last:3"), year_label("2020-2026"), year_label("2020-"), year_label("-2010")], ["2024", "近 3 年", "2020–2026", "2020 年起", "2010 年及以前"]);
+        assert_eq!([impact_label("5-"), impact_label("-3"), impact_label("2.5-10")], ["≥ 5", "≤ 3", "2.5–10"]);
+        assert_eq!([zone_label("cas:1"), zone_label("cas:2"), zone_label("xr:3"), zone_label("jcr:1"), zone_label("jcr:2")], ["中科院 1区", "中科院 1–2区", "新锐 1–3区", "JCR Q1", "JCR Q1–Q2"]);
+        // The two boxes of 自定义区间…: either end alone, the ends the wrong way round, one year twice, nothing at all.
+        let year = |low, high| range_value(&FilterKey::Year, low, high);
+        assert_eq!([year("2000", "2026"), year("2020", ""), year("", "2010"), year("2026", "2000"), year("", "")], [Ok("2000-2026".to_string()), Ok("2020-".into()), Ok("-2010".into()), Ok("2000-2026".into()), Ok(String::new())]);
+        assert_eq!(year_label(&year("2024", "2024").unwrap()), "2024");
+        assert!(year("20", "").is_err() && year("2020", "soon").is_err() && year("-5", "").is_err());
+        let impact = |low, high| range_value(&FilterKey::Impact, low, high);
+        assert_eq!([impact("5", ""), impact("2.5", "10"), impact("10", "5"), impact("", "3.0")], [Ok("5-".to_string()), Ok("2.5-10".into()), Ok("5-10".into()), Ok("-3".into())]);
+        assert!(impact("high", "").is_err() && impact("-1", "").is_err() && impact("inf", "").is_err());
+        // What the boxes give, the filter reads.
+        assert_eq!(wisp_core::filter::impact_span(&impact("2.5", "10").unwrap()), Some((Some(2.5), Some(10.))));
     }
 }

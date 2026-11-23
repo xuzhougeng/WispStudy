@@ -1,6 +1,6 @@
 //! Timestamps: stored as RFC 3339 UTC with milliseconds, shown in local time.
 
-use chrono::{DateTime, Local, SecondsFormat, Utc};
+use chrono::{DateTime, Datelike, Local, SecondsFormat, Utc};
 
 pub fn now_iso() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
@@ -8,6 +8,11 @@ pub fn now_iso() -> String {
 
 pub fn now_millis() -> i64 {
     Utc::now().timestamp_millis()
+}
+
+/// The year a moment falls in on this machine's calendar: what 「近 3 年」 counts back from (`filter::year_span`).
+pub fn year_of(millis: i64) -> i32 {
+    DateTime::from_timestamp_millis(millis).map_or(1970, |moment| moment.with_timezone(&Local).year())
 }
 
 fn parse(value: &str) -> Option<DateTime<Utc>> {

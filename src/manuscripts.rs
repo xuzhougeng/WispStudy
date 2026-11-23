@@ -895,7 +895,7 @@ impl Workspace {
             .on_click(self.on(Cmd::WriteReading(!reading), cx))
             .tooltip(move |_, cx| cx.new(|_| crate::write_assist::Tip(preview_tip.to_string())).into())
             .child(ui::icon("eye", 14., if reading { Theme::accent() } else { Theme::text_secondary() }));
-        // 铺满: the text as wide as the column, or back to the standard measure; the same setting as 设置 › 外观's 稿件正文宽度. Lit while on.
+        // 铺满: the text as wide as the column, or back to the standard measure; the same setting as 设置 › 外观's 正文宽度. Lit while on.
         let fill = self.settings.reading_appearance.width == wisp_core::settings::TextWidth::Fill;
         let fill_tip = if fill { t("铺满：开。正文随窗口宽度铺满；点击回到标准宽度。设置 › 外观 里也可以选正文宽度。") } else { t("铺满：关。点击让正文随窗口宽度铺满，窗口多宽，一行就多长。") };
         let fill_button = div()

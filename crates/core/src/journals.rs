@@ -63,6 +63,15 @@ impl Journal {
         }
     }
 
+    /// The zone's number in one partition, 1 to 4 (Q1 is 1): what a filter by zone compares (`filter::zone_parts`).
+    pub fn zone_number(&self, which: &str) -> Option<u8> {
+        match which {
+            "jcr" => self.quartile.strip_prefix('Q').and_then(|q| q.parse().ok()),
+            "xr" => self.xr,
+            _ => self.cas,
+        }
+    }
+
     /// The order of the 分区 column: a lower zone first, Top before the rest of its zone.
     pub fn zone_rank(&self, which: &str) -> Option<u8> {
         match which {

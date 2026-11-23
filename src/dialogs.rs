@@ -3,7 +3,7 @@
 //! in app.rs; this file draws them.
 
 use crate::i18n::{label, t};
-use crate::app::{Cmd, ImportRow, Imported, Modal, Workspace};
+use crate::app::{Cmd, FilterKey, ImportRow, Imported, Modal, Workspace};
 use crate::theme::{self, Theme, text_px};
 use crate::ui;
 use gpui::{prelude::FluentBuilder, *};
@@ -274,6 +274,17 @@ impl Workspace {
                     .child(ui::dialog_title(t("重命名标签")))
                     .child(body().child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_tertiary()).child(tf!("「{tag}」在 {count} 篇文献上，都会改成新的名字。改成一个已有的标签，两个就合成一个。", "“{tag}” is used on {count} papers. All will be renamed. Choosing an existing tag merges them."))).child(ui::field(name, window, cx)).child(error))
                     .child(footer(t("改名"), false, self, cx))
+            }
+
+            Modal::Range { key, low, high } => {
+                let impact = *key == FilterKey::Impact;
+                let note = if impact { t("只填一格也可以：只填前一格是不低于它，只填后一格是不高于它。影响因子来自随应用附带的 JCR 数据，期刊不在其中的文献不在筛选结果里。") } else { t("只填一格也可以：只填前一格是这一年及以后，只填后一格是这一年及以前。没有年份的文献不在筛选结果里。") };
+                // The boxes have widths of their own: two short numbers, not a line of text.
+                let ends = div().flex().items_center().gap(px(10.)).child(div().w(px(150.)).child(ui::field(low, window, cx))).child(div().text_color(Theme::text_tertiary()).child(t("至"))).child(div().w(px(150.)).child(ui::field(high, window, cx)));
+                ui::dialog(420.)
+                    .child(ui::dialog_title(if impact { t("影响因子范围") } else { t("年份区间") }))
+                    .child(body().child(ends).child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_tertiary()).child(note)).child(error))
+                    .child(footer(crate::i18n::tc("filter.apply", "筛选"), false, self, cx))
             }
 
             Modal::EmptyTrash { phrase } => {
