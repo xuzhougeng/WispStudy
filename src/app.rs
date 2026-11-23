@@ -5635,32 +5635,32 @@ impl Workspace {
             PdfEvent::RestyleText { resource, id, style } => self.change_pdf_annotation(resource, |store| store.restyle_pdf_text(resource, id, style), cx),
             PdfEvent::OpenFigure(id) => self.open_figure_on_page(id, cx),
             // 固定对照: the figure stays in the other half of this viewer. A file of the paper shown there gives it up.
-            PdfEvent::FigureBeside { file: None, page, top } => {
+            PdfEvent::FigureBeside { file: None, page, top, mark } => {
                 let Some(lib) = self.lib.as_ref() else { return };
                 let main = lib.pdf.as_ref() == Some(&view);
                 let (inner, width) = { let pdf = view.read(cx); (pdf.split(), pdf.width()) };
                 let split = crate::pdf::beside_split(lib.beside.as_ref().filter(|_| main).map(|beside| beside.split), inner, width);
                 if main { self.close_beside(cx) }
-                view.update(cx, |pdf, cx| pdf.keep_beside(split, *page, *top, cx));
+                view.update(cx, |pdf, cx| pdf.keep_beside(split, *page, *top, mark.clone(), cx));
             }
             // A figure in another file of the paper: that file is shown in the other half, at the figure.
-            PdfEvent::FigureBeside { file: Some(file), page, top } => {
+            PdfEvent::FigureBeside { file: Some(file), page, top, mark } => {
                 if !self.panel_viewer(&view, cx) { return }
                 // The translation keeps the other half while it is on, even written on the pages themselves.
                 if self.lib.as_ref().is_some_and(|lib| lib.facing_shown()) { return self.say(t("开着「译文」时另一半不能换成别的文件：先关掉译文，或者用「前往原位置」。"), cx) }
                 self.show_beside(file.clone(), cx);
                 let Some(other) = self.lib.as_ref().and_then(|lib| lib.beside.as_ref()).map(|beside| beside.view.clone()).filter(|other| other.read(cx).resource_id() == file) else { return };
-                other.update(cx, |pdf, cx| pdf.arrive(vec![], Some((*page, *top)), cx));
+                other.update(cx, |pdf, cx| pdf.arrive(vec![], Some((*page, *top)), mark.clone(), cx));
             }
             // 前往原位置 of a figure in another file: the half worked in shows that file at the figure, and is
             // handed the places to come back to.
-            PdfEvent::FigureGo { file, page, top, trail } => {
+            PdfEvent::FigureGo { file, page, top, mark, trail } => {
                 if !self.panel_viewer(&view, cx) {
                     // It stays where it is, with the places it had before this one.
                     let kept = trail[..trail.len().saturating_sub(1)].to_vec();
-                    return view.update(cx, |pdf, cx| pdf.arrive(kept, None, cx));
+                    return view.update(cx, |pdf, cx| pdf.arrive(kept, None, vec![], cx));
                 }
-                if let Some(pdf) = self.read_in_panel(file, cx) { pdf.update(cx, |pdf, cx| pdf.arrive(trail.clone(), Some((*page, *top)), cx)) }
+                if let Some(pdf) = self.read_in_panel(file, cx) { pdf.update(cx, |pdf, cx| pdf.arrive(trail.clone(), Some((*page, *top)), mark.clone(), cx)) }
             }
             // 返回刚才位置 to a place in another file: that file again, where it was left and as large.
             PdfEvent::FigureReturn { back, trail } => {
@@ -8991,6 +8991,10 @@ impl Workspace {
                         "go" => pdf.update(cx, |pdf, cx| pdf.go_to_figure(cx)),
                         "back" => pdf.update(cx, |pdf, cx| pdf.return_back(cx)),
                         _ if arg.starts_with("pick;") => pdf.update(cx, |pdf, cx| pdf.pick_figure(arg[5..].parse().unwrap_or(0), cx)),
+                        // 相关文字 of the figure on show, then the n-th paragraph it lists: gone to, or kept beside.
+                        "said" => pdf.update(cx, |pdf, cx| pdf.show_said(cx)),
+                        _ if arg.starts_with("said;") => pdf.update(cx, |pdf, cx| pdf.go_to_said(arg[5..].parse().unwrap_or(0), cx)),
+                        _ if arg.starts_with("saidpin;") => pdf.update(cx, |pdf, cx| pdf.pin_said(arg[8..].parse().unwrap_or(0), cx)),
                         _ => {
                             let numbers: Vec<usize> = arg.split(';').filter_map(|n| n.parse().ok()).collect();
                             if let [page, n] = numbers.as_slice() && !pdf.update(cx, |pdf, cx| pdf.open_figure_mention(page.saturating_sub(1), *n, cx)) {
