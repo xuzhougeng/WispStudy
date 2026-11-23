@@ -1665,6 +1665,8 @@ pub struct Library {
     pub filters: Filters,
     /// Indices into `papers` of the rows shown, in order.
     pub shown: Vec<usize>,
+    /// What the sidebar counts beside its views and tags, under the search and filters set (`filter::counts`).
+    pub counts: filter::Counts,
     pub search: Entity<TextInput>,
     pub page: Page,
     pub selected: Option<String>,
@@ -2475,7 +2477,9 @@ impl Library {
     }
 
     pub fn refilter(&mut self) {
-        self.shown = filter::filter_papers(&self.papers, &self.filters, time::now_millis());
+        let now = time::now_millis();
+        self.shown = filter::filter_papers(&self.papers, &self.filters, now);
+        self.counts = filter::counts(&self.papers, &self.filters, now);
         self.scope_refilter();
     }
 
@@ -4730,6 +4734,7 @@ impl Workspace {
             rounds: vec![],
             filters,
             shown: vec![],
+            counts: filter::Counts::default(),
             search,
             page: Page::Papers,
             selected: None,
