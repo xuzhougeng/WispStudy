@@ -299,11 +299,11 @@ pub fn label_citations(args: &mut Value, sources: &[Source], index: &Index) -> V
 /// kept as the passages those citations rest on (`keep_quoted`). The
 /// result says how many were kept and which quotations their papers do not hold.
 pub fn call(store: &mut Store, info: &crate::libraries::LibraryInfo, name: &str, args: &Value, sources: &[Source], fetch: crate::sources::Fetch, download: crate::sources::Download) -> Result<Value, String> {
-    call_with(store, info, name, args, sources, fetch, download, None)
+    call_with(store, info, name, args, sources, fetch, download, crate::tools::Reach::default())
 }
 
-pub fn call_with(store: &mut Store, info: &crate::libraries::LibraryInfo, name: &str, args: &Value, sources: &[Source], fetch: crate::sources::Fetch, download: crate::sources::Download, publish: Option<crate::notes::Publish>) -> Result<Value, String> {
-    if name != "edit_section" { return crate::tools::call_in_with(store, info, name, args, fetch, download, publish) }
+pub fn call_with(store: &mut Store, info: &crate::libraries::LibraryInfo, name: &str, args: &Value, sources: &[Source], fetch: crate::sources::Fetch, download: crate::sources::Download, reach: crate::tools::Reach) -> Result<Value, String> {
+    if name != "edit_section" { return crate::tools::call_in_with(store, info, name, args, fetch, download, reach) }
     let mut args = args.clone();
     let pieces = {
         let read = |store: &Store| -> Result<_> { Ok((store.list_papers()?, store.list_trash()?, store.cite_keys()?)) };

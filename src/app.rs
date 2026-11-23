@@ -329,6 +329,8 @@ pub enum Cmd {
     SetDensity(String),
     /// Which partition the 分区 column shows (`journals::ZONES`).
     SetJournalZone(String),
+    /// 设置 › 网络 › 网页搜索: an engine's key, `websearch::AUTO` or `websearch::OFF`.
+    SetWebSearchEngine(String),
     /// The voice 朗读 reads in, a key of `speech::VOICES`.
     SetSpeechVoice(String),
     /// The Latin or the Chinese interface font; empty is the platform's own.
@@ -3295,6 +3297,11 @@ impl Workspace {
                 self.settings.density = value;
                 self.save_settings(cx);
                 window.refresh();
+            }
+            Cmd::SetWebSearchEngine(engine) => {
+                self.settings.web_search.engine = engine;
+                self.save_settings(cx);
+                cx.notify();
             }
             Cmd::SetJournalZone(value) => {
                 self.settings.journal_zone = value;
@@ -6986,7 +6993,9 @@ impl Workspace {
         let Some(lib) = self.lib.as_mut() else { return false };
         let chat = chat_of!(lib, talk);
         if chat.ctx.is_none() { return false }
-        let catalog = tools::library_catalog();
+        let mut catalog = tools::library_catalog();
+        // Web search is offered only while an engine can be asked: switched off or without a key, the model would only hear why not.
+        if wisp_core::websearch::ready(&self.settings, "").is_err() { catalog.retain(|tool| tool.name != "web_search") }
         let build = |chat: &Chat| ai::chat_request_with(&profile, chat.ctx.as_ref()?, &chat.wire, &catalog, &outside).ok();
         let mut request = match chat.ctx.as_ref().map(|ctx| ai::chat_request_with(&profile, ctx, &chat.wire, &catalog, &outside)) {
             Some(Ok(request)) => request,
@@ -8226,7 +8235,7 @@ impl Workspace {
         cx.notify();
         let work = cx.background_executor().spawn(async move {
             let mut store = Store::open(&info.dir).map_err(|e| format!("{e:#}"))?;
-            tools::call_in_with(&mut store, &info, name, &args, &wisp_net::get_text, &wisp_net::download, Some(&wisp_net::notes::publish))
+            tools::call_in_with(&mut store, &info, name, &args, &wisp_net::get_text, &wisp_net::download, wisp_net::reach())
         });
         cx.spawn(async move |this, cx| {
             let result = work.await;
@@ -8589,7 +8598,7 @@ fn run_tool(info: &LibraryInfo, sources: &[ai::Source], call: PreparedCall, allo
     let result = call.args.and_then(|args| {
         let mut store = Store::open(&info.dir).map_err(|e| format!("{e:#}"))?;
         // As the tool table has it; what is written into a manuscript cites as the conversation does (`compose::call`).
-        let mut value = wisp_core::compose::call_with(&mut store, info, &call.name, &args, sources, &wisp_net::get_text, &wisp_net::download, Some(&wisp_net::notes::publish))?;
+        let mut value = wisp_core::compose::call_with(&mut store, info, &call.name, &args, sources, &wisp_net::get_text, &wisp_net::download, wisp_net::reach())?;
         ai::add_labels(&mut value, sources);
         Ok(value)
     });

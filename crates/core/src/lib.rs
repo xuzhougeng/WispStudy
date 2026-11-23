@@ -102,4 +102,5 @@ pub mod translation;
 pub mod update;
 pub mod usage;
 pub mod webpage;
+pub mod websearch;
 pub mod zotero;

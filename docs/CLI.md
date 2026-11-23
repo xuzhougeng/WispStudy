@@ -99,6 +99,7 @@ wisp search_fulltext --help             # 一个工具的参数
 | `find_passages` | 在一篇文献里找出最贴近给定句子的原文：稿件里引用它的那句话依据的是哪一句（摘要和全文里的句子，全文里的带页码；语言不同时用 `queries` 给出检索词） |
 | `find_sentences` | 写作参考：库里各篇文献在同一部分（摘要、导言、方法、结果、讨论）的句子；给 `--query` 时按相近程度排，不给时返回各篇这一部分的开头 |
 | `search_online` | 在 PubMed、Europe PMC、Crossref 或 arXiv 试运行一个检索式，不写入；标出每条结果是否已在库中 |
+| `web_search` | 用网页搜索引擎搜索互联网（DeepSeek 或 Jina，按桌面「设置 › 网络 › 网页搜索」；`--engine` 指定一个），返回标题、网址、摘要、站点和发布时间；`--content` 附上网页正文，`--count` 默认 8。不需要文献库，不写入。DeepSeek 的 Key 与它的模型共用，Jina 的 Key 也可以放在环境变量 `JINA_API_KEY` |
 | `find_metadata` | 为缺 DOI 或题目的文献按题目到 Crossref、Europe PMC 和 arXiv 查找可能对应的记录，不写入；返回各来源的情况和候选（相似度、一致与不一致之处、是否已是库里的另一篇）。`--paper-id` 必填，`--title`、`--author`、`--year` 可选。写入由人在窗口里核对后确认 |
 | `list_searches` / `save_search` / `remove_search` | 查看、保存、删除检索式（后两个会改动文献库） |
 | `run_search` | 运行一个保存的检索式并导入，已有的文献跳过，返回批次号（会改动文献库） |

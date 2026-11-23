@@ -1785,5 +1785,12 @@
   "回到这张图": "Back to the figure",
   "没有在文中找到提到这张图的段落。": "No paragraph of the text was found that speaks of this figure.",
   "开着「译文」时另一半不能换成别的文件：先关掉译文，或者用「前往原位置」。": "While the translation is on, the other half cannot show another file: turn it off first, or use Go to figure.",
-  "这张图在这篇文献的另一个文件里：在文献库窗口里读这篇，才能固定对照或前往。": "This figure is in another file of the paper: read the paper in the library window to pin it beside or go to it."
+  "这张图在这篇文献的另一个文件里：在文献库窗口里读这篇，才能固定对照或前往。": "This figure is in another file of the paper: read the paper in the library window to pin it beside or go to it.",
+  "留空则使用「AI」页 DeepSeek 服务的 Key": "Leave blank to use the DeepSeek service's key on the AI page",
+  "已关闭": "Off",
+  "缺少 API Key": "No API key",
+  "搜索引擎": "Search engine",
+  "「自动」用第一个有 Key 的引擎。关闭后助手不再搜索网页。": "Auto uses the first engine that has a key. When off, the assistant does not search the web.",
+  "网页搜索": "Web search",
+  "助手和 wisp 命令的 web_search 工具用它搜索互联网，查文献数据库之外的信息（软件文档、指南、机构页面、新闻）。搜索词会发给所选的服务，按它的价格计费。Key 以明文保存在本机的 settings.json 里。": "The web_search tool of the assistant and the wisp command searches the internet with it, for what literature databases do not hold (software documentation, guidelines, institutions' pages, news). Queries are sent to the chosen service and billed at its prices. Keys are stored in plain text in settings.json on this computer."
 }

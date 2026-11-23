@@ -19,6 +19,7 @@ use crate::openaccess;
 use crate::organise;
 use crate::pdftext;
 use crate::sources::{self, Download, Fetch};
+use crate::websearch;
 use crate::store::{SavedSearch, Store, Suggestion};
 use anyhow::{Result, anyhow, bail};
 use serde_json::{Map, Value, json};
@@ -75,6 +76,19 @@ pub fn catalog() -> Vec<ToolDef> {
             title: "列出文献库",
             description: "列出所有文献库：ID、名称、主题和文献数量。其他工具用 library 参数指定其中一个。首页上还没有建成文献库的对话不在其中。",
             input_schema: json!({"type": "object", "properties": {}, "additionalProperties": false}),
+            writes: false,
+            confirm: false,
+        },
+        ToolDef {
+            name: "web_search",
+            title: "搜索网页",
+            description: "用网页搜索引擎（DeepSeek 或 Jina，在「设置 › 网络 › 网页搜索」选择并填写 Key）搜索互联网，返回每条结果的标题、网址、摘要、站点和发布时间。用于文献数据库之外的信息：软件和数据库的文档、指南与政策、机构和项目的页面、新闻。找学术文献先用 search_online；网页结果不是文献库里的文献，引用时写出网址，只读到摘要时不要当作读过全文。想把一篇文献的页面收进文献库，用 import_url。不改动文献库。",
+            input_schema: json!({"type": "object", "properties": {
+                "query": {"type": "string", "description": "搜索词。可以用 site:域名 限定站点、\"短语\" 精确匹配、-词 排除；DeepSeek 还支持 lang:zh、after:2025、before:2026-06-01。DeepSeek 的搜索词最多 128 个字符。"},
+                "count": {"type": "integer", "description": "返回多少条，默认 8；DeepSeek 最多 50，Jina 最多 20。"},
+                "content": {"type": "boolean", "description": "为 true 时每条结果附上网页正文（每条最多 6000 个字符，更慢）；默认 false，只给摘要。"},
+                "engine": {"type": "string", "enum": websearch::ENGINES.iter().map(|engine| engine.key).collect::<Vec<_>>(), "description": "指定搜索引擎；省略时按设置选择。"},
+            }, "required": ["query"], "additionalProperties": false}),
             writes: false,
             confirm: false,
         },
@@ -654,6 +668,8 @@ pub fn describe_result(result: &Result<Value, String>) -> String {
         Ok(value) => {
             if let Some(total) = value["total"].as_u64() {
                 format!("{total} 条结果")
+            } else if let (Some(engine), Some(results)) = (value["engine"].as_str(), value["results"].as_array()) {
+                format!("{engine}：{} 个网页", results.len())
             } else if let (Some(changed), Some(unchanged)) = (value["changed"].as_u64(), value["unchanged"].as_u64()) {
                 if unchanged > 0 { format!("改了 {changed} 篇，{unchanged} 篇不用改") } else { format!("改了 {changed} 篇") }
             } else if let Some(commented) = value["commented"].as_u64() {
@@ -689,38 +705,61 @@ pub fn describe_result(result: &Result<Value, String>) -> String {
     }
 }
 
+/// What a front end lends the tools beyond plain requests (`Fetch`, `Download`): the ways out that need the
+/// person's own connections or keys. `Reach::default()` lends nothing, and a tool that needs what was not lent says so.
+#[derive(Clone, Copy, Default)]
+pub struct Reach<'a> {
+    /// Saving a note to Notion through the connector set up in the window.
+    pub publish: Option<crate::notes::Publish<'a>>,
+    /// Searching the web with the engine chosen in settings (`websearch`).
+    pub search: Option<websearch::Search<'a>>,
+}
+
 /// Run a tool against the data folder `root`. The error is a sentence for
 /// whoever called: a person at a terminal or a model.
 pub fn call(root: &Path, name: &str, args: &Value, fetch: Fetch, download: Download) -> Result<Value, String> {
-    call_with(root, name, args, fetch, download, None)
+    call_with(root, name, args, fetch, download, Reach::default())
 }
 
-pub fn call_with(root: &Path, name: &str, args: &Value, fetch: Fetch, download: Download, publish: Option<crate::notes::Publish>) -> Result<Value, String> {
+pub fn call_with(root: &Path, name: &str, args: &Value, fetch: Fetch, download: Download, reach: Reach) -> Result<Value, String> {
     checked(name, args)?;
     if name == "create_library" { return local::create_library(root, args).map_err(|e| format!("{e:#}")) }
     if name == "import_library" { return local::import_library(root, args).map_err(|e| format!("{e:#}")) }
     if name == "list_zotero_libraries" { return local::zotero_libraries(args).map_err(|e| format!("{e:#}")) }
     if name == "sync_searches" { return sync_searches(root, args, fetch, crate::time::now_millis()).map_err(|e| format!("{e:#}")) }
+    if name == "web_search" { return web_search(args, reach) }
     if name == "list_libraries" {
         let all: Vec<Value> = libraries::shelved(root).iter().map(|l| json!({"id": l.id, "name": l.name, "topic": l.topic, "papers": l.paper_count, "autoSyncHours": l.auto_sync_hours})).collect();
         return Ok(json!({"libraries": all}));
     }
     let info = find_library(root, args["library"].as_str().unwrap_or(""))?;
     let mut store = Store::open(&info.dir).map_err(|e| format!("{e:#}"))?;
-    call_in_with(&mut store, &info, name, args, fetch, download, publish)
+    call_in_with(&mut store, &info, name, args, fetch, download, reach)
 }
 
 /// Run a library tool on a library that is already open.
 pub fn call_in(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fetch: Fetch, download: Download) -> Result<Value, String> {
-    call_in_with(store, info, name, args, fetch, download, None)
+    call_in_with(store, info, name, args, fetch, download, Reach::default())
 }
 
-pub fn call_in_with(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fetch: Fetch, download: Download, publish: Option<crate::notes::Publish>) -> Result<Value, String> {
+pub fn call_in_with(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fetch: Fetch, download: Download, reach: Reach) -> Result<Value, String> {
     checked(name, args)?;
     if name == "save_note_to_notion" {
-        return publish.ok_or("此运行环境没有提供 Notion MCP；请使用桌面应用或 wisp 命令。")?(store, info, args);
+        return reach.publish.ok_or("此运行环境没有提供 Notion MCP；请使用桌面应用或 wisp 命令。")?(store, info, args);
     }
+    if name == "web_search" { return web_search(args, reach) }
     dispatch(store, info, name, args, fetch, download).map_err(|e| format!("{e:#}"))
+}
+
+/// `web_search`: the web searched with the engine asked for or the one settings choose. No library is read or written.
+fn web_search(args: &Value, reach: Reach) -> Result<Value, String> {
+    let search = reach.search.ok_or("此运行环境没有提供网页搜索；请使用桌面应用或 wisp 命令。")?;
+    let words = |e: anyhow::Error| format!("{e:#}");
+    let query = websearch::Query { query: text(args, "query").map_err(words)?.to_string(), count: number(args, "count", websearch::DEFAULT_COUNT, 50).map_err(words)?.max(1), content: args["content"].as_bool().unwrap_or(false) };
+    let found = search(text(args, "engine").map_err(words)?, &query)?;
+    let mut value = json!({"engine": found.engine.name, "query": query.query, "results": found.hits});
+    if found.hits.is_empty() { value["note"] = json!("没有找到结果：换个说法，或去掉 site:、引号等限制再试。") }
+    Ok(value)
 }
 
 fn dispatch(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fetch: Fetch, download: Download) -> Result<Value> {
@@ -2097,7 +2136,7 @@ pub(crate) mod tests {
         assert!(call(&root, "list_pdf_annotations", &json!({"kind": "wrong"})).is_err());
         // The same tool is available to the built-in assistant and a read-only MCP client.
         assert!(library_catalog().iter().any(|t| t.name == "list_pdf_annotations" && !t.writes));
-        let server = crate::mcp::Server { fetch: &offline, download: &no_download, publish: None, read_only: true };
+        let server = crate::mcp::Server { fetch: &offline, download: &no_download, reach: Reach::default(), read_only: true };
         let response = crate::mcp::handle(&root, &json!({"id": 1, "method": "tools/call", "params": {"name": "list_pdf_annotations", "arguments": {"paperId": paper}}}), &server).unwrap();
         assert_eq!(response["result"]["isError"], false);
         assert_eq!(response["result"]["structuredContent"]["total"], 2);
@@ -2928,6 +2967,34 @@ pub(crate) mod tests {
         assert_eq!(library_catalog().iter().filter(|tool| tool.confirm).map(|tool| tool.name).collect::<Vec<_>>().len(), 20);
         // The tools that write a manuscript are asked about outside the conversation that writes it.
         assert!(MANUSCRIPT.iter().all(|name| catalog().iter().any(|tool| tool.name == *name && tool.writes && tool.confirm)));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn the_web_searched_through_what_the_front_end_lends() {
+        let (root, _) = sample();
+        // Without a way to search lent, the tool says so instead of failing somewhere deeper.
+        assert!(call(&root, "web_search", &json!({"query": "CRISPR"})).unwrap_err().contains("没有提供网页搜索"));
+        let asked = std::cell::RefCell::new(vec![]);
+        let search = |engine: &str, query: &websearch::Query| -> Result<websearch::Found, String> {
+            asked.borrow_mut().push((engine.to_string(), query.clone()));
+            let hits = if query.query == "nothing" { vec![] } else { vec![websearch::Hit { title: "Cas9".into(), url: "https://example.org/cas9".into(), summary: "A nuclease.".into(), ..Default::default() }] };
+            Ok(websearch::Found { engine: websearch::engine(if engine.is_empty() { "deepseek" } else { engine }).unwrap(), hits })
+        };
+        let reach = Reach { search: Some(&search), ..Default::default() };
+        let found = call_with(&root, "web_search", &json!({"query": " Cas9 ", "count": 3}), &offline, &no_download, reach).unwrap();
+        assert_eq!(found, json!({"engine": "DeepSeek", "query": "Cas9", "results": [{"title": "Cas9", "url": "https://example.org/cas9", "summary": "A nuclease."}]}));
+        assert_eq!(asked.borrow()[0], (String::new(), websearch::Query { query: "Cas9".into(), count: 3, content: false }));
+        // Inside an open library it is the same tool; an engine named and a count out of range are passed on as asked, at least one.
+        let info = find_library(&root, "").unwrap();
+        let mut store = Store::open(&info.dir).unwrap();
+        let empty = call_in_with(&mut store, &info, "web_search", &json!({"query": "nothing", "engine": "jina", "content": true, "count": 0}), &offline, &no_download, reach).unwrap();
+        assert!(empty["results"].as_array().unwrap().is_empty() && empty["note"].as_str().unwrap().contains("没有找到结果"));
+        assert_eq!(asked.borrow()[1], ("jina".into(), websearch::Query { query: "nothing".into(), count: 1, content: true }));
+        assert!(library_catalog().iter().any(|t| t.name == "web_search" && !t.writes && !t.confirm));
+        assert_eq!((describe_call("web_search", &json!({"query": "Cas9  off-target", "engine": "jina"})), describe_result(&Ok(found))), ("搜索网页：jina · Cas9 off-target".to_string(), "DeepSeek：1 个网页".to_string()));
+        assert!(call_with(&root, "web_search", &json!({}), &offline, &no_download, reach).unwrap_err().contains("需要参数 query"));
+        drop(store);
         std::fs::remove_dir_all(root).ok();
     }
 

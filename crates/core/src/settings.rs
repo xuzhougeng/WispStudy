@@ -119,6 +119,8 @@ pub struct Settings {
     /// The proxy every request goes through, as a URL (`http://127.0.0.1:7890`,
     /// `socks5://…`); empty leaves it to the environment (`HTTPS_PROXY` and the like).
     pub proxy: String,
+    /// Which engine the tool `web_search` asks and the keys of the engines (设置 › 网络 › 网页搜索).
+    pub web_search: crate::websearch::WebSearchSettings,
     /// Changed shortcuts by id; an empty key means the shortcut is removed.
     pub shortcuts: BTreeMap<String, String>,
     /// How wide the reader made the detail panel, in logical pixels; 0 is the width it comes with.
@@ -176,7 +178,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let providers = provider::DEFAULT_PRESETS.iter().filter_map(|key| provider::preset(key)).map(Provider::from_preset).collect();
-        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), play_speed: 1., commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, pdf_split_free: false, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, library_order: vec![], days_used: 0, last_used_day: String::new(), star_answered: false };
+        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), play_speed: 1., commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), web_search: Default::default(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, pdf_split_free: false, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, library_order: vec![], days_used: 0, last_used_day: String::new(), star_answered: false };
         settings.tidy();
         settings
     }
