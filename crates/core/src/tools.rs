@@ -14,7 +14,7 @@ use crate::extract::{self, Proposal};
 use crate::filter::{self, Filters, filter_papers};
 use crate::fulltext::{self, terms};
 use crate::libraries::{self, LibraryInfo};
-use crate::model::{FULLTEXTS, Paper, READINGS, SCREENINGS, one_of};
+use crate::model::{FULLTEXTS, Paper, PaperFile, READINGS, SCREENINGS, one_of};
 use crate::openaccess;
 use crate::organise;
 use crate::pdftext;
@@ -40,7 +40,7 @@ pub struct ToolDef {
 }
 
 /// The tools that change the library.
-const WRITING: [&str; 27] = ["create_library", "import_library", "export_library", "import_pdf", "import_references", "import_zotero", "save_search", "remove_search", "run_search", "undo_import", "suggest_screening", "suggest_field", "sync_searches", "find_pdf", "import_url", "organise_papers", "edit_section", "set_outline", "comment_manuscript", "export_note", "save_note_to_notion", "resolve_note_save", "save_cite_style", "restyle_docx", "import_docx_references", "import_manuscript", "make_slides"];
+const WRITING: [&str; 28] = ["compress_pdf", "create_library", "import_library", "export_library", "import_pdf", "import_references", "import_zotero", "save_search", "remove_search", "run_search", "undo_import", "suggest_screening", "suggest_field", "sync_searches", "find_pdf", "import_url", "organise_papers", "edit_section", "set_outline", "comment_manuscript", "export_note", "save_note_to_notion", "resolve_note_save", "save_cite_style", "restyle_docx", "import_docx_references", "import_manuscript", "make_slides"];
 /// Of those, the ones the window's assistant runs only with the person's
 /// consent. Saving a search, suggesting a screening decision or proposing
 /// a field's value changes nothing a person has not yet to act on, so they
@@ -48,7 +48,7 @@ const WRITING: [&str; 27] = ["create_library", "import_library", "export_library
 /// about everywhere but in the conversation that writes that manuscript,
 /// where the person has handed the pen over. `comment_manuscript` is not among them: a comment changes no
 /// word of the manuscript, it waits for the person like a screening suggestion.
-const CONFIRMING: [&str; 20] = ["import_library", "export_library", "import_pdf", "import_references", "import_zotero", "run_search", "undo_import", "remove_search", "find_pdf", "import_url", "organise_papers", "edit_section", "set_outline", "export_note", "save_note_to_notion", "resolve_note_save", "restyle_docx", "import_docx_references", "import_manuscript", "make_slides"];
+const CONFIRMING: [&str; 21] = ["compress_pdf", "import_library", "export_library", "import_pdf", "import_references", "import_zotero", "run_search", "undo_import", "remove_search", "find_pdf", "import_url", "organise_papers", "edit_section", "set_outline", "export_note", "save_note_to_notion", "resolve_note_save", "restyle_docx", "import_docx_references", "import_manuscript", "make_slides"];
 /// The tools that write a manuscript (`compose`).
 pub const MANUSCRIPT: [&str; 2] = ["edit_section", "set_outline"];
 
@@ -315,6 +315,16 @@ pub fn catalog() -> Vec<ToolDef> {
                 "paperId": {"type": "string", "description": "只为这一篇文献查找；省略时处理文献库里没有 PDF 的文献。"},
                 "limit": {"type": "integer", "description": "省略 paperId 时一次最多处理几篇，默认 10，最多 50。"},
                 "lookOnly": {"type": "boolean", "description": "只查找、不下载：返回每篇文献的候选地址。"},
+            }),
+            &[],
+        ),
+        scoped(
+            "compress_pdf",
+            "压缩 PDF",
+            "把文献库里过大的 PDF 变小：长边超过 2400 像素（约 A4 页面上 200 dpi）的图片缩到 2400 像素，照片存为 JPEG，线条图、图表和截图保持无损；文字、字体、页面和用户的标注都不变，压缩后会核对每页文字与原来一致。至少小一成才替换，附件 ID 不变；原文件移到文献库文件夹的 removed/（结果里的 original），以后再导入原文件仍认得这篇文献。带密码或权限保护的 PDF 不处理。给 resourceId 只压缩这个附件，给 paperId 压缩这篇文献的所有 PDF。",
+            json!({
+                "resourceId": {"type": "string", "description": "要压缩的 PDF 附件 ID，见 get_paper 的 files。"},
+                "paperId": {"type": "string", "description": "压缩这篇文献的所有 PDF 附件。"},
             }),
             &[],
         ),
@@ -729,6 +739,7 @@ fn dispatch(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fet
         "import_zotero" => local::import_zotero(store, args),
         "list_zotero_libraries" => local::zotero_libraries(args),
         "find_pdf" => find_pdf(store, args, fetch, download),
+        "compress_pdf" => compress_pdf(store, args),
         "import_url" => web::import_url(store, args, fetch, download),
         "find_citations" => find_citations(store, args),
         "find_passages" => find_passages(store, args),
@@ -1308,6 +1319,34 @@ fn try_candidate(store: &mut Store, paper: &Paper, candidate: &openaccess::Candi
             Ok(false)
         }
     }
+}
+
+/// Make the PDFs of a paper, or one of them, smaller (`shrink`), keeping each only when it is worth it.
+fn compress_pdf(store: &mut Store, args: &Value) -> Result<Value> {
+    let (resource, paper) = (text(args, "resourceId")?, text(args, "paperId")?);
+    let files: Vec<PaperFile> = match (resource.is_empty(), paper.is_empty()) {
+        (false, _) => store.list_files()?.into_iter().filter(|f| f.id == resource).collect(),
+        (true, false) => store.paper_files(store.get_paper(paper)?.id.as_str())?,
+        (true, true) => bail!("需要 resourceId 或 paperId。"),
+    };
+    if files.is_empty() { bail!("附件不存在：{resource}") }
+    let files: Vec<PaperFile> = files.into_iter().filter(|f| f.format == "pdf").collect();
+    if files.is_empty() { bail!("这里没有 PDF 附件。") }
+    let mut rows = vec![];
+    for file in files {
+        let path = store.file_path(&file);
+        let shrunk = std::fs::read(&path).map_err(|e| anyhow!("无法读取文件：{e}")).and_then(|data| crate::shrink::shrink(&data));
+        let row = match shrunk {
+            Ok(shrunk) if shrunk.worth() => {
+                let (_, original) = store.replace_file(&file.id, &shrunk.bytes)?;
+                json!({"resourceId": file.id, "title": file.title, "outcome": "compressed", "before": shrunk.before, "after": shrunk.bytes.len(), "images": shrunk.images, "original": original.to_string_lossy()})
+            }
+            Ok(shrunk) => json!({"resourceId": file.id, "title": file.title, "outcome": "not_worth", "before": shrunk.before, "after": shrunk.bytes.len(), "note": "压缩后小不到一成，原文件保持不变。"}),
+            Err(err) => json!({"resourceId": file.id, "title": file.title, "outcome": "failed", "error": format!("{err:#}")}),
+        };
+        rows.push(row);
+    }
+    Ok(json!({"files": rows}))
 }
 
 fn find_pdf(store: &mut Store, args: &Value, fetch: Fetch, download: Download) -> Result<Value> {
@@ -1989,6 +2028,33 @@ pub(crate) mod tests {
         let file = store.import_file(&atlas.id, &source, "fulltext").unwrap();
         store.save_fulltext_pages(&file.id, &Ok(vec!["Introduction.\nThe root tip of Arabidopsis.".into(), "Libraries were prepared with\n10x Genomics Chromium. WOX5 marks the quiescent centre.".into()])).unwrap();
         (root, atlas.id)
+    }
+
+    #[test]
+    fn a_heavy_pdf_is_compressed_in_place_and_a_light_one_left_alone() {
+        let (root, paper) = sample();
+        let info = find_library(&root, "").unwrap();
+        let mut store = Store::open(&info.dir).unwrap();
+        let (heavy, light) = (root.join("heavy.pdf"), root.join("light.pdf"));
+        std::fs::write(&heavy, crate::shrink::tests::paper(4800, 3600, true, false)).unwrap();
+        // A file already as small as it gets.
+        std::fs::write(&light, crate::shrink::shrink(&crate::shrink::tests::paper(300, 200, false, false)).unwrap().bytes).unwrap();
+        let (heavy_file, light_file) = (store.import_file(&paper, &heavy, "fulltext").unwrap(), store.import_file(&paper, &light, "supplement").unwrap());
+        let done = call(&root, "compress_pdf", &json!({"paperId": paper})).unwrap();
+        let row = |id: &str| done["files"].as_array().unwrap().iter().find(|r| r["resourceId"] == id).unwrap().clone();
+        let (compressed, left) = (row(&heavy_file.id), row(&light_file.id));
+        assert_eq!((compressed["outcome"].as_str(), left["outcome"].as_str()), (Some("compressed"), Some("not_worth")));
+        assert!(compressed["after"].as_u64().unwrap() * 2 < compressed["before"].as_u64().unwrap());
+        // The same attachment, smaller; the original is set aside and still known.
+        let now = store.paper_files(&paper).unwrap().into_iter().find(|f| f.id == heavy_file.id).unwrap();
+        assert_eq!(now.size_bytes, compressed["after"].as_u64().unwrap());
+        assert!(Path::new(compressed["original"].as_str().unwrap()).is_file());
+        assert_eq!(store.paper_holding(&heavy).unwrap(), Some(paper.clone()));
+        // The text file of the sample is not a PDF; a missing id is said.
+        assert!(call(&root, "compress_pdf", &json!({"resourceId": "R-missing"})).unwrap_err().contains("附件不存在"));
+        assert!(call(&root, "compress_pdf", &json!({})).is_err());
+        assert!(super::CONFIRMING.contains(&"compress_pdf") && super::WRITING.contains(&"compress_pdf"));
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]
@@ -2858,7 +2924,7 @@ pub(crate) mod tests {
             // Only a tool that changes the library has anything to ask the person about.
             assert!(tool.writes || !tool.confirm, "{}", tool.name);
         }
-        assert_eq!(library_catalog().iter().filter(|tool| tool.confirm).map(|tool| tool.name).collect::<Vec<_>>().len(), 19);
+        assert_eq!(library_catalog().iter().filter(|tool| tool.confirm).map(|tool| tool.name).collect::<Vec<_>>().len(), 20);
         // The tools that write a manuscript are asked about outside the conversation that writes it.
         assert!(MANUSCRIPT.iter().all(|name| catalog().iter().any(|tool| tool.name == *name && tool.writes && tool.confirm)));
         std::fs::remove_dir_all(root).ok();

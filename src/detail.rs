@@ -388,6 +388,9 @@ impl Workspace {
             .enumerate()
             .map(|(i, file)| {
                 let reading = lib.extracting.contains(&file.id);
+                let shrinking = lib.shrinking.contains(&file.id);
+                // A heavy PDF is offered to be made smaller, until it has been or turned out not to get smaller.
+                let heavy = file.format == "pdf" && file.size_bytes >= wisp_core::shrink::HEAVY && !lib.shrunk.contains(&file.id) && !lib.no_smaller.contains(&file.id);
                 // By a model's eyes, when the file gave no text of its own.
                 let by_eye = lib.writing.sorting.reading && lib.writing.sorting.working.contains(&file.id);
                 let text = lib.store.fulltext_pages(&file.id).ok().flatten();
@@ -396,6 +399,7 @@ impl Workspace {
                     _ => None,
                 };
                 let note = match &text {
+                    _ if shrinking => t("正在压缩…").to_string(),
                     _ if reading => t("正在提取文字…").to_string(),
                     _ if by_eye => t("模型正在读页面…").to_string(),
                     Some(Ok(pages)) => {
@@ -432,7 +436,7 @@ impl Workspace {
                             .flex()
                             .items_center()
                             .gap(px(8.))
-                            .child(if reading || by_eye { ui::spinner(SharedString::from(format!("file-busy-{}", file.id)), 16., Theme::accent()).into_any_element() } else { ui::icon("file-text", 18., Theme::accent()).into_any_element() })
+                            .child(if reading || by_eye || shrinking { ui::spinner(SharedString::from(format!("file-busy-{}", file.id)), 16., Theme::accent()).into_any_element() } else { ui::icon("file-text", 18., Theme::accent()).into_any_element() })
                             .child(
                                 div()
                                     .flex()
@@ -443,6 +447,7 @@ impl Workspace {
                                     .child(div().truncate().text_size(text_px(12.)).text_color(if failure.is_some() { Theme::warning() } else { Theme::text_tertiary() }).child(format!("{} · {}{}", match attachments.iter().position(|a| a == &file.id) { Some(n) => format!("S{}", n + 1), None if file.kind == "fulltext" => t("正文").to_string(), None => t("附件").to_string() }, file_size(file.size_bytes), if note.is_empty() { String::new() } else { format!(" · {note}") }))),
                             )
                             // A PDF is read in the viewer here, an attachment as well as the main text.
+                            .when(heavy && !shrinking, |d| d.child(small(("file-compress", i), t("压缩")).tooltip(ui::tip(t("把过大的图片缩小，文字、页面和标注不变。原文件移到 removed 文件夹。"))).on_click(self.on(Cmd::CompressFile(file.id.clone()), cx))))
                             .when(file.format == "pdf", |d| d.child(small(("file-read", i), t("阅读")).on_click(self.on(Cmd::ReadFile(file.id.clone()), cx))))
                             .child(ui::ghost_button(("file-open", i), Some("link"), None).tooltip(ui::tip(t("用系统应用打开"))).on_click(self.on(Cmd::OpenFile(file.id.clone()), cx)))
                             .child(ui::ghost_button(("file-remove", i), Some("x"), None).on_click(self.on(Cmd::RemoveFile(file.id.clone()), cx))),

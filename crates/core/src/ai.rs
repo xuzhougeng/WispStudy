@@ -789,6 +789,15 @@ pub fn base64(bytes: &[u8]) -> String {
     out
 }
 
+/// OpenCode Go wants every request to name a session (`x-opencode-session`) and refuses one without
+/// (HTTP 400); the same name for as long as the app runs, so its requests are known as one client's.
+fn opencode_session(base: &str, headers: &mut Vec<(String, String)>) {
+    static SESSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    if !crate::provider::is_opencode_go(base) { return }
+    headers.push(("x-opencode-session".to_string(), SESSION.get_or_init(|| crate::model::new_id("wisp")).clone()));
+    headers.push(("user-agent".to_string(), format!("wisp-study/{}", env!("CARGO_PKG_VERSION"))));
+}
+
 /// An answer already given, when a conversation is replayed to another protocol.
 pub fn assistant_message(text: &str) -> Value {
     json!({"role": "assistant", "content": text})
@@ -839,6 +848,7 @@ pub fn chat_request_with(profile: &Profile, ctx: &Context, wire: &[Value], tools
                     body["fallbacks"] = json!("default");
                 }
             }
+            opencode_session(base, &mut headers);
             Ok(HttpRequest { url: format!("{base}/v1/messages"), headers, body, proxy: profile.proxy.trim().to_string() })
         }
         Protocol::OpenAI => {
@@ -849,7 +859,9 @@ pub fn chat_request_with(profile: &Profile, ctx: &Context, wire: &[Value], tools
                 body["tools"] = tools.iter().map(|(name, description, schema)| json!({"type": "function", "function": {"name": name, "description": description, "parameters": schema}})).collect();
             }
             apply_effort(profile, base, &mut body);
-            Ok(HttpRequest { url: format!("{base}/chat/completions"), headers: vec![("authorization".to_string(), format!("Bearer {key}")), ("content-type".to_string(), "application/json".to_string())], body, proxy: profile.proxy.trim().to_string() })
+            let mut headers = vec![("authorization".to_string(), format!("Bearer {key}")), ("content-type".to_string(), "application/json".to_string())];
+            opencode_session(base, &mut headers);
+            Ok(HttpRequest { url: format!("{base}/chat/completions"), headers, body, proxy: profile.proxy.trim().to_string() })
         }
         Protocol::Responses => {
             let mut body = json!({
@@ -866,7 +878,9 @@ pub fn chat_request_with(profile: &Profile, ctx: &Context, wire: &[Value], tools
                 body["tools"] = tools.iter().map(|(name, description, schema)| json!({"type": "function", "name": name, "description": description, "parameters": schema})).collect();
             }
             apply_effort(profile, base, &mut body);
-            Ok(HttpRequest { url: format!("{base}/responses"), headers: vec![("authorization".to_string(), format!("Bearer {key}")), ("content-type".to_string(), "application/json".to_string())], body, proxy: profile.proxy.trim().to_string() })
+            let mut headers = vec![("authorization".to_string(), format!("Bearer {key}")), ("content-type".to_string(), "application/json".to_string())];
+            opencode_session(base, &mut headers);
+            Ok(HttpRequest { url: format!("{base}/responses"), headers, body, proxy: profile.proxy.trim().to_string() })
         }
     }
 }
@@ -2127,6 +2141,16 @@ mod tests {
         assert_eq!(r.body["messages"][1]["role"], "user");
         assert_eq!((r.body["tools"][0]["type"].as_str(), r.body["tools"][0]["function"]["parameters"]["type"].as_str()), (Some("function"), Some("object")));
         assert!(chat_request(&Profile { base_url: "ftp://x".into(), api_key: "k".into(), ..Default::default() }, &ctx, &wire, &tools).is_err());
+        assert!(!r.headers.iter().any(|(k, _)| k == "x-opencode-session"));
+        // OpenCode Go names its session on every interface, the same one each time.
+        let session = |r: &HttpRequest| r.headers.iter().find(|(k, _)| k == "x-opencode-session").map(|(_, v)| v.clone());
+        let go = Profile { base_url: "https://opencode.ai/inference/go/openai/v1".into(), model: "kimi-k3".into(), ..other.clone() };
+        let first = chat_request(&go, &ctx, &wire, &tools).unwrap();
+        assert_eq!(first.url, "https://opencode.ai/inference/go/openai/v1/chat/completions");
+        let go_claude = Profile { protocol: Protocol::Anthropic, base_url: "https://opencode.ai/inference/go/anthropic".into(), ..go.clone() };
+        let second = chat_request(&go_claude, &ctx, &wire, &tools).unwrap();
+        assert_eq!(second.url, "https://opencode.ai/inference/go/anthropic/v1/messages");
+        assert!(session(&first).is_some_and(|s| s.starts_with("wisp-")) && session(&first) == session(&second));
     }
 
     #[test]
