@@ -183,6 +183,10 @@ impl Theme {
     pub fn note_paper() -> Hsla { hsla(46. / 360., 0.95, 0.78, 1.) }
     pub fn note_edge() -> Hsla { hsla(40. / 360., 0.6, 0.45, 0.55) }
     pub fn note_ink() -> Hsla { hsla(35. / 360., 0.7, 0.25, 1.) }
+    /// The handles of a box chosen on a PDF page: white squares ringed in the accent, which stand out from
+    /// the page and from the box's own colour, whatever it is. The page is white in either set.
+    pub fn handle_fill() -> Hsla { hsla(0., 0., 1., 1.) }
+    pub fn handle_ring() -> Hsla { Self::accent() }
     /// The off state of a switch and the groove of a segmented control.
     pub fn groove() -> Hsla { if dark() { hsla(0., 0., 1., 0.12) } else { hsla(0., 0., 0., 0.07) } }
     /// The chosen segment of a segmented control, lighter than its groove.
