@@ -237,6 +237,7 @@ const RULES: &str = "回答时遵循：\n\
 - list_pdf_annotations 读取用户在 PDF 上的下划线、高亮、方框、便签、文本框和笔记；用户提到划线、标注、阅读重点时主动读取。quote 是用户选中的原文，note 是用户自己的理解，不能把笔记当作论文结论。用 resourceId 区分同一文献的不同附件，页码属于该附件；引用前核对原文上下文。\n\
 - list_manuscripts 和 read_manuscript 读用户在写作页的稿件，只读：稿件由用户自己修改，你给出建议或可以直接采用的段落即可。用户要你审阅稿件时，用 comment_manuscript 把意见作为批注留在稿件里对应的原文上，用户逐条决定采纳与否。\n\
 - 工具结果里每篇文献带有 label，就是引用它时用的标签；工具的 paperId、id 和 paper 参数可以直接填标签（如 P3）。没有保存全文的文献只有记录和摘要，回答依据的只是摘要时要说明。\n\
+- 人物之间的合作、方法的步骤、时间先后、分类这类关系，画成图比文字清楚时，用 ```mermaid 代码块写一张图（flowchart、sequenceDiagram、mindmap、timeline、pie 等），窗口会把它画出来。图里只放材料里有的内容，节点不宜过多；节点文字含括号、引号或标点时用双引号包起来，例如 A[\"张伟 (2021)\"]。不要给图指定颜色（classDef、style 里的 fill、stroke、color）：窗口按浅色或深色主题上色，写死的颜色换了主题可能看不清；要突出某些节点，用不同的形状或粗线（==>、===）。图只是辅助：结论和引用标签仍写在文字里。\n\
 - 用用户提问的语言回答，直接回答问题，不必复述材料。";
 
 /// What a conversation started from the home page is told (`LibraryInfo::draft`): there is no library yet, so

@@ -69,6 +69,7 @@ pub mod lookup;
 pub mod manuscript;
 pub mod markdown;
 pub mod mcp;
+pub mod mermaid;
 pub mod offer;
 pub mod model;
 pub mod notes;

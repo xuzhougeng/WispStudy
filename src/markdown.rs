@@ -1,13 +1,15 @@
 //! Draws an answer of the assistant: the blocks `wisp_core::markdown` reads
 //! from its Markdown, one under the other. Lists are set tight, tables as a
 //! grid of equal columns, links open in the browser. Where the answer
-//! cites (`[P3 p.5 "…"]`), a click is handed to whoever asked for it.
+//! cites (`[P3 p.5 "…"]`), a click is handed to whoever asked for it. A
+//! closed block of Mermaid is drawn as the diagram it describes (`diagram`).
 
 use crate::theme::{self, Theme, text_px};
 use gpui::{prelude::FluentBuilder, *};
 use std::rc::Rc;
 use wisp_core::ai::{self, Citation};
 use wisp_core::markdown::{Align, Block, Marker, Rich, parse};
+use wisp_core::mermaid;
 
 /// What a click on a citation does.
 pub type OnCite = Rc<dyn Fn(&Citation, &mut Window, &mut App)>;
@@ -49,18 +51,21 @@ pub struct Selecting {
 
 /// What is drawn with: an id that keeps the links of this text apart from
 /// those of another, a count of the links so far, what a citation does,
-/// and the layouts of the pieces drawn so far, for finding the pointer in them.
+/// and the layouts of the pieces drawn so far, for finding the pointer in them:
+/// none for a piece drawn as something other than its text (a diagram).
 struct Draw<'a> {
     id: &'a str,
     links: usize,
+    /// The diagrams so far: what keeps the buttons of one apart from those of the next.
+    diagrams: usize,
     cite: Option<OnCite>,
     selected: Option<(Place, Place)>,
-    layouts: Vec<TextLayout>,
+    layouts: Vec<Option<TextLayout>>,
 }
 
 /// `text` as elements.
 pub fn render(id: &str, text: &str, cite: Option<OnCite>, selecting: Option<Selecting>) -> Div {
-    let mut draw = Draw { id, links: 0, cite, selected: selecting.as_ref().and_then(|selecting| selecting.selected), layouts: vec![] };
+    let mut draw = Draw { id, links: 0, diagrams: 0, cite, selected: selecting.as_ref().and_then(|selecting| selecting.selected), layouts: vec![] };
     let drawn = div().flex().flex_col().gap(theme::paragraph_gap(10.)).children(blocks(&parse(text), &mut draw));
     let Some(selecting) = selecting else { return drawn };
     // Where the pointer is among the pieces: in the one it is over, else at the near end of the one nearest above or below.
@@ -70,6 +75,7 @@ pub fn render(id: &str, text: &str, cite: Option<OnCite>, selecting: Option<Sele
     let place = move |position: Point<Pixels>| -> Option<Place> {
         let mut nearest: Option<((Pixels, Pixels), Place)> = None;
         for (at, layout) in layouts.iter().enumerate() {
+            let Some(layout) = layout else { continue };
             // A piece not laid out in this frame has no place to be found in.
             let Ok(bounds) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| layout.bounds())) else { continue };
             let (down, index) = if position.y < bounds.top() {
@@ -94,7 +100,7 @@ pub fn render(id: &str, text: &str, cite: Option<OnCite>, selecting: Option<Sele
         canvas(
             move |bounds, window, cx| {
                 let at = |(piece, byte): Place| -> Option<(Point<Pixels>, Pixels)> {
-                    let layout = layouts.get(piece)?;
+                    let layout = layouts.get(piece)?.as_ref()?;
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| layout.position_for_index(byte.min(layout.len())).map(|point| (point, layout.line_height())))).ok().flatten()
                 };
                 if let (Some((start, _)), Some((end, line))) = (at(from), at(to)) { told(Drawn { start, end, line, origin: bounds.origin }, window, cx) }
@@ -259,10 +265,25 @@ fn block(block: &Block, links: &mut Draw) -> AnyElement {
                 .child(div().flex().flex_col().flex_1().min_w_0().gap(px(4.)).child(rich(text, links)).children(blocks(children, links)))
                 .into_any_element()
         }
-        Block::Code { text, .. } => {
+        Block::Code { lang, text, closed } => {
+            // A block of Mermaid that is written to its end is a diagram: drawn as one, unless the person asked for
+            // its source or it cannot be drawn. One still being written stays code: half a diagram is not shown.
+            let diagram = (*closed && mermaid::is_mermaid(lang)).then(|| {
+                links.diagrams += 1;
+                (format!("{}-diagram-{}", links.id, links.diagrams), crate::diagram::drawn(text))
+            });
+            if let Some((id, Ok(drawn))) = &diagram && !crate::diagram::as_source(text) {
+                // Still a piece of the answer, so the places after it count as they do in `texts`; there is no text of it to select.
+                links.layouts.push(None);
+                return crate::diagram::picture(id, text, drawn);
+            }
             let code = StyledText::new(text.clone()).with_highlights(with_selection(vec![], selected_in(links, text)));
-            links.layouts.push(code.layout().clone());
-            div().px(px(12.)).py(px(10.)).rounded(px(6.)).border_1().border_color(Theme::line()).bg(Theme::bg_sunken()).font_family(theme::MONO_FONT).text_size(text_px(12.5)).line_height(theme::body_line(19.)).child(code).into_any_element()
+            links.layouts.push(Some(code.layout().clone()));
+            let code = div().px(px(12.)).py(px(10.)).rounded(px(6.)).border_1().border_color(Theme::line()).bg(Theme::bg_sunken()).font_family(theme::MONO_FONT).text_size(text_px(12.5)).line_height(theme::body_line(19.)).child(code).into_any_element();
+            match diagram {
+                Some((id, drawn)) => crate::diagram::source(&id, text, code, drawn.err().as_deref()),
+                None => code,
+            }
         }
         Block::Quote(inner) => div().flex().flex_col().gap(theme::paragraph_gap(8.)).pl(px(12.)).border_l_2().border_color(Theme::line_strong()).text_color(Theme::text_secondary()).children(blocks(inner, links)).into_any_element(),
         Block::Rule => div().h(px(1.)).bg(Theme::line()).into_any_element(),
@@ -329,7 +350,7 @@ fn rich(rich: &Rich, draw: &mut Draw) -> AnyElement {
     }
     highlights.sort_by_key(|(range, _)| range.start);
     let text = StyledText::new(rich.text.clone()).with_highlights(with_selection(highlights, selected_in(draw, &rich.text)));
-    draw.layouts.push(text.layout().clone());
+    draw.layouts.push(Some(text.layout().clone()));
     if targets.is_empty() { return text.into_any_element() }
     draw.links += 1;
     let cite = draw.cite.clone();
@@ -360,6 +381,8 @@ mod tests {
         assert_eq!(text_between(answer, (1, 13), (3, 6)), "10x 平台。\n第一条\n里面");
         assert_eq!(text_between(answer, (1, 1), (1, 6)), "根尖");
         assert_eq!(text_between(answer, (9, 0), (40, 0)), "let x = 1;");
+        // A diagram is drawn as a picture and still counted as the piece its source is: what follows it keeps its place.
+        assert_eq!(texts("前文\n\n```mermaid\ngraph LR\n  A --> B\n```\n\n后文"), ["前文", "graph LR\n  A --> B", "后文"]);
     }
 
     #[test]

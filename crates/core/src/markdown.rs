@@ -70,7 +70,8 @@ pub enum Block {
     Paragraph(Rich),
     Heading(u8, Rich),
     Item { marker: Marker, text: Rich, children: Vec<Block> },
-    Code { lang: String, text: String },
+    /// `closed` is whether its closing fence was read: an answer still being written ends in one that is not.
+    Code { lang: String, text: String, closed: bool },
     Quote(Vec<Block>),
     Rule,
     /// The first row is the header; every row has one cell per column.
@@ -175,7 +176,7 @@ fn blocks(lines: &[&str]) -> Vec<Block> {
                 code.push(dedent(lines[j], ind));
                 j += 1;
             }
-            out.push(Block::Code { lang: info.split_whitespace().next().unwrap_or("").to_string(), text: code.join("\n") });
+            out.push(Block::Code { lang: info.split_whitespace().next().unwrap_or("").to_string(), text: code.join("\n"), closed: j < lines.len() });
             i = j + 1;
             continue;
         }
@@ -763,9 +764,11 @@ mod tests {
         assert!(matches!(&parsed[5], Block::Item { marker: Marker::Number(2), .. }));
         assert_eq!(parsed[6], Block::Rule);
         assert_eq!(parsed[7], Block::Quote(vec![Block::Paragraph(Rich::plain("引文"))]));
-        assert_eq!(parsed[8], Block::Code { lang: "python".into(), text: "print(1)".into() });
+        assert_eq!(parsed[8], Block::Code { lang: "python".into(), text: "print(1)".into(), closed: true });
         assert!(matches!(&parsed[9], Block::Item { marker: Marker::Todo(true), .. }));
         assert_eq!(parsed.len(), 10);
+        // A fence an answer has not come to the end of yet.
+        assert_eq!(parse("```mermaid\ngraph LR\n  A --> B"), [Block::Code { lang: "mermaid".into(), text: "graph LR\n  A --> B".into(), closed: false }]);
     }
 
     #[test]
