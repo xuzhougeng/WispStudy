@@ -410,6 +410,10 @@ pub enum Cmd {
     TagPapers(Vec<String>),
     FindPdfsOf(Vec<String>),
     AskTrashPapers(Vec<String>),
+    /// 移到文献库: the dialog for a paper, a library chosen in it, and the move (`transfer.rs`).
+    AskMovePaper(String),
+    ChooseMoveTarget(String),
+    MovePaper(String, String),
     TrashPapers(Vec<String>),
     /// Open a paper on one page of the detail panel.
     OpenPaper(String, Tab),
@@ -1607,6 +1611,8 @@ pub enum Modal {
     Extract(Box<crate::extract::Form>),
     /// 写作: which paragraphs of a Word file without heading styles start a section.
     Headings(Box<crate::comments::HeadingsForm>),
+    /// 移到文献库: the paper, and the library chosen for it (`transfer.rs`).
+    MoveTo { paper: String, to: Option<String> },
 }
 
 /// A paper kept in a pane of its own beside the paper on show (#194): choosing another paper leaves it
@@ -3023,6 +3029,12 @@ impl Workspace {
                 window.focus(&self.focus);
             }
             Cmd::Draft(what) => self.run_draft(what, window, cx),
+            Cmd::AskMovePaper(paper) => self.ask_move_paper(paper, cx),
+            Cmd::ChooseMoveTarget(id) => {
+                if let Some(Modal::MoveTo { to, .. }) = self.modal.as_mut() { *to = Some(id) }
+                self.modal_error.clear();
+            }
+            Cmd::MovePaper(paper, to) => self.move_paper(paper, to, window, cx),
             Cmd::NewLibrary => self.library_dialog(None, window, cx),
             Cmd::EditLibrary(id) => self.library_dialog(Some(id), window, cx),
             Cmd::AskRemoveLibrary(id) => {
@@ -7839,6 +7851,13 @@ impl Workspace {
                 self.run(cmd, window, cx);
             }
             Modal::ImportReport => self.run(Cmd::CloseModal, window, cx),
+            Modal::MoveTo { paper, to } => match to.clone() {
+                Some(to) => {
+                    let paper = paper.clone();
+                    self.run(Cmd::MovePaper(paper, to), window, cx)
+                }
+                None => self.modal_error = t("选一个文献库。").into(),
+            },
             Modal::Section { .. } | Modal::History { .. } => self.submit_manuscript_modal(window, cx),
             Modal::Headings(_) => {
                 self.headings_done(true, cx);
@@ -8259,6 +8278,9 @@ impl Workspace {
                 // `importdoc:<path>` starts a manuscript from a Word or Markdown file; `comments` shows the comments beside the manuscript (`comments:off` the candidates);
                 // `comment:<step>` is `review`, `stop`, `write`, `save`, `cancel`, `takeall`, `import`, `fromreview` (a manuscript of the newest review the assistant wrote sections for), and by a comment's place among those of the section from 0: `take;<n>`, `back;<n>`, `drop;<n>`, `done;<n>`, `show;<n>`;
                 // `wish:<text>` / `commenttext:<text>` leave text in the review's box / the comment being written; `exportdoc:<path>` / `exportdoc:track;<path>` write the manuscript as a Word file there.
+                // 移到文献库 for the selected paper: the dialog; `moveto:<n>` chooses the n-th library it offers, `submit` moves.
+                "movepaper" => self.lib.as_ref().and_then(|lib| lib.selected.clone()).map(Cmd::AskMovePaper),
+                "moveto" => self.move_targets().get(arg.parse::<usize>().unwrap_or(0)).map(|info| Cmd::ChooseMoveTarget(info.id.clone())),
                 "importdoc" => {
                     self.import_manuscript_files(vec![PathBuf::from(arg)], cx);
                     None

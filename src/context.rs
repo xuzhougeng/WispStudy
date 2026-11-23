@@ -176,6 +176,7 @@ impl Workspace {
                 if let Some(file) = pdf { items.push(item(reveal_label(), Cmd::RevealFile(file.id.clone()))) }
 
                 breaks.push(items.len());
+                if !self.move_targets().is_empty() { items.push(item(t("移到文献库…"), Cmd::AskMovePaper(id.clone()))) }
                 items.push(MenuItem { label: t("移到回收站").into(), checked: false, note: Some(crate::shortcuts::pretty("secondary-backspace").into()), cmd: Cmd::TrashPaper(id.clone()) });
             }
             MenuKind::Papers(ids) => {
