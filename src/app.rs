@@ -155,6 +155,10 @@ impl Tab {
 pub enum FilterKey {
     Tag,
     Year,
+    /// The journal's impact factor, a span (`Filters::impact`).
+    Impact,
+    /// The journal's zone in the partition the 分区 column shows (`Filters::zone`).
+    Zone,
     Reading,
     Screening,
     Fulltext,
@@ -398,6 +402,8 @@ pub enum Cmd {
     SetView(View),
     SetPage(Page),
     SetFilter(FilterKey, String),
+    /// 自定义区间…: the two ends of a filter by year or by impact factor, typed (`Modal::Range`).
+    FilterRange(FilterKey),
     ClearFilters,
     SetSort(String),
     Select(String),
@@ -1586,6 +1592,8 @@ pub enum Modal {
     Confirm { title: String, message: String, action: String, cmd: Cmd },
     /// Another name for a tag, on every paper that has it.
     Tag { tag: String, name: Entity<TextInput> },
+    /// The two ends of a filter by year or by impact factor (`FilterKey::Year`, `FilterKey::Impact`); either may be left empty.
+    Range { key: FilterKey, low: Entity<TextInput>, high: Entity<TextInput> },
     /// Tags for several papers at once.
     TagPapers { ids: Vec<String>, name: Entity<TextInput> },
     /// 清空回收站: the papers in the trash deleted from disk, once the phrase is typed.
@@ -2993,9 +3001,17 @@ impl Workspace {
                 let f = &lib.filters;
                 let fixed = |table: &[(&str, &str)]| table.iter().map(|(v, l)| (v.to_string(), t(l).to_string(), None)).collect::<Vec<_>>();
                 let counted = |list: Vec<(String, usize)>| list.into_iter().take(40).map(|(v, n)| (v.clone(), v, Some(n))).collect::<Vec<_>>();
+                // A span of numbers: the usual ones by name with how many papers each keeps, then one typed.
+                let now = time::now_millis();
+                let kept = |set: &dyn Fn(&mut Filters)| Some(filter::count_with(&lib.papers, set, now));
                 let (current, choices): (String, Vec<(String, String, Option<usize>)>) = match &key {
                     FilterKey::Tag => (f.tag.clone(), counted(filter::tag_counts(&lib.papers))),
-                    FilterKey::Year => (f.year.clone(), counted(filter::years(&lib.papers))),
+                    FilterKey::Year => (f.year.clone(), crate::library::YEARS_BACK.iter().map(|n| format!("last:{n}")).map(|value| (value.clone(), crate::library::year_label(&value), kept(&|f| f.year = value.clone()))).collect()),
+                    FilterKey::Impact => (f.impact.clone(), crate::library::IMPACTS.iter().map(|least| filter::span_value(Some(least), None)).map(|value| (value.clone(), crate::library::impact_label(&value), kept(&|f| f.impact = value.clone()))).collect()),
+                    FilterKey::Zone => {
+                        let which = crate::library::zone_sort(&self.settings);
+                        (f.zone.clone(), (1..=3).map(|last| filter::zone_value(which, last)).map(|value| (value.clone(), crate::library::zone_label(&value), kept(&|f| f.zone = value.clone()))).collect())
+                    }
                     FilterKey::Source => (f.source.clone(), counted(filter::source_counts(&lib.papers))),
                     FilterKey::Reading => (f.reading.clone(), fixed(&READINGS)),
                     FilterKey::Screening => (f.screening.clone(), fixed(&SCREENINGS)),
@@ -3004,8 +3020,32 @@ impl Workspace {
                     FilterKey::Field(id) => (f.fields.get(id).cloned().unwrap_or_default(), counted(filter::field_counts(&lib.papers, id))),
                 };
                 items.push(MenuItem { label: t("全部").into(), checked: current.is_empty(), note: None, cmd: Cmd::SetFilter(key.clone(), String::new()) });
+                let mut named = current.is_empty();
                 for (value, label, count) in choices {
+                    named |= current == value;
                     items.push(MenuItem { label: label.into(), checked: current == value, note: count.map(|n| n.to_string().into()), cmd: Cmd::SetFilter(key.clone(), value) });
+                }
+                match &key {
+                    FilterKey::Year => {
+                        // The years one by one come last; a span typed is ticked on its own row, which says what it is.
+                        let years = counted(filter::years(&lib.papers));
+                        let typed = !named && !years.iter().any(|(value, ..)| *value == current);
+                        items.push(MenuItem { label: t("自定义区间…").into(), checked: typed, note: typed.then(|| crate::library::year_label(&current).into()), cmd: Cmd::FilterRange(key.clone()) });
+                        breaks.push(items.len());
+                        for (value, label, count) in years {
+                            items.push(MenuItem { label: label.into(), checked: current == value, note: count.map(|n| n.to_string().into()), cmd: Cmd::SetFilter(key.clone(), value) });
+                        }
+                    }
+                    FilterKey::Impact => items.push(MenuItem { label: t("自定义范围…").into(), checked: !named, note: (!named).then(|| crate::library::impact_label(&current).into()), cmd: Cmd::FilterRange(key.clone()) }),
+                    FilterKey::Zone => {
+                        // Which partition the zones are of is the 分区 column's (设置 › 外观): the same choice, here where it is needed.
+                        breaks.push(items.len());
+                        let which = crate::library::zone_sort(&self.settings);
+                        for (value, label) in wisp_core::journals::ZONES {
+                            items.push(MenuItem { label: tf!("分区表：{}", "Partition: {}", t(label)).into(), checked: value == which, note: None, cmd: Cmd::SetJournalZone(if value == "cas" { String::new() } else { value.to_string() }) });
+                        }
+                    }
+                    _ => {}
                 }
             }
         }
@@ -3196,9 +3236,10 @@ impl Workspace {
                 // 分区 header has the arrow whenever the list is in its order.
                 let mut failed = None;
                 if let Some(lib) = self.lib.as_mut() {
-                    let sort = crate::library::sort_in_zone(&lib.filters.sort, &self.settings);
-                    if sort != lib.filters.sort {
-                        lib.filters.sort = sort;
+                    // So is a list filtered by zone: the same zones, of the partition now on show.
+                    let (sort, zone) = (crate::library::sort_in_zone(&lib.filters.sort, &self.settings), filter::zone_in(&lib.filters.zone, crate::library::zone_sort(&self.settings)));
+                    if sort != lib.filters.sort || zone != lib.filters.zone {
+                        (lib.filters.sort, lib.filters.zone) = (sort, zone);
                         lib.refilter();
                     }
                     let kept = crate::library::sort_in_zone(&lib.info.sort, &self.settings);
@@ -3450,6 +3491,8 @@ impl Workspace {
                     match key {
                         FilterKey::Tag => f.tag = value,
                         FilterKey::Year => f.year = value,
+                        FilterKey::Impact => f.impact = value,
+                        FilterKey::Zone => f.zone = value,
                         FilterKey::Reading => f.reading = value,
                         FilterKey::Screening => f.screening = value,
                         FilterKey::Fulltext => f.fulltext = value,
@@ -3462,6 +3505,16 @@ impl Workspace {
                     lib.page = Page::Papers;
                     lib.refilter();
                 }
+            }
+            Cmd::FilterRange(key) => {
+                let Some(current) = self.lib.as_ref().map(|lib| if key == FilterKey::Impact { lib.filters.impact.clone() } else { lib.filters.year.clone() }) else { return };
+                // A span set comes back into the two boxes; a year alone and 近 N 年 start them empty.
+                let (from, to) = current.split_once('-').filter(|_| !current.starts_with("last:")).unwrap_or_default();
+                self.modal_subscriptions.clear();
+                self.modal_error.clear();
+                let (low, high) = if key == FilterKey::Impact { (self.modal_input("最低，例如 5", from, false, window, cx), self.modal_input("最高，可留空", to, false, window, cx)) } else { (self.modal_input("最早，例如 2000", from, false, window, cx), self.modal_input("最晚，可留空", to, false, window, cx)) };
+                low.read(cx).focus(window);
+                self.modal = Some(Modal::Range { key, low, high });
             }
             Cmd::ClearFilters => {
                 if let Some(lib) = self.lib.as_mut() {
@@ -4473,7 +4526,11 @@ impl Workspace {
         // So does the palette: its own key puts it away, the others wait.
         if self.palette.is_some() { return }
         let in_settings = self.settings_view.is_some();
+        // ⌘+ / ⌘- / ⌘0 are the PDF's size while one is on show. Anywhere else, the home page and the settings
+        // included, they are the size of the interface's text (设置 › 外观's 字号), as in a browser.
+        let pdf_shown = !in_settings && self.lib.as_ref().is_some_and(|lib| lib.selected.is_some() && lib.pdf.is_some() && (lib.tab == Tab::Pdf || lib.split));
         let cmd = match id {
+            "zoom-in" | "zoom-out" | "zoom-fit" if !pdf_shown => return self.step_text_size(match id { "zoom-in" => Some(1.), "zoom-out" => Some(-1.), _ => None }, window, cx),
             "settings" if !in_settings => Cmd::OpenSettings(SettingsPage::General),
             "home" => Cmd::GoHome,
             "new-library" if !in_settings && self.lib.is_none() => Cmd::NewLibrary,
@@ -4523,6 +4580,15 @@ impl Workspace {
             _ => return,
         };
         self.run(cmd, window, cx);
+    }
+
+    /// One step of the interface's text size from the keyboard, or back to the default (`None`). The toast says
+    /// the size it came to, and at either end that it goes no further.
+    fn step_text_size(&mut self, step: Option<f32>, window: &mut Window, cx: &mut Context<Self>) {
+        use wisp_core::settings::{DEFAULT_FONT_SIZE, font_size};
+        let (was, size) = (self.settings.font_size, step.map_or(DEFAULT_FONT_SIZE, |step| font_size(self.settings.font_size + step)));
+        if size != was { self.run(Cmd::SetFontSize(size), window, cx) }
+        self.say(if size == was && step.is_some() { tf!("文字大小 {size} px，已到头", "Text size {size} px, as far as it goes") } else { tf!("文字大小 {size} px", "Text size {size} px") }, cx);
     }
 
     // ---- libraries
@@ -7995,6 +8061,16 @@ impl Workspace {
                 }
                 if name == tag || self.retag(&tag, Some(&name), cx) { self.run(Cmd::CloseModal, window, cx) }
             }
+            Modal::Range { key, low, high } => {
+                let (key, low, high) = (key.clone(), text(low, cx), text(high, cx));
+                match crate::library::range_value(&key, &low, &high) {
+                    Ok(value) => {
+                        self.run(Cmd::CloseModal, window, cx);
+                        self.run(Cmd::SetFilter(key, value), window, cx);
+                    }
+                    Err(why) => self.modal_error = why,
+                }
+            }
             Modal::EmptyTrash { phrase } => {
                 if crate::dialogs::phrase_typed(&text(phrase, cx)) { self.run(Cmd::EmptyTrash, window, cx) }
             }
@@ -8886,7 +8962,7 @@ impl Workspace {
                     return;
                 }
                 "menu" => {
-                    let kind = match arg { "sort" => MenuKind::Sort, "columns" => MenuKind::Columns, "year" => MenuKind::Filter(FilterKey::Year), "zoom" => MenuKind::PdfZoom, "pdfsplit" => MenuKind::PdfSplit, "pdfmore" => MenuKind::PdfMore, "panes" => MenuKind::Panes, "layout" => MenuKind::Layout, "pdffiles" => MenuKind::PdfFiles, "fulltext" => MenuKind::Filter(FilterKey::Fulltext), "manuscripts" => MenuKind::Manuscripts, "export" => MenuKind::ManuscriptExport, "retry" => MenuKind::ExtractRetry, "podcasts" => MenuKind::Podcasts, "speed" => MenuKind::PlaySpeed, _ => MenuKind::Add };
+                    let kind = match arg { "sort" => MenuKind::Sort, "columns" => MenuKind::Columns, "year" => MenuKind::Filter(FilterKey::Year), "impact" => MenuKind::Filter(FilterKey::Impact), "zones" => MenuKind::Filter(FilterKey::Zone), "zoom" => MenuKind::PdfZoom, "pdfsplit" => MenuKind::PdfSplit, "pdfmore" => MenuKind::PdfMore, "panes" => MenuKind::Panes, "layout" => MenuKind::Layout, "pdffiles" => MenuKind::PdfFiles, "fulltext" => MenuKind::Filter(FilterKey::Fulltext), "manuscripts" => MenuKind::Manuscripts, "export" => MenuKind::ManuscriptExport, "retry" => MenuKind::ExtractRetry, "podcasts" => MenuKind::Podcasts, "speed" => MenuKind::PlaySpeed, _ => MenuKind::Add };
                     self.open_menu(kind, point(px(if matches!(arg, "zoom" | "manuscripts" | "export" | "retry") { 900. } else { 20. }), px(120.)), cx);
                     return;
                 }
@@ -9048,6 +9124,12 @@ impl Workspace {
                 "textwidth" => Some(Cmd::SetTextWidth(match arg { "narrow" => wisp_core::settings::TextWidth::Narrow, "wide" => wisp_core::settings::TextWidth::Wide, "fill" => wisp_core::settings::TextWidth::Fill, _ => wisp_core::settings::TextWidth::Standard })),
                 "density" => Some(Cmd::SetDensity(arg.to_string())),
                 "zone" => Some(Cmd::SetJournalZone(arg.to_string())),
+                // A filter of the paper list set (`filter:year;last:3`, `filter:impact;5-`, `filter:zone;cas:2`, nothing after the `;` clears it), and 自定义区间…'s dialog (`range:year`, `range:impact`).
+                "filter" | "range" => {
+                    let (which, value) = arg.split_once(';').unwrap_or((arg, ""));
+                    let key = match which { "impact" => FilterKey::Impact, "zone" => FilterKey::Zone, _ => FilterKey::Year };
+                    Some(if name == "range" { Cmd::FilterRange(key) } else { Cmd::SetFilter(key, value.to_string()) })
+                }
                 "contrast" => Some(Cmd::ToggleHighContrast),
                 "appearancereset" => Some(Cmd::ResetAppearance),
                 "language" => Some(Cmd::SetLanguage(if arg == "en" { Language::En } else { Language::Zh })),

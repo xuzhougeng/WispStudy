@@ -11,7 +11,7 @@ mod web;
 
 use crate::complete;
 use crate::extract::{self, Proposal};
-use crate::filter::{Filters, filter_papers};
+use crate::filter::{self, Filters, filter_papers};
 use crate::fulltext::{self, terms};
 use crate::libraries::{self, LibraryInfo};
 use crate::model::{FULLTEXTS, Paper, READINGS, SCREENINGS, one_of};
@@ -165,6 +165,10 @@ pub fn catalog() -> Vec<ToolDef> {
                 "fulltext": {"type": "string", "enum": keys(&FULLTEXTS), "description": "全文状态：stored 表示已保存 PDF 并读出了文字，textless 表示有 PDF 但没有读出文字。"},
                 "tag": {"type": "string", "description": "带有这个标签。"},
                 "year": {"type": "integer", "description": "发表年份。"},
+                "yearFrom": {"type": "integer", "description": "发表年份不早于这一年；与 yearTo 合成一个区间，两头可以只给一头。不与 year 同用。"},
+                "yearTo": {"type": "integer", "description": "发表年份不晚于这一年。"},
+                "minImpact": {"type": "number", "description": "期刊影响因子不低于这个数，例如 10。期刊不在随应用附带的表里（见 journal_metrics）的文献不返回。"},
+                "zone": {"type": "string", "description": "期刊分区，写成「分区表:最后一区」：cas 中科院、xr 新锐、jcr JCR；cas:1 是中科院 1 区，cas:2 是 1–2 区，jcr:1 是 Q1。期刊在这张表里没有分区的文献不返回。"},
                 "sort": {"type": "string", "description": "newest（默认），或 title / year / journal / authors 加上 -asc、-desc，例如 year-desc。"},
                 "limit": {"type": "integer", "description": "最多返回多少篇，默认 50，最大 500。"},
                 "offset": {"type": "integer", "description": "跳过前多少篇，用于翻页。"},
@@ -856,13 +860,28 @@ fn library_status(store: &mut Store, info: &LibraryInfo) -> Result<Value> {
 }
 
 fn list_papers(store: &mut Store, info: &LibraryInfo, args: &Value) -> Result<Value> {
+    let given = |key: &str| -> Result<Option<usize>> { if args[key].is_null() { Ok(None) } else { number(args, key, 0, 9999).map(Some) } };
+    let year = match (given("year")?, given("yearFrom")?, given("yearTo")?) {
+        (Some(year), None, None) => year.to_string(),
+        (Some(_), ..) => bail!("参数 year 是某一年，yearFrom / yearTo 是一个区间：两种不能同时给。"),
+        (None, Some(from), Some(to)) if from > to => bail!("参数 yearFrom 不能晚于 yearTo。"),
+        (None, from, to) => filter::span_value(from, to),
+    };
+    let impact = match &args["minImpact"] {
+        Value::Null => String::new(),
+        value => filter::span_value(Some(value.as_f64().filter(|least| least.is_finite() && *least >= 0.).ok_or_else(|| anyhow!("参数 minImpact 应为不小于 0 的数字，例如 5。"))?), None),
+    };
+    let zone = text(args, "zone")?;
+    if !zone.is_empty() && filter::zone_parts(zone).is_none() { bail!("参数 zone 应写成「分区表:最后一区」，例如 cas:1、cas:2、xr:1、jcr:2：分区表是 cas（中科院）、xr（新锐）、jcr（JCR），区是 1–4。") }
     let filters = Filters {
         search: text(args, "query")?.into(),
         screening: choice(args, "screening", &SCREENINGS)?.into(),
         reading: choice(args, "reading", &READINGS)?.into(),
         fulltext: choice(args, "fulltext", &FULLTEXTS)?.into(),
         tag: text(args, "tag")?.into(),
-        year: if args["year"].is_null() { String::new() } else { number(args, "year", 0, 9999)?.to_string() },
+        year,
+        impact,
+        zone: zone.into(),
         sort: text(args, "sort")?.into(),
         ..Default::default()
     };
@@ -2096,6 +2115,9 @@ pub(crate) mod tests {
         assert_eq!(call(&root, "list_papers", &json!({"screening": "irrelevant"})).unwrap()["papers"][0]["title"], "Leaf development");
         assert_eq!(call(&root, "list_papers", &json!({"query": "wox5 niche", "year": 2021})).unwrap()["total"], 1);
         assert_eq!(call(&root, "list_papers", &json!({"query": "wox5", "year": 2019})).unwrap()["total"], 0);
+        // A span of years, and the journal's numbers: the sample's papers name no journal, so those keep none.
+        assert_eq!((call(&root, "list_papers", &json!({"yearFrom": 2020})).unwrap()["total"].as_u64(), call(&root, "list_papers", &json!({"yearFrom": 2015, "yearTo": 2020})).unwrap()["total"].as_u64(), call(&root, "list_papers", &json!({"yearTo": 2021})).unwrap()["total"].as_u64()), (Some(1), Some(0), Some(1)));
+        assert_eq!((call(&root, "list_papers", &json!({"minImpact": 5})).unwrap()["total"].as_u64(), call(&root, "list_papers", &json!({"zone": "cas:2"})).unwrap()["total"].as_u64()), (Some(0), Some(0)));
         let paged = call(&root, "list_papers", &json!({"limit": 1, "offset": 1})).unwrap();
         assert_eq!((paged["total"].as_u64(), paged["papers"].as_array().map(Vec::len)), (Some(1), Some(0)));
 
@@ -2109,6 +2131,10 @@ pub(crate) mod tests {
             ("get_paper", json!({}), "需要参数 id"),
             ("list_papers", json!({"screening": "maybe"}), "pending"),
             ("list_papers", json!({"limit": "ten"}), "非负整数"),
+            ("list_papers", json!({"year": 2021, "yearTo": 2024}), "不能同时给"),
+            ("list_papers", json!({"yearFrom": 2024, "yearTo": 2021}), "不能晚于"),
+            ("list_papers", json!({"minImpact": "high"}), "minImpact"),
+            ("list_papers", json!({"zone": "top"}), "分区表:最后一区"),
             ("list_papers", json!({"colour": "red"}), "没有参数 colour"),
             ("list_papers", json!([]), "JSON 对象"),
             ("drop_everything", json!({}), "没有这个工具"),
