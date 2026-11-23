@@ -775,9 +775,17 @@ impl Store {
     /// 彻底删除: one paper of the trash goes as all of them do when it is
     /// emptied. A paper that is not in the trash is left alone.
     pub fn purge_trashed(&mut self, id: &str) -> Result<()> {
-        let trashed = self.db.query_row("SELECT 1 FROM trashed_papers WHERE paper_id = ?1", [id], |_| Ok(())).optional()?.is_some();
-        if !trashed { bail!("这篇文献不在回收站里：{id}") }
-        self.purge(&[id.to_string()]).map(|_| ())
+        self.purge_trashed_papers(&[id.to_string()]).map(|_| ())
+    }
+
+    /// 彻底删除所选: several papers of the trash at once, in one transaction.
+    /// When one of them is not in the trash, none is deleted.
+    pub fn purge_trashed_papers(&mut self, ids: &[String]) -> Result<usize> {
+        for id in ids {
+            let trashed = self.db.query_row("SELECT 1 FROM trashed_papers WHERE paper_id = ?1", [id], |_| Ok(())).optional()?.is_some();
+            if !trashed { bail!("这篇文献不在回收站里：{id}") }
+        }
+        self.purge(ids)
     }
 
     /// Papers leave the trash for good: their records go as with
@@ -2172,6 +2180,29 @@ mod tests {
         assert!(store.file_path(&kept_file).exists());
         assert_eq!((store.list_papers().unwrap().len(), store.list_files().unwrap().len()), (1, 1));
         assert_eq!(store.empty_trash().unwrap(), 0);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn papers_chosen_in_the_trash_are_deleted_together() {
+        let dir = temp_dir("purge-chosen");
+        let mut store = Store::open(&dir).unwrap();
+        let papers: Vec<Paper> = ["One", "Two", "Three", "Outside"].into_iter().map(|title| store.add_paper(paper(title, "")).unwrap()).collect();
+        let pdf = dir.join("one.pdf");
+        std::fs::write(&pdf, b"%PDF-1.4 one").unwrap();
+        let file = store.import_file(&papers[0].id, &pdf, "fulltext").unwrap();
+        for p in &papers[..3] { store.trash_paper(&p.id).unwrap() }
+        // One of them outside the trash: nothing is deleted.
+        assert!(store.purge_trashed_papers(&[papers[0].id.clone(), papers[3].id.clone()]).is_err());
+        assert_eq!(store.list_trash().unwrap().len(), 3);
+        assert!(store.file_path(&file).exists());
+        // The two chosen go with their files; the third stays in the trash, the paper outside it in the library.
+        assert_eq!(store.purge_trashed_papers(&[papers[0].id.clone(), papers[1].id.clone()]).unwrap(), 2);
+        let left: Vec<String> = store.list_trash().unwrap().into_iter().map(|entry| entry.paper.id).collect();
+        assert_eq!(left, vec![papers[2].id.clone()]);
+        assert!(store.get_paper(&papers[0].id).is_err() && store.get_paper(&papers[1].id).is_err());
+        assert!(!store.file_path(&file).exists() && !dir.join("removed").exists());
+        assert_eq!(store.list_papers().unwrap().len(), 1);
         std::fs::remove_dir_all(dir).ok();
     }
 

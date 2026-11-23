@@ -2848,6 +2848,8 @@ impl PdfView {
     /// file when that is another of the paper's. It stays until it is used or put away.
     fn return_chip(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let back = self.returns.last()?;
+        // Not laid out yet (a viewer just made for another file): its foot is not known.
+        if self.height <= 0. { return None }
         let pane = if self.split == Split::Off || back.from.is_some() { self.active } else { back.pane };
         let (half_w, half_h) = self.pane_size();
         let (left, top) = match (self.split, pane) {
