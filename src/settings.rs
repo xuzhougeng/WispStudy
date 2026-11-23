@@ -753,6 +753,11 @@ impl Workspace {
         if view.protocol == protocol { return }
         let same_service = view.protocol != Protocol::Anthropic && protocol != Protocol::Anthropic;
         view.protocol = protocol;
+        // OpenCode Go speaks all three, each at its own address: go there, models and key untouched.
+        if provider::is_opencode_go(view.fields.base_url.read(cx).text()) {
+            view.fields.base_url.update(cx, |input, cx| input.set_text(provider::opencode_go_base(protocol), cx));
+            return self.save_provider(cx);
+        }
         // Chat completions and Responses are two interfaces of one service: its address and models stay.
         if same_service { return self.save_provider(cx) }
         // The other protocol's address would only fail: offer this one's default. The models stay to be renamed.

@@ -25,7 +25,7 @@ pub struct Preset {
     pub console: &'static str,
 }
 
-pub const PRESETS: [Preset; 8] = [
+pub const PRESETS: [Preset; 9] = [
     Preset { key: "deepseek", name: "DeepSeek", protocol: Protocol::OpenAI, base_url: "https://api.deepseek.com", key_env: "DEEPSEEK_API_KEY", models: &["deepseek-flash", "deepseek-v4-pro"], images: &[], judges: &[], console: "https://platform.deepseek.com/api_keys" },
     Preset { key: "kimi", name: "Kimi", protocol: Protocol::OpenAI, base_url: "https://api.moonshot.cn/v1", key_env: "MOONSHOT_API_KEY", models: &["kimi-k2.6"], images: &[], judges: &[], console: "https://platform.moonshot.cn/console/api-keys" },
     Preset { key: "glm", name: "GLM", protocol: Protocol::OpenAI, base_url: "https://open.bigmodel.cn/api/paas/v4", key_env: "ZHIPUAI_API_KEY", models: &["glm-5.3", "glm-5.1"], images: &[], judges: &[], console: "https://open.bigmodel.cn/usercenter/apikeys" },
@@ -37,6 +37,10 @@ pub const PRESETS: [Preset; 8] = [
     Preset { key: "ark", name: "火山方舟", protocol: Protocol::OpenAI, base_url: "https://ark.cn-beijing.volces.com/api/v3", key_env: "ARK_API_KEY", models: &[], images: &["doubao-seedream-4-0-250828"], judges: &[], console: "https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey" },
     // A System One service: its models judge and write nothing (`judge`). The interface chosen for chat is not used.
     Preset { key: "typesafe", name: "TypeSafe", protocol: Protocol::OpenAI, base_url: "https://api.typesafe.ai/v1", key_env: "TYPESAFE_API_KEY", models: &[], images: &[], judges: &["jev-latest"], console: "https://console.typesafe.ai/" },
+    // OpenCode's subscription: one key for many vendors' models. Each model has a native interface (Kimi and GLM:
+    // chat completions; MiniMax, Qwen: Claude's under `…/go/anthropic`; Grok, GPT: Responses) and the service
+    // translates the others, so one address serves them all. Every request names its session (`ai::opencode_session`).
+    Preset { key: "opencode-go", name: "OpenCode Go", protocol: Protocol::OpenAI, base_url: "https://opencode.ai/inference/go/openai/v1", key_env: "OPENCODE_API_KEY", models: &["kimi-k3", "glm-5.3"], images: &[], judges: &[], console: "https://opencode.ai/console" },
 ];
 
 /// The providers a new settings file starts with.
@@ -59,8 +63,24 @@ pub fn preset(key: &str) -> Option<&'static Preset> {
 /// The preset an address belongs to, for settings written before presets existed.
 pub fn preset_of_address(base_url: &str) -> Option<&'static Preset> {
     let host = base_url.split("://").nth(1).unwrap_or(base_url).split(['/', ':']).next().unwrap_or("").to_lowercase();
-    let key = if host.ends_with("deepseek.com") { "deepseek" } else if host.contains("moonshot") { "kimi" } else if host.ends_with("bigmodel.cn") { "glm" } else if host.ends_with("anthropic.com") { "claude" } else if host == "api.openai.com" { "openai" } else if host == "generativelanguage.googleapis.com" { "gemini" } else if host.starts_with("ark.") && host.ends_with("volces.com") { "ark" } else if host == "api.typesafe.ai" { "typesafe" } else { return None };
+    let key = if host.ends_with("deepseek.com") { "deepseek" } else if host.contains("moonshot") { "kimi" } else if host.ends_with("bigmodel.cn") { "glm" } else if host.ends_with("anthropic.com") { "claude" } else if host == "api.openai.com" { "openai" } else if host == "generativelanguage.googleapis.com" { "gemini" } else if host.starts_with("ark.") && host.ends_with("volces.com") { "ark" } else if host == "api.typesafe.ai" { "typesafe" } else if is_opencode_go(base_url) { "opencode-go" } else { return None };
     preset(key)
+}
+
+/// Whether an address is OpenCode Go's: `opencode.ai/inference/go/…`, or `opencode.ai/zen/go/…` as it was first given.
+/// OpenCode's pay-as-you-go service (`…/zen/v1`) is another, with its own billing.
+pub fn is_opencode_go(base_url: &str) -> bool {
+    let rest = base_url.split("://").nth(1).unwrap_or(base_url).to_lowercase();
+    let (host, path) = rest.split_once('/').unwrap_or((&rest, ""));
+    host.split(':').next() == Some("opencode.ai") && (path.starts_with("inference/go") || path.starts_with("zen/go"))
+}
+
+/// OpenCode Go's address for an interface: Claude's has its own, chat completions and Responses share one.
+pub fn opencode_go_base(protocol: Protocol) -> &'static str {
+    match protocol {
+        Protocol::Anthropic => "https://opencode.ai/inference/go/anthropic",
+        Protocol::OpenAI | Protocol::Responses => "https://opencode.ai/inference/go/openai/v1",
+    }
 }
 
 /// One model a provider offers.
@@ -147,8 +167,9 @@ impl Provider {
     /// The environment variable a key is read from when none is stored.
     pub fn key_env(&self) -> &'static str {
         match self.preset() {
-            // A preset moved to another interface of the same service keeps its variable,
-            Some(preset) if preset.protocol == self.protocol || (preset.protocol != Protocol::Anthropic && self.protocol != Protocol::Anthropic) => preset.key_env,
+            // A preset moved to another interface of the same service keeps its variable, and OpenCode Go's
+            // key is the same at all three of its addresses,
+            Some(preset) if preset.protocol == self.protocol || (preset.protocol != Protocol::Anthropic && self.protocol != Protocol::Anthropic) || preset.key == "opencode-go" => preset.key_env,
             _ => match self.protocol {
                 Protocol::Anthropic => "ANTHROPIC_API_KEY",
                 Protocol::OpenAI | Protocol::Responses => "OPENAI_API_KEY",
@@ -191,7 +212,7 @@ mod tests {
         assert_eq!((gemini.models.iter().filter(|m| m.speaks()).count(), gemini.models.iter().filter(|m| m.draws()).count(), gemini.key_env()), (1, 2, "GEMINI_API_KEY"));
         assert_eq!(crate::imagegen::interface(&gemini.profile(&gemini.models[1])), crate::imagegen::Interface::Gemini);
         // The add box suggests a model that answers in words, a judge only where the service has nothing else.
-        assert_eq!(PRESETS.map(|p| p.example()), [Some("deepseek-flash"), Some("kimi-k2.6"), Some("glm-5.3"), Some(DEFAULT_MODEL), Some("gpt-6.2-sol"), Some("gemini-4-hydrogen"), Some("doubao-seed-1-6-251015"), Some("jev-latest")]);
+        assert_eq!(PRESETS.map(|p| p.example()), [Some("deepseek-flash"), Some("kimi-k2.6"), Some("glm-5.3"), Some(DEFAULT_MODEL), Some("gpt-6.2-sol"), Some("gemini-4-hydrogen"), Some("doubao-seed-1-6-251015"), Some("jev-latest"), Some("kimi-k3")]);
         assert_eq!(preset_of_address("https://ark.cn-beijing.volces.com/api/v3").map(|p| p.key), Some("ark"));
         assert_eq!(preset_of_address("https://generativelanguage.googleapis.com/v1beta/openai").map(|p| p.key), Some("gemini"));
         // A service whose models judge: its own key, its own address, and no other kind of model.
@@ -199,6 +220,16 @@ mod tests {
         assert_eq!(typesafe.models.iter().map(|m| (m.model.as_str(), m.judges(), m.speaks())).collect::<Vec<_>>(), [("jev-latest", true, false)]);
         assert!(typesafe.profile(&typesafe.models[0]).judges() && typesafe.key_env() == "TYPESAFE_API_KEY");
         assert_eq!(preset_of_address("https://api.typesafe.ai/v1").map(|p| p.key), Some("typesafe"));
+        // OpenCode Go, at either of its addresses; its pay-as-you-go sibling is not it.
+        let go = Provider::from_preset(preset("opencode-go").unwrap());
+        assert_eq!((go.title().as_str(), go.key_env(), go.models.iter().filter(|m| m.speaks()).count()), ("OpenCode Go", "OPENCODE_API_KEY", 2));
+        let go_claude = Provider { protocol: Protocol::Anthropic, base_url: "https://opencode.ai/inference/go/anthropic".into(), ..go.clone() };
+        assert_eq!(go_claude.key_env(), "OPENCODE_API_KEY");
+        assert_eq!((opencode_go_base(Protocol::OpenAI), go.base_url.as_str()), (preset("opencode-go").unwrap().base_url, "https://opencode.ai/inference/go/openai/v1"));
+        assert_eq!(preset_of_address("https://opencode.ai/inference/go/anthropic").map(|p| p.key), Some("opencode-go"));
+        assert_eq!(preset_of_address("https://opencode.ai/zen/go/v1").map(|p| p.key), Some("opencode-go"));
+        assert_eq!(preset_of_address("https://opencode.ai/zen/v1").map(|p| p.key), None);
+        assert_eq!(preset_of_address("https://notopencode.ai/inference/go").map(|p| p.key), None);
         // A model that answers in words is written as before: no kind, no interface.
         assert_eq!(serde_json::to_string(&Model { id: "m1".into(), model: "x".into(), ..Default::default() }).unwrap(), r#"{"id":"m1","model":"x","effort":""}"#);
     }
