@@ -75,6 +75,35 @@ cargo run -p wisp_core --example seed -- /tmp/wisp-demo some.pdf
 WISP_STUDY_HOME=/tmp/wisp-demo cargo run
 ```
 
+### 在 Windows 上编译 exe
+
+exe 要在 Windows 上编译，macOS 和 Linux 上交叉编译不出来。先装好两样（只需一次）：
+
+```powershell
+winget install Microsoft.VisualStudio.2022.BuildTools --override "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --passive"
+winget install Rustlang.Rustup
+```
+
+第一条装的是 MSVC 构建工具（「使用 C++ 的桌面开发」，含 Windows SDK）。在仓库里第一次运行 `cargo` 时，rustup 会装上 `rust-toolchain.toml` 指定的版本。
+
+只要 exe，在仓库根目录运行：
+
+```powershell
+cargo build --release -p wisp_study -p wisp_cli
+```
+
+产物是 `target\release\wisp_study.exe`（应用，不带控制台窗口）和 `target\release\wisp.exe`（命令行，`wisp mcp` 是 MCP 服务）。图标和 `assets/` 已编进 exe，不用另外带文件。
+
+要打成和发布页一样的包，运行 `scripts/package-windows.ps1`：
+
+```powershell
+pwsh -File scripts/package-windows.ps1 -NoInstaller   # 只出便携版 dist\WispStudy-v<版本>-windows-x64.zip
+winget install JRSoftware.InnoSetup                   # 要安装版时先装 Inno Setup 6
+pwsh -File scripts/package-windows.ps1                # 便携版加 dist\WispStudy-v<版本>-windows-x64-setup.exe
+```
+
+`-Sign` 用 SSL.com eSigner 签名，要先设好 `ESIGNER_*` 变量，平时用在发布流程里，本地试用不需要。手动试运行前可以先设 `$env:WISP_STUDY_HOME="C:\tmp\wisp-test"`，这样不会碰到 `Documents\WispStudy` 里的文献库。
+
 提问、建库向导、筛选、翻译和写作页的模型分节需要模型服务，在「设置 › AI」里配置：Claude API、OpenAI 兼容的 chat/completions，或 OpenAI 的 Responses 接口。可以放进多个模型，提问、批量筛选、翻译、整理全文各用哪一个、各自思考到什么程度分别指定。
 
 ## 功能
