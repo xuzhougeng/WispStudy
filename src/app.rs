@@ -602,6 +602,8 @@ pub enum Cmd {
     /// Show or put away the summary a compacted conversation goes on from.
     ToggleCompacted(Talk),
     CopyText(String),
+    /// The diagram of this Mermaid source, to the clipboard as a picture on white.
+    CopyDiagram(String),
     /// 撤回: the question at this place in the conversation and all after it are taken back; its words and pictures return to the box.
     Retract(Talk, usize),
     /// 重新回答: the answer that ends at this place is asked for again, from the question before it.
@@ -2608,6 +2610,12 @@ impl Workspace {
         let focus = cx.focus_handle();
         window.focus(&focus);
         theme::set_accent("blue");
+        // A diagram in an answer is drawn by a function that knows no workspace: what its buttons ask comes here.
+        let workspace = cx.weak_entity();
+        crate::diagram::on_ask(move |ask, window, cx| {
+            let crate::diagram::Ask::CopyPicture(source) = ask;
+            workspace.update(cx, |this, cx| this.run(Cmd::CopyDiagram(source), window, cx)).ok();
+        });
         shortcuts::rebuild(&settings.shortcuts, cx);
         let libraries = libraries::list(&root);
         let home = crate::draft::Home::new(window, cx);
@@ -4274,6 +4282,21 @@ impl Workspace {
             Cmd::CopyText(text) => {
                 cx.write_to_clipboard(ClipboardItem::new_string(text));
                 self.say(t("已复制"), cx);
+            }
+            Cmd::CopyDiagram(source) => {
+                // Drawn anew for a white page and three times as fine: not on the thread that draws the window.
+                cx.spawn(async move |this, cx| {
+                    let png = cx.background_executor().spawn(async move { crate::diagram::png(&source) }).await;
+                    this.update(cx, |this, cx| match png {
+                        Ok(bytes) => {
+                            cx.write_to_clipboard(ClipboardItem::new_image(&Image::from_bytes(ImageFormat::Png, bytes)));
+                            this.say(t("图片已复制"), cx);
+                        }
+                        Err(err) => this.fail(tf!("这张图画不出来：{err}", "This diagram cannot be drawn: {err}"), cx),
+                    })
+                    .ok();
+                })
+                .detach();
             }
             Cmd::Retract(talk, at) => self.retract(talk, at, window, cx),
             Cmd::Regenerate(talk, at) => self.regenerate(talk, at, cx),

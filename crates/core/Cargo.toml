@@ -23,6 +23,8 @@ flate2 = "1"
 icu_segmenter = "2"
 # CSL citation styles, the files Zotero uses (`csl.rs`); `archive` carries the common styles and every locale.
 hayagriva = { version = "0.10", default-features = false, features = ["archive", "csl-json"] }
+# Mermaid diagrams as SVG without a browser (`mermaid.rs`). Not the default features: those bring the ELK layout, which is EPL-2.0.
+merman = { version = "0.11", default-features = false, features = ["svg", "layout-cytoscape", "all-diagrams"] }
 
 [lints]
 workspace = true

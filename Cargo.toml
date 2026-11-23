@@ -22,6 +22,8 @@ unicode-segmentation = "1"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
 hayro = "0.9"
 async-channel = "2"
+# A diagram's SVG as pixels (`src/diagram.rs`): the version GPUI draws its icons with, so nothing is built twice.
+resvg = "0.45"
 # 朗读's sound out to the speakers (`src/read_aloud.rs`); playback only, no decoders.
 rodio = { version = "0.23", default-features = false, features = ["playback"] }
 

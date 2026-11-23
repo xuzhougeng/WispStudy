@@ -15,6 +15,7 @@ mod comments;
 mod context;
 mod custom;
 mod detail;
+mod diagram;
 mod extract;
 mod facing;
 mod figures;
