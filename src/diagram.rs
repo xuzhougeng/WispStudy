@@ -27,9 +27,10 @@ const COPY_SCALE: f32 = 3.;
 /// and its picture is not to take a hundred megabytes.
 const MAX_EDGE: f32 = 4096.;
 
-/// The tallest a diagram stands in an answer before it is asked for at its own size: a pie is laid out as large
-/// as a page, and an answer is read, not looked at.
-const FITTED_HEIGHT: f32 = 420.;
+/// The tallest a diagram stands in an answer before it is asked for at its own size: a tall graph is not to push
+/// what is said about it out of sight, and a dozen names one under the other are still to be read (14 px words
+/// are not made much smaller by it).
+const FITTED_HEIGHT: f32 = 520.;
 
 /// From this width on a diagram may have been made smaller to fit the column: then it is offered at its own size.
 const MAY_BE_FITTED: f32 = 480.;
