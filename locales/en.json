@@ -1754,5 +1754,8 @@
   "固定对照": "Pin beside",
   "前往原位置": "Go to figure",
   "返回刚才位置": "Back to where you were",
-  "不回去了": "Stay here"
+  "不回去了": "Stay here",
+  "回到候选": "Back to the list",
+  "开着「译文」时另一半不能换成别的文件：先关掉译文，或者用「前往原位置」。": "While the translation is on, the other half cannot show another file: turn it off first, or use Go to figure.",
+  "这张图在这篇文献的另一个文件里：在文献库窗口里读这篇，才能固定对照或前往。": "This figure is in another file of the paper: read the paper in the library window to pin it beside or go to it."
 }

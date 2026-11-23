@@ -112,18 +112,20 @@ fn number(rest: &str) -> Option<(u16, bool, usize)> {
     Some((value, supplement, at))
 }
 
-/// What stands between two numbers of one list, at the start of `rest`: the bytes up to the next number.
-/// A comma lists only after a plural ("Figs. 2, 3"): "in Fig. 2, 30 cells" is one figure.
-fn listed(rest: &str, plural: bool) -> Option<usize> {
+/// What stands between two numbers of one list, at the start of `rest`: the bytes up to the next number,
+/// and whether it says "through" ("2–4", "2 to 4") rather than "and". A comma lists only after a plural
+/// ("Figs. 2, 3"): "in Fig. 2, 30 cells" is one figure.
+fn listed(rest: &str, plural: bool) -> Option<(usize, bool)> {
     let before = blank(rest);
     let tail = &rest[before..];
     let (word, always) = [("and", true), ("&", true), ("to", true), ("–", true), ("—", true), ("-", true), ("~", true), ("～", true), ("至", true), ("和", true), ("及", true), ("与", true), (",", false), (";", false), ("，", false), ("、", false)].into_iter().find(|(word, _)| starts(tail, word))?;
+    let through = matches!(word, "to" | "–" | "—" | "-" | "~" | "～" | "至");
     if !always && !plural { return None }
     let mut at = before + word.len();
     // "and" and "to" are words: "2 and 3", not "2 android".
     if word.is_ascii() && word.chars().all(char::is_alphabetic) && blank(&rest[at..]) == 0 { return None }
     at += blank(&rest[at..]);
-    number(&rest[at..]).map(|_| at)
+    number(&rest[at..]).map(|_| (at, through))
 }
 
 /// The figure a caption's number names: "Fig. 3", "Supplementary Figure S12", "图 3".
@@ -142,6 +144,19 @@ pub struct Mention {
     pub from: usize,
     pub to: usize,
     pub key: Key,
+    /// The first number the words stand for: the number itself, but at the end of a run ("Figs. 2–5": the
+    /// `5`) the one after the run's first, since the figures between are written nowhere else.
+    pub since: u16,
+}
+
+/// The most figures a run ("Figs. 2–5") is taken to name: past that the two numbers are something else.
+const RUN: u16 = 12;
+
+impl Mention {
+    /// The figures the words stand for, in order: one, or those a run ends with.
+    pub fn keys(&self) -> impl Iterator<Item = Key> + '_ {
+        (self.since.min(self.key.number)..=self.key.number).map(|number| Key { number, ..self.key })
+    }
 }
 
 /// Every place a page's glyphs speak of a figure, a table or a scheme by its number, in reading order. A
@@ -167,12 +182,16 @@ pub fn mentions(marks: &[Mark]) -> Vec<Mention> {
             let mut from = at;
             let mut end = at + taken + blank(&text[at + taken..]);
             let mut any = false;
+            // The number a run began at, when the words before this number said "through".
+            let mut run: Option<(u16, Series)> = None;
             while let Some((number, supplement, taken)) = number(&text[end..]) {
                 let series = if supplement && series == Series::Main { Series::Supplementary } else { series };
-                out.push(Mention { from: mark_of(from), to: mark_of(end + taken - 1), key: Key { kind, series, number } });
+                let since = run.filter(|(first, of)| *of == series && number > first + 1 && number - first < RUN).map_or(number, |(first, _)| first + 1);
+                out.push(Mention { from: mark_of(from), to: mark_of(end + taken - 1), key: Key { kind, series, number }, since });
                 any = true;
                 end += taken;
-                let Some(between) = listed(&text[end..], plural) else { break };
+                let Some((between, through)) = listed(&text[end..], plural) else { break };
+                run = through.then_some((number, series));
                 from = end + between;
                 end = from;
             }
@@ -400,6 +419,41 @@ impl Place {
     }
 }
 
+/// A PDF of a paper, for finding a figure named in another: where it shows its figures, and whether it
+/// is the paper's main text (else an attachment: a supplement).
+#[derive(Clone, Copy)]
+pub struct File<'a> {
+    pub index: &'a Index,
+    pub main: bool,
+}
+
+/// Where a number written in one of a paper's files (`files[here]`) may lead, among all of them: the file
+/// and the place in it, this file's first and then the others in their order. More than one is a choice
+/// for the reader. The supplement's and Extended Data's numbers are looked for in every file. A plain
+/// number ("Fig. 3") is this file's, or the main text's when it is written in a supplement: the main text
+/// never means an attachment's Figure 3 by it. And when no file has a "Fig. S2" by that name, a supplement
+/// that numbers its own figures plainly ("Figure 2") is what the main text's "Supplementary Fig. 2" means.
+pub fn places<'a>(key: Key, files: &[File<'a>], here: usize) -> Vec<(usize, &'a Place)> {
+    let order = || std::iter::once(here).chain((0..files.len()).filter(move |at| *at != here)).filter(|at| *at < files.len());
+    let named: Vec<(usize, &Place)> = order().filter(|at| *at == here || key.series != Series::Main || files[*at].main).filter_map(|at| Some((at, files[at].index.find(key)?))).collect();
+    if !named.is_empty() || key.series != Series::Supplementary { return named }
+    let plain = Key { series: Series::Main, ..key };
+    order().filter(|at| *at != here && !files[*at].main).filter_map(|at| Some((at, files[at].index.find(plain)?))).collect()
+}
+
+/// Where a whole file shows its figures, settled, and the sizes of its pages in points; `None` when the
+/// file cannot be parsed. Of a long file the first `most` pages are read.
+pub fn file_index(data: Vec<u8>, most: usize) -> Option<(Index, Vec<(f32, f32)>)> {
+    let mut index = Index::default();
+    let sizes = pdftext::pages_drawn(data, most, &mut |page, marks, shapes, size| {
+        let shown = shown(marks, shapes, size);
+        let loose = unclaimed(shapes, &shown, size);
+        index.add(page, shown, loose, size.1);
+    })?;
+    index.settle();
+    Some((index, sizes))
+}
+
 /// Whether a mention on a 0-based page stands within the figure it would lead to: the caption's own
 /// number, words of its legend, or a label in the figure itself. It leads nowhere but to where it is.
 pub fn own(marks: &[Mark], mention: &Mention, page: usize, place: &Place) -> bool {
@@ -508,6 +562,11 @@ mod tests {
         assert_eq!(named(&["(Fig.S2c; Extended Data Fig. 4)"]), vec![("Fig.S2c".to_string(), supplement), ("Extended Data Fig. 4".to_string(), Key { kind: Kind::Figure, series: Series::Extended, number: 4 })]);
         // A number broken off its word at the line's end is still that figure's.
         assert_eq!(named(&["the roots bend (Fig.", "3) within hours"]), vec![("Fig. 3".to_string(), figure(3))]);
+        // A run names the figures between its ends too: they are reached from its last number.
+        let runs = |line: &str| mentions(&glyphs(100., 50., &[line])).iter().map(|mention| mention.keys().map(|key| key.number).collect::<Vec<_>>()).collect::<Vec<_>>();
+        assert_eq!(runs("Figs. 2–5 and 7"), vec![vec![2], vec![3, 4, 5], vec![7]]);
+        assert_eq!(runs("Figures 2 to 3, and Fig. 4a–c"), vec![vec![2], vec![3], vec![4]]);
+        assert_eq!(runs("Fig. 3-1998"), vec![vec![3]]);
         // A list after a plural; a comma after one figure lists nothing.
         assert_eq!(named(&["Figures 2, 3 and 5"]).iter().map(|(_, key)| key.number).collect::<Vec<_>>(), vec![2, 3, 5]);
         assert_eq!(named(&["in Fig. 2, 30 cells were counted"]), vec![("Fig. 2".to_string(), figure(2))]);
@@ -628,6 +687,29 @@ mod tests {
         // One figure more or less than there are legends: which is whose is not known.
         let index = pages(2);
         assert_eq!([1, 2, 3].map(|number| index.find(figure(number)).unwrap().apart), [None, None, None]);
+    }
+
+    #[test]
+    fn a_number_leads_to_the_file_that_has_its_figure() {
+        let file = |numbers: &[(u16, Series)]| {
+            let mut index = Index::default();
+            index.add(0, numbers.iter().map(|(number, series)| Shown { key: Key { kind: Kind::Figure, series: *series, number: *number }, ..caption(*number, 300., Some([60., 100., 500., 290.])) }).collect(), None, 842.);
+            index
+        };
+        let (text, supplement, plain) = (file(&[(1, Series::Main), (2, Series::Main)]), file(&[(1, Series::Supplementary), (2, Series::Supplementary)]), file(&[(1, Series::Main), (3, Series::Main)]));
+        let supp = |number| Key { kind: Kind::Figure, series: Series::Supplementary, number };
+        let found = |key, files: &[File], here| places(key, files, here).iter().map(|(at, _)| *at).collect::<Vec<_>>();
+        let files = [File { index: &text, main: true }, File { index: &supplement, main: false }, File { index: &plain, main: false }];
+        // Read in the main text: its own figure; the supplement's by its S; never an attachment's plain Figure 3.
+        assert_eq!(found(figure(2), &files, 0), vec![0]);
+        assert_eq!(found(supp(2), &files, 0), vec![1]);
+        assert_eq!(found(figure(3), &files, 0), Vec::<usize>::new());
+        // Read in the supplement: a plain number is the main text's; one both have is a choice, this file's first.
+        assert_eq!(found(figure(2), &files, 1), vec![0]);
+        assert_eq!(found(figure(1), &files, 2), vec![2, 0]);
+        // No file calls it S3: the supplement that numbers its figures plainly is meant.
+        assert_eq!(found(supp(3), &files, 0), vec![2]);
+        assert_eq!(found(supp(1), &files, 0), vec![1]);
     }
 
     #[test]
