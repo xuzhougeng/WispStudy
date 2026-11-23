@@ -26,6 +26,7 @@
 //! - `panes`    分栏: the reading area as columns on an eight-unit grid, and what a window of a given width shows of a layout
 //! - `ai`       context building, request bodies and stream parsing for 文献库提问
 //! - `podcast`  播客: a paper talked over by two hosts, the script asked of a model and its sound kept as WAV
+//! - `playback` the player of 朗读 and 播客: speeds, seeking, where a kept podcast goes on, speech played faster at the same pitch
 //! - `speech`   朗读: a paper's text in pieces for DeepSeek's speech service, and the sound it sends
 //! - `screening` the person's side of 筛选: the keys, a round of papers one by one, suggestions confirmed together
 //! - `sources`  literature database searches: URLs to ask, records read from the replies
@@ -80,6 +81,7 @@ pub mod retrieval;
 pub mod review;
 pub mod revise;
 pub mod screening;
+pub mod playback;
 pub mod podcast;
 pub mod speech;
 pub mod selection;

@@ -31,6 +31,7 @@ mod notes;
 mod palette;
 mod pdf;
 mod picture;
+mod player;
 mod read_aloud;
 mod reader;
 mod revise;

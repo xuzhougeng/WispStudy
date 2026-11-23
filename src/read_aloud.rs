@@ -3,8 +3,11 @@
 //! holds the output device while there is sound to play: rodio's device
 //! sink cannot leave the thread it was opened on, and closing it when the
 //! reading ends leaves the device alone the rest of the time. What was
-//! fetched and not yet played is a `Tape` shared with the output; dropping
-//! the `Reading` stops both.
+//! fetched is a `Tape` shared with the output; dropping the `Reading` stops
+//! both. Either can be paused and played at another speed at the same pitch
+//! (`wisp_core::playback::Stretch`); a podcast's tape keeps all its sound, so
+//! it can also be played from anywhere made so far, while 朗读's lets go of
+//! what was heard.
 
 use rodio::{ChannelCount, DeviceSinkBuilder, SampleRate, Source};
 use std::collections::VecDeque;
@@ -12,6 +15,7 @@ use std::num::NonZero;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 use wisp_core::ai::HttpRequest;
+use wisp_core::playback::Stretch;
 use wisp_core::speech::{self, SAMPLE_RATE};
 
 /// How far ahead of what is heard the sound is fetched: enough that a slow answer is not heard, little
@@ -65,12 +69,21 @@ struct Mark {
 /// Samples of sound a billed character takes before any piece came whole to tell (`speech::billed`).
 const SAMPLES_PER_CHARACTER: f32 = 1_700.;
 
-/// Sound fetched and not yet played, with how much of it was played and where each piece begins.
+/// Sound fetched, how much of it was heard and where each piece begins. Positions count from the
+/// reading's first sample; `samples` holds the sound from `base` on.
 #[derive(Default)]
 struct Tape {
-    samples: VecDeque<f32>,
+    samples: Vec<f32>,
+    base: usize,
+    /// The sample being heard.
     played: usize,
     fetched: usize,
+    /// All the sound is kept (a podcast): what was heard can be heard again.
+    keep: bool,
+    paused: bool,
+    /// How fast it plays (`playback::SPEEDS`); away from 1× through `stretch`, made anew at each seek.
+    speed: f32,
+    stretch: Option<Stretch>,
     /// Each piece in turn, from the sample it begins at.
     marks: Vec<Mark>,
     /// Every byte fetched, while it is kept (a podcast), and its script; handed out once when all came.
@@ -89,11 +102,69 @@ fn lock(tape: &Mutex<Tape>) -> MutexGuard<'_, Tape> {
     tape.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
+impl Tape {
+    fn new(keep: bool) -> Tape {
+        Tape { keep, speed: 1., ..Tape::default() }
+    }
+
+    /// Sound came.
+    fn extend(&mut self, samples: impl IntoIterator<Item = f32>) {
+        let before = self.samples.len();
+        self.samples.extend(samples);
+        self.fetched += self.samples.len() - before;
+    }
+
+    /// The next stretch of sound to hear from `played` on, moving `played` past it: as it was made at 1×,
+    /// else through `stretch`. Empty while what comes next is not here yet, and after the end.
+    fn take(&mut self, most: usize) -> Vec<f32> {
+        if self.speed == 1. {
+            let from = self.played - self.base;
+            let take = self.samples.len().saturating_sub(from).min(most);
+            self.played += take;
+            let out = self.samples[from..from + take].to_vec();
+            self.let_go();
+            return out;
+        }
+        let Tape { stretch, samples, base, played, speed, done, .. } = self;
+        let stretch = stretch.get_or_insert_with(|| Stretch::new(*played));
+        let Some(out) = stretch.step(*speed, samples, *base, *done) else { return vec![] };
+        *played = stretch.position().min(*base + samples.len());
+        self.let_go();
+        out
+    }
+
+    /// 朗读 lets go of what was heard, all but the second a stretch may still reach back into.
+    fn let_go(&mut self) {
+        if self.keep { return }
+        let heard = self.played.saturating_sub(SAMPLE_RATE as usize);
+        if heard > self.base + SAMPLE_RATE as usize * 10 {
+            self.samples.drain(..heard - self.base);
+            self.base = heard;
+        }
+    }
+
+    /// Play on from `at`, within what is kept.
+    fn seek(&mut self, at: usize) {
+        self.played = at.clamp(self.base, self.fetched);
+        self.stretch = None;
+    }
+}
+
 /// What the output plays: the tape, taken in batches so the audio thread does not lock for every sample.
-/// While the next piece is on its way it plays silence; it ends when the tape is done and played, or stopped.
+/// While paused, or while the next piece is on its way, it plays silence (the device stays open, so the
+/// sound goes on at once); it ends when the tape is done and heard, or stopped.
 struct Track {
     tape: Arc<Mutex<Tape>>,
     batch: VecDeque<f32>,
+}
+
+/// Silence given out at a time, while paused or waiting: 10 ms.
+const QUIET: usize = SAMPLE_RATE as usize / 100;
+
+impl Track {
+    fn new(tape: Arc<Mutex<Tape>>) -> Track {
+        Track { tape, batch: VecDeque::new() }
+    }
 }
 
 impl Iterator for Track {
@@ -103,16 +174,16 @@ impl Iterator for Track {
         if let Some(sample) = self.batch.pop_front() { return Some(sample) }
         let mut tape = lock(&self.tape);
         if tape.stopped { return None }
-        let take = tape.samples.len().min(1024);
-        if take == 0 {
-            if tape.done {
+        let taken = if tape.paused { vec![] } else { tape.take(1024) };
+        if taken.is_empty() {
+            if tape.done && !tape.paused && tape.played >= tape.fetched {
                 tape.over = true;
                 return None;
             }
-            return Some(0.);
+            self.batch.extend(std::iter::repeat_n(0., QUIET));
+        } else {
+            self.batch.extend(taken);
         }
-        self.batch.extend(tape.samples.drain(..take));
-        tape.played += take;
         self.batch.pop_front()
     }
 }
@@ -143,7 +214,7 @@ pub struct Heard {
     pub sentence: String,
 }
 
-/// How a reading stands, as the toolbar shows it.
+/// How a reading stands, as the toolbar and the player show it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Status {
     /// The page or turn being heard; `None` for a selection, or before the first sound.
@@ -154,6 +225,12 @@ pub struct Status {
     pub recorded: bool,
     /// Nothing to play yet: the first sound, or the next piece, is on its way.
     pub waiting: bool,
+    pub paused: bool,
+    /// The sample heard, and how many there are so far (all of them once `made`), in the sound as it was made.
+    pub played: usize,
+    pub length: usize,
+    /// All the sound is here: nothing more is being made.
+    pub made: bool,
     /// Everything was heard, or the reading broke off (`error`).
     pub over: bool,
     pub error: Option<String>,
@@ -167,30 +244,34 @@ pub struct Reading {
     tape: Arc<Mutex<Tape>>,
     /// A kept podcast played again: its sound's attachment (`PaperFile::id`), which the playlist goes on from.
     pub replay: Option<String>,
+    /// The kept sound this is (played again, or made now and kept since): where it was left is remembered under it.
+    pub sound: Option<String>,
 }
 
 impl Reading {
-    /// Play a kept podcast again from its files: the WAV, and the script beside it when there is one, so
-    /// the turn heard and its words show as they did the first time. Nothing is asked of any service.
-    pub fn replay(resource: String, sound: String, wav: std::path::PathBuf, script: Option<std::path::PathBuf>) -> Reading {
-        let tape = Arc::new(Mutex::new(Tape::default()));
+    /// Play a kept podcast again from its files, from `at` (`playback::resume_at` decides how near it):
+    /// the WAV, and the script beside it when there is one, so the turn heard and its words show as they
+    /// did the first time. Nothing is asked of any service.
+    pub fn replay(resource: String, sound: String, wav: std::path::PathBuf, script: Option<std::path::PathBuf>, at: usize) -> Reading {
+        let tape = Arc::new(Mutex::new(Tape::new(true)));
         let shared = tape.clone();
-        std::thread::Builder::new().name("read-aloud".into()).spawn(move || replay(shared, wav, script)).ok();
-        Reading { resource, kind: Kind::Podcast, tape, replay: Some(sound) }
+        std::thread::Builder::new().name("read-aloud".into()).spawn(move || replay(shared, wav, script, at)).ok();
+        Reading { resource, kind: Kind::Podcast, tape, replay: Some(sound.clone()), sound: Some(sound) }
     }
 
     /// Start reading the pieces that `plan` makes on the reading's thread (a podcast's script is written
     /// there too), each asked for with `ask` (voice, text). A podcast is fetched whole and kept; a
     /// reading only `AHEAD` of what is heard.
     pub fn start(resource: String, kind: Kind, plan: impl FnOnce() -> Result<Plan, String> + Send + 'static, ask: impl Fn(&str, &str) -> Result<HttpRequest, String> + Send + 'static) -> Reading {
-        let tape = Arc::new(Mutex::new(Tape { recording: (kind == Kind::Podcast).then(Vec::new), ..Tape::default() }));
+        let podcast = kind == Kind::Podcast;
+        let tape = Arc::new(Mutex::new(Tape { recording: podcast.then(Vec::new), ..Tape::new(podcast) }));
         let shared = tape.clone();
-        let ahead = if kind == Kind::Podcast { usize::MAX } else { AHEAD };
+        let ahead = if podcast { usize::MAX } else { AHEAD };
         std::thread::Builder::new()
             .name("read-aloud".into())
             .spawn(move || run(shared, ahead, plan, ask))
             .ok();
-        Reading { resource, kind, tape, replay: None }
+        Reading { resource, kind, tape, replay: None, sound: None }
     }
 
     pub fn status(&self) -> Status {
@@ -198,7 +279,33 @@ impl Reading {
         let current = tape.marks.iter().rev().find(|m| m.start <= tape.played).or(tape.marks.first());
         let mark = current.map(|m| m.mark).filter(|mark| *mark > 0);
         let heard = current.filter(|_| tape.played > 0).and_then(|m| heard(&tape, m));
-        Status { mark, heard, recorded: tape.recorded, waiting: tape.samples.is_empty() && !tape.done, over: tape.over || tape.stopped, error: tape.error.clone() }
+        let waiting = tape.played >= tape.fetched && !tape.done;
+        Status { mark, heard, recorded: tape.recorded, waiting, paused: tape.paused, played: tape.played, length: tape.fetched, made: tape.done && tape.error.is_none(), over: tape.over || tape.stopped, error: tape.error.clone() }
+    }
+
+    /// Whether the sound can be played from elsewhere: a podcast's is all kept.
+    pub fn seekable(&self) -> bool {
+        lock(&self.tape).keep
+    }
+
+    pub fn pause(&self, paused: bool) {
+        lock(&self.tape).paused = paused;
+    }
+
+    /// Play on from sample `at` of what was made so far.
+    pub fn seek(&self, at: usize) {
+        let mut tape = lock(&self.tape);
+        if tape.keep { tape.seek(at) }
+    }
+
+    /// Play at `speed` (`playback::speed` makes it one offered) from where it is.
+    pub fn set_speed(&self, speed: f32) {
+        let mut tape = lock(&self.tape);
+        let speed = wisp_core::playback::speed(speed);
+        if tape.speed == speed { return }
+        tape.speed = speed;
+        let at = tape.played;
+        tape.seek(at);
     }
 
     /// A podcast's sound (16-bit PCM bytes) and script once all of it came; `None` before, and after it was taken.
@@ -255,7 +362,7 @@ fn run(tape: Arc<Mutex<Tape>>, ahead: usize, plan: impl FnOnce() -> Result<Plan,
         }
         Err(err) => return give_up(tf!("没有可用的声音输出设备：{}", "No sound output device is available: {}", err)),
     };
-    sink.mixer().add(Track { tape: tape.clone(), batch: VecDeque::new() });
+    sink.mixer().add(Track::new(tape.clone()));
     let mut whole = true;
     for (index, piece) in pieces.enumerate() {
         let piece = match piece {
@@ -270,7 +377,7 @@ fn run(tape: Arc<Mutex<Tape>>, ahead: usize, plan: impl FnOnce() -> Result<Plan,
         loop {
             let tape = lock(&tape);
             if tape.stopped { return }
-            if tape.samples.len() < ahead { break }
+            if tape.fetched - tape.played < ahead { break }
             drop(tape);
             std::thread::sleep(Duration::from_millis(250));
         }
@@ -286,8 +393,7 @@ fn run(tape: Arc<Mutex<Tape>>, ahead: usize, plan: impl FnOnce() -> Result<Plan,
             let mut tape = lock(&tape);
             // A breath between two speakers, heard and kept.
             if piece.pause && index > 0 {
-                tape.samples.extend(std::iter::repeat_n(0., wisp_core::podcast::PAUSE));
-                tape.fetched += wisp_core::podcast::PAUSE;
+                tape.extend(std::iter::repeat_n(0., wisp_core::podcast::PAUSE));
                 if let Some(recording) = tape.recording.as_mut() { recording.extend(std::iter::repeat_n(0u8, wisp_core::podcast::PAUSE * 2)) }
             }
             let start = tape.fetched;
@@ -298,8 +404,7 @@ fn run(tape: Arc<Mutex<Tape>>, ahead: usize, plan: impl FnOnce() -> Result<Plan,
             let samples = pcm.samples(bytes);
             let mut tape = lock(&tape);
             if tape.stopped { return false }
-            tape.fetched += samples.len();
-            tape.samples.extend(samples);
+            tape.extend(samples);
             if let Some(recording) = tape.recording.as_mut() { recording.extend_from_slice(bytes) }
             true
         });
@@ -319,9 +424,13 @@ fn run(tape: Arc<Mutex<Tape>>, ahead: usize, plan: impl FnOnce() -> Result<Plan,
         tape.recorded = whole && !tape.stopped && tape.recording.as_ref().is_some_and(|r| !r.is_empty());
         if tape.recorded { tape.transcript = plan.transcript.take().map(|write| write()) }
     }
-    // The output keeps playing what is fetched; the device is let go once it is heard.
+    play_out(&tape, sink);
+}
+
+/// The output keeps playing what is fetched; the device is let go once it is heard, or the reading stopped.
+fn play_out(tape: &Mutex<Tape>, sink: rodio::MixerDeviceSink) {
     loop {
-        let tape = lock(&tape);
+        let tape = lock(tape);
         if tape.stopped || tape.over { break }
         drop(tape);
         std::thread::sleep(Duration::from_millis(200));
@@ -329,8 +438,8 @@ fn run(tape: Arc<Mutex<Tape>>, ahead: usize, plan: impl FnOnce() -> Result<Plan,
     drop(sink);
 }
 
-/// A kept podcast's thread: read its sound and script onto the tape, all at once, and play it out.
-fn replay(tape: Arc<Mutex<Tape>>, wav: std::path::PathBuf, script: Option<std::path::PathBuf>) {
+/// A kept podcast's thread: read its sound and script onto the tape, all at once, and play it out from `at`.
+fn replay(tape: Arc<Mutex<Tape>>, wav: std::path::PathBuf, script: Option<std::path::PathBuf>, at: usize) {
     use wisp_core::podcast;
     let give_up = |error: String| {
         let mut tape = lock(&tape);
@@ -348,9 +457,10 @@ fn replay(tape: Arc<Mutex<Tape>>, wav: std::path::PathBuf, script: Option<std::p
     {
         let mut tape = lock(&tape);
         if tape.stopped { return }
-        tape.fetched = samples.len();
-        tape.samples = samples.into();
+        let at = wisp_core::playback::resume_at(at, samples.len());
+        tape.extend(samples);
         (tape.marks, tape.done) = (marks, true);
+        tape.seek(at);
     }
     let sink = match DeviceSinkBuilder::open_default_sink() {
         Ok(mut sink) => {
@@ -359,28 +469,26 @@ fn replay(tape: Arc<Mutex<Tape>>, wav: std::path::PathBuf, script: Option<std::p
         }
         Err(err) => return give_up(tf!("没有可用的声音输出设备：{}", "No sound output device is available: {}", err)),
     };
-    sink.mixer().add(Track { tape: tape.clone(), batch: VecDeque::new() });
-    loop {
-        let tape = lock(&tape);
-        if tape.stopped || tape.over { break }
-        drop(tape);
-        std::thread::sleep(Duration::from_millis(200));
-    }
-    drop(sink);
+    sink.mixer().add(Track::new(tape.clone()));
+    play_out(&tape, sink);
 }
 
 #[cfg(test)]
 mod tests {
     use super::{Mark, Reading, Tape, Track};
-    use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
+
+    fn reading(tape: Tape) -> Reading {
+        Reading { resource: "R".into(), kind: super::Kind::Podcast, tape: Arc::new(Mutex::new(tape)), replay: None, sound: None }
+    }
 
     #[test]
     fn the_track_plays_silence_while_waiting_and_ends_with_the_tape() {
-        let tape = Arc::new(Mutex::new(Tape::default()));
-        let mut track = Track { tape: tape.clone(), batch: VecDeque::new() };
+        let tape = Arc::new(Mutex::new(Tape::new(false)));
+        let mut track = Track::new(tape.clone());
         assert_eq!(track.next(), Some(0.));
-        tape.lock().unwrap().samples.extend([0.5, 0.25]);
+        track.batch.clear();
+        tape.lock().unwrap().extend([0.5, 0.25]);
         assert_eq!((track.next(), track.next()), (Some(0.5), Some(0.25)));
         assert_eq!(tape.lock().unwrap().played, 2);
         tape.lock().unwrap().done = true;
@@ -389,10 +497,59 @@ mod tests {
     }
 
     #[test]
+    fn a_paused_track_holds_its_place_and_a_kept_tape_is_played_from_anywhere() {
+        let mut tape = Tape::new(true);
+        tape.extend((0..100).map(|n| n as f32));
+        tape.done = true;
+        let reading = reading(tape);
+        let mut track = Track::new(reading.tape.clone());
+        reading.pause(true);
+        assert_eq!(track.next(), Some(0.));
+        track.batch.clear();
+        let status = reading.status();
+        assert!(status.paused && !status.over && status.played == 0 && status.length == 100 && status.made);
+        reading.pause(false);
+        reading.seek(40);
+        assert_eq!(track.next(), Some(40.));
+        track.batch.clear();
+        // Back to what was heard already, and past the end only to the end.
+        reading.seek(10);
+        assert_eq!(track.next(), Some(10.));
+        track.batch.clear();
+        reading.seek(500);
+        assert_eq!((track.next(), reading.status().played), (None, 100));
+    }
+
+    #[test]
+    fn faster_the_track_goes_through_the_sound_sooner() {
+        let mut tape = Tape::new(true);
+        tape.extend(vec![0.1; 24_000]);
+        tape.done = true;
+        let reading = reading(tape);
+        reading.set_speed(2.);
+        let mut track = Track::new(reading.tape.clone());
+        let heard = std::iter::from_fn(|| track.next()).count();
+        assert!((11_500..12_700).contains(&heard), "{heard}");
+        assert_eq!(reading.status().played, 24_000);
+    }
+
+    #[test]
+    fn reading_aloud_lets_go_of_what_was_heard() {
+        let mut tape = Tape::new(false);
+        tape.extend(vec![0.; 24_000 * 20]);
+        tape.played = 24_000 * 15;
+        let _ = tape.take(10);
+        assert_eq!((tape.base, tape.samples.len(), tape.fetched), (24_000 * 15 + 10 - 24_000, 24_000 * 6 - 10, 24_000 * 20));
+        // Seeking stays within what is still kept.
+        tape.seek(0);
+        assert_eq!(tape.played, tape.base);
+    }
+
+    #[test]
     fn the_sentence_heard_is_found_by_the_time_played() {
         let piece = |start, end, text: &str| Mark { start, end, mark: 3, page: 3, voice: "stella".into(), text: text.into() };
-        let tape = Tape { fetched: 120, marks: vec![piece(0, Some(100), "Aaaa. Bbbb."), piece(100, None, "Cccc. Dddd.")], ..Tape::default() };
-        let reading = Reading { resource: "R".into(), kind: super::Kind::Aloud, tape: Arc::new(Mutex::new(tape)), replay: None };
+        let tape = Tape { fetched: 120, marks: vec![piece(0, Some(100), "Aaaa. Bbbb."), piece(100, None, "Cccc. Dddd.")], ..Tape::new(false) };
+        let reading = Reading { resource: "R".into(), kind: super::Kind::Aloud, tape: Arc::new(Mutex::new(tape)), replay: None, sound: None };
         assert_eq!(reading.status().heard, None);
         let at = |played| {
             reading.tape.lock().unwrap().played = played;
