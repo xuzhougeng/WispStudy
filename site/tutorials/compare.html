@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>对照着读几篇文献 · Wisp Study 教程</title>
+<meta name="description" content="把研究同一件事、方法不同的几篇文献并排放开：各带各的译文，一起向助手提问并跳回各自的原文核对，单开一个窗口读，用后退和前进来回切换，事后在历史里找回这段对话。">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../app-icon.png">
+<link rel="stylesheet" href="../style.css">
+<link rel="stylesheet" href="../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">跳到正文</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="站点">
+      <a href="index.html" aria-current="page">教程</a>
+      <a href="../index.html#ideas">理念</a>
+      <a href="../index.html#tools">工具</a>
+      <a href="../index.html#download">下载</a>
+    </nav>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="位置"><a href="index.html">教程</a><span>›</span>阅读</nav>
+
+  <header class="doc-head">
+    <p class="kicker">教程 05　·　阅读</p>
+    <h1>对照着读几篇文献</h1>
+    <p class="lead">两篇文章研究的是同一件事，用的方法却不一样，读一篇再翻另一篇，总是忘了前一篇怎么说的。本篇把两篇毛状体发育的单细胞研究并排放开：各带各的译文，一起向助手提问、跳回各自的原文核对，单开一个窗口读其中一篇，用后退和前进在它们之间来回，最后在历史里找回这段对话。</p>
+    <dl class="facts">
+      <div><dt>场景</dt><dd>比较两篇毛状体发育的研究：一篇用原生质体做单细胞测序，一篇用细胞核。</dd></div>
+      <div><dt>需要</dt><dd>两三篇带 PDF 的文献，一个在「设置 › AI」里配置好的模型服务。</dd></div>
+      <div><dt>用时</dt><dd>约 15 分钟，不算读文章本身。</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="本篇的小节">
+      <h2>本篇</h2>
+      <ol>
+        <li><a href="#s1">选好要对照的文献</a></li>
+        <li><a href="#s2">把一篇留在旁边</a></li>
+        <li><a href="#s3">当前栏：点一下才换</a></li>
+        <li><a href="#s4">版面：一次切好读法</a></li>
+        <li><a href="#s5">把几篇放在一起问</a></li>
+        <li><a href="#s6">单开一个窗口</a></li>
+        <li><a href="#s7">后退、前进，停在原处</a></li>
+        <li><a href="#s8">在历史里找回这段对话</a></li>
+        <li class="plain"><a href="#recap">回顾</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>选好要对照的文献</h2>
+        <p>在文献列表上方的搜索框里输入 <code>trichome</code>，文献库「植物单细胞转录组」里剩下 3 篇，都在研究毛状体：</p>
+        <ul>
+          <li>Single-cell transcriptome of Nepeta tenuifolia leaves reveal differentiation trajectories in glandular trichomes（Zhou 等，2022，Frontiers in Plant Science，15 页）。荆芥幼叶酶解成原生质体，做单细胞 scRNA-seq，研究的是会分泌精油的盾状腺毛。</li>
+          <li>Comprehensive insights into the development of arabidopsis trichomes by single-nucleus RNA-seq（Chen 等，2026，BMC Plant Biology，16 页）。重新分析公开的拟南芥单细胞核 snRNA-seq 数据，研究的是单细胞、会分枝、不分泌的毛状体。</li>
+          <li>茶树毛状体的那一篇，全文一栏是「有链接」，库里没有 PDF，这次不用。</li>
+        </ul>
+        <p>前两篇问的是同一件事：毛状体细胞从表皮出发，沿什么轨迹分化。办法却正好相反，一篇要先把叶片消化成原生质体，一篇只取细胞核。读的时候最想知道的就是：两种办法各看到了什么，结论能不能放在一起说。这正是并排对照的用处。</p>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>把一篇留在旁边</h2>
+        <p>先点荆芥那一篇，切到「PDF」。右侧详情面板窄，PDF 工具栏上只有图标；按 <kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd>（Windows 上是 <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd>）进入阅读模式，工具栏够宽，按钮都带上了名字，其中有「留在旁边」和「新窗口」。</p>
+
+        <figure class="shot">
+          <img src="../img/t/compare-01-keep.jpg" width="1372" height="867" loading="lazy" alt="阅读模式下打开荆芥那一篇的第 1 页，工具栏从左到右是页码、缩放、译文、分屏、截图、方框、便签、朗读、播客、留在旁边、新窗口、用系统应用打开。">
+          <figcaption><b>图 1</b>　阅读模式的工具栏。「留在旁边」是一枚图钉。详情面板里只显示图钉，悬停时提示「留住这篇：再选别的文献时，它留在旁边的一栏里，两篇并排对照」。</figcaption>
+        </figure>
+
+        <p>点「留在旁边」，窗口回到文献列表，图钉亮起，顶上提示「已留住这篇。在列表里选另一篇，两篇并排显示。」这时在列表里点拟南芥那一篇，两篇就并排占满窗口：左边一栏是荆芥，右边一栏是拟南芥。另一个办法是在列表里右键一篇，菜单里有「放在旁边一栏对照」。按功能说明，旁边最多能留 3 篇，本例只并排了两篇。</p>
+        <p>留住之后要直接在列表里选下一篇。本例中途按了一次 <kbd>Esc</kbd> 关掉详情，再选拟南芥时它是单独打开的，留住的那篇没有跟着出来。</p>
+
+        <figure class="shot">
+          <img src="../img/t/compare-02-beside.jpg" width="1372" height="867" loading="lazy" alt="两篇文献并排：左栏顶上一行是荆芥那篇的题目、1 / 15 页和关闭的 ×；右栏是拟南芥那篇，顶上是完整的 PDF 工具栏，下面一条绿线；窗口顶上是拟南芥那篇的题目和「退出阅读 Esc」。">
+          <figcaption><b>图 2</b>　两篇并排。旁边那栏只有一行：题目、第几页、×；当前那栏顶上是它的工具栏。</figcaption>
+        </figure>
+
+        <p>旁边每一栏的顶上只有一行：是哪一篇、第几页，点右端的 × 关掉这一栏。各栏的这一行一样高，页面从同一条线开始。并排时窗口顶上写着「退出阅读 Esc」。</p>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>当前栏：点一下才换</h2>
+        <p>几栏里总有一栏是「当前栏」：它顶上有一条绿线，PDF 工具栏、快捷键、窗口顶上的题目和「信息」都跟着它。在左边荆芥那栏里点一下，绿线和工具栏就移到左边，顶上的题目换成荆芥那篇；拟南芥那栏缩成一行，各栏的页码和缩放都不动。</p>
+        <p>只是滚动别的栏看一眼，不会换当前栏。图 3 里，当前栏是左边的荆芥，右边的拟南芥被滚到了第 3 页的图 1，那一栏顶上的页码跟着变成「3 / 16 页」，绿线和工具栏仍在左边。</p>
+
+        <figure class="shot">
+          <img src="../img/t/compare-03-current.jpg" width="1372" height="867" loading="lazy" alt="左栏荆芥那篇现在是当前栏，顶上是它的工具栏和绿线，窗口题目换成荆芥那篇；右栏拟南芥那篇缩成一行，写着 3 / 16 页，页面停在它的图 1。">
+          <figcaption><b>图 3</b>　左栏是当前栏；右栏被滚到第 3 页，当前栏没有变。</figcaption>
+        </figure>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>版面：一次切好读法</h2>
+        <p>窗口顶上「信息」「PDF」「提问」右边的那个下拉按钮是「版面」，并排时按钮上写着正在用的那一种。点开有四种：「阅读」只看原文；「对照译文」每篇带着自己的译文；「提问」是对话在一边、原文在另一边；「精读」占满窗口，原文和译文上下排，对话在右边。并排几篇时，每篇各占一份，菜单里不写分栏比例。</p>
+        <h3>对照译文</h3>
+        <p>选「对照译文」，每一栏都分成两半，原文在上，同一页的译文在下；本例的窗口宽 1400 像素，放不下四栏左右排。同一时间只翻译一篇：当前栏的拟南芥那篇先开始，工具栏上写着进度和「停止」；旁边荆芥那栏的一行里写着「继续翻译」，点一下，它的进度也写在那一行里。本例的翻译模型是 <code>codex/gpt-6-luna</code>，拟南芥那篇两分半钟时译到 137 段里的 103 段，荆芥那篇 111 段用了不到三分钟。译过的段落存在文献库里，下次再打开直接显示。</p>
+        <h3>精读</h3>
+        <p>两篇都译好后切到「精读」：左边两栏各是原文在上、译文在下，右边是对话。对话还空着时，上方写着「就这几篇文献提问」，下面列了三个比较类的问题：「这几篇的研究问题和方法有什么不同？」「它们的结论一致吗？哪里互相支持，哪里有出入？」「用一张表对比这几篇的对象、方法、数据和主要发现。」点一下就发出去。</p>
+
+        <figure class="shot">
+          <img src="../img/t/compare-04-layout.jpg" width="1372" height="867" loading="lazy" alt="「精读」版面：左栏荆芥那篇停在第 12 页，上半是原文的方法部分，下半是同一页的中文译文；中栏拟南芥那篇第 1 页，上半英文、下半中文题目和摘要；两栏顶上各写着 111 / 111 段和 137 / 137 段；右边是空白的对话，标题「就这几篇文献提问」，下面三个比较类的问题。">
+          <figcaption><b>图 4</b>　「精读」版面。两篇各带各的译文，右边的对话是就这两篇一起问的。</figcaption>
+        </figure>
+
+        <p>荆芥那篇打开就停在第 12 页，因为上一次读到那里（见第 7 节）。刚切到「精读」时，拟南芥那栏的页面有几秒是空白的，只写着「第 1 页」，等一会儿就画出来了。</p>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>把几篇放在一起问</h2>
+        <p>切到「提问」版面，左边是对话，右边两栏原文，没有文献列表。在输入框里写：</p>
+        <blockquote><cite>提问</cite><p>这两篇都研究毛状体发育：各用了什么材料、取样方式和测序方法（单细胞还是单细胞核）？鉴定毛状体细胞用了哪些标记基因？对发育轨迹的结论有哪些异同？请逐篇注明出处。</p></blockquote>
+        <p>对话上方写着「已提供这 2 篇文献…」，也就是两篇的记录和全文会发给你配置的模型服务（本例是 <code>claude/claude-sonnet-5-5</code>）。一分多钟后答完。回答里两篇被编成 P12（荆芥）和 P26（拟南芥），先用一张表分开材料、取样和测序：P12 是 25 天苗的幼叶，酶解成原生质体，10x Genomics 单细胞测序，得到 33,254 个细胞；P26 没有自己取样，重新分析公开的 snRNA-seq 数据，不需要原生质体。再分开列两篇的标记基因：P12 靠拟南芥的同源基因注释，P26 用 GL1、GL2、MYB106 把毛状体分成起始、中间、分枝三期。</p>
+        <p>轨迹的异同一节最有用。相同的是两篇都把表皮和毛状体细胞挑出来重新聚类，再用 Monocle 做拟时序；不同的是 P12 的轨迹是从表皮分叉到腺毛和另一类毛状体，P26 是一条分阶段的轨迹。它还指出了两篇最该放在一起看的一点：P12 的腺毛只有 45 个细胞，作者承认毛状体难以原生质体化，提出 snRNA-seq 可能是解决办法，而 P26 用的正是细胞核。最后它提醒，P12 里那类身份未定的毛状体「不宜与 P26 的分枝阶段直接对应」。</p>
+
+        <figure class="shot">
+          <img src="../img/t/compare-05-sources.jpg" width="1372" height="867" loading="lazy" alt="「提问」版面：左边是回答的后半段和一列出处卡片，P26 p.2 那张被点中，右端写着「原文一致」；中栏荆芥那篇停在第 12 页；右栏拟南芥那篇成为当前栏，跳到第 2 页，被引的那句「we reanalyzed publicly available snRNA-seq datasets」被标出。">
+          <figcaption><b>图 5</b>　点出处卡片，跳到那一篇自己的栏里找原文。荆芥那栏还停在刚才点过的第 12 页。</figcaption>
+        </figure>
+
+        <p>回答下面是出处卡片，每张写着是哪一篇、第几页和一句原文，核对过的右端写着「原文一致」。点「P12 p.12」那张，荆芥那栏成为当前栏，跳到第 12 页，把「Young leaves were harvested from 25-d-old seedlings」那句标黄。再点「P26 p.2」那张，换成拟南芥那栏跳到第 2 页、标出它重新分析公开数据的那一句，而荆芥那栏仍停在第 12 页。两篇各在各的栏里核对，不用来回翻。</p>
+        <p>在哪一栏里读，都是同一段对话；它在历史里也按这两篇一起存。增减一栏，就换一段新对话。</p>
+
+        <aside class="note warn"><b>注意</b>「原文一致」只说明引的那句话在原文里，不说明回答的比较对。本例回答里有几处没有带原句的说法，比如 P12 用了 3 个生物学重复，讲之前要自己翻到那一页确认。</aside>
+      </section>
+
+      <section id="s6">
+        <h2><i>6</i>单开一个窗口</h2>
+        <p>想一边读荆芥那篇全文，一边在文献库里看别的文献，就点 PDF 工具栏的「新窗口」。这一篇进了一个单独的窗口，文献库的窗口回到列表；在列表里点拟南芥那篇，它的「信息」照常在右侧打开，两边互不打扰。</p>
+
+        <figure class="shot">
+          <img src="../img/t/compare-06-window.jpg" width="1234" height="1372" loading="lazy" alt="单独的阅读窗口：顶上一行是荆芥那篇的题目、1 / 15 页、缩放 109%、适应宽度和「文献库」，下面是 PDF 第 1 页。">
+          <figcaption><b>图 6</b>　阅读窗口顶上只有题目、页码、缩放和「文献库」。</figcaption>
+        </figure>
+
+        <p>阅读窗口顶上是题目、页码和缩放，「文献库」把这篇在文献库的窗口里打开。这里的工具栏没有「译文」：阅读窗口里暂时还不能开译文，要看译文，回到文献库的窗口。</p>
+      </section>
+
+      <section id="s7">
+        <h2><i>7</i>后退、前进，停在原处</h2>
+        <p>不并排的时候也能来回对照。在详情面板里读荆芥那篇，翻到第 3 页；在列表里换成拟南芥那篇。按 <kbd>⌘</kbd> + <kbd>[</kbd>（Windows 上是 <kbd>Ctrl</kbd> + <kbd>[</kbd>）后退，回到荆芥那篇，PDF 仍停在「3 / 15 页」；按 <kbd>⌘</kbd> + <kbd>]</kbd> 前进，又回到拟南芥那篇的第 1 页。</p>
+        <p>不只是后退和前进：每篇文献再打开时都停在上次离开的地方。第 5 节点出处卡片跳到荆芥那篇的第 12 页，之后不管是单独打开它、还是再并排，它都从第 12 页开始。</p>
+      </section>
+
+      <section id="s8">
+        <h2><i>8</i>在历史里找回这段对话</h2>
+        <p>下次再把这两篇并排、切到「提问」，对话是空的。点对话上方的「历史」，标题是「这几篇文献的历史对话」，上方的开关写着「这几篇文献」，下面按日子分组，那段比较在「今天」下面，写着时间和「1 个问题」。点这一行，回答和出处卡片原样回来，可以接着问。</p>
+
+        <figure class="shot">
+          <img src="../img/t/compare-07-history.jpg" width="1372" height="867" loading="lazy" alt="并排两篇时的「历史」：标题「这几篇文献的历史对话」，开关「这几篇文献」和「全部对话」，搜索框「找对话：标题、文献、说过的话」，「今天」下面一行是那次比较的问题，写着 16:27 · 1 个问题。">
+          <figcaption><b>图 7</b>　并排着这两篇时，「历史」里就是它们一起问过的对话。</figcaption>
+        </figure>
+
+        <p>只打开一篇时，开关写的是「这篇文献」，旁边是「全部对话」。「全部对话」列出这个文献库里和助手的对话、和每篇文献的对话，每行下面写着是哪一篇（或「助手」）。并排几篇时的对话不在其中，要在并排着它们时打开「历史」找。搜索框按标题、文献和说过的话找：输入「毛状体」，只剩荆芥那篇的一次提问和问助手的一次，讲愈伤组织的那段 <code>/slides</code> 对话不见了。</p>
+
+        <figure class="shot">
+          <img src="../img/t/compare-08-all.jpg" width="1372" height="867" loading="lazy" alt="单独打开荆芥那篇时的「全部历史对话」：开关选在「全部对话」，搜索框里是「毛状体」，剩下两行：「这篇的盾状腺毛细胞为什么这么少？作者怎么解释？」，下面写着荆芥那篇的题目；「库里有哪几篇研究毛状体？各用了什么测序方法？」，下面写着「助手」。">
+          <figcaption><b>图 8</b>　「全部对话」里搜「毛状体」。每行下面写着是哪篇文献的，或者是「助手」的。</figcaption>
+        </figure>
+
+        <p>对话默认用第一个问题作标题，太长不好找时，用一行的「重命名…」，弹出「重命名对话」，框里是原来的标题，改好点「改名」；框下写着「留空，就用第一个问题作标题。」</p>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>回顾</h2>
+        <ul>
+          <li>用「留在旁边」或右键「放在旁边一栏对照」把几篇并排；旁边的栏只有一行，点 × 关掉。</li>
+          <li>点一下才换当前栏，滚动别的栏不换；绿线、工具栏和「信息」跟着当前栏。</li>
+          <li>「版面」一次切好读法：「对照译文」每篇带着译文，「提问」和「精读」把对话放在旁边。</li>
+          <li>并排时的提问就这几篇一起问，出处卡片跳到那一篇自己的栏里，各栏停在各自的位置。</li>
+          <li>「新窗口」单开一篇，「后退」「前进」在读过的文献间来回；这段对话在「历史」的「这几篇文献」里，单篇和助手的对话在「全部对话」里。</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="上一篇和下一篇">
+    <a class="prev" href="read.html"><small>上一篇 · 04</small><strong>精读一篇文献：读、标、问、记</strong></a>
+    <a class="next" href="listen.html"><small>下一篇 · 06</small><strong>听一篇文献</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>参考</h2>
+      <ol>
+        <li><a href="index.html">全部教程</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">功能详解：每个页面能做什么</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">数据与隐私：文件放在哪里，哪些数据会离开本机</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">问题与想法：Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>关于这篇教程</b>　截图和数字来自 2026 年 11 月在 macOS 上用 v0.16.0 的一次实际操作。模型每次的回答不一样，你照做时措辞和数字会有出入，步骤是一样的。</p>
+      <p><b>助手可能出错</b>　它的建议和回答都要你确认；关键的数字和结论请对照原文。</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
