@@ -441,26 +441,142 @@ pub fn places<'a>(key: Key, files: &[File<'a>], here: usize) -> Vec<(usize, &'a 
     order().filter(|at| *at != here && !files[*at].main).filter_map(|at| Some((at, files[at].index.find(plain)?))).collect()
 }
 
-/// Where a whole file shows its figures, settled, and the sizes of its pages in points; `None` when the
-/// file cannot be parsed. Of a long file the first `most` pages are read.
-pub fn file_index(data: Vec<u8>, most: usize) -> Option<(Index, Vec<(f32, f32)>)> {
-    let mut index = Index::default();
-    let sizes = pdftext::pages_drawn(data, most, &mut |page, marks, shapes, size| {
+/// A place where a file's text speaks of a figure, with the paragraph it stands in: what is listed when
+/// one asks, at a figure, where the text discusses it (#229, step 3).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Spoken {
+    /// 0-based.
+    pub page: usize,
+    pub mention: Mention,
+    /// Where the mention's first glyph stands, for `own_at`, and one box per line of its words.
+    pub at: (f32, f32),
+    pub boxes: Vec<[f32; 4]>,
+    /// The paragraph around it, from the sentence the mention is in (`SNIPPET` characters at most), and
+    /// the paragraph's box on the page.
+    pub text: String,
+    pub rect: [f32; 4],
+    /// The part of the paper it stands in: a key of `structure::SECTIONS`, empty where no heading said.
+    pub section: String,
+}
+
+/// The most of a paragraph that is kept to show, in characters.
+const SNIPPET: usize = 280;
+
+/// A paragraph as it is shown: all of it when it is short, else cut from the start of the sentence `words`
+/// are in (or a little before them, when the sentence is long), `SNIPPET` characters, with … where it was cut.
+fn snippet(paragraph: &str, words: &str) -> String {
+    let chars: Vec<char> = paragraph.chars().collect();
+    if chars.len() <= SNIPPET { return paragraph.to_string() }
+    let found = paragraph.find(words).map(|byte| paragraph[..byte].chars().count()).unwrap_or(0);
+    // Back to where the sentence begins: after a full stop and a space, or a Chinese one.
+    let lead = 120.min(found);
+    let mut start = found - lead;
+    // "Fig. 1 and" is no sentence's end: after the stop a sentence opens with a capital.
+    if let Some(begin) = (found - lead..found).rev().find(|at| *at == 0 || matches!(chars[*at - 1], '。' | '！' | '？') || *at >= 2 && chars[*at - 1] == ' ' && matches!(chars[*at - 2], '.' | '!' | '?') && chars[*at].is_uppercase()) {
+        start = begin;
+    } else if start > 0 {
+        // No sentence begins near: at a word.
+        start = (start..found).find(|at| chars[*at - 1] == ' ').unwrap_or(start);
+    }
+    let end = (start + SNIPPET).min(chars.len());
+    let mut out = String::new();
+    if start > 0 { out.push('…') }
+    out.extend(&chars[start..end]);
+    if end < chars.len() { out.push('…') }
+    out
+}
+
+/// The places a page's text speaks of a figure, each with its paragraph. `section` is the part of the
+/// paper the page opens in and is left as the part it ends in: a heading on the way that names a part
+/// (`structure::canonical`) changes it. Pages are handed in order.
+pub fn spoken(page: usize, marks: &[Mark], section: &mut String) -> Vec<Spoken> {
+    let found = mentions(marks);
+    let paragraphs = pdftext::page_paragraphs(marks);
+    // The part each paragraph stands in, as the page is read down.
+    let mut parts = Vec::with_capacity(paragraphs.len());
+    for paragraph in &paragraphs {
+        if paragraph.lines == 1 && paragraph.text.chars().count() <= 60 && let Some(part) = crate::structure::canonical(&paragraph.text) {
+            *section = if part == crate::structure::SKIP { String::new() } else { part.to_string() };
+        }
+        parts.push(section.clone());
+    }
+    found.into_iter().filter_map(|mention| {
+        let glyphs = marks.get(mention.from..=mention.to)?;
+        let first = glyphs.first()?;
+        let at = ((first.x0 + first.x1) / 2., first.y - first.size * 0.3);
+        // The paragraph the words stand in; in the margin of none, the nearest.
+        let away = |[x0, y0, x1, y1]: [f32; 4]| (x0 - at.0).max(at.0 - x1).max(0.) + (y0 - at.1).max(at.1 - y1).max(0.);
+        let (n, paragraph) = paragraphs.iter().enumerate().min_by(|a, b| away(a.1.rect).total_cmp(&away(b.1.rect)))?;
+        Some(Spoken { page, mention, at, boxes: pdftext::mark_boxes(glyphs), text: snippet(&paragraph.text, &pdftext::marks_text(glyphs)), rect: paragraph.rect, section: parts[n].clone() })
+    }).collect()
+}
+
+/// A file read for its figures: where it shows them (settled), where its text speaks of them, and the
+/// sizes of its pages in points.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Read {
+    pub index: Index,
+    pub spoken: Vec<Spoken>,
+    pub sizes: Vec<(f32, f32)>,
+}
+
+/// A whole file read for its figures; `None` when it cannot be parsed. Of a long file the first `most`
+/// pages are read.
+pub fn file_index(data: Vec<u8>, most: usize) -> Option<Read> {
+    let mut read = Read::default();
+    let mut section = String::new();
+    read.sizes = pdftext::pages_drawn(data, most, &mut |page, marks, shapes, size| {
         let shown = shown(marks, shapes, size);
         let loose = unclaimed(shapes, &shown, size);
-        index.add(page, shown, loose, size.1);
+        read.index.add(page, shown, loose, size.1);
+        read.spoken.extend(spoken(page, marks, &mut section));
     })?;
-    index.settle();
-    Some((index, sizes))
+    read.index.settle();
+    Some(read)
+}
+
+/// The places in a paper's files whose text speaks of one figure: `place`, in `files[there]`. Each is the
+/// file and the mention with its paragraph; the main text's first, then the other files in their order,
+/// and a paragraph that names the figure several times once. `spoken[n]` is what `files[n]` says. A mention
+/// counts when the figure is among those it may lead to (`places`), and it stands within no figure it
+/// names: not this one's caption, nor the caption of another file's figure of the same number.
+pub fn speaking<'a>(place: &Place, there: usize, files: &[File], spoken: &[&'a [Spoken]]) -> Vec<(usize, &'a Spoken)> {
+    let same = |other: &Place| other.page == place.page && other.shown.key == place.shown.key && other.shown.caption == place.shown.caption;
+    let mut order: Vec<usize> = (0..files.len().min(spoken.len())).collect();
+    order.sort_by_key(|at| !files[*at].main);
+    let mut out: Vec<(usize, &Spoken)> = vec![];
+    for file in order {
+        for said in spoken[file] {
+            if file == there && own_at(said.at, said.page, place) { continue }
+            // A caption's own number, in whichever file, speaks of no figure but its own.
+            if said.mention.keys().any(|key| files[file].index.find(key).is_some_and(|own| own_at(said.at, said.page, own))) { continue }
+            if !said.mention.keys().any(|key| places(key, files, file).iter().any(|(at, found)| *at == there && same(found))) { continue }
+            if out.last().is_some_and(|(of, last)| *of == file && last.page == said.page && last.rect == said.rect) { continue }
+            out.push((file, said));
+        }
+    }
+    out
 }
 
 /// Whether a mention on a 0-based page stands within the figure it would lead to: the caption's own
 /// number, words of its legend, or a label in the figure itself. It leads nowhere but to where it is.
 pub fn own(marks: &[Mark], mention: &Mention, page: usize, place: &Place) -> bool {
     let Some(first) = marks.get(mention.from) else { return false };
-    let (x, y) = ((first.x0 + first.x1) / 2., first.y - first.size * 0.3);
+    own_at(((first.x0 + first.x1) / 2., first.y - first.size * 0.3), page, place)
+}
+
+/// `own`, for a mention whose first glyph stands at a point of the page.
+pub fn own_at((x, y): (f32, f32), page: usize, place: &Place) -> bool {
     let inside = |[x0, y0, x1, y1]: [f32; 4]| x >= x0 - 1. && x <= x1 + 1. && y >= y0 - 1. && y <= y1 + 1.;
     page == place.page && (inside(place.shown.caption) || place.shown.figure.is_some_and(inside)) || place.apart.is_some_and(|(at, figure)| at == page && inside(figure))
+}
+
+/// Whether a mention on a 0-based page is the number a figure's caption opens with: at the figure, it is
+/// what leads to the text that speaks of it.
+pub fn opens(marks: &[Mark], mention: &Mention, page: usize, place: &Place) -> bool {
+    let Some(first) = marks.get(mention.from) else { return false };
+    let [x0, y0, ..] = place.shown.caption;
+    page == place.page && mention.key == place.shown.key && first.x0 - x0 < first.size * 2. && (first.y - first.size * 0.8 - y0).abs() < first.size * 0.8
 }
 
 impl Index {
@@ -710,6 +826,59 @@ mod tests {
         // No file calls it S3: the supplement that numbers its figures plainly is meant.
         assert_eq!(found(supp(3), &files, 0), vec![2]);
         assert_eq!(found(supp(1), &files, 0), vec![1]);
+    }
+
+    #[test]
+    fn the_paragraphs_that_speak_of_a_figure() {
+        // The main text: a heading, two paragraphs that name figure 2 (one twice), one that names the
+        // supplement's, and figure 2 itself with its caption.
+        let mut marks = glyphs(60., 60., &["Results"]);
+        marks.extend(glyphs(90., 60., &["Roots bend down within hours. The bend is slower in mosses", "(Fig. 2a) and faster in seed plants (Fig. 2b)."]));
+        marks.extend(glyphs(140., 60., &["The same is seen in ferns (Supplementary Fig. 2)."]));
+        marks.extend(glyphs(190., 60., &["Discussion"]));
+        marks.extend(glyphs(220., 60., &["Why the bend is fast (Fig. 2) is not known."]));
+        marks.extend(glyphs(620., 60., &["Fig. 2 | The bend of the root.", "a, Mosses. b, Seed plants, as in Fig. 2 of the first report."]));
+        let shapes = [[80., 300., 500., 600.]];
+        let mut section = String::new();
+        let said = spoken(0, &marks, &mut section);
+        assert_eq!(section, "discussion");
+        assert_eq!(said.iter().map(|said| (said.mention.key.number, said.section.as_str())).collect::<Vec<_>>(), vec![(2, "results"), (2, "results"), (2, "results"), (2, "discussion"), (2, "discussion"), (2, "discussion")]);
+        assert_eq!(said[0].text, "Roots bend down within hours. The bend is slower in mosses (Fig. 2a) and faster in seed plants (Fig. 2b).");
+        let mut text = Index::default();
+        let shown = shown(&marks, &shapes, PAGE);
+        text.add(0, shown, None, PAGE.1);
+        // The supplement numbers its own figures plainly, and speaks of the main text's by the same words.
+        let mut extra = glyphs(620., 60., &["Figure 2. Ferns."]);
+        extra.extend(glyphs(90., 60., &["Ferns bend as slowly as the mosses of the main text do."]));
+        let mut supplement = Index::default();
+        supplement.add(0, super::shown(&extra, &[[80., 300., 500., 600.]], PAGE), None, PAGE.1);
+        let said_there = spoken(0, &extra, &mut String::new());
+        let files = [File { index: &text, main: true }, File { index: &supplement, main: false }];
+        let all: [&[Spoken]; 2] = [&said, &said_there];
+        // Figure 2 of the main text: a paragraph of Results once, though it names it twice, and one of
+        // Discussion; not its own caption, nor the legend's words.
+        let found = speaking(text.find(figure(2)).unwrap(), 0, &files, &all);
+        assert_eq!(found.iter().map(|(file, said)| (*file, said.section.as_str(), said.text.chars().take(12).collect::<String>())).collect::<Vec<_>>(), vec![(0, "results", "Roots bend d".to_string()), (0, "discussion", "Why the bend".to_string())]);
+        // The supplement's Figure 2: the main text's paragraph that says "Supplementary Fig. 2".
+        let found = speaking(supplement.find(figure(2)).unwrap(), 1, &files, &all);
+        assert_eq!(found.iter().map(|(file, said)| (*file, said.text.as_str())).collect::<Vec<_>>(), vec![(0, "The same is seen in ferns (Supplementary Fig. 2).")]);
+        // A caption's number opens it; the same words in the text do not.
+        let place = text.find(figure(2)).unwrap();
+        let found = mentions(&marks);
+        assert_eq!(found.iter().map(|mention| opens(&marks, mention, 0, place)).collect::<Vec<_>>(), vec![false, false, false, false, true, false]);
+    }
+
+    #[test]
+    fn a_long_paragraph_is_shown_from_the_sentence_that_names_the_figure() {
+        let before = "Auxin moves down the root. ".repeat(12);
+        let after = " The cells then grow.".repeat(30);
+        let cut = snippet(&format!("{before}It gathers at the tip (Fig. 3).{after}"), "Fig. 3");
+        assert!(cut.starts_with("…It gathers at the tip (Fig. 3). The cells then grow.") && cut.ends_with('…'), "{cut}");
+        assert_eq!(cut.chars().count(), SNIPPET + 2);
+        assert_eq!(snippet("如图3所示，根尖向下弯曲。", "图3"), "如图3所示，根尖向下弯曲。");
+        // The stop of "Fig." ends no sentence: the second mention is shown from its own sentence's start.
+        let cut = snippet(&format!("{before}It is seen in mosses (Fig. 1 and Supplementary Fig. 1a).{after}"), "Supplementary Fig. 1a");
+        assert!(cut.starts_with("…It is seen in mosses (Fig. 1 and Supplementary Fig. 1a)."), "{cut}");
     }
 
     #[test]
