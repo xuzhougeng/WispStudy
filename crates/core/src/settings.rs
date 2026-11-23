@@ -43,15 +43,18 @@ impl Spacing {
 pub enum TextWidth {
     Narrow,
     Wide,
+    /// As wide as the place it is in: the lines fill the window, whatever its width.
+    Fill,
     #[default]
     #[serde(other)]
     Standard,
 }
 
 impl TextWidth {
-    pub const ALL: [Self; 3] = [Self::Narrow, Self::Standard, Self::Wide];
-    pub fn label(self) -> &'static str { match self { Self::Narrow => "窄", Self::Standard => "标准", Self::Wide => "宽" } }
-    pub fn pixels(self) -> f32 { match self { Self::Narrow => 560., Self::Standard => 720., Self::Wide => 960. } }
+    pub const ALL: [Self; 4] = [Self::Narrow, Self::Standard, Self::Wide, Self::Fill];
+    pub fn label(self) -> &'static str { match self { Self::Narrow => "窄", Self::Standard => "标准", Self::Wide => "宽", Self::Fill => "铺满" } }
+    /// The most a line of long text is wide. `Fill` has no measure of its own: the place it is in decides.
+    pub fn pixels(self) -> f32 { match self { Self::Narrow => 560., Self::Standard => 720., Self::Wide => 960., Self::Fill => 100_000. } }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

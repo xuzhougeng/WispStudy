@@ -2496,6 +2496,8 @@ impl Library {
         self.suggestions = self.store.list_suggestions()?.into_iter().map(|s| (s.paper_id.clone(), s)).collect();
         self.batches = self.store.list_batches(30)?;
         self.writing.structures = self.store.structures()?;
+        // A paper's record may have changed: how its citations read is worked out again.
+        self.citing.read.made_from = 0;
         self.origins = self.store.file_origins()?;
         self.gallery.items = self.store.list_figures()?;
         self.extract.proposals = wisp_core::extract::Proposals::new(self.store.list_proposals()?);
@@ -8998,7 +9000,7 @@ impl Workspace {
                 "fontreset" => Some(Cmd::ResetTypography),
                 "linespacing" => Some(Cmd::SetLineSpacing(match arg { "compact" => wisp_core::settings::Spacing::Compact, "relaxed" => wisp_core::settings::Spacing::Relaxed, _ => wisp_core::settings::Spacing::Standard })),
                 "paragraphspacing" => Some(Cmd::SetParagraphSpacing(match arg { "compact" => wisp_core::settings::Spacing::Compact, "relaxed" => wisp_core::settings::Spacing::Relaxed, _ => wisp_core::settings::Spacing::Standard })),
-                "textwidth" => Some(Cmd::SetTextWidth(match arg { "narrow" => wisp_core::settings::TextWidth::Narrow, "wide" => wisp_core::settings::TextWidth::Wide, _ => wisp_core::settings::TextWidth::Standard })),
+                "textwidth" => Some(Cmd::SetTextWidth(match arg { "narrow" => wisp_core::settings::TextWidth::Narrow, "wide" => wisp_core::settings::TextWidth::Wide, "fill" => wisp_core::settings::TextWidth::Fill, _ => wisp_core::settings::TextWidth::Standard })),
                 "density" => Some(Cmd::SetDensity(arg.to_string())),
                 "zone" => Some(Cmd::SetJournalZone(arg.to_string())),
                 "contrast" => Some(Cmd::ToggleHighContrast),

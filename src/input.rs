@@ -110,6 +110,8 @@ struct DisplayMap {
     /// Words drawn where nothing is written, saying what to write there (under a picture without a caption): where
     /// they are drawn, and the byte of the text they stand at. A click on them puts the caret at that byte.
     invites: Vec<(Range<usize>, usize)>,
+    /// Stretches drawn as other words (`TextInput::set_folds`): where the words are drawn, and the stretch of the text.
+    folds: Vec<(Range<usize>, Range<usize>)>,
 }
 
 struct Seg {
@@ -195,6 +197,9 @@ pub struct TextInput {
     pictures: HashMap<String, Arc<RenderImage>>,
     /// Where the links were last drawn, in the window: a box for each line of each, with its place in `links`.
     link_boxes: Vec<(usize, Bounds<Pixels>)>,
+    /// Stretches drawn as other words in a text drawn as Markdown, while the caret is not in them and nothing of them
+    /// is selected: a manuscript's citations, as a reader will read them. Each is one citation as the Markdown reads it.
+    folds: Vec<(Range<usize>, String)>,
     /// The link under the pointer, and the box of the line of it the pointer is on.
     hovered: Option<(usize, Bounds<Pixels>)>,
     /// Updated during prepaint, so a selection toolbar follows wrapping and scrolling in this frame.
@@ -252,6 +257,7 @@ impl TextInput {
             links: vec![],
             pictures: HashMap::new(),
             link_boxes: vec![],
+            folds: vec![],
             hovered: None,
             selection_geometry: None,
             selection_toolbar_visible: false,
@@ -291,6 +297,7 @@ impl TextInput {
         self.scroll_x = px(0.);
         // What was laid out was the old text: nothing is placed by it until this one is drawn (`top_of`).
         self.layout = None;
+        self.folds.clear();
         // Another text altogether (a draft of another part): its changes are not this one's.
         (self.undo, self.redo, self.typing) = (vec![], vec![], false);
         cx.notify();
@@ -306,6 +313,19 @@ impl TextInput {
         if self.links == links { return }
         self.links = links;
         self.hovered = None;
+    }
+
+    /// Stretches to draw as other words while the caret is not in them (`folds`). The owner gives them anew when the
+    /// text changes; one that is no longer a citation where it stands is drawn as written.
+    pub fn set_folds(&mut self, folds: Vec<(Range<usize>, String)>) {
+        self.folds = folds;
+    }
+
+    /// The stretch drawn as other words that ends (`before`) or begins at `o`, while it is drawn so.
+    fn fold_beside(&self, o: usize, before: bool) -> Option<Range<usize>> {
+        if !self.markdown || self.masked { return None }
+        let text = &self.text;
+        self.folds.iter().map(|(range, _)| range.clone()).find(|range| (if before { range.end == o } else { range.start == o }) && text.get(range.clone()).is_some_and(|written| written.starts_with('[') && written.ends_with(']')))
     }
 
     /// The pictures the text's picture lines show, by their addresses. The owner gives them anew as they are read;
@@ -509,6 +529,11 @@ impl TextInput {
     }
 
     fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
+        // Beside a citation drawn as a reader reads it, the first press selects it whole, written out, and the next takes it away.
+        if self.sel.is_empty() && let Some(range) = self.fold_beside(self.cursor(), true) {
+            (self.sel, self.reversed, self.typing) = (range, true, false);
+            return cx.notify();
+        }
         if self.sel.is_empty() {
             let p = self.prev(self.cursor());
             self.select_to(p, cx);
@@ -517,6 +542,10 @@ impl TextInput {
     }
 
     fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
+        if self.sel.is_empty() && let Some(range) = self.fold_beside(self.cursor(), false) {
+            (self.sel, self.reversed, self.typing) = (range, false, false);
+            return cx.notify();
+        }
         if self.sel.is_empty() {
             let n = self.next(self.cursor());
             self.select_to(n, cx);
@@ -711,6 +740,13 @@ impl TextInput {
         self.text_offset(&l.map, drawn)
     }
 
+    /// The stretch drawn as other words that a point is inside of, not at an edge of: a click there opens it.
+    fn fold_under(&self, p: Point<Pixels>) -> Option<Range<usize>> {
+        let l = self.layout.as_ref()?;
+        let drawn = self.index_in(l, point(p.x - l.bounds.left() + l.scroll_x, p.y - l.bounds.top()));
+        l.map.folds.iter().find(|(shown, _)| shown.start < drawn && drawn < shown.end).map(|(_, src)| src.clone())
+    }
+
     fn on_down(&mut self, ev: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.selection_toolbar_dismissed = false;
         window.focus(&self.focus);
@@ -722,6 +758,11 @@ impl TextInput {
             return;
         }
         self.selecting = true;
+        // A click on a citation drawn as a reader reads it opens it: the caret goes in, before its closing bracket, and it is written out.
+        let i = match self.fold_under(ev.position) {
+            Some(fold) if ev.click_count == 1 && !ev.modifiers.shift && !ev.modifiers.secondary() => fold.end - 1,
+            _ => i,
+        };
         if self.markdown { self.reveal_held = Some(i..i) }
         // Two clicks a word, three a paragraph, ⌘ or Ctrl with one a sentence, as in Word.
         let unit = match ev.click_count {
@@ -1088,6 +1129,12 @@ const QUOTE_INDENT: f32 = 16.;
 /// How far code is set in from its ground's edge.
 const CODE_INDENT: f32 = 10.;
 
+/// Whether a stretch drawn as other words is written out: the caret is inside it (at an edge it stays as it is
+/// drawn, so typing next to it moves nothing), or some of it is selected.
+fn opens(range: &Range<usize>, reveal: &Range<usize>) -> bool {
+    if reveal.is_empty() { range.start < reveal.start && reveal.start < range.end } else { reveal.start < range.end && range.start < reveal.end }
+}
+
 /// Markdown drawn as it says, a paragraph at a time: headings larger,
 /// emphasis, code and links in their style, a bullet for `-`, quotes set in
 /// behind a bar. The syntax is hidden but on the lines the selection or the
@@ -1111,9 +1158,12 @@ fn shape_markdown(input: &TextInput, style: &TextStyle, window: &mut Window, wra
         for piece in &line.pieces {
             let written = &text[piece.range.clone()];
             let hidden = piece.part == Part::Syntax && !revealed;
-            let drawn: &str = if piece.part == Part::Bullet && !revealed { "•" } else if hidden { "" } else { written };
+            // A citation as a reader will read it, unless the caret is in it or some of it is selected.
+            let folded = piece.cite.then(|| input.folds.iter().find(|(range, _)| *range == piece.range)).flatten().filter(|(range, _)| !(focused && opens(range, &reveal))).map(|(_, label)| label.as_str());
+            let drawn: &str = if let Some(label) = folded { label } else if piece.part == Part::Bullet && !revealed { "•" } else if hidden { "" } else { written };
             let from = start + shown.len();
             map.segs.push(Seg { src: piece.range.clone(), shown: from..from + drawn.len(), same: drawn.len() == written.len() && !hidden && drawn == written });
+            if folded.is_some() { map.folds.push((from..from + drawn.len(), piece.range.clone())) }
             if drawn.is_empty() { continue }
             shown.push_str(drawn);
             let marks = &piece.marks;
@@ -1403,7 +1453,7 @@ mod tests {
     /// `a **b**` drawn as `a b`, then a line break and `- c` drawn as `• c`.
     fn map() -> DisplayMap {
         let seg = |src: std::ops::Range<usize>, shown: std::ops::Range<usize>, same: bool| Seg { src, shown, same };
-        DisplayMap { segs: vec![seg(0..2, 0..2, true), seg(2..4, 2..2, false), seg(4..5, 2..3, true), seg(5..7, 3..3, false), seg(7..8, 3..4, true), seg(8..9, 4..7, false), seg(9..11, 7..9, true)], invites: vec![] }
+        DisplayMap { segs: vec![seg(0..2, 0..2, true), seg(2..4, 2..2, false), seg(4..5, 2..3, true), seg(5..7, 3..3, false), seg(7..8, 3..4, true), seg(8..9, 4..7, false), seg(9..11, 7..9, true)], invites: vec![], folds: vec![] }
     }
 
     #[test]

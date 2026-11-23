@@ -530,13 +530,14 @@ fn pieces_of(s: &str, base: usize, marks: &Marks, out: &mut Vec<Piece>) {
     let push = |out: &mut Vec<Piece>, range: Range<usize>, marks: Marks, part: Part, cite: bool| {
         if range.is_empty() { return }
         let range = base + range.start..base + range.end;
-        // Words beside words with the same marks are one piece.
+        // Words beside words with the same marks are one piece; a citation is always one of its own, so two written together stay two.
         if let Some(last) = out.last_mut()
             && part == Part::Text
             && last.part == Part::Text
             && last.range.end == range.start
             && last.marks == marks
-            && last.cite == cite
+            && !cite
+            && !last.cite
         {
             return last.range.end = range.end;
         }
