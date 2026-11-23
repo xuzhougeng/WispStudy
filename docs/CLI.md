@@ -18,11 +18,13 @@ wisp import_references -l L-实际ID --path references.ris
 wisp import_pdf -l L-实际ID --path paper.pdf
 wisp import_pdf -l L-实际ID --path "PDF collection"
 wisp import_zotero -l L-实际ID --path /path/to/Zotero/zotero.sqlite
+wisp list_zotero_libraries --path /path/to/Zotero/zotero.sqlite
+wisp import_zotero -l L-实际ID --path /path/to/Zotero/zotero.sqlite --zotero-library "Root Lab"
 ```
 
 `import_pdf` 支持递归导入文件夹，子文件夹名称转为标签；`--paper-id` 可将单个 PDF 附到已有文献。离线提取 DOI 和全文，未补全的题目用文件名，不自动联网查询元数据。已有记录保留，回收站条目跳过，相同条目的相同附件内容只保存一次；内容完全相同的文件换了名字再导入，算作已持有它的那篇文献，不新建记录。
 
-`import_references` 按内容识别 BibTeX / RIS，不自动携带 PDF。`import_zotero` 复用桌面的只读迁移流程，复制可访问的本地 PDF；建议先退出 Zotero，详见 [Zotero 导入](ZOTERO.md)。这些本地导入不联网、不移动源文件。
+`import_references` 按内容识别 BibTeX / RIS，不自动携带 PDF。`import_zotero` 复用桌面的只读迁移流程，复制可访问的本地 PDF；默认导入个人库和所有群组库，`--zotero-library` 只导入其中一个（「我的文库」、群组名称，或 `list_zotero_libraries` 列出的 `id`；名称对不上时报错并列出有哪些）。建议先退出 Zotero，详见 [Zotero 导入](ZOTERO.md)。这些本地导入不联网、不移动源文件。
 
 PDF / Zotero 的 JSON 含新增、跳过、附件数量和逐项 `results`。必须检查 `failed` 和 `results[].problems`：有些记录已入库，但附件可能缺失，部分失败仍可能退出 0。PDF 的 `textless` / `textError` 表示文件已保存但未提取出文字。Zotero 附件的文本在阅读时提取。本地导入不生成在线检索的批次号，不能用 `undo_import` 撤销。
 
@@ -83,7 +85,8 @@ wisp search_fulltext --help             # 一个工具的参数
 | `import_library` | 把另一个 Wisp Study 导出的 `.wispstudy` 文件（或改名前的 `.wisppaper` 文件）导入为新文献库，`--path` 必填（会创建文件和数据库） |
 | `import_pdf` | 复制本地 PDF 或递归导入文件夹，`--path` 必填；单文件可用 `--paper-id` 附到已有条目（会改动文献库） |
 | `import_references` | 导入本地 BibTeX / RIS 文件，`--path` 必填，按内容识别格式（会改动文献库） |
-| `import_zotero` | 从本机 `zotero.sqlite` 迁移文献、笔记、标签和 PDF，`--path` 必填（会改动目标文献库） |
+| `import_zotero` | 从本机 `zotero.sqlite` 迁移文献、笔记、标签和 PDF，`--path` 必填；`--zotero-library` 只导入其中一个文献库（会改动目标文献库） |
+| `list_zotero_libraries` | 列出本机 `zotero.sqlite` 里的个人库和群组库，各有 `id`、名称和会导入的条目数，`--path` 必填（只读） |
 | `library_status` | 一个库的概况：各状态的数量、自定义词条、状态值的显示名称 |
 | `list_papers` | 搜索、筛选、翻页；规则与界面上的列表相同 |
 | `get_paper` | 一篇文献的完整记录、词条和附件；`journalMetrics` 是它的期刊的影响因子与分区（查不到为 null） |
