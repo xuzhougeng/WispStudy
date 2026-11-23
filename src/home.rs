@@ -135,6 +135,8 @@ impl Render for Workspace {
             }))
             // The same while the floating conversation is held by its title bar, its corner or its button (floating.rs).
             .children(self.render_float_layer(cx))
+            // The same while the dialog of a piece cut out is moved by its title (figures.rs).
+            .children(self.render_figure_layer(cx))
             // The same while the player's bar is held (player.rs).
             .children(self.render_seek_layer(cx))
             .children(ui::window_controls(window))

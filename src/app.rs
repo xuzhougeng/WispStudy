@@ -1821,6 +1821,10 @@ pub struct Workspace {
     pub modal: Option<Modal>,
     pub modal_error: String,
     pub modal_subscriptions: Vec<Subscription>,
+    /// The figure dialog of a piece cut out stands over the PDF without hiding it (figures.rs): moved by its
+    /// title this far from the window's centre, kept for the next one; and the press holding it meanwhile.
+    pub figure_at: (f32, f32),
+    pub figure_drag: Option<(Point<Pixels>, (f32, f32))>,
     pub menu: Option<Menu>,
     /// The command palette, while it is open (`palette.rs`).
     pub palette: Option<crate::palette::Palette>,
@@ -2524,7 +2528,7 @@ impl Workspace {
         shortcuts::rebuild(&settings.shortcuts, cx);
         let libraries = libraries::list(&root);
         let home = crate::draft::Home::new(window, cx);
-        let mut this = Workspace { focus, settings, settings_path, root, libraries, lib: None, parked: vec![], stepping: false, main_window: window.window_handle(), settings_view: None, connections: vec![], skills: vec![], update: UpdateState::Idle, update_told: None, session: Session::default(), modal: None, modal_error: String::new(), modal_subscriptions: vec![], menu: None, palette: None, toast, home_scroll: ScrollHandle::new(), home, resizing: None, column_drag: None, picked: None, pinning: false, filters_over: [false; 2], filters_drawn: false, star_ask: false };
+        let mut this = Workspace { focus, settings, settings_path, root, libraries, lib: None, parked: vec![], stepping: false, main_window: window.window_handle(), settings_view: None, connections: vec![], skills: vec![], update: UpdateState::Idle, update_told: None, session: Session::default(), modal: None, modal_error: String::new(), modal_subscriptions: vec![], figure_at: (0., 0.), figure_drag: None, menu: None, palette: None, toast, home_scroll: ScrollHandle::new(), home, resizing: None, column_drag: None, picked: None, pinning: false, filters_over: [false; 2], filters_drawn: false, star_ask: false };
         // A new day of use is counted once at start; on the fifth the home page asks for a star, until answered.
         // A settings file that could not be read is not written over with defaults for it (the toast says so).
         if this.toast.is_none() && wisp_core::settings::note_use(&mut this.settings, &wisp_core::time::today()) { this.save_settings(cx) }
@@ -2716,7 +2720,11 @@ impl Workspace {
         let result = f(lib).and_then(|_| lib.reload());
         cx.notify();
         match result {
-            Ok(()) => true,
+            Ok(()) => {
+                // A figure kept or taken away is shown so on its page.
+                self.sync_figure_frames(cx);
+                true
+            }
             Err(err) => {
                 self.fail(format!("{err:#}"), cx);
                 false
@@ -4337,6 +4345,9 @@ impl Workspace {
                 if matches!(self.modal, Some(Modal::Headings(_))) { return cx.notify() }
                 self.modal = None;
                 self.modal_subscriptions.clear();
+                self.figure_drag = None;
+                // The piece a figure dialog was for is no longer shown on its page.
+                self.sync_figure_frames(cx);
                 window.focus(&self.focus);
             }
             Cmd::SubmitModal => self.submit_modal(window, cx),
@@ -4385,6 +4396,8 @@ impl Workspace {
         if self.menu.take().is_some() {
         } else if self.palette.is_some() {
             self.close_palette(window, cx);
+        } else if self.modal.as_ref().is_some_and(|modal| matches!(modal, Modal::Figure(form) if form.collects())) && !self.figure_dialog_focused(window, cx) {
+            // The figure dialog standing beside the page: Esc on the page (a selection copied from) does not put away what was written.
         } else if self.modal.is_some() {
             self.run(Cmd::CloseModal, window, cx);
         } else if self.dismiss_font_picker(window, cx) {
@@ -5128,6 +5141,8 @@ impl Workspace {
             pdf
         });
         let events = cx.subscribe(&pdf, |this, view, event: &PdfEvent, cx| this.pdf_event(view, event, cx));
+        let (figures, collecting) = self.figure_frames(&file.id);
+        pdf.update(cx, |pdf, cx| pdf.set_figures(figures, collecting, cx));
         Some((pdf, events))
     }
 

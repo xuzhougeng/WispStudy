@@ -52,6 +52,9 @@ const LARGE_EDGE: u32 = 2800;
 /// The width of the dialog's column of fields.
 const SIDE_W: f32 = 348.;
 
+/// How much of the dialog of a piece cut out stays in the window however far it is moved.
+const GRAB: f32 = 96.;
+
 /// What stands under the dialog's picture: a line of tools, or the box a picture is drawn from.
 const TOOLS_H: f32 = 52.;
 const DRAW_H: f32 = 172.;
@@ -101,6 +104,13 @@ pub struct FigureForm {
     fresh: bool,
     /// 生图: the picture is a model's, drawn from what is written here.
     pub draw: Option<Drawing>,
+}
+
+impl FigureForm {
+    /// A piece just cut out of a PDF: its dialog stands over the page without hiding it, and is moved by the pointer.
+    pub fn collects(&self) -> bool {
+        self.id.is_none() && self.draw.is_none() && !self.paper_id.is_empty()
+    }
 }
 
 /// The box a picture is drawn from, in the dialog of a figure that is not kept yet.
@@ -431,7 +441,14 @@ impl Workspace {
         let Some(paper_id) = lib.selected.clone() else { return };
         let resource_id = lib.pdf_file(&paper_id).map(|file| file.id.clone()).unwrap_or_default();
         let caption = piece.caption.clone().unwrap_or_default();
-        let figure = Figure { paper_id, resource_id, page: piece.page, bbox: Some(piece.bbox), label: caption.label, legend: caption.legend, ..Default::default() };
+        let mut figure = Figure { paper_id, resource_id, page: piece.page, bbox: Some(piece.bbox), label: caption.label, legend: caption.legend, ..Default::default() };
+        // A piece cut again while the dialog of the last one is open is that figure cut better: what was
+        // written stays, and the number and legend are the page's only where it gives them.
+        if let Some(Modal::Figure(form)) = self.modal.as_ref().filter(|modal| matches!(modal, Modal::Figure(form) if form.collects())) {
+            let text = |input: &Entity<TextInput>| input.read(cx).text().to_string();
+            if piece.caption.is_none() { (figure.label, figure.legend) = (text(&form.label), text(&form.legend)) }
+            (figure.tags, figure.notes) = (split_list(&text(&form.tags)), text(&form.notes));
+        }
         let mut form = self.figure_form(Some(&figure), cx);
         let png = Arc::new(piece.png.clone());
         (form.id, form.key, form.png, form.guessed) = (None, new_id("N"), Some(png.clone()), piece.caption.is_some());
@@ -440,7 +457,99 @@ impl Workspace {
         self.modal_error.clear();
         self.modal = Some(Modal::Figure(Box::new(form)));
         self.load_large(key, move || Some(png.to_vec()), cx);
+        self.sync_figure_frames(cx);
         cx.notify();
+    }
+
+    /// What the pages of a file show of the figure library: its figures cut from that file, and the piece
+    /// whose dialog is open when it is of that file.
+    pub(crate) fn figure_frames(&self, resource: &str) -> (Vec<crate::pdf::KeptFigure>, Option<(usize, [f32; 4])>) {
+        let Some(lib) = self.lib.as_ref() else { return (vec![], None) };
+        let kept = lib.gallery.items.iter().filter(|f| f.resource_id == resource && f.page > 0).filter_map(|f| Some(crate::pdf::KeptFigure { page: f.page, rect: f.bbox?, label: f.label.clone() })).collect();
+        let collecting = match self.modal.as_ref() {
+            Some(Modal::Figure(form)) if form.collects() && form.resource_id == resource => form.bbox.map(|bbox| (form.page, bbox)),
+            _ => None,
+        };
+        (kept, collecting)
+    }
+
+    /// Hand every viewer of the library what its pages show of the figure library (`figure_frames`).
+    pub(crate) fn sync_figure_frames(&mut self, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_ref() else { return };
+        let views: Vec<Entity<crate::pdf::PdfView>> = lib.pdf.iter().chain(lib.beside.as_ref().map(|beside| &beside.view)).chain(lib.pins.iter().map(|pin| &pin.view)).chain(lib.windows.iter().map(|w| &w.view)).cloned().collect();
+        for view in views {
+            let (figures, collecting) = self.figure_frames(view.read(cx).resource_id());
+            view.update(cx, |view, cx| view.set_figures(figures, collecting, cx));
+        }
+    }
+
+    /// The size of a figure's dialog in this window. One of a piece cut out leaves more of the page in view.
+    pub(crate) fn figure_dialog_size(form: &FigureForm, window: &Window) -> (f32, f32) {
+        let viewport = window.viewport_size();
+        let (most_w, most_h) = if form.collects() { (940., 640.) } else { (1060., 700.) };
+        ((f32::from(viewport.width) * 0.92).min(most_w), (f32::from(viewport.height) * 0.88).min(most_h))
+    }
+
+    /// Where the dialog of a piece cut out stands: its top-left corner, moved `figure_at` from the centre, and
+    /// kept so that its title can always be taken hold of again.
+    pub(crate) fn figure_place(&self, (width, height): (f32, f32), window: &Window) -> (f32, f32) {
+        let viewport = window.viewport_size();
+        let (vw, vh) = (f32::from(viewport.width), f32::from(viewport.height));
+        let (x, y) = ((vw - width) / 2. + self.figure_at.0, (vh - height) / 2. + self.figure_at.1);
+        (x.clamp((GRAB - width).min(0.), (vw - GRAB).max(0.)), y.clamp(0., (vh - GRAB).max(0.)))
+    }
+
+    /// The dialog of a piece cut out, taken hold of by its title or its picture.
+    fn figure_grab(&mut self, at: Point<Pixels>, window: &Window, cx: &mut Context<Self>) {
+        let Some(Modal::Figure(form)) = self.modal.as_ref().filter(|modal| matches!(modal, Modal::Figure(form) if form.collects())) else { return };
+        // From where it is drawn, so a window made smaller since does not leave it far off.
+        let size = Self::figure_dialog_size(form, window);
+        let (x, y) = self.figure_place(size, window);
+        let viewport = window.viewport_size();
+        self.figure_at = (x - (f32::from(viewport.width) - size.0) / 2., y - (f32::from(viewport.height) - size.1) / 2.);
+        self.figure_drag = Some((at, self.figure_at));
+        cx.notify();
+    }
+
+    fn figure_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let Some((from, at)) = self.figure_drag else { return };
+        if event.pressed_button != Some(MouseButton::Left) { return self.figure_drag = None }
+        self.figure_at = (at.0 + f32::from(event.position.x - from.x), at.1 + f32::from(event.position.y - from.y));
+        cx.notify();
+    }
+
+    /// While the dialog of a piece cut out is held, a layer over the whole window takes the pointer's moves.
+    pub fn render_figure_layer(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.figure_drag?;
+        Some(
+            div()
+                .id("figure-drag-layer")
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .occlude()
+                .cursor(CursorStyle::ClosedHand)
+                .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| this.figure_move(event, cx)))
+                .on_mouse_up(MouseButton::Left, cx.listener(|this, _, window, cx| {
+                    this.figure_drag = None;
+                    // Kept where it was let go, as it is drawn.
+                    if let Some(Modal::Figure(form)) = this.modal.as_ref() {
+                        let size = Self::figure_dialog_size(form, window);
+                        let (x, y) = this.figure_place(size, window);
+                        let viewport = window.viewport_size();
+                        this.figure_at = (x - (f32::from(viewport.width) - size.0) / 2., y - (f32::from(viewport.height) - size.1) / 2.);
+                    }
+                    cx.notify();
+                }))
+                .into_any_element(),
+        )
+    }
+
+    /// The keyboard is in a field of the figure dialog: Esc elsewhere (the page, copied from) leaves the dialog be.
+    pub(crate) fn figure_dialog_focused(&self, window: &Window, cx: &App) -> bool {
+        let Some(Modal::Figure(form)) = self.modal.as_ref() else { return false };
+        [&form.label, &form.legend, &form.tags, &form.notes].into_iter().chain(form.draw.as_ref().map(|draw| &draw.prompt)).any(|input| input.focus_handle(cx).is_focused(window))
     }
 
     /// Read the dialog's picture off the main thread; it is shown when it is the dialog's still.
@@ -584,8 +693,6 @@ impl Workspace {
         if drawing {
             self.say(t("已收藏到图片库。"), cx);
         } else if id.is_none() {
-            // The piece is kept: the next one can be cut.
-            if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.cut_kept(cx)) }
             self.say(t("已收藏到图片库，在左侧「收藏」里的「图片」下。"), cx);
         }
     }
@@ -593,8 +700,9 @@ impl Workspace {
     pub(crate) fn render_figure_dialog(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<Div> {
         let Some(Modal::Figure(form)) = self.modal.as_ref() else { return None };
         let lib = self.lib.as_ref()?;
-        let viewport = window.viewport_size();
-        let (width, height) = ((f32::from(viewport.width) * 0.92).min(1060.), (f32::from(viewport.height) * 0.88).min(700.));
+        let (width, height) = Self::figure_dialog_size(form, window);
+        // A piece cut out: the dialog is moved by its title or its picture, off what is to be read on the page.
+        let movable = form.collects();
         let stage = (width - SIDE_W, height - if form.draw.is_some() { DRAW_H } else { TOOLS_H });
         let paper = lib.paper(&form.paper_id);
         let held = form.id.as_deref().and_then(|id| lib.gallery.figure(id));
@@ -684,7 +792,7 @@ impl Workspace {
             .rounded_l(px(14.))
             .bg(Theme::bg_sunken())
             .overflow_hidden()
-            .child(div().flex().flex_1().min_h_0().items_center().justify_center().child(picture))
+            .child(div().flex().flex_1().min_h_0().items_center().justify_center().child(picture).when(movable, |d| d.cursor(CursorStyle::OpenHand).on_mouse_down(MouseButton::Left, cx.listener(|this, event: &MouseDownEvent, window, cx| this.figure_grab(event.position, window, cx)))))
             .child(under);
 
         // The tags the library's figures already carry, to take with a click.
@@ -777,7 +885,8 @@ impl Workspace {
             .child(div().flex_1())
             .child(ui::secondary_button("modal-cancel", if fresh { t("取消") } else { crate::i18n::tc("dialog.close", "关闭") }).on_click(self.on(Cmd::CloseModal, cx)))
             .child(ui::primary_button("modal-ok", if fresh { tc("action.save_figure", "收藏") } else { t("保存") }).on_click(self.on(Cmd::SubmitModal, cx)));
-        let right = div().flex().flex_col().flex_none().w(px(SIDE_W)).h_full().child(ui::dialog_title(if form.draw.is_some() { t("生成图片") } else if fresh { t("收藏到图片库") } else { t("图片") })).child(fields).child(footer);
+        let title = ui::dialog_title(if form.draw.is_some() { t("生成图片") } else if fresh { t("收藏到图片库") } else { t("图片") }).when(movable, |d| d.cursor(CursorStyle::OpenHand).on_mouse_down(MouseButton::Left, cx.listener(|this, event: &MouseDownEvent, window, cx| this.figure_grab(event.position, window, cx))));
+        let right = div().flex().flex_col().flex_none().w(px(SIDE_W)).h_full().child(title).child(fields).child(footer);
         Some(ui::dialog(width).h(px(height)).flex_row().child(left).child(right))
     }
 

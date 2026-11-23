@@ -647,6 +647,12 @@ impl Workspace {
                     )
             }
         };
+        // The dialog of a piece cut out stands over the PDF without hiding it or holding the pointer: the page
+        // can be read, selected and copied from meanwhile, and the dialog moved off what is read (figures.rs).
+        if let Some(Modal::Figure(form)) = self.modal.as_ref() && form.collects() {
+            let (x, y) = self.figure_place(Self::figure_dialog_size(form, window), window);
+            return Some(div().absolute().top_0().left_0().size_full().child(card.absolute().left(px(x)).top(px(y))).into_any_element());
+        }
         // The top strip still drags the window while a dialog is open.
         Some(div().absolute().top_0().left_0().size_full().occlude().flex().items_center().justify_center().bg(Theme::scrim()).child(ui::title_strip().absolute().top_0().left_0()).child(card).into_any_element())
     }

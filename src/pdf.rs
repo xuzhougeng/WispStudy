@@ -30,7 +30,8 @@ pub enum PdfEvent {
     Quote(usize, String, bool),
     /// A piece of a page as a picture (PNG) for the next question, and whether for the library's conversation.
     Picture(Vec<u8>, bool),
-    /// A piece of a page to keep in the figure library. It stays marked on the page until `PdfView::cut_kept`.
+    /// A piece of a page to keep in the figure library. The viewer goes back to selecting text, so the page's
+    /// words can be copied into the dialog; the owner shows the piece meanwhile (`PdfView::set_figures`).
     Figure(Piece),
     /// Translate the selected text: the text, and the model service (its id) asked for this once, else the one translation is bound to.
     /// The answer comes back through `PdfView::show_translation`.
@@ -783,6 +784,20 @@ pub struct PdfView {
     searches: u64,
     /// 朗读: the sentence being heard, marked on its page.
     spoken: Spoken,
+    /// The figures of the figure library cut from this file, and the piece whose dialog is open (`set_figures`).
+    figures: Vec<KeptFigure>,
+    collecting: Option<(usize, [f32; 4])>,
+}
+
+/// A figure of the figure library as its page shows it: a dashed frame in `Theme::success`, so a piece kept is
+/// told from one only marked (`Kind::Cut`, the accent).
+#[derive(Clone, Debug, PartialEq)]
+pub struct KeptFigure {
+    /// 1-based, as the figure has it.
+    pub page: usize,
+    pub rect: [f32; 4],
+    /// The number the paper gives it, on the frame's corner; empty when there is none.
+    pub label: String,
 }
 
 /// The sentence read aloud as the page shows it: the one asked for (1-based page and sentence), and where
@@ -868,6 +883,8 @@ impl PdfView {
             finder: None,
             searches: 0,
             spoken: Spoken::default(),
+            figures: Vec::new(),
+            collecting: None,
         }
     }
 
@@ -1649,11 +1666,12 @@ impl PdfView {
         // Boxes, hollow so what they frame stays clear; the one chosen with its four corners to size it by.
         let chosen = self.mark_menu.as_ref().map(|menu| menu.id.clone());
         let free = self.tool == Tool::Select && !cutting;
-        // A piece marked to be cut out later is a dashed frame in the accent, and says it can be clicked.
+        // A piece marked to be cut out later is a dashed frame in the accent, and says it can be clicked; one kept
+        // in the figure library since is in the colour of a figure kept.
         let shapes: Vec<Div> = self.annotations.iter().filter(|a| a.page == index + 1 && matches!(a.kind, Kind::Box | Kind::Cut)).map(|a| {
             let [x0, y0, x1, y1] = self.rect_of(a);
             let marked = a.kind == Kind::Cut;
-            let color = if marked { Theme::accent() } else { Theme::highlight_swatch(&a.color) };
+            let color = if !marked { Theme::highlight_swatch(&a.color) } else if self.kept_at(index, [x0, y0, x1, y1]) { Theme::success() } else { Theme::accent() };
             let picked = chosen.as_deref() == Some(a.id.as_str());
             let grips = picked.then(|| [(0., 0.), (1., 0.), (1., 1.), (0., 1.)].map(|(fx, fy)| {
                 div().absolute().left(px((x1 - x0) * scale * fx - GRIP / 2. + 1.)).top(px((y1 - y0) * scale * fy - GRIP / 2. + 1.)).size(px(GRIP)).rounded(px(2.)).bg(gpui::white()).border_1().border_color(color)
@@ -1662,6 +1680,17 @@ impl PdfView {
                 .when(marked, |d| d.border_dashed().when(self.tool == Tool::Select, |d| d.cursor_pointer()).when(picked, |d| d.bg(Theme::selection())))
                 .children(grips.into_iter().flatten())
         }).collect();
+        // The figures kept from this page: a dashed frame in the colour of a figure kept, its number on the corner.
+        // It takes no clicks: what it frames is still the page's, to select and copy. A mark at the same place draws it.
+        let kept: Vec<Div> = self.figures.iter().filter(|f| f.page == index + 1 && !self.annotations.iter().any(|a| a.kind == Kind::Cut && a.page == f.page && same_place(self.rect_of(a), f.rect))).map(|f| {
+            let [x0, y0, x1, y1] = f.rect;
+            let chip = div().absolute().left(px(-2.)).top(px(-2.)).flex().items_center().gap(px(3.)).max_w(px(((x1 - x0) * scale).max(24.))).px(px(4.)).py(px(1.)).rounded_br(px(4.)).bg(Theme::success()).text_color(gpui::white()).text_size(px(10.)).line_height(px(14.))
+                .child(ui::icon("check", 10., gpui::white()))
+                .when(!f.label.is_empty(), |d| d.child(div().min_w_0().truncate().child(f.label.clone())));
+            div().absolute().left(px(x0 * scale - 1.)).top(px(y0 * scale - 1.)).w(px((x1 - x0) * scale + 2.)).h(px((y1 - y0) * scale + 2.)).border_2().border_dashed().border_color(Theme::success()).rounded(px(2.)).child(chip)
+        }).collect();
+        // The piece in the figure dialog, as it was cut, until the dialog is put away.
+        let collecting = self.collecting.filter(|(page, _)| *page == index + 1).map(|(_, [x0, y0, x1, y1])| div().absolute().left(px(x0 * scale)).top(px(y0 * scale)).w(px((x1 - x0) * scale)).h(px((y1 - y0) * scale)).border_2().border_color(Theme::accent()).bg(Theme::selection()));
         // A box being drawn.
         let drawing = self.drawing.filter(|(page, _)| *page == index).map(|(_, [x0, y0, x1, y1])| div().absolute().left(px(x0.min(x1) * scale)).top(px(y0.min(y1) * scale)).w(px((x1 - x0).abs() * scale)).h(px((y1 - y0).abs() * scale)).border_2().border_color(Theme::highlight_swatch(wisp_core::annotation::BOX_COLOR)).rounded(px(2.)));
         // Sticky notes, folded to an icon at their spot; the open one ringed. A note being written shows where it will go.
@@ -1716,7 +1745,7 @@ impl PdfView {
             return div().w_full().flex().pb(px(PAGE_GAP)).child(sheet).into_any_element();
         }
         let sheet = match image {
-            Some((image, _)) => sheet.when(cutting || !free, |d| d.cursor_crosshair()).when(free, |d| d.cursor_text()).child(img(image).w(px(width)).h(px(height))).children(annotations).children(spoken).children(selected).children(marks).children(found).children(cut).children(shapes).children(drawing).children(notes),
+            Some((image, _)) => sheet.when(cutting || !free, |d| d.cursor_crosshair()).when(free, |d| d.cursor_text()).child(img(image).w(px(width)).h(px(height))).children(annotations).children(spoken).children(selected).children(marks).children(found).children(kept).children(collecting).children(cut).children(shapes).children(drawing).children(notes),
             None => sheet.flex().items_center().justify_center().text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(if self.broken.contains(&index) { tf!("第 {} 页无法渲染", "Cannot render page {}", index + 1) } else { tf!("第 {} 页", "Page {}", index + 1) }),
         };
         // Draw over the image without changing its size or covering the text.
@@ -2005,13 +2034,28 @@ impl PdfView {
         cx.notify();
     }
 
-    /// Hand the piece cut out to the figure library, with the caption the page gives it. The piece stays
-    /// marked, so a dialog put away leaves it to be used otherwise; `cut_kept` lets go of it.
+    /// Hand the piece cut out to the figure library, with the caption the page gives it. The viewer goes back
+    /// to selecting text, so what the page says of the figure can be copied into the dialog standing beside it;
+    /// the piece is shown where it was until the dialog is put away (`set_figures`).
     pub fn collect_cut(&mut self, cx: &mut Context<Self>) {
         let (Some(png), Some((page, [x0, y0, x1, y1]))) = (self.cut_picture(), self.cut) else { return };
         let bbox = [x0.min(x1), y0.min(y1), x0.max(x1), y0.max(y1)];
         let caption = self.marks.get(&page).and_then(|marks| wisp_core::figure::caption(marks, bbox));
+        (self.cut, self.cutting, self.selecting) = (None, false, false);
         cx.emit(PdfEvent::Figure(Piece { png, page: page + 1, bbox, caption }));
+        cx.notify();
+    }
+
+    /// The figures of the library cut from this file, and the piece whose dialog is open: drawn on their pages.
+    pub fn set_figures(&mut self, figures: Vec<KeptFigure>, collecting: Option<(usize, [f32; 4])>, cx: &mut Context<Self>) {
+        if self.figures == figures && self.collecting == collecting { return }
+        (self.figures, self.collecting) = (figures, collecting);
+        cx.notify();
+    }
+
+    /// A figure of the library stands at this place of a 0-based page.
+    fn kept_at(&self, page: usize, rect: [f32; 4]) -> bool {
+        self.figures.iter().any(|f| f.page == page + 1 && same_place(f.rect, rect))
     }
 
     /// Leave the piece cut out marked on its page, a dashed frame to click later: for the figure library or
@@ -2044,12 +2088,6 @@ impl PdfView {
         let Some((png, ..)) = self.marked_piece() else { return };
         (self.mark_menu, self.cut, self.cutting) = (None, None, false);
         cx.emit(PdfEvent::Picture(png, to_library));
-        cx.notify();
-    }
-
-    /// The piece cut out is in the figure library: the next one can be cut.
-    pub fn cut_kept(&mut self, cx: &mut Context<Self>) {
-        self.cut = None;
         cx.notify();
     }
 
@@ -2587,6 +2625,11 @@ impl Render for PdfView {
             .child(self.annotation_panel(window, cx))
             .into_any_element()
     }
+}
+
+/// Two boxes on a page are the same place: a mark and the figure kept from it, as rounded when they were saved.
+fn same_place(a: [f32; 4], b: [f32; 4]) -> bool {
+    a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1.5)
 }
 
 #[cfg(test)]
