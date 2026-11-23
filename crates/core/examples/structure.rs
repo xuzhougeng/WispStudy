@@ -1,6 +1,6 @@
 //! What the structuring makes of a file, for looking at a PDF that comes out wrong:
 //!
-//!     cargo run -p wisp_core --example structure -- a.pdf [blocks|sentences|pages|outline|captions|aloud [title [journal]]|apply <reply.txt>]
+//!     cargo run -p wisp_core --example structure -- a.pdf [blocks|sentences|pages|outline|captions|figures|aloud [title [journal]]|apply <reply.txt>]
 //!
 //! Prints the text's language, how many sentences each part got and how
 //! each part opens; with `blocks`, every block and its label; with
@@ -8,6 +8,8 @@
 //! `outline`, what a model is asked when it sorts the parts; with `apply`,
 //! the parts a model's answer (in a file) gives; with `captions`, the
 //! captions of figures and tables each page shows, as the figure library reads them; with
+//! `figures`, where the file shows each figure (its caption, the piece of the page found for it) and what
+//! every mention of a figure in the text leads to; with
 //! `aloud`, what 朗读 sends page by page, one sentence a line (the paper's title and journal, if given, find
 //! the first page's title).
 
@@ -22,6 +24,39 @@ fn main() {
         for (index, marks) in pages.iter().enumerate() {
             for caption in wisp_core::figure::captions(marks) {
                 println!("p{:<3} [{}] {}", index + 1, caption.label, caption.legend);
+            }
+        }
+        return;
+    }
+    // Where the file shows its figures, and where its text speaks of them: what the reader makes of a click on a number.
+    if mode == "figures" {
+        let Some(pages) = std::fs::read(&path).ok().and_then(wisp_core::pdftext::file_drawn) else { return println!("cannot read {}", path.display()) };
+        let mut index = wisp_core::figref::Index::default();
+        for (at, (marks, shapes, size)) in pages.iter().enumerate() {
+            let shown = wisp_core::figref::shown(marks, shapes, *size);
+            let loose = wisp_core::figref::unclaimed(shapes, &shown, *size);
+            index.add(at, shown, loose, size.1);
+        }
+        index.settle();
+        let rect = |[x0, y0, x1, y1]: [f32; 4]| format!("[{x0:.0},{y0:.0} {x1:.0},{y1:.0}]");
+        for place in index.places() {
+            let shown = &place.shown;
+            let figure = match (shown.figure, place.apart) {
+                (Some(figure), _) => format!("figure {}", rect(figure)),
+                (None, Some((page, figure))) => format!("figure on p{} {}", page + 1, rect(figure)),
+                (None, None) => "no figure found".to_string(),
+            };
+            println!("p{:<3} [{}] w{} caption {} {figure}  {}", place.page + 1, shown.label, shown.weight, rect(shown.caption), shown.legend.chars().take(50).collect::<String>());
+        }
+        for (at, (marks, ..)) in pages.iter().enumerate() {
+            for mention in wisp_core::figref::mentions(marks) {
+                let text = wisp_core::pdftext::marks_text(&marks[mention.from..=mention.to]);
+                let to = match index.find(mention.key) {
+                    Some(place) if wisp_core::figref::own(marks, &mention, at, place) => "itself".to_string(),
+                    Some(place) => format!("p{} [{}]", place.page + 1, place.shown.label),
+                    None => "nowhere in this file".to_string(),
+                };
+                println!("p{:<3} {text:?} -> {to}", at + 1);
             }
         }
         return;

@@ -5448,6 +5448,15 @@ impl Workspace {
             }, cx),
             PdfEvent::RestyleText { resource, id, style } => self.change_pdf_annotation(resource, |store| store.restyle_pdf_text(resource, id, style), cx),
             PdfEvent::OpenFigure(id) => self.open_figure_on_page(id, cx),
+            // 固定对照: the figure stays in the other half of this viewer. A file of the paper shown there gives it up.
+            PdfEvent::FigureBeside { page, top } => {
+                let Some(lib) = self.lib.as_ref() else { return };
+                let main = lib.pdf.as_ref() == Some(&view);
+                let (inner, width) = { let pdf = view.read(cx); (pdf.split(), pdf.width()) };
+                let split = crate::pdf::beside_split(lib.beside.as_ref().filter(|_| main).map(|beside| beside.split), inner, width);
+                if main { self.close_beside(cx) }
+                view.update(cx, |pdf, cx| pdf.keep_beside(split, *page, *top, cx));
+            }
             PdfEvent::Reframe { page, bbox, png } => {
                 let resource = view.read(cx).resource_id().to_string();
                 self.reframe_piece(&resource, *page, *bbox, png, cx);
@@ -8720,6 +8729,24 @@ impl Workspace {
                     let numbers: Vec<usize> = arg.split(';').filter_map(|n| n.parse().ok()).collect();
                     if let (Some(pdf), [page, from, to]) = (self.lib.as_ref().and_then(|l| l.pdf.clone()), numbers.as_slice()) && !pdf.update(cx, |pdf, cx| pdf.select_marks(page.saturating_sub(1), *from, *to, cx)) {
                         eprintln!("pdfpick: the glyphs of page {page} are not at hand yet");
+                    }
+                    return;
+                }
+                // `pdffig:<page>;<n>` shows the figure the n-th mention (from 0) of a 1-based page of the PDF on show leads to,
+                // as a click on the number does (after a `shot:` has drawn the page and the file's figures are read);
+                // `pdffig:pin` keeps it in the other half, `pdffig:go` goes to it, `pdffig:back` comes back.
+                "pdffig" => {
+                    let Some(pdf) = self.lib.as_ref().and_then(|l| l.pdf.clone()) else { return };
+                    match arg {
+                        "pin" => pdf.update(cx, |pdf, cx| pdf.pin_figure(cx)),
+                        "go" => pdf.update(cx, |pdf, cx| pdf.go_to_figure(cx)),
+                        "back" => pdf.update(cx, |pdf, cx| pdf.return_back(cx)),
+                        _ => {
+                            let numbers: Vec<usize> = arg.split(';').filter_map(|n| n.parse().ok()).collect();
+                            if let [page, n] = numbers.as_slice() && !pdf.update(cx, |pdf, cx| pdf.open_figure_mention(page.saturating_sub(1), *n, cx)) {
+                                eprintln!("pdffig: page {page} has no such mention of a figure, or it is not read yet");
+                            }
+                        }
                     }
                     return;
                 }

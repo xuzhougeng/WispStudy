@@ -53,6 +53,7 @@ pub mod csl;
 pub mod docx;
 pub mod export;
 pub mod extract;
+pub mod figref;
 pub mod figure;
 pub mod filter;
 pub mod floating;
