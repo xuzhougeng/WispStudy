@@ -41,6 +41,7 @@ mod screen;
 mod screen_confirm;
 mod screen_single;
 mod searches;
+mod scrollbar;
 mod select;
 mod settings;
 mod shortcuts;
