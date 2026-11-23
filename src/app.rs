@@ -1665,6 +1665,8 @@ pub struct Library {
     pub filters: Filters,
     /// Indices into `papers` of the rows shown, in order.
     pub shown: Vec<usize>,
+    /// What the sidebar counts beside its views and tags, under the search and filters set (`filter::counts`).
+    pub counts: filter::Counts,
     pub search: Entity<TextInput>,
     pub page: Page,
     pub selected: Option<String>,
@@ -2475,7 +2477,9 @@ impl Library {
     }
 
     pub fn refilter(&mut self) {
-        self.shown = filter::filter_papers(&self.papers, &self.filters, time::now_millis());
+        let now = time::now_millis();
+        self.shown = filter::filter_papers(&self.papers, &self.filters, now);
+        self.counts = filter::counts(&self.papers, &self.filters, now);
         self.scope_refilter();
     }
 
@@ -2496,6 +2500,8 @@ impl Library {
         self.suggestions = self.store.list_suggestions()?.into_iter().map(|s| (s.paper_id.clone(), s)).collect();
         self.batches = self.store.list_batches(30)?;
         self.writing.structures = self.store.structures()?;
+        // A paper's record may have changed: how its citations read is worked out again.
+        self.citing.read.made_from = 0;
         self.origins = self.store.file_origins()?;
         self.gallery.items = self.store.list_figures()?;
         self.extract.proposals = wisp_core::extract::Proposals::new(self.store.list_proposals()?);
@@ -2664,6 +2670,7 @@ impl Workspace {
                 items.push(ticked(t("截图"), view.cutting(), Cmd::PdfCut));
                 items.push(ticked(t("方框"), view.tool() == crate::pdf::Tool::Box, Cmd::PdfTool(crate::pdf::Tool::Box)));
                 items.push(ticked(t("便签"), view.tool() == crate::pdf::Tool::Note, Cmd::PdfTool(crate::pdf::Tool::Note)));
+                items.push(ticked(t("文本框"), view.tool() == crate::pdf::Tool::Text, Cmd::PdfTool(crate::pdf::Tool::Text)));
                 part(items, breaks);
                 let playing = lib.playing_here(view.resource_id());
                 let paused = lib.aloud_shown.as_ref().is_some_and(|status| status.paused);
@@ -4730,6 +4737,7 @@ impl Workspace {
             rounds: vec![],
             filters,
             shown: vec![],
+            counts: filter::Counts::default(),
             search,
             page: Page::Papers,
             selected: None,
@@ -5432,6 +5440,13 @@ impl Workspace {
             PdfEvent::RemoveAnnotation { resource, id } => self.change_pdf_annotation(resource, |store| store.remove_pdf_annotation(resource, id), cx),
             PdfEvent::AddShape { paper, resource, page, kind, rect, note } => self.change_pdf_annotation(resource, |store| store.add_pdf_shape(paper, resource, *page, *kind, *rect, note).map(|_| ()), cx),
             PdfEvent::MoveShape { resource, id, rect } => self.change_pdf_annotation(resource, |store| store.move_pdf_shape(resource, id, *rect), cx),
+            PdfEvent::AddText { paper, resource, page, rect, text, style } => self.change_pdf_annotation(resource, |store| store.add_pdf_text(paper, resource, *page, *rect, text, style).map(|_| ()), cx),
+            // The words first: written empty, the box goes and there is nothing to size.
+            PdfEvent::WriteText { resource, id, text, rect } => self.change_pdf_annotation(resource, |store| {
+                store.update_pdf_annotation_note(resource, id, text)?;
+                match rect { Some(rect) if !text.trim().is_empty() => store.move_pdf_shape(resource, id, *rect), _ => Ok(()) }
+            }, cx),
+            PdfEvent::RestyleText { resource, id, style } => self.change_pdf_annotation(resource, |store| store.restyle_pdf_text(resource, id, style), cx),
             PdfEvent::OpenFigure(id) => self.open_figure_on_page(id, cx),
             // 固定对照: the figure stays in the other half of this viewer. A file of the paper shown there gives it up.
             PdfEvent::FigureBeside { page, top } => {
@@ -8766,8 +8781,13 @@ impl Workspace {
                     if let Some(reading) = self.lib.as_ref().and_then(|lib| lib.aloud.as_ref()) { reading.seek((arg.parse::<f64>().unwrap_or(0.) * reading.status().length as f64) as usize) }
                     return;
                 }
-                // `pdftool:box` / `pdftool:note` draw boxes / place a note on the PDF on show; again, or `pdftool:off`, selects text.
-                "pdftool" => Some(Cmd::PdfTool(match arg { "box" => crate::pdf::Tool::Box, "note" => crate::pdf::Tool::Note, _ => crate::pdf::Tool::Select })),
+                // `pdftool:box` / `pdftool:note` / `pdftool:text` draw boxes / place a note / write a text box on the PDF on show; again, or `pdftool:off`, selects text.
+                "pdftool" => Some(Cmd::PdfTool(match arg { "box" => crate::pdf::Tool::Box, "note" => crate::pdf::Tool::Note, "text" => crate::pdf::Tool::Text, _ => crate::pdf::Tool::Select })),
+                // `pdfwrite:<words>` writes in the text box being written on the PDF on show, as if typed (`\n` breaks the line).
+                "pdfwrite" => {
+                    if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.dev_write(arg, cx)) }
+                    return;
+                }
                 // `readfile:<n>` reads the n-th PDF of the selected paper (0 its main text, then its attachments) in the viewer.
                 "readfile" => self.lib.as_ref().and_then(|lib| {
                     let paper = lib.selected.as_deref()?;
@@ -9025,7 +9045,7 @@ impl Workspace {
                 "fontreset" => Some(Cmd::ResetTypography),
                 "linespacing" => Some(Cmd::SetLineSpacing(match arg { "compact" => wisp_core::settings::Spacing::Compact, "relaxed" => wisp_core::settings::Spacing::Relaxed, _ => wisp_core::settings::Spacing::Standard })),
                 "paragraphspacing" => Some(Cmd::SetParagraphSpacing(match arg { "compact" => wisp_core::settings::Spacing::Compact, "relaxed" => wisp_core::settings::Spacing::Relaxed, _ => wisp_core::settings::Spacing::Standard })),
-                "textwidth" => Some(Cmd::SetTextWidth(match arg { "narrow" => wisp_core::settings::TextWidth::Narrow, "wide" => wisp_core::settings::TextWidth::Wide, _ => wisp_core::settings::TextWidth::Standard })),
+                "textwidth" => Some(Cmd::SetTextWidth(match arg { "narrow" => wisp_core::settings::TextWidth::Narrow, "wide" => wisp_core::settings::TextWidth::Wide, "fill" => wisp_core::settings::TextWidth::Fill, _ => wisp_core::settings::TextWidth::Standard })),
                 "density" => Some(Cmd::SetDensity(arg.to_string())),
                 "zone" => Some(Cmd::SetJournalZone(arg.to_string())),
                 "contrast" => Some(Cmd::ToggleHighContrast),

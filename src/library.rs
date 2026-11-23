@@ -496,7 +496,6 @@ impl Workspace {
         // While writing, the tags and counts are of no use: the manuscript's outline takes their place.
         if self.outline_shown() { return self.render_outline(width, cx) }
         let lib = self.lib.as_ref().unwrap();
-        let now = time::now_millis();
         let nav = |id: &'static str, icon: &'static str, label: &'static str, count: Option<usize>, active: bool, cmd: Cmd, this: &Self, cx: &mut Context<Self>| {
             div()
                 .id(id)
@@ -515,13 +514,17 @@ impl Workspace {
                 .when_some(count, |d, n| d.child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(n.to_string())))
         };
         let on_papers = lib.page == Page::Papers;
+        // The numbers follow the search and the filters set over the list (`Library::counts`): each view says
+        // how many papers it would show, each tag how many of those on show hold it.
+        let filtered = lib.filters.active() > 0 || !lib.filters.search.trim().is_empty();
         let mut view_rows: Vec<AnyElement> = VIEWS
             .into_iter()
             .map(|(id, icon, label, view)| {
                 // 收藏 holds the starred papers and the figure library: both count, and either page is its own.
-                let collected = if view == View::Starred { lib.gallery.items.len() } else { 0 };
+                // The figures are not narrowed by the list's filters, so under them only the papers count.
+                let collected = if view == View::Starred && !filtered { lib.gallery.items.len() } else { 0 };
                 let active = (on_papers && lib.filters.view == view) || (view == View::Starred && lib.page == Page::Figures);
-                nav(id, icon, t(label), Some(filter::view_count(&lib.papers, view, now) + collected).filter(|n| *n > 0), active, Cmd::SetView(view), self, cx).into_any_element()
+                nav(id, icon, t(label), Some(lib.counts.view(view) + collected).filter(|n| *n > 0), active, Cmd::SetView(view), self, cx).into_any_element()
             })
             .collect();
         // 播客: the playlist of the podcasts kept in the library, once there is one; lit while one plays.
@@ -552,7 +555,9 @@ impl Workspace {
             .iter()
             .take(30)
             .enumerate()
-            .map(|(i, (tag, count))| {
+            .map(|(i, (tag, _))| {
+                // Listed in the order of the whole library, so the rows stay put while the search is typed.
+                let count = lib.counts.tag(tag);
                 let active = on_papers && &lib.filters.tag == tag;
                 div()
                     .id(("tag", i))
@@ -569,7 +574,7 @@ impl Workspace {
                     .on_mouse_down(MouseButton::Right, self.on_context(MenuKind::Tag(tag.clone()), cx))
                     .child(div().size(px(6.)).flex_none().rounded_full().bg(if active { Theme::accent() } else { Theme::text_placeholder() }))
                     .child(div().flex_1().min_w_0().truncate().child(tag.clone()))
-                    .child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(count.to_string()))
+                    .child(div().text_size(text_px(12.)).text_color(if count == 0 { Theme::text_placeholder() } else { Theme::text_tertiary() }).child(count.to_string()))
                     .into_any_element()
             })
             .collect();
@@ -923,7 +928,11 @@ impl Workspace {
                 ui::empty_state("search", t("没有匹配的文献"), t("调整搜索词或筛选条件。")).child(ui::secondary_button("empty-clear", t("清空筛选")).on_click(self.on(Cmd::ClearFilters, cx))).into_any_element()
             }
         } else {
-            uniform_list("papers", shown, cx.processor(move |this, range: Range<usize>, window, cx| this.render_rows(range, width, window, cx))).track_scroll(lib.table_scroll.clone()).flex_1().into_any_element()
+            // A bar at the right edge shows where in a long list the rows on show are, and is dragged to go elsewhere.
+            div().relative().flex().flex_col().flex_1().min_h_0()
+                .child(uniform_list("papers", shown, cx.processor(move |this, range: Range<usize>, window, cx| this.render_rows(range, width, window, cx))).track_scroll(lib.table_scroll.clone()).flex_1())
+                .child(crate::scrollbar::scrollbar("papers-bar", lib.table_scroll.clone()))
+                .into_any_element()
         };
         let marked = lib.marked.len();
         let status = if marked > 0 {
@@ -1220,7 +1229,10 @@ impl Workspace {
         let body = if shown == 0 {
             div().flex_1().px(px(8.)).pt(px(8.)).text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_placeholder()).child(t("没有匹配的文献。换个搜索词，或按 Esc 回到完整列表调整筛选。")).into_any_element()
         } else {
-            uniform_list("ask-papers", shown, cx.processor(move |this, range: Range<usize>, _, cx| this.render_ask_rows(range, cx))).track_scroll(lib.table_scroll.clone()).flex_1().into_any_element()
+            div().relative().flex().flex_col().flex_1().min_h_0()
+                .child(uniform_list("ask-papers", shown, cx.processor(move |this, range: Range<usize>, _, cx| this.render_ask_rows(range, cx))).track_scroll(lib.table_scroll.clone()).flex_1())
+                .child(crate::scrollbar::scrollbar("ask-papers-bar", lib.table_scroll.clone()))
+                .into_any_element()
         };
         // The edge between the list and the paper is drawn by the detail panel, which is where it is dragged.
         div()

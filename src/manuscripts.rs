@@ -895,6 +895,23 @@ impl Workspace {
             .on_click(self.on(Cmd::WriteReading(!reading), cx))
             .tooltip(move |_, cx| cx.new(|_| crate::write_assist::Tip(preview_tip.to_string())).into())
             .child(ui::icon("eye", 14., if reading { Theme::accent() } else { Theme::text_secondary() }));
+        // 铺满: the text as wide as the column, or back to the standard measure; the same setting as 设置 › 外观's 稿件正文宽度. Lit while on.
+        let fill = self.settings.reading_appearance.width == wisp_core::settings::TextWidth::Fill;
+        let fill_tip = if fill { t("铺满：开。正文随窗口宽度铺满；点击回到标准宽度。设置 › 外观 里也可以选正文宽度。") } else { t("铺满：关。点击让正文随窗口宽度铺满，窗口多宽，一行就多长。") };
+        let fill_button = div()
+            .id("write-fill")
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .size(text_px(26.))
+            .rounded(px(6.))
+            .cursor_pointer()
+            .when(fill, |d| d.bg(Theme::accent_soft()))
+            .when(!fill, |d| d.hover(|s| s.bg(Theme::hover())))
+            .on_click(self.on(Cmd::SetTextWidth(if fill { wisp_core::settings::TextWidth::Standard } else { wisp_core::settings::TextWidth::Fill }), cx))
+            .tooltip(move |_, cx| cx.new(|_| crate::write_assist::Tip(fill_tip.to_string())).into())
+            .child(ui::icon("expand", 14., if fill { Theme::accent() } else { Theme::text_secondary() }));
         // The outline in the sidebar has the title, who writes, the sections and the manuscripts: here they are only while it is put away.
         let outlined = self.outline_shown() && !self.settings.sidebar_hidden;
         div()
@@ -929,6 +946,7 @@ impl Workspace {
                     .when(!outlined, |d| d.child(tool("write-materials", "image", Some(t("资料库").into())).on_click(self.on(Cmd::WriteFigures(crate::write_figures::Do::Open), cx))))
                     // 预览 shows the whole manuscript as it reads, Markdown drawn; lit while it does, a click goes back to writing.
                     .child(preview)
+                    .child(fill_button)
                     // The language is said even in a narrow column: there is no icon that says it.
                     .child(ui::ghost_button("write-language", Some("chevron-down"), Some(language.to_string().into())).h(text_px(26.)).px(px(7.)).text_size(text_px(12.)).on_click(self.on_menu(MenuKind::WriteLanguage, cx)))
                     .children(if self.settings.agent_writing && !self.in_draft() { self.render_version_stepper(cx) } else { None })

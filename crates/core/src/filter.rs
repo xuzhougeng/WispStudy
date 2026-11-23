@@ -186,6 +186,46 @@ pub fn view_count(papers: &[Paper], view: View, now_ms: i64) -> usize {
     papers.iter().filter(|p| p.screening != "irrelevant" && in_view(p, view, now_ms)).count()
 }
 
+/// The sidebar's views, in the order `Counts::views` holds them.
+pub const VIEWS: [View; 5] = [View::All, View::Recent, View::Unread, View::Starred, View::NoPdf];
+
+/// What the sidebar counts under the search and filters that are set: how many papers each view would
+/// show, and each tag. A view is counted as if it were the one chosen, a tag as if it were the one
+/// filtered by; everything else set narrows both. With nothing set, the counts of the whole library.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Counts {
+    pub views: [usize; 5],
+    pub tags: std::collections::HashMap<String, usize>,
+}
+
+impl Counts {
+    pub fn view(&self, view: View) -> usize {
+        VIEWS.iter().position(|v| *v == view).map_or(0, |i| self.views[i])
+    }
+
+    pub fn tag(&self, tag: &str) -> usize {
+        self.tags.get(tag).copied().unwrap_or(0)
+    }
+}
+
+pub fn counts(papers: &[Paper], f: &Filters, now_ms: i64) -> Counts {
+    let rest = Filters { view: View::All, tag: String::new(), ..f.clone() };
+    let mut counts = Counts::default();
+    for p in papers.iter().filter(|p| matches(p, &rest, now_ms)) {
+        if f.tag.is_empty() || p.tags.contains(&f.tag) {
+            for (n, view) in counts.views.iter_mut().zip(VIEWS) {
+                if in_view(p, view, now_ms) { *n += 1 }
+            }
+        }
+        if in_view(p, f.view, now_ms) {
+            for tag in &p.tags {
+                *counts.tags.entry(tag.clone()).or_default() += 1;
+            }
+        }
+    }
+    counts
+}
+
 /// Every distinct value with the number of papers holding it, most used first.
 fn tally<'a>(values: impl Iterator<Item = &'a str>) -> Vec<(String, usize)> {
     let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
@@ -314,7 +354,7 @@ mod tests {
     }
 
     #[test]
-    fn counts() {
+    fn tallies() {
         let papers = library();
         assert_eq!(tag_counts(&papers), [("atlas".to_string(), 2), ("fish".to_string(), 1)]);
         assert_eq!(years(&papers), [("2024".to_string(), 1), ("2021".to_string(), 1)]);
@@ -324,5 +364,32 @@ mod tests {
         assert_eq!(f.active(), 1);
         f.clear();
         assert_eq!((f.active(), f.search.as_str(), f.sort.as_str(), f.view), (0, "", "year-asc", View::Starred));
+    }
+
+    #[test]
+    fn the_sidebar_counts_follow_the_search_and_filters() {
+        let papers = library();
+        // Nothing set: the whole library, without the irrelevant paper.
+        let all = counts(&papers, &Filters::default(), 0);
+        assert_eq!((all.view(View::All), all.view(View::Starred), all.view(View::Unread)), (3, 1, 2));
+        assert_eq!((all.tag("atlas"), all.tag("fish"), all.tag("none")), (2, 1, 0));
+        assert_eq!(all.view(View::All), view_count(&papers, View::All, 0));
+        // A search narrows every view and every tag.
+        let searched = counts(&papers, &Filters { search: "atlas".into(), ..Default::default() }, 0);
+        assert_eq!((searched.view(View::All), searched.view(View::Unread), searched.view(View::Starred)), (2, 1, 0));
+        assert_eq!((searched.tag("atlas"), searched.tag("fish")), (2, 1));
+        // The tag filtered by narrows the views, not the other tags; the view chosen narrows the tags, not the other views.
+        let tagged = counts(&papers, &Filters { tag: "fish".into(), view: View::Unread, ..Default::default() }, 0);
+        assert_eq!((tagged.view(View::All), tagged.view(View::Unread), tagged.view(View::Starred)), (1, 1, 0));
+        assert_eq!((tagged.tag("atlas"), tagged.tag("fish")), (1, 1));
+        // Asked for by name, the irrelevant paper is counted.
+        let irrelevant = counts(&papers, &Filters { screening: "irrelevant".into(), ..Default::default() }, 0);
+        assert_eq!(irrelevant.view(View::All), 1);
+        // Each count is what the list shows with that view chosen.
+        let f = Filters { search: "a".into(), year: "2021".into(), ..Default::default() };
+        let c = counts(&papers, &f, 0);
+        for view in VIEWS {
+            assert_eq!(c.view(view), filter_papers(&papers, &Filters { view, ..f.clone() }, 0).len());
+        }
     }
 }

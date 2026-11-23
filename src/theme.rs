@@ -187,6 +187,31 @@ impl Theme {
     /// the page and from the box's own colour, whatever it is. The page is white in either set.
     pub fn handle_fill() -> Hsla { hsla(0., 0., 1., 1.) }
     pub fn handle_ring() -> Hsla { Self::accent() }
+    /// A text box on a PDF page, by keys of `annotation::TEXT_FILLS` / `TEXT_BORDERS` / `TEXT_INKS` (anything else
+    /// as the default's): a pale fill the words read on, an edge in the highlight's tone, words dark enough for
+    /// the page. The page is white in either set, so the same in both; `none` is no colour at all.
+    pub fn text_fill(key: &str) -> Hsla {
+        match key {
+            "none" => hsla(0., 0., 1., 0.),
+            "white" => hsla(0., 0., 1., 1.),
+            _ => { let (h, s, _) = highlight_hue(key); hsla(h / 360., s.min(0.9), 0.9, 1.) }
+        }
+    }
+    pub fn text_border(key: &str) -> Hsla {
+        match key {
+            "none" => hsla(0., 0., 1., 0.),
+            "black" => hsla(0., 0., 0.12, 1.),
+            "gray" => hsla(0., 0., 0.55, 1.),
+            _ => { let (h, s, l) = highlight_hue(key); hsla(h / 360., s, l, 1.) }
+        }
+    }
+    pub fn text_ink(key: &str) -> Hsla {
+        match key {
+            "gray" => hsla(0., 0., 0.42, 1.),
+            "red" | "orange" | "green" | "blue" | "purple" => { let (h, s, _) = highlight_hue(key); hsla(h / 360., s.min(0.85), 0.38, 1.) }
+            _ => hsla(0., 0., 0.1, 1.),
+        }
+    }
     /// The off state of a switch and the groove of a segmented control.
     pub fn groove() -> Hsla { if dark() { hsla(0., 0., 1., 0.12) } else { hsla(0., 0., 0., 0.07) } }
     /// The chosen segment of a segmented control, lighter than its groove.
