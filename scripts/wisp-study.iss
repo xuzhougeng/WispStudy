@@ -53,6 +53,8 @@ OutputBaseFilename={#BaseName}
 ; The app keeps running behind its tray icon after its window is closed.
 CloseApplications=force
 RestartApplications=no
+; The PDF entry under Open with is told to Explorer at once.
+ChangesAssociations=yes
 
 [Languages]
 Name: "en"; MessagesFile: "compiler:Default.isl"
@@ -85,6 +87,15 @@ Name: "{autodesktop}\Wisp Study"; Filename: "{app}\WispStudy.exe"; Tasks: deskto
 ; it being on PATH. HKA is HKCU for this per-user setup; the key goes with the app when it is removed.
 Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\WispStudy.exe"; ValueType: string; ValueName: ""; ValueData: "{app}\WispStudy.exe"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Microsoft\Windows\CurrentVersion\App Paths\WispStudy.exe"; ValueType: string; ValueName: "Path"; ValueData: "{app}"
+; PDFs under Open with (the right button), without taking them over as their default: the
+; file is the first argument, handed to a window already open (src/background.rs, src/open_file.rs).
+Root: HKA; Subkey: "Software\Classes\WispStudy.pdf"; ValueType: string; ValueName: ""; ValueData: "PDF (Wisp Study)"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\WispStudy.pdf\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\WispStudy.exe,0"
+Root: HKA; Subkey: "Software\Classes\WispStudy.pdf\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\WispStudy.exe"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\.pdf\OpenWithProgids"; ValueType: string; ValueName: "WispStudy.pdf"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Applications\WispStudy.exe"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "Wisp Study"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\Applications\WispStudy.exe\SupportedTypes"; ValueType: string; ValueName: ".pdf"; ValueData: ""
+Root: HKA; Subkey: "Software\Classes\Applications\WispStudy.exe\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\WispStudy.exe"" ""%1"""
 
 [Run]
 Filename: "{app}\WispStudy.exe"; Description: "{cm:LaunchProgram,Wisp Study}"; Flags: nowait postinstall skipifsilent

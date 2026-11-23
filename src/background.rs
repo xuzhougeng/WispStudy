@@ -94,6 +94,12 @@ pub fn hand_over() -> bool {
     tray::hand_over()
 }
 
+/// Windows: the PDFs a second launch (Explorer's 打开方式) left for this window, taken once.
+#[cfg(target_os = "windows")]
+pub fn take_handed() -> Vec<std::path::PathBuf> {
+    tray::take_handed()
+}
+
 /// Windows: this instance is about to quit for another to start (an update): the next launch is not handed over to it.
 #[cfg(target_os = "windows")]
 pub fn forget() {
@@ -218,6 +224,18 @@ mod tray {
         std::fs::remove_file(marker()).ok();
     }
 
+    /// The files a second launch was given, one path a line, beside the marker: the window reads them when it
+    /// comes to the front (`open_file::listen_for_files`).
+    fn handed() -> PathBuf {
+        marker().with_extension("open")
+    }
+
+    pub fn take_handed() -> Vec<PathBuf> {
+        let Ok(text) = std::fs::read_to_string(handed()) else { return vec![] };
+        std::fs::remove_file(handed()).ok();
+        text.lines().filter(|line| !line.trim().is_empty()).map(PathBuf::from).collect()
+    }
+
     pub fn hand_over() -> bool {
         let Ok(text) = std::fs::read_to_string(marker()) else { return false };
         let mut words = text.split_whitespace().map(|w| w.parse::<isize>().ok());
@@ -232,6 +250,13 @@ mod tray {
             let mut class = [0u16; 64];
             let length = GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32);
             if String::from_utf16_lossy(&class[..length.max(0) as usize]) != "Zed::Window" { return false }
+        }
+        // A PDF this launch was given is left for that window, which reads it once it is in front.
+        let named = crate::open_file::from_args();
+        if !named.is_empty() {
+            use std::io::Write;
+            let lines: String = named.iter().map(|path| format!("{}\n", path.display())).collect();
+            if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(handed()) { file.write_all(lines.as_bytes()).ok(); }
         }
         bring_up(hwnd);
         true

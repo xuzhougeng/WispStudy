@@ -28,6 +28,7 @@ mod library;
 mod manuscripts;
 mod markdown;
 mod notes;
+mod open_file;
 mod palette;
 mod pdf;
 mod picture;
@@ -63,6 +64,13 @@ fn main() {
     if background::hand_over() { return }
     let app = Application::new().with_assets(assets::Assets);
     background::on_reopen(&app);
+    // macOS hands a file over (打开方式 › Wisp Study, a PDF dropped on the Dock icon) as an address, maybe
+    // before the window is there: it waits in the channel until the workspace listens (`open_file.rs`).
+    let (handed, inbox) = async_channel::unbounded::<Vec<std::path::PathBuf>>();
+    app.on_open_urls(move |urls| {
+        let paths: Vec<_> = urls.iter().filter_map(|url| open_file::file_url_path(url)).collect();
+        if !paths.is_empty() { handed.try_send(paths).ok(); }
+    });
     app.run(|cx: &mut App| {
         background::install(cx);
         let bounds = Bounds::centered(None, size(px(1360.), px(860.)), cx);
@@ -81,6 +89,8 @@ fn main() {
         .update(cx, |workspace, window, cx| {
             background::watch(cx.entity(), window, cx);
             workspace.start_session(window, cx);
+            // After the session is back: a file handed over at the start is what is read.
+            workspace.listen_for_files(inbox, window, cx);
             #[cfg(debug_assertions)]
             workspace.dev_start(window, cx);
         })
