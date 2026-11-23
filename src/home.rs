@@ -92,7 +92,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &UndoDecision, window, cx| this.screen_key("z", window, cx)))
             .on_action(cx.listener(|this, _: &AskAssistant, window, cx| this.screen_key("g", window, cx)))
             .on_action(cx.listener(|this, _: &TickSuggestion, window, cx| this.screen_key("space", window, cx)))
-            .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.import_paths(paths.paths().to_vec(), cx)))
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| this.drop_paths(paths.paths().to_vec(), window, cx)))
 
             .child(page)
             .children(self.render_modal(window, cx))

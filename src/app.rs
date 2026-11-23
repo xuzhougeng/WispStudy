@@ -8296,8 +8296,14 @@ impl Workspace {
                 }
                 // `import:<folder>` takes in every PDF under a folder, as if it were dropped on the window:
                 // the folders below it become tags.
+                // As a file dropped on the window: on the home page a PDF is read (`open_file.rs`).
                 "import" => {
-                    self.import_paths(vec![PathBuf::from(arg)], cx);
+                    self.drop_paths(vec![PathBuf::from(arg)], window, cx);
+                    return;
+                }
+                // `openfile:<path>`: a file handed over as Finder's or Explorer's 打开方式 hands it.
+                "openfile" => {
+                    self.open_handed(vec![PathBuf::from(arg)], window, cx);
                     return;
                 }
                 // `shot:<file.png>` writes the window as it is drawn to a picture, without the screen:

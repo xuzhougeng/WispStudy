@@ -118,6 +118,16 @@ cat >"${app}/Contents/Info.plist" <<EOF
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSHumanReadableCopyright</key><string>© 2026 xuzhougeng</string>
+  <!-- PDFs open with the app (Open With, a file dropped on the Dock icon) without it taking them over as their default. -->
+  <key>CFBundleDocumentTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleTypeName</key><string>PDF Document</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>LSHandlerRank</key><string>Alternate</string>
+      <key>LSItemContentTypes</key><array><string>com.adobe.pdf</string></array>
+    </dict>
+  </array>
 </dict>
 </plist>
 EOF
