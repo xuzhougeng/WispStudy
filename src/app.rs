@@ -378,6 +378,8 @@ pub enum Cmd {
     ImportReferences,
     ImportZotero,
     PickZotero,
+    /// One library of the Zotero database chosen to import (`zotero::Library::id`), or `None`: all of them.
+    ChooseZoteroLibrary(Option<i64>),
     ShowZotero,
     ImportPdfs,
     ImportFolder,
@@ -1594,6 +1596,8 @@ pub enum Modal {
     ImportReport,
     /// `open`: Zotero holds its database right now, as far as the usual place of it tells.
     Zotero { open: bool },
+    /// The database picked holds more than one library with items: which of them to import (`None`: all).
+    ZoteroLibraries { path: PathBuf, libraries: Vec<zotero::Library>, chosen: Option<i64> },
     ZoteroReport,
     /// What came of looking for each paper's open full text (`Library::fetching`).
     FetchReport,
@@ -3301,6 +3305,9 @@ impl Workspace {
                 self.modal = Some(if self.lib.as_ref().and_then(|l| l.zotero.as_ref()).is_some_and(|r| r.running) { Modal::ZoteroReport } else { Modal::Zotero { open: zotero::default_database().is_some_and(|path| zotero::in_use(&path)) } });
             }
             Cmd::PickZotero => self.pick_zotero(cx),
+            Cmd::ChooseZoteroLibrary(id) => {
+                if let Some(Modal::ZoteroLibraries { chosen, .. }) = self.modal.as_mut() { *chosen = id }
+            }
             Cmd::ShowZotero => {
                 self.modal_error.clear();
                 self.modal = Some(Modal::ZoteroReport);
@@ -5565,7 +5572,7 @@ impl Workspace {
                 if this.lib.as_ref().is_none_or(|l| l.info.id != library) { return }
                 match result {
                     Ok(Ok(Some(paths))) => match paths.into_iter().next() {
-                        Some(path) => this.import_zotero(path, cx),
+                        Some(path) => this.zotero_picked(path, cx),
                         None => this.modal_error = t("没有得到所选文件的路径，请重新选择 zotero.sqlite。").into(),
                     },
                     Ok(Ok(None)) => {}
@@ -5577,7 +5584,28 @@ impl Workspace {
         }).detach();
     }
 
-    fn import_zotero(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+    /// A database picked: when more than one of its libraries holds items, the person chooses which to import;
+    /// otherwise the import starts. A database that cannot be listed goes on to the import, whose report says why.
+    fn zotero_picked(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_ref() else { return };
+        let library = lib.info.id.clone();
+        let listing = path.clone();
+        cx.spawn(async move |this, cx| {
+            let listed = cx.background_executor().spawn(async move { zotero::libraries(&listing) }).await;
+            this.update(cx, |this, cx| {
+                // Closed meanwhile, or another library opened: nothing goes on.
+                if this.lib.as_ref().is_none_or(|l| l.info.id != library) || !matches!(this.modal, Some(Modal::Zotero { .. })) { return }
+                let offered: Vec<zotero::Library> = listed.map(|all| all.into_iter().filter(|l| l.items > 0).collect()).unwrap_or_default();
+                if offered.len() < 2 { return this.import_zotero(path, None, cx) }
+                this.modal_error.clear();
+                this.modal = Some(Modal::ZoteroLibraries { path, chosen: Some(offered[0].id), libraries: offered });
+                cx.notify();
+            }).ok();
+        }).detach();
+    }
+
+    /// `only`: one library of the database (`zotero::Library::id`); `None` imports all of them.
+    fn import_zotero(&mut self, path: PathBuf, only: Option<i64>, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
         if lib.zotero.as_ref().is_some_and(|run| run.running) { return }
         let library = lib.info.id.clone();
@@ -5588,7 +5616,7 @@ impl Workspace {
         self.modal = Some(Modal::ZoteroReport);
         cx.notify();
         cx.spawn(async move |this, cx| {
-            let parsed = cx.background_executor().spawn(async move { zotero::read(&path) }).await;
+            let parsed = cx.background_executor().spawn(async move { zotero::read(&path, only) }).await;
             let entries = this.update(cx, |this, cx| {
                 let run = this.lib.as_mut().filter(|l| l.info.id == library)?.zotero.as_mut().filter(|r| r.id == run_id)?;
                 let entries = match parsed {
@@ -7920,6 +7948,10 @@ impl Workspace {
                 if form.chosen.is_some() { self.complete_apply(window, cx) } else if form.by_id { self.complete_lookup(cx) } else { self.complete_find(cx) }
             }
             Modal::Zotero { .. } => self.run(Cmd::PickZotero, window, cx),
+            Modal::ZoteroLibraries { path, chosen, .. } => {
+                let (path, chosen) = (path.clone(), *chosen);
+                self.import_zotero(path, chosen, cx);
+            }
             Modal::ZoteroReport => self.run(Cmd::CloseModal, window, cx),
             Modal::FetchReport => self.run(Cmd::CloseModal, window, cx),
             Modal::Library { editing, name, topic, color, .. } => {
@@ -8605,7 +8637,8 @@ impl Workspace {
                 // `report` shows what came of the last import.
                 "report" => Some(Cmd::ShowImport),
                 "zotero" => {
-                    self.import_zotero(PathBuf::from(arg), cx);
+                    self.modal = Some(Modal::Zotero { open: false });
+                    self.zotero_picked(PathBuf::from(arg), cx);
                     None
                 }
                 "zotero-report" => Some(Cmd::ShowZotero),
