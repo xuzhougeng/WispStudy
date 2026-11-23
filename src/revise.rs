@@ -293,6 +293,7 @@ impl Workspace {
                             run.note = tf!("模型服务暂时没有回应（{why}），正在重试，第 {attempt} 次…", "The model service has not responded ({why}). Retrying, attempt {attempt}…");
                             true
                         }
+                        ChatEvent::Used(_) => true,
                         ChatEvent::Error(error) => {
                             (run.busy, run.error, run.target) = (false, error, None);
                             run.note.clear();

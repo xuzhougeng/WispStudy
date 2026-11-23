@@ -56,6 +56,13 @@ pub struct Profile {
     /// What kind of model it is (`provider::Model::kind`): empty for one that answers in words.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub kind: String,
+    /// How many tokens the model takes in (`provider::Model::context`); 0 leaves it to `compact::window`.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub context: usize,
+}
+
+pub(crate) fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 /// The thinking settings a profile may have, and what they are called.
@@ -66,7 +73,7 @@ pub const DEFAULT_MODEL: &str = "claude-opus-5-5";
 
 impl Default for Profile {
     fn default() -> Self {
-        Profile { id: String::new(), name: "Claude".into(), provider: String::new(), protocol: Protocol::Anthropic, base_url: ANTHROPIC_BASE.into(), api_key: String::new(), key_env: String::new(), model: DEFAULT_MODEL.into(), effort: String::new(), proxy: String::new(), interface: String::new(), kind: String::new() }
+        Profile { id: String::new(), name: "Claude".into(), provider: String::new(), protocol: Protocol::Anthropic, base_url: ANTHROPIC_BASE.into(), api_key: String::new(), key_env: String::new(), model: DEFAULT_MODEL.into(), effort: String::new(), proxy: String::new(), interface: String::new(), kind: String::new(), context: 0 }
     }
 }
 
@@ -911,6 +918,9 @@ pub enum ChatEvent {
     Text(String),
     /// The service was busy or unreachable and is being asked again: which try this is, and why.
     Retrying(usize, String),
+    /// The tokens the service counted for the request, when it says: what the app's own estimate is corrected by (`compact`),
+    /// and what a question is said to have used (`usage`).
+    Used(crate::usage::Usage),
     Done(Turn),
     Error(String),
 }
@@ -936,11 +946,19 @@ pub struct TurnReader {
     reasoning: String,
     calls: Vec<(String, String, String)>,
     stop: String,
+    /// The tokens of the request and of the answer, as the service counted them.
+    used: Option<crate::usage::Usage>,
 }
 
 impl TurnReader {
     pub fn new(protocol: Protocol) -> TurnReader {
-        TurnReader { protocol, blocks: vec![], inputs: vec![], text: String::new(), reasoning: String::new(), calls: vec![], stop: String::new() }
+        TurnReader { protocol, blocks: vec![], inputs: vec![], text: String::new(), reasoning: String::new(), calls: vec![], stop: String::new(), used: None }
+    }
+
+    /// The tokens the service counted, once it has said: those of the request (what it read from its cache among
+    /// them, and apart where it says) and those of the answer.
+    pub fn used(&self) -> Option<crate::usage::Usage> {
+        self.used
     }
 
     /// One line of the stream: the answer text it adds, if any. `Err` is an
@@ -976,8 +994,15 @@ impl TurnReader {
                             _ => {}
                         }
                     }
+                    Some("message_start") => {
+                        let usage = &value["message"]["usage"];
+                        let read: u64 = ["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"].iter().filter_map(|key| usage[*key].as_u64()).sum();
+                        if read > 0 { self.used = Some(crate::usage::Usage { input: read as usize, cached: usage["cache_read_input_tokens"].as_u64().map(|n| n as usize), ..Default::default() }) }
+                    }
                     Some("message_delta") => {
                         if let Some(reason) = value["delta"]["stop_reason"].as_str() { self.stop = reason.to_string() }
+                        // The answer's tokens come with its end.
+                        if let (Some(used), Some(written)) = (self.used.as_mut(), value["usage"]["output_tokens"].as_u64()) { used.output = written as usize }
                     }
                     _ => {}
                 }
@@ -992,7 +1017,14 @@ impl TurnReader {
                     while self.blocks.len() <= index { self.blocks.push(Value::Null) }
                     self.blocks[index] = value["item"].clone();
                 }
-                Some("response.completed") => self.stop = "stop".into(),
+                Some("response.completed") => {
+                    self.stop = "stop".into();
+                    let usage = &value["response"]["usage"];
+                    if let Some(read) = usage["input_tokens"].as_u64() {
+                        let count = |value: &Value| value.as_u64().unwrap_or(0) as usize;
+                        self.used = Some(crate::usage::Usage { input: read as usize, cached: usage["input_tokens_details"]["cached_tokens"].as_u64().map(|n| n as usize), output: count(&usage["output_tokens"]), reasoning: count(&usage["output_tokens_details"]["reasoning_tokens"]) });
+                    }
+                }
                 Some("response.incomplete") => {
                     self.stop = match value["response"]["incomplete_details"]["reason"].as_str() {
                         Some("content_filter") => "content_filter",
@@ -1006,6 +1038,14 @@ impl TurnReader {
             },
             Protocol::OpenAI => {
                 let choice = &value["choices"][0];
+                // A service that counts says so with the last chunk, beside the choices or inside one (Kimi).
+                let usage = if value["usage"].is_object() { &value["usage"] } else { &choice["usage"] };
+                if let Some(read) = usage["prompt_tokens"].as_u64() {
+                    let count = |value: &Value| value.as_u64().unwrap_or(0) as usize;
+                    // What was read from the service's cache: DeepSeek's own field, else OpenAI's.
+                    let cached = usage["prompt_cache_hit_tokens"].as_u64().or(usage["prompt_tokens_details"]["cached_tokens"].as_u64()).map(|n| n as usize);
+                    self.used = Some(crate::usage::Usage { input: read as usize, cached, output: count(&usage["completion_tokens"]), reasoning: count(&usage["completion_tokens_details"]["reasoning_tokens"]) });
+                }
                 if let Some(reason) = choice["finish_reason"].as_str() { self.stop = reason.to_string() }
                 for call in choice["delta"]["tool_calls"].as_array().into_iter().flatten() {
                     let index = call["index"].as_u64().unwrap_or(self.calls.len().saturating_sub(1) as u64) as usize;
@@ -1172,7 +1212,7 @@ pub struct Slash {
     pub alone: &'static str,
 }
 
-pub const SLASH: [Slash; 8] = [
+pub const SLASH: [Slash; 9] = [
     Slash {
         name: "search",
         about: "在全文和记录里检索",
@@ -1222,8 +1262,12 @@ pub const SLASH: [Slash; 8] = [
         template: "逐条核对下面这段内容的依据：{}\n\n写的是「上一个回答」时，核对的是你在这次对话里给出的上一个回答。做法：\n1. 把其中的论断一条条列出来，不合并、不遗漏。\n2. 对每一条，用 search_fulltext 找到出处，再用 read_fulltext 读那一页的上下文；只凭关键词命中不算核对。\n3. 每一条按这个顺序写：论断 → 原文摘录（写成 [P3 p.5 \"逐字的一句原文\"]）→ 这句原文支持到什么程度、有什么局限。\n\n要求：摘录必须逐字出自那一页，不翻译、不改写、不把几处拼成一句；界面会拿它和原文逐字比对，并标出比对的结果。只有摘要可依据的，说明依据是摘要，不写页码。没有读到全文、或者原文里找不到依据的，直接写「无法核对」并说明原因，不要用印象补上。原文和论断不一致的，照实指出。最后用一两句话说明哪几条有原文依据、哪几条没有。",
         alone: "上一个回答",
     },
+    Slash { name: COMPACT, about: "把较早的对话压缩成摘要，腾出模型的上下文", hint: "", template: "", alone: "" },
     Slash { name: "new", about: "开始一次新对话", hint: "", template: "", alone: "" },
 ];
+
+/// The command that compacts the conversation (`compact`); like `/new`, the window carries it out.
+pub const COMPACT: &str = "compact";
 
 /// A command the person wrote: a name and the request it stands for, kept
 /// in `Settings::commands`. It is a prompt template and nothing more: it
@@ -1272,6 +1316,8 @@ pub enum Input {
     Ask(String),
     /// `/new`: leave this conversation and start another.
     NewChat,
+    /// `/compact`: have what was said so far summarised, and go on from the summary.
+    Compact,
 }
 
 /// Read a typed message; `custom` are the person's own commands, which a
@@ -1286,7 +1332,7 @@ pub fn read_input(input: &str, custom: &[Command]) -> Result<Input, String> {
         let known = SLASH.iter().map(|command| (command.name, command.about)).chain(custom.iter().map(|command| (command.name.as_str(), command.about.as_str())));
         return Err(format!("没有 /{name} 这个命令。可用：{}", known.map(|(name, about)| if about.is_empty() { format!("/{name}") } else { format!("/{name}（{about}）") }).collect::<Vec<_>>().join("、")));
     };
-    if command.template.is_empty() { return Ok(Input::NewChat) }
+    if command.template.is_empty() { return Ok(if command.name == COMPACT { Input::Compact } else { Input::NewChat }) }
     let argument = if argument.trim().is_empty() { command.alone } else { argument.trim() };
     if argument.is_empty() { return Err(format!("/{name} 后面写上内容：{}。", command.about)) }
     Ok(Input::Ask(command.template.replace("{}", argument)))
@@ -1379,6 +1425,10 @@ pub enum Said {
 pub struct Transcript {
     pub items: Vec<Said>,
     pub sources: Vec<Source>,
+    /// The summary the model is given in place of the first of the items, once the conversation was compacted.
+    /// A build from before this was kept reads the rest and sends the conversation whole.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compacted: Option<crate::compact::Compaction>,
 }
 
 impl Transcript {
@@ -1839,7 +1889,7 @@ pub fn stop_note(reason: &str) -> Option<&'static str> {
     match reason {
         "refusal" | "content_filter" => Some("模型拒绝回答这个问题。"),
         "max_tokens" | "length" => Some("回答达到长度上限，被截断了。"),
-        "model_context_window_exceeded" => Some("材料超出了模型的上下文长度，回答可能不完整。请缩小提问范围。"),
+        "model_context_window_exceeded" => Some("对话超出了模型的上下文长度，回答可能不完整。用 /compact 压缩对话后再问，或缩小提问范围。"),
         _ => None,
     }
 }
@@ -2486,6 +2536,7 @@ mod tests {
         assert!(read_input("/search", &[]).unwrap_err().contains("/search 后面写上内容"));
         assert!(read_input("/dance now", &[]).unwrap_err().contains("/cite"));
         assert_eq!(read_input("/new", &[]).unwrap(), Input::NewChat);
+        assert_eq!(read_input("/compact", &[]).unwrap(), Input::Compact);
         // A message that cannot be expanded is replayed as it was typed.
         assert_eq!(expand_slash("/dance now"), "/dance now");
         // Every command that stands for a request says what to write after it.
@@ -2516,12 +2567,12 @@ mod tests {
         assert_eq!(expand_slash("/style-check 一段话"), "/style-check 一段话");
 
         let names = |input: &str| slash_matches(input, &own).into_iter().map(|offer| offer.name).collect::<Vec<_>>();
-        assert_eq!(names("/"), ["search", "cite", "review", "compare", "write", "slides", "verify", "new", "style-check", "润色", "empty"]);
+        assert_eq!(names("/"), ["search", "cite", "review", "compare", "write", "slides", "verify", "compact", "new", "style-check", "润色", "empty"]);
         assert_eq!(names("/s"), ["search", "slides", "style-check"]);
         assert_eq!(names("/润"), ["润色"]);
         assert_eq!(names("/空泛"), ["style-check"]);
         let offers = slash_matches("/", &own);
-        assert!(offers.iter().all(|offer| offer.custom == !SLASH.iter().any(|command| command.name == offer.name) && offer.runs == (offer.name == "new")));
+        assert!(offers.iter().all(|offer| offer.custom == !SLASH.iter().any(|command| command.name == offer.name) && offer.runs == matches!(offer.name.as_str(), "new" | "compact")));
 
         let problem = |name: &str| command_name_problem(name, own.iter().map(|command| command.name.as_str()));
         for good in ["methods-check", "检查方法", "a_1"] { assert_eq!(problem(good), None, "{good}") }
@@ -2531,11 +2582,11 @@ mod tests {
     #[test]
     fn slash_popup() {
         let names = |input: &str| slash_matches(input, &[]).into_iter().map(|command| command.name).collect::<Vec<_>>();
-        assert_eq!(names("/"), ["search", "cite", "review", "compare", "write", "slides", "verify", "new"]);
+        assert_eq!(names("/"), ["search", "cite", "review", "compare", "write", "slides", "verify", "compact", "new"]);
         // A command that can stand alone works on what it says it does.
         assert!(matches!(read_input("/verify", &[]), Ok(Input::Ask(prompt)) if prompt.contains("逐条核对下面这段内容的依据：上一个回答")));
         assert!(read_input("/cite", &[]).is_err());
-        assert_eq!(names("/c"), ["cite", "compare"]);
+        assert_eq!(names("/c"), ["cite", "compare", "compact"]);
         assert_eq!(names("/RE"), ["review"]);
         // Found by what it does, after those found by name.
         assert_eq!(names("/配"), ["cite"]);
@@ -2589,6 +2640,33 @@ mod tests {
     }
 
     #[test]
+    fn the_service_counts_the_request() {
+        let read = |protocol, lines: &[&str]| {
+            let mut reader = TurnReader::new(protocol);
+            for line in lines {
+                reader.line(line).unwrap();
+            }
+            reader.used()
+        };
+        use crate::usage::Usage;
+        // Claude says the request first, what it read from its cache apart, and the answer with its end.
+        assert_eq!(
+            read(Protocol::Anthropic, &[r#"data: {"type":"message_start","message":{"usage":{"input_tokens":12,"cache_creation_input_tokens":300,"cache_read_input_tokens":4000,"output_tokens":1}}}"#, r#"data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":88}}"#]),
+            Some(Usage { input: 4312, cached: Some(4000), output: 88, reasoning: 0 })
+        );
+        // Chat completions with the last chunk, where a service counts at all.
+        assert_eq!(read(Protocol::OpenAI, &[r#"data: {"choices":[{"delta":{"content":"好"}}]}"#]), None);
+        assert_eq!(read(Protocol::OpenAI, &[r#"data: {"choices":[{"delta":{"content":"好"}}],"usage":null}"#, r#"data: {"choices":[],"usage":{"prompt_tokens":812,"completion_tokens":5,"prompt_tokens_details":{"cached_tokens":700}}}"#]), Some(Usage { input: 812, cached: Some(700), output: 5, reasoning: 0 }));
+        assert_eq!(read(Protocol::OpenAI, &[r#"data: {"choices":[{"delta":{},"finish_reason":"stop","usage":{"prompt_tokens":77}}]}"#]), Some(Usage { input: 77, ..Default::default() }));
+        // DeepSeek: beside the choice that ends the answer, with its own names for the cache.
+        assert_eq!(
+            read(Protocol::OpenAI, &[r#"data: {"choices":[{"index":0,"delta":{"content":""},"finish_reason":"stop"}],"usage":{"prompt_tokens":7000,"completion_tokens":110,"total_tokens":7110,"prompt_tokens_details":{"cached_tokens":6400},"prompt_cache_hit_tokens":6400,"prompt_cache_miss_tokens":600,"completion_tokens_details":{"reasoning_tokens":40}}}"#]),
+            Some(Usage { input: 7000, cached: Some(6400), output: 110, reasoning: 40 })
+        );
+        assert_eq!(read(Protocol::Responses, &[r#"data: {"type":"response.completed","response":{"usage":{"input_tokens":640,"input_tokens_details":{"cached_tokens":512},"output_tokens":9,"output_tokens_details":{"reasoning_tokens":3}}}}"#]), Some(Usage { input: 640, cached: Some(512), output: 9, reasoning: 3 }));
+    }
+
+    #[test]
     fn transcripts() {
         let transcript = Transcript {
             items: vec![
@@ -2597,14 +2675,18 @@ mod tests {
                 Said::Answer { text: "见 [P1]。".into() },
             ],
             sources: vec![Source { label: "P1".into(), paper_id: "a".into(), title: "Alpha".into() }],
+            compacted: None,
         };
         let text = serde_json::to_string(&transcript).unwrap();
-        assert!(text.contains(r#""kind":"user""#) && text.contains(r#""paperId":"a""#));
+        assert!(text.contains(r#""kind":"user""#) && text.contains(r#""paperId":"a""#) && !text.contains("compacted"));
         assert_eq!(serde_json::from_str::<Transcript>(&text).unwrap(), transcript);
+        // A compacted conversation keeps its summary and where it stands.
+        let compacted = Transcript { compacted: Some(crate::compact::Compaction { at: 3, summary: "1. 用户问了一张图。".into(), before: 9000, after: 400, dropped: 0 }), ..transcript.clone() };
+        assert_eq!(serde_json::from_str::<Transcript>(&serde_json::to_string(&compacted).unwrap()).unwrap(), compacted);
         assert_eq!((transcript.title(), transcript.questions()), ("这张图 说明了什么？".to_string(), 1));
         // Kept by an older build, or damaged: what is missing is empty, not an error.
         assert_eq!(serde_json::from_str::<Transcript>("{}").unwrap(), Transcript::default());
-        let pictures = Transcript { items: vec![Said::User { text: String::new(), images: vec!["I-1".into()], files: vec![], prompt: String::new() }], sources: vec![] };
+        let pictures = Transcript { items: vec![Said::User { text: String::new(), images: vec!["I-1".into()], files: vec![], prompt: String::new() }], sources: vec![], compacted: None };
         assert_eq!((pictures.title(), Transcript::default().title()), ("（图片）".to_string(), "未命名对话".to_string()));
     }
 }

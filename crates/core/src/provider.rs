@@ -26,7 +26,7 @@ pub struct Preset {
 }
 
 pub const PRESETS: [Preset; 8] = [
-    Preset { key: "deepseek", name: "DeepSeek", protocol: Protocol::OpenAI, base_url: "https://api.deepseek.com", key_env: "DEEPSEEK_API_KEY", models: &["deepseek-v4-pro", "deepseek-flash"], images: &[], judges: &[], console: "https://platform.deepseek.com/api_keys" },
+    Preset { key: "deepseek", name: "DeepSeek", protocol: Protocol::OpenAI, base_url: "https://api.deepseek.com", key_env: "DEEPSEEK_API_KEY", models: &["deepseek-flash", "deepseek-v4-pro"], images: &[], judges: &[], console: "https://platform.deepseek.com/api_keys" },
     Preset { key: "kimi", name: "Kimi", protocol: Protocol::OpenAI, base_url: "https://api.moonshot.cn/v1", key_env: "MOONSHOT_API_KEY", models: &["kimi-k2.6"], images: &[], judges: &[], console: "https://platform.moonshot.cn/console/api-keys" },
     Preset { key: "glm", name: "GLM", protocol: Protocol::OpenAI, base_url: "https://open.bigmodel.cn/api/paas/v4", key_env: "ZHIPUAI_API_KEY", models: &["glm-5.3", "glm-5.1"], images: &[], judges: &[], console: "https://open.bigmodel.cn/usercenter/apikeys" },
     Preset { key: "claude", name: "Claude", protocol: Protocol::Anthropic, base_url: ANTHROPIC_BASE, key_env: "ANTHROPIC_API_KEY", models: &[DEFAULT_MODEL, "claude-sonnet-5-5", "claude-haiku-5-5"], images: &[], judges: &[], console: "https://console.anthropic.com/settings/keys" },
@@ -79,7 +79,13 @@ pub struct Model {
     /// For a model that draws: how it is asked, a key of `imagegen::INTERFACES`; empty leaves it to `imagegen::guess`.
     #[serde(skip_serializing_if = "String::is_empty")]
     pub interface: String,
+    /// How many tokens it takes in, for knowing when a conversation has to be compacted; 0 leaves it to `compact::window`.
+    #[serde(skip_serializing_if = "crate::ai::is_zero")]
+    pub context: usize,
 }
+
+/// The windows a model can be said to have in the settings, in tokens.
+pub const CONTEXTS: [usize; 7] = [16_000, 32_000, 64_000, 128_000, 200_000, 400_000, 1_000_000];
 
 impl Model {
     /// Whether it draws pictures, not answers in words.
@@ -152,7 +158,7 @@ impl Provider {
 
     /// What a request with one of its models is made with.
     pub fn profile(&self, model: &Model) -> Profile {
-        Profile { id: model.id.clone(), name: String::new(), provider: self.title(), protocol: self.protocol, base_url: self.base_url.clone(), api_key: self.api_key.clone(), key_env: self.key_env().into(), model: model.model.clone(), effort: model.effort.clone(), proxy: self.proxy.clone(), interface: model.interface.clone(), kind: model.kind.clone() }
+        Profile { id: model.id.clone(), name: String::new(), provider: self.title(), protocol: self.protocol, base_url: self.base_url.clone(), api_key: self.api_key.clone(), key_env: self.key_env().into(), model: model.model.clone(), effort: model.effort.clone(), proxy: self.proxy.clone(), interface: model.interface.clone(), kind: model.kind.clone(), context: model.context }
     }
 
     /// The key it would send now, stored or from the environment.
@@ -171,7 +177,7 @@ mod tests {
         assert_eq!((deepseek.title().as_str(), deepseek.models.len(), deepseek.key_env()), ("DeepSeek", 2, "DEEPSEEK_API_KEY"));
         // A key of the OpenAI kind is never what DeepSeek is asked with.
         let profile = deepseek.profile(&deepseek.models[0]);
-        assert_eq!((profile.key_env.as_str(), profile.model.as_str(), profile.provider.as_str(), profile.title().as_str()), ("DEEPSEEK_API_KEY", "deepseek-v4-pro", "DeepSeek", "deepseek-v4-pro"));
+        assert_eq!((profile.key_env.as_str(), profile.model.as_str(), profile.provider.as_str(), profile.title().as_str()), ("DEEPSEEK_API_KEY", "deepseek-flash", "DeepSeek", "deepseek-flash"));
         let custom = Provider { base_url: "http://localhost:11434/v1".into(), ..Default::default() };
         assert_eq!((custom.title().as_str(), custom.key_env()), ("localhost", "OPENAI_API_KEY"));
         assert_eq!(preset_of_address("https://api.moonshot.cn/v1").map(|p| p.key), Some("kimi"));
@@ -185,7 +191,7 @@ mod tests {
         assert_eq!((gemini.models.iter().filter(|m| m.speaks()).count(), gemini.models.iter().filter(|m| m.draws()).count(), gemini.key_env()), (1, 2, "GEMINI_API_KEY"));
         assert_eq!(crate::imagegen::interface(&gemini.profile(&gemini.models[1])), crate::imagegen::Interface::Gemini);
         // The add box suggests a model that answers in words, a judge only where the service has nothing else.
-        assert_eq!(PRESETS.map(|p| p.example()), [Some("deepseek-v4-pro"), Some("kimi-k2.6"), Some("glm-5.3"), Some(DEFAULT_MODEL), Some("gpt-6.2-sol"), Some("gemini-4-hydrogen"), Some("doubao-seed-1-6-251015"), Some("jev-latest")]);
+        assert_eq!(PRESETS.map(|p| p.example()), [Some("deepseek-flash"), Some("kimi-k2.6"), Some("glm-5.3"), Some(DEFAULT_MODEL), Some("gpt-6.2-sol"), Some("gemini-4-hydrogen"), Some("doubao-seed-1-6-251015"), Some("jev-latest")]);
         assert_eq!(preset_of_address("https://ark.cn-beijing.volces.com/api/v3").map(|p| p.key), Some("ark"));
         assert_eq!(preset_of_address("https://generativelanguage.googleapis.com/v1beta/openai").map(|p| p.key), Some("gemini"));
         // A service whose models judge: its own key, its own address, and no other kind of model.
