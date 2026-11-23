@@ -218,6 +218,8 @@ pub enum MenuKind {
     /// Several papers marked in the list.
     Papers(Vec<String>),
     Trashed(String),
+    /// Several papers chosen in the trash (`Library::trash_chosen`).
+    TrashedMany(Vec<String>),
     File(String),
     Tag(String),
     Conversation(Talk, String),
@@ -430,6 +432,12 @@ pub enum Cmd {
     DeletePaper(String),
     /// Every paper in the trash back in the library.
     RestoreAll,
+    /// 回收站多选: every paper of the trash chosen or none (全选 / 取消全选); the chosen ones restored,
+    /// or deleted for good after asking.
+    ChooseAllTrash(bool),
+    RestorePapers(Vec<String>),
+    AskDeletePapers(Vec<String>),
+    DeletePapers(Vec<String>),
     /// 清空回收站: the dialog that asks for the phrase, and the deletion it leads to.
     AskEmptyTrash,
     EmptyTrash,
@@ -1675,6 +1683,10 @@ pub struct Library {
     /// Where a stretch marked with Shift starts, and where it reaches to.
     pub anchor: Option<String>,
     pub cursor: Option<String>,
+    /// The papers chosen in the trash, kept apart from `marked`; emptied when the trash is opened or
+    /// left. `trash_anchor` is where a stretch chosen with Shift starts.
+    pub trash_chosen: Vec<String>,
+    pub trash_anchor: Option<String>,
     /// The papers the library's next conversation is kept to: picked in the list, or dragged into the
     /// conversation from the panel over it. None means the list on show, narrowed by that panel's search.
     pub asked: Vec<String>,
@@ -2521,6 +2533,10 @@ impl Library {
             self.marked.retain(|id| held.contains(id));
             self.asked.retain(|id| held.contains(id));
         }
+        // Chosen papers restored or deleted meanwhile are no longer chosen.
+        let trashed: HashSet<&str> = self.trash.iter().map(|entry| entry.paper.id.as_str()).collect();
+        self.trash_chosen.retain(|id| trashed.contains(id.as_str()));
+        if self.trash_anchor.as_deref().is_some_and(|id| !trashed.contains(id)) { self.trash_anchor = None }
         self.refilter();
         // A paper changed or gone is another source for the review's evidence.
         self.load_review()?;
@@ -2784,7 +2800,7 @@ impl Workspace {
         };
         let filter = matches!(kind, MenuKind::Filter(_));
         match kind {
-            MenuKind::Paper(_) | MenuKind::Papers(_) | MenuKind::Trashed(_) | MenuKind::File(_) | MenuKind::Tag(_) | MenuKind::Conversation(..) | MenuKind::Text(_) | MenuKind::Answer(..) => (items, breaks) = self.context_menu(&kind),
+            MenuKind::Paper(_) | MenuKind::Papers(_) | MenuKind::Trashed(_) | MenuKind::TrashedMany(_) | MenuKind::File(_) | MenuKind::Tag(_) | MenuKind::Conversation(..) | MenuKind::Text(_) | MenuKind::Answer(..) => (items, breaks) = self.context_menu(&kind),
             MenuKind::Figure(id) => (items, breaks) = self.figure_menu(&id),
             MenuKind::Add => {
                 items.push(item(t("通过 DOI / PMID / 网址添加…"), Cmd::AddById));
@@ -3365,6 +3381,8 @@ impl Workspace {
                     self.agent_versions(cx);
                 }
                 if let Some(lib) = self.lib.as_mut() {
+                    // What was chosen in the trash is for that visit: none chosen on coming back, nor after leaving.
+                    if lib.page == Page::Trash || page == Page::Trash { (lib.trash_chosen, lib.trash_anchor) = (vec![], None) }
                     if page == Page::Write { lib.enter_write() } else { lib.page = page }
                     lib.reading = false;
                     if page == Page::Ask { lib.library_chat.input.read(cx).focus(window) }
@@ -3518,11 +3536,37 @@ impl Workspace {
             }
             Cmd::RestoreAll => {
                 let ids: Vec<String> = self.lib.as_ref().map(|lib| lib.trash.iter().map(|entry| entry.paper.id.clone()).collect()).unwrap_or_default();
+                self.run(Cmd::RestorePapers(ids), window, cx);
+            }
+            Cmd::ChooseAllTrash(all) => {
+                if let Some(lib) = self.lib.as_mut() {
+                    lib.trash_chosen = if all { lib.trash.iter().map(|entry| entry.paper.id.clone()).collect() } else { vec![] };
+                    lib.trash_anchor = None;
+                }
+                window.focus(&self.focus);
+            }
+            Cmd::RestorePapers(ids) => {
                 let done = self.change(cx, |lib| {
                     for id in &ids { lib.store.restore_paper(id)? }
                     Ok(())
                 });
-                if done { self.say(tf!("已恢复 {} 篇。", "Restored {} papers.", ids.len()), cx) }
+                if done { self.say(if ids.len() == 1 { t("已恢复。").to_string() } else { tf!("已恢复 {} 篇。", "Restored {} papers.", ids.len()) }, cx) }
+            }
+            Cmd::AskDeletePapers(ids) => {
+                let total = self.lib.as_ref().map_or(0, |lib| lib.trash.len());
+                // One is that paper's own question; all of them is emptying the trash, which asks for the phrase.
+                if let [id] = ids.as_slice() { return self.run(Cmd::AskDeletePaper(id.clone()), window, cx) }
+                if ids.is_empty() { return }
+                if ids.len() == total { return self.run(Cmd::AskEmptyTrash, window, cx) }
+                self.modal_error.clear();
+                let count = ids.len();
+                self.modal = Some(Modal::Confirm { title: tf!("彻底删除这 {count} 篇文献？", "Delete these {count} papers permanently?"), message: t("它们连同各自的笔记、词条、标注、PDF 和图片，会从磁盘上完全删除，无法恢复。删除之后它们不再阻止重复导入。").into(), action: t("彻底删除").into(), cmd: Cmd::DeletePapers(ids) });
+            }
+            Cmd::DeletePapers(ids) => {
+                self.modal = None;
+                let mut count = 0;
+                if self.change(cx, |lib| lib.store.purge_trashed_papers(&ids).map(|n| count = n)) { self.say(tf!("已彻底删除 {count} 篇。", "Deleted {count} papers permanently."), cx) }
+                window.focus(&self.focus);
             }
             Cmd::AskEmptyTrash => {
                 if self.lib.as_ref().is_none_or(|lib| lib.trash.is_empty()) { return }
@@ -4448,6 +4492,8 @@ impl Workspace {
                 lib.library_chat.materials_open = false;
                 lib.library_chat.input.read(cx).focus(window);
             }
+        } else if self.lib.as_ref().is_some_and(|l| l.page == Page::Trash && !l.trash_chosen.is_empty()) {
+            if let Some(lib) = self.lib.as_mut() { (lib.trash_chosen, lib.trash_anchor) = (vec![], None) }
         } else if self.lib.as_ref().is_some_and(|l| !l.marked.is_empty()) {
             if let Some(lib) = self.lib.as_mut() { lib.marked.clear() }
         } else if self.lib.as_ref().is_some_and(|l| l.reading && l.selected.is_some()) {
@@ -4773,6 +4819,8 @@ impl Workspace {
             write_chat,
             marked: vec![],
             anchor: None,
+            trash_chosen: vec![],
+            trash_anchor: None,
             cursor: None,
             asked: vec![],
             scope_find,
@@ -8245,6 +8293,7 @@ impl Workspace {
                     "delete-paper" => self.lib.as_ref().and_then(|lib| lib.selected.clone()).map(Cmd::AskDeletePaper),
                     // The trash page's head: 全部恢复 and the dialog of 清空回收站.
                     "restore-all" => Some(Cmd::RestoreAll),
+                    "trash-all" => Some(Cmd::ChooseAllTrash(true)),
                     "empty-trash" => Some(Cmd::AskEmptyTrash),
                     "guide" => Some(Cmd::OpenGuide(true)),
                     "guide-search" => Some(Cmd::OpenGuide(false)),

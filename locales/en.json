@@ -1507,6 +1507,8 @@
   "清空之后，它们不再阻止重复导入：以后的检索可能会把它们再导入进来。": "Once emptied, they no longer block re-import: a later search may import them again.",
   "我已知晓": "I understand",
   "全部恢复": "Restore all",
+  "取消全选": "Select none",
+  "它们连同各自的笔记、词条、标注、PDF 和图片，会从磁盘上完全删除，无法恢复。删除之后它们不再阻止重复导入。": "They, with their notes, fields, annotations, PDFs and pictures, will be deleted from disk completely and cannot be recovered. They will no longer block re-import.",
   "便签": "Note",
   "写下想法…": "Write a thought…",
   "另一半": "Other half",

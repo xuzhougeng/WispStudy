@@ -3,7 +3,7 @@
 //! right click opens a menu of what can be done with the thing under it.
 
 use crate::i18n::t;
-use crate::app::{Cmd, MenuItem, MenuKind, Page, Tab, Talk, Workspace};
+use crate::app::{Cmd, Library, MenuItem, MenuKind, Page, Tab, Talk, Workspace};
 use gpui::*;
 use wisp_core::model::READINGS;
 
@@ -53,6 +53,68 @@ impl Workspace {
             };
             this.open_menu(kind, event.position, cx);
         })
+    }
+
+    /// A click on a button inside a row that answers clicks itself: the button's command, not the row's.
+    pub fn on_alone(&self, cmd: Cmd, cx: &mut Context<Self>) -> impl Fn(&ClickEvent, &mut Window, &mut App) + 'static {
+        cx.listener(move |this, _: &ClickEvent, window, cx| {
+            cx.stop_propagation();
+            this.run(cmd.clone(), window, cx);
+        })
+    }
+
+    /// A right click on a row of the trash: on one of several chosen papers, the menu for all of them;
+    /// on any other, that paper's own (and the choice ends).
+    pub fn on_trashed_context(&self, id: String, cx: &mut Context<Self>) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static {
+        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+            cx.stop_propagation();
+            let Some(lib) = this.lib.as_mut() else { return };
+            let kind = if lib.trash_chosen.len() > 1 && lib.trash_chosen.contains(&id) {
+                MenuKind::TrashedMany(lib.trash_chosen_ids())
+            } else {
+                if !lib.trash_chosen.contains(&id) { (lib.trash_chosen, lib.trash_anchor) = (vec![], None) }
+                MenuKind::Trashed(id.clone())
+            };
+            this.open_menu(kind, event.position, cx);
+        })
+    }
+
+    /// A click on a row of the trash, or on its box. Alone it chooses that paper only; ⌘ / Ctrl, or the
+    /// box, adds it to the chosen ones or takes it out; Shift chooses every paper from where the choosing started.
+    pub fn choose_trashed(&mut self, id: &str, toggle: bool, stretch: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        let ids: Vec<String> = lib.trash.iter().map(|entry| entry.paper.id.clone()).collect();
+        let place = |id: &str| ids.iter().position(|other| other == id);
+        if stretch {
+            let from = lib.trash_anchor.clone().filter(|id| place(id).is_some()).unwrap_or_else(|| id.to_string());
+            let (Some(a), Some(b)) = (place(&from), place(id)) else { return };
+            lib.trash_chosen = ids[a.min(b)..=a.max(b)].to_vec();
+            lib.trash_anchor = Some(from);
+        } else {
+            if toggle {
+                match lib.trash_chosen.iter().position(|other| other == id) {
+                    Some(at) => { lib.trash_chosen.remove(at); }
+                    None => lib.trash_chosen.push(id.to_string()),
+                }
+            } else {
+                lib.trash_chosen = vec![id.to_string()];
+            }
+            lib.trash_anchor = Some(id.to_string());
+        }
+        // The keyboard stays with the page, for ⌘A, Delete and Esc.
+        window.focus(&self.focus);
+        cx.notify();
+    }
+
+    /// ⌘A and Delete on the trash page: every paper chosen; the chosen ones deleted for good, after asking.
+    fn trash_nav(&mut self, nav: Nav, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_ref() else { return };
+        match nav {
+            Nav::MarkAll => self.run(Cmd::ChooseAllTrash(true), window, cx),
+            Nav::Trash if !lib.trash_chosen.is_empty() => self.run(Cmd::AskDeletePapers(lib.trash_chosen_ids()), window, cx),
+            _ => {}
+        }
+        cx.notify();
     }
 
     /// A click on a row with a key held. ⌘ / Ctrl: the paper joins the marked ones or leaves them
@@ -213,6 +275,11 @@ impl Workspace {
                 items.push(item(t("恢复"), Cmd::RestorePaper(id.clone())));
                 items.push(item(t("彻底删除…"), Cmd::AskDeletePaper(id.clone())));
             }
+            MenuKind::TrashedMany(ids) => {
+                let count = ids.len();
+                items.push(item(&tf!("恢复 {count} 篇", "Restore {count} papers"), Cmd::RestorePapers(ids.clone())));
+                items.push(item(&tf!("彻底删除 {count} 篇…", "Delete {count} papers permanently…"), Cmd::AskDeletePapers(ids.clone())));
+            }
             MenuKind::File(id) => {
                 let Some(file) = lib.files.iter().find(|f| f.id == *id) else { return (items, breaks) };
                 items.push(item(t("用系统应用打开"), Cmd::OpenFile(id.clone())));
@@ -289,6 +356,7 @@ impl Workspace {
         if lib.page == Page::Screen && lib.screen.mode != crate::app::ScreenMode::Batch { return self.screen_nav(nav, window, cx) }
         // 提取 moves along its rows.
         if lib.page == Page::Extract { return self.extract_nav(nav, window, cx) }
+        if lib.page == Page::Trash { return self.trash_nav(nav, window, cx) }
         // The papers in the order the page shows them.
         let ids: Vec<String> = match lib.page {
             Page::Papers => lib.shown.iter().map(|&i| lib.papers[i].id.clone()).collect(),
@@ -357,4 +425,11 @@ impl Workspace {
 
 fn reveal_label() -> &'static str {
     if cfg!(target_os = "macos") { t("在访达中显示") } else { t("在文件夹中显示") }
+}
+
+impl Library {
+    /// The papers chosen in the trash, in the trash's order whatever order they were chosen in.
+    pub fn trash_chosen_ids(&self) -> Vec<String> {
+        self.trash.iter().map(|entry| entry.paper.id.clone()).filter(|id| self.trash_chosen.contains(id)).collect()
+    }
 }

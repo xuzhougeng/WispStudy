@@ -1345,7 +1345,10 @@ impl Workspace {
             .enumerate()
             .map(|(i, entry)| {
                 let p = &entry.paper;
+                let chosen = lib.trash_chosen.contains(&p.id);
+                // A click chooses the paper, with ⌘ / Ctrl or on its box one more, with Shift a stretch; its buttons are for it alone.
                 div()
+                    .id(SharedString::from(format!("trashed-{}", p.id)))
                     .flex()
                     .items_center()
                     .gap(px(12.))
@@ -1353,20 +1356,43 @@ impl Workspace {
                     .py(px(10.))
                     .border_b_1()
                     .border_color(Theme::line())
-                    .on_mouse_down(MouseButton::Right, self.on_context(MenuKind::Trashed(p.id.clone()), cx))
-                    .child(div().flex().flex_col().flex_1().min_w_0().child(div().truncate().child(p.title.clone())).child(div().truncate().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tf!("{} · 删除于 {}", "{} · Deleted {}", if p.authors.is_empty() { t("作者待补").to_string() } else { crate::i18n::short_authors(p) }, time::date_text(&entry.deleted_at)))))
-                    .child(ui::secondary_button(("restore", i), t("恢复")).on_click(self.on(Cmd::RestorePaper(p.id.clone()), cx)))
-                    .child(ui::ghost_button(("delete", i), Some("bin"), Some(t("彻底删除").into())).text_color(Theme::danger()).on_click(self.on(Cmd::AskDeletePaper(p.id.clone()), cx)))
+                    .cursor_pointer()
+                    .when(chosen, |d| d.bg(Theme::accent_soft()))
+                    .when(!chosen, |d| d.hover(|s| s.bg(Theme::hover())))
+                    .on_mouse_down(MouseButton::Right, self.on_trashed_context(p.id.clone(), cx))
+                    .on_click(cx.listener({
+                        let id = p.id.clone();
+                        move |this, ev: &ClickEvent, window, cx| this.choose_trashed(&id, ev.modifiers().secondary(), ev.modifiers().shift, window, cx)
+                    }))
+                    .child(div().id(("trash-tick", i)).flex_none().child(crate::extract::tick_box(chosen, true)).on_click(cx.listener({
+                        let id = p.id.clone();
+                        move |this, ev: &ClickEvent, window, cx| {
+                            cx.stop_propagation();
+                            this.choose_trashed(&id, true, ev.modifiers().shift, window, cx)
+                        }
+                    })))
+                    .child(div().flex().flex_col().flex_1().min_w_0().child(div().truncate().when(chosen, |d| d.text_color(Theme::accent())).child(p.title.clone())).child(div().truncate().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tf!("{} · 删除于 {}", "{} · Deleted {}", if p.authors.is_empty() { t("作者待补").to_string() } else { crate::i18n::short_authors(p) }, time::date_text(&entry.deleted_at)))))
+                    .child(ui::secondary_button(("restore", i), t("恢复")).on_click(self.on_alone(Cmd::RestorePaper(p.id.clone()), cx)))
+                    .child(ui::ghost_button(("delete", i), Some("bin"), Some(t("彻底删除").into())).text_color(Theme::danger()).on_click(self.on_alone(Cmd::AskDeletePaper(p.id.clone()), cx)))
                     .into_any_element()
             })
             .collect();
+        let (chosen, total) = (lib.trash_chosen_ids(), lib.trash.len());
+        let count = chosen.len();
+        // With papers chosen, the head's two buttons are for them, where 清空回收站 and 全部恢复 stand otherwise.
+        let (delete, restore) = if count == 0 {
+            (ui::ghost_button("trash-empty", Some("bin"), Some(t("清空回收站").into())).on_click(self.on(Cmd::AskEmptyTrash, cx)), ui::secondary_button("trash-restore-all", t("全部恢复")).on_click(self.on(Cmd::RestoreAll, cx)))
+        } else {
+            (ui::ghost_button("trash-delete-chosen", Some("bin"), Some(tf!("彻底删除所选 {count} 篇", "Delete {count} selected").into())).on_click(self.on(Cmd::AskDeletePapers(chosen.clone()), cx)), ui::secondary_button("trash-restore-chosen", tf!("恢复所选 {count} 篇", "Restore {count} selected")).on_click(self.on(Cmd::RestorePapers(chosen), cx)))
+        };
+        let all = count == total;
         div()
             .flex()
             .flex_col()
             .size_full()
-            // 全部恢复 stands over the rows' 恢复; 清空回收站, which cannot be undone, by the title, away from both.
+            // 全部恢复 stands over the rows' 恢复, 全选 beside it; 清空回收站, which cannot be undone, by the title, away from them.
             .child(ui::column_head().gap(px(8.)).child(div().flex_none().text_size(text_px(ui::HEAD_TITLE)).font_weight(FontWeight::SEMIBOLD).child(t("回收站"))).child(ui::hint("trash-hint", t("这里的文献保留着笔记、词条和 PDF，可以恢复。它们仍会阻止同一篇文献被重复导入。")))
-                .when(!rows.is_empty(), |d| d.child(ui::ghost_button("trash-empty", Some("bin"), Some(t("清空回收站").into())).text_color(Theme::danger()).on_click(self.on(Cmd::AskEmptyTrash, cx))).child(div().flex_1()).child(ui::secondary_button("trash-restore-all", t("全部恢复")).on_click(self.on(Cmd::RestoreAll, cx)))))
+                .when(!rows.is_empty(), |d| d.child(delete.text_color(Theme::danger())).child(div().flex_1()).child(ui::ghost_button("trash-choose-all", None, Some(if all { t("取消全选") } else { t("全选") }.into())).on_click(self.on(Cmd::ChooseAllTrash(!all), cx))).child(restore)))
             .child(if rows.is_empty() { ui::empty_state("bin", t("回收站是空的"), "").into_any_element() } else { div().id("trash").flex().flex_col().flex_1().min_h_0().overflow_y_scroll().children(rows).into_any_element() })
             .into_any_element()
     }
