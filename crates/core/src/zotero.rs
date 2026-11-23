@@ -5,7 +5,7 @@ use crate::model::{Paper, clean_strings, normalize_doi, normalize_pmid, strip_ma
 use crate::store::Store;
 use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, ErrorCode, OpenFlags};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::{Component, Path, PathBuf};
 
 pub struct Entry {
@@ -53,6 +53,45 @@ impl Library {
     pub fn is_user(&self) -> bool { self.kind == "user" }
 }
 
+/// One collection (分类) of a library, what `read` can be narrowed to.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Collection {
+    /// Zotero's `collectionID`, what `read` takes.
+    pub id: i64,
+    /// The `Library::id` it belongs to.
+    pub library: i64,
+    pub name: String,
+    /// The collection it is in; `None` at the top of its library.
+    pub parent: Option<i64>,
+    /// The names from the top down, `植物/根`, as an imported paper's tag `Zotero/植物/根` says it.
+    pub path: String,
+    /// 0 for a collection at the top of its library.
+    pub depth: usize,
+    /// How many items `read` takes from it and its subcollections.
+    pub items: usize,
+    /// Those items (`itemID`, sorted), so that a choice of several can be counted without counting one twice.
+    #[serde(skip)]
+    pub members: Vec<i64>,
+}
+
+/// How many items a choice of collections takes, each once.
+pub fn count_items<'a>(chosen: impl IntoIterator<Item = &'a Collection>) -> usize {
+    chosen.into_iter().flat_map(|c| c.members.iter()).collect::<HashSet<_>>().len()
+}
+
+/// Whether a collection is under one of those picked (not itself one of them): it is taken in with that one.
+pub fn under_picked(collections: &[Collection], picked: &[i64], id: i64) -> bool {
+    let parent = |id: i64| collections.iter().find(|c| c.id == id).and_then(|c| c.parent);
+    let mut next = parent(id);
+    for _ in 0..collections.len() {
+        let Some(up) = next else { return false };
+        if picked.contains(&up) { return true }
+        next = parent(up);
+    }
+    false
+}
+
 /// What Zotero calls the person's own library, as the tools say it.
 pub const MY_LIBRARY: &str = "我的文库";
 
@@ -63,8 +102,46 @@ const ITEMS: &str = "FROM items i JOIN itemTypes t USING(itemTypeID) JOIN librar
 /// A read transaction includes committed WAL data and keeps all queries on the
 /// same snapshot. Do not use `immutable=1`, which would ignore Zotero's WAL.
 /// `library` is one `Library::id`; `None` reads every library.
-pub fn read(path: &Path, library: Option<i64>) -> Result<Import> {
-    explained(snapshot(path).and_then(|db| read_items(&db, path.parent().unwrap_or_else(|| Path::new(".")), library)))
+/// `collections` (`Collection::id`) narrows it to the items in them or their subcollections; empty is the whole library.
+pub fn read(path: &Path, library: Option<i64>, collections: &[i64]) -> Result<Import> {
+    explained(snapshot(path).and_then(|db| read_items(&db, path.parent().unwrap_or_else(|| Path::new(".")), library, collections)))
+}
+
+/// The collections of every library `libraries` lists, a library's after one another as Zotero shows
+/// them: each followed by its subcollections, names in alphabetical order. Collections in Zotero's trash are left out.
+pub fn collections(path: &Path) -> Result<Vec<Collection>> {
+    explained(snapshot(path).and_then(|db| {
+        let tree = Tree::read(&db)?;
+        Ok(list_libraries(&db)?.iter().flat_map(|library| tree.listed(library.id)).collect())
+    }))
+}
+
+/// The collections a caller named, each by its `id`, its path (`植物/根`) or its name when only one has it.
+/// A name that fits none, or several, is refused with the collections there are.
+pub fn choose_collections(collections: &[Collection], wanted: &[String]) -> Result<Vec<i64>> {
+    let path_key = |path: &str| path.split('/').map(|part| part.trim().to_lowercase()).collect::<Vec<_>>().join("/");
+    let listed = || {
+        let mut names = collections.iter().take(40).map(|c| format!("{}（id {}，{} 条）", c.path, c.id, c.items)).collect::<Vec<_>>();
+        if collections.len() > 40 { names.push(format!("等 {} 个", collections.len())) }
+        if names.is_empty() { "没有分类".to_string() } else { names.join("、") }
+    };
+    let mut chosen = vec![];
+    for wanted in wanted.iter().map(|w| w.trim().trim_matches('/')).filter(|w| !w.is_empty()) {
+        let number = wanted.parse::<i64>().ok().filter(|n| collections.iter().any(|c| c.id == *n));
+        let found: Vec<&Collection> = match number {
+            Some(n) => collections.iter().filter(|c| c.id == n).collect(),
+            None => {
+                let by_path: Vec<_> = collections.iter().filter(|c| path_key(&c.path) == path_key(wanted)).collect();
+                if by_path.is_empty() { collections.iter().filter(|c| c.name.trim().to_lowercase() == wanted.to_lowercase()).collect() } else { by_path }
+            }
+        };
+        match found.as_slice() {
+            [one] => if !chosen.contains(&one.id) { chosen.push(one.id) },
+            [] => bail!("没有名为「{wanted}」的 Zotero 分类。可选的分类：{}。", listed()),
+            several => bail!("有不止一个分类叫「{wanted}」，请用路径或 id 指定：{}。", several.iter().map(|c| format!("{}（id {}）", c.path, c.id)).collect::<Vec<_>>().join("、")),
+        }
+    }
+    Ok(chosen)
 }
 
 /// The libraries `read` can import, the person's own first, then the groups by name.
@@ -148,16 +225,94 @@ fn list_libraries(db: &Connection) -> Result<Vec<Library>> {
     }).collect()
 }
 
-fn read_items(db: &Connection, root: &Path, library: Option<i64>) -> Result<Import> {
+/// The collections not in Zotero's trash, with the items `read` would take from each.
+struct Tree {
+    nodes: BTreeMap<i64, Node>,
+    /// A collection's own items (`itemID`), not its subcollections'.
+    own: BTreeMap<i64, Vec<i64>>,
+    /// The collections under each (`None`: at the top), by library, names in alphabetical order.
+    kids: BTreeMap<(i64, Option<i64>), Vec<i64>>,
+}
+
+struct Node { name: String, parent: Option<i64>, library: i64 }
+
+impl Tree {
+    fn read(db: &Connection) -> Result<Self> {
+        // Zotero 7 keeps a collection in the trash in `deletedCollections`; Zotero 6 has no such table.
+        let trash: bool = db.query_row("SELECT count(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'deletedCollections'", [], |r| r.get(0))?;
+        let live = if trash { " WHERE NOT EXISTS (SELECT 1 FROM deletedCollections d WHERE d.collectionID = c.collectionID)" } else { "" };
+        let mut nodes = db.prepare(&format!("SELECT c.collectionID, c.collectionName, c.parentCollectionID, c.libraryID FROM collections c{live}"))?;
+        let nodes = nodes.query_map([], |r| Ok((r.get::<_, i64>(0)?, Node { name: r.get::<_, Option<String>>(1)?.unwrap_or_default(), parent: r.get(2)?, library: r.get(3)? })))?.collect::<rusqlite::Result<BTreeMap<_, _>>>()?;
+        let mut own = db.prepare(&format!("SELECT ci.collectionID, ci.itemID FROM collectionItems ci WHERE ci.itemID IN (SELECT i.itemID {ITEMS}) ORDER BY ci.itemID"))?;
+        let mut kids: BTreeMap<(i64, Option<i64>), Vec<i64>> = BTreeMap::new();
+        for (id, node) in &nodes { kids.entry((node.library, node.parent)).or_default().push(*id) }
+        for children in kids.values_mut() { children.sort_by_cached_key(|id| (nodes[id].name.to_lowercase(), *id)) }
+        let mut tree = Tree { nodes, own: BTreeMap::new(), kids };
+        for pair in own.query_map([None::<i64>], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))? {
+            let (collection, item) = pair?;
+            tree.own.entry(collection).or_default().push(item);
+        }
+        Ok(tree)
+    }
+
+    /// The names from the top down; `None` for one whose parent is gone or that is its own ancestor.
+    fn path(&self, id: i64) -> Option<String> {
+        let mut parts = vec![];
+        let mut seen = HashSet::new();
+        let mut next = Some(id);
+        while let Some(id) = next {
+            if !seen.insert(id) { return None }
+            let node = self.nodes.get(&id)?;
+            parts.push(node.name.as_str());
+            next = node.parent;
+        }
+        parts.reverse();
+        Some(parts.join("/"))
+    }
+
+    fn children(&self, id: Option<i64>, library: i64) -> &[i64] {
+        self.kids.get(&(library, id)).map_or(&[], Vec::as_slice)
+    }
+
+    /// The collection and every one under it, each once, in Zotero's order.
+    fn under(&self, id: i64) -> Vec<i64> {
+        let Some(library) = self.nodes.get(&id).map(|n| n.library) else { return vec![] };
+        let (mut found, mut seen, mut next) = (vec![], HashSet::new(), vec![id]);
+        while let Some(id) = next.pop() {
+            if !seen.insert(id) { continue }
+            found.push(id);
+            next.extend(self.children(Some(id), library).iter().rev());
+        }
+        found
+    }
+
+    fn items(&self, ids: &[i64]) -> BTreeSet<i64> {
+        ids.iter().flat_map(|&id| self.under(id)).flat_map(|id| self.own.get(&id).into_iter().flatten().copied()).collect()
+    }
+
+    /// A library's collections as `collections` lists them. One whose parent is gone, or in the trash, is not shown.
+    fn listed(&self, library: i64) -> Vec<Collection> {
+        self.children(None, library).iter().flat_map(|&top| self.under(top)).filter_map(|id| {
+            let path = self.path(id)?;
+            let members: Vec<i64> = self.items(&[id]).into_iter().collect();
+            Some(Collection { id, library, name: self.nodes[&id].name.clone(), parent: self.nodes[&id].parent, depth: path.matches('/').count(), path, items: members.len(), members })
+        }).collect()
+    }
+}
+
+fn read_items(db: &Connection, root: &Path, library: Option<i64>, only: &[i64]) -> Result<Import> {
+    let tree = Tree::read(db)?;
     let mut items = db.prepare(&format!("SELECT i.itemID, t.typeName {ITEMS} ORDER BY i.itemID"))?;
-    let items = items.query_map([library], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut items = items.query_map([library], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+    if !only.is_empty() {
+        let wanted = tree.items(only);
+        items.retain(|(id, _)| wanted.contains(id));
+    }
     let mut fields = db.prepare("SELECT f.fieldName, CAST(v.value AS TEXT) FROM itemData d JOIN fieldsCombined f USING(fieldID) JOIN itemDataValues v USING(valueID) WHERE d.itemID = ?1")?;
     let mut creators = db.prepare("SELECT c.firstName, c.lastName, c.fieldMode FROM itemCreators ic JOIN creators c USING(creatorID) JOIN creatorTypes ct USING(creatorTypeID) WHERE ic.itemID = ?1 AND ct.creatorType = 'author' ORDER BY ic.orderIndex")?;
     let mut tags = db.prepare("SELECT t.name FROM itemTags it JOIN tags t USING(tagID) WHERE it.itemID = ?1 ORDER BY t.name")?;
     let mut notes = db.prepare("SELECT n.note FROM itemNotes n WHERE n.parentItemID = ?1 AND NOT EXISTS (SELECT 1 FROM deletedItems d WHERE d.itemID = n.itemID) ORDER BY n.itemID")?;
     let mut attachments = db.prepare("SELECT i.key, a.path, a.contentType, a.linkMode FROM itemAttachments a JOIN items i USING(itemID) WHERE a.parentItemID = ?1 AND NOT EXISTS (SELECT 1 FROM deletedItems d WHERE d.itemID = a.itemID) ORDER BY a.itemID")?;
-    let mut collections = db.prepare("SELECT collectionID, collectionName, parentCollectionID FROM collections")?;
-    let collections = collections.query_map([], |r| Ok((r.get::<_, i64>(0)?, (r.get::<_, String>(1)?, r.get::<_, Option<i64>>(2)?))))?.collect::<rusqlite::Result<BTreeMap<_, _>>>()?;
     let mut memberships = db.prepare("SELECT collectionID FROM collectionItems WHERE itemID = ?1 ORDER BY collectionID")?;
     let mut imported = Import::default();
     for (id, kind) in items {
@@ -170,7 +325,7 @@ fn read_items(db: &Connection, root: &Path, library: Option<i64>) -> Result<Impo
         })?.collect::<rusqlite::Result<Vec<_>>>()?.join("; ");
         let mut paper_tags = tags.query_map([id], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
         for collection in memberships.query_map([id], |r| r.get::<_, i64>(0))? {
-            if let Some(path) = collection_path(collection?, &collections) { paper_tags.push(format!("Zotero/{path}")) }
+            if let Some(path) = tree.path(collection?) { paper_tags.push(format!("Zotero/{path}")) }
         }
         let mut paper_notes = notes.query_map([id], |r| r.get::<_, Option<String>>(0))?.collect::<rusqlite::Result<Vec<_>>>()?
             .into_iter().flatten().map(|note| strip_markup(&note)).filter(|note| !note.is_empty()).collect::<Vec<_>>();
@@ -202,20 +357,6 @@ fn read_items(db: &Connection, root: &Path, library: Option<i64>) -> Result<Impo
         imported.entries.push(Entry { paper, pdfs });
     }
     Ok(imported)
-}
-
-fn collection_path(id: i64, collections: &BTreeMap<i64, (String, Option<i64>)>) -> Option<String> {
-    let mut parts = vec![];
-    let mut seen = HashSet::new();
-    let mut next = Some(id);
-    while let Some(id) = next {
-        if !seen.insert(id) { return None }
-        let (name, parent) = collections.get(&id)?;
-        parts.push(name.as_str());
-        next = *parent;
-    }
-    parts.reverse();
-    Some(parts.join("/"))
 }
 
 fn attachment_path(root: &Path, key: &str, value: &str, mode: i64) -> Result<PathBuf, String> {
@@ -305,7 +446,8 @@ mod tests {
                 CREATE TABLE itemNotes(itemID INTEGER PRIMARY KEY, parentItemID INT, note TEXT);
                 CREATE TABLE itemAttachments(itemID INTEGER PRIMARY KEY, parentItemID INT, linkMode INT, contentType TEXT, path TEXT);
                 CREATE TABLE deletedItems(itemID INTEGER PRIMARY KEY);
-                CREATE TABLE collections(collectionID INTEGER PRIMARY KEY, collectionName TEXT, parentCollectionID INT);
+                CREATE TABLE collections(collectionID INTEGER PRIMARY KEY, collectionName TEXT, parentCollectionID INT, libraryID INT);
+                CREATE TABLE deletedCollections(collectionID INTEGER PRIMARY KEY);
                 CREATE TABLE collectionItems(collectionID INT, itemID INT);
                 CREATE TABLE groups(groupID INTEGER PRIMARY KEY, libraryID INT, name TEXT);
                 INSERT INTO libraries VALUES(1, 'user'), (2, 'group'), (3, 'feed'), (4, 'group');
@@ -323,13 +465,14 @@ mod tests {
                 INSERT INTO itemNotes VALUES(2,1,'<p>Keep &amp; compare</p>'), (5,NULL,'Standalone'), (11,1,'Deleted note');
                 INSERT INTO itemAttachments VALUES(3,1,0,'application/pdf','storage:研究.pdf'), (6,1,0,'application/pdf','storage:missing.pdf'), (7,1,1,'text/html','storage:snapshot.html'), (12,1,0,'application/pdf','storage:deleted.pdf');
                 INSERT INTO deletedItems VALUES(4), (11), (12);
-                INSERT INTO collections VALUES(1, '植物', NULL), (2, '根', 1);
-                INSERT INTO collectionItems VALUES(2,1);
+                INSERT INTO collections VALUES(1, '植物', NULL, 1), (2, '根', 1, 1), (3, 'Trashed', NULL, 1), (4, 'Lab shelf', NULL, 2), (5, '叶', 1, 1);
+                INSERT INTO collectionItems VALUES(2,1), (3,1), (1,4), (4,9);
+                INSERT INTO deletedCollections VALUES(3);
             ").unwrap();
             Self { root, db }
         }
 
-        fn read(&self) -> Import { read(&self.path(), None).unwrap() }
+        fn read(&self) -> Import { read(&self.path(), None, &[]).unwrap() }
 
         fn path(&self) -> PathBuf { self.root.join("zotero.sqlite") }
     }
@@ -375,15 +518,61 @@ mod tests {
     #[test]
     fn reads_only_the_library_chosen() {
         let fixture = Fixture::new();
-        let own = read(&fixture.path(), Some(1)).unwrap();
+        let own = read(&fixture.path(), Some(1), &[]).unwrap();
         assert_eq!(own.entries.iter().map(|e| e.paper.title.as_str()).collect::<Vec<_>>(), ["Root atlas"]);
         assert_eq!(own.other_attachments, 1);
-        let group = read(&fixture.path(), Some(2)).unwrap();
+        let group = read(&fixture.path(), Some(2), &[]).unwrap();
         assert_eq!(group.entries.iter().map(|e| e.paper.title.as_str()).collect::<Vec<_>>(), ["Group preprint"]);
         assert_eq!(group.other_attachments, 0);
-        assert!(read(&fixture.path(), Some(4)).unwrap().entries.is_empty());
+        assert!(read(&fixture.path(), Some(4), &[]).unwrap().entries.is_empty());
         // A feed is never imported, even when asked for by id.
-        assert!(read(&fixture.path(), Some(3)).unwrap().entries.is_empty());
+        assert!(read(&fixture.path(), Some(3), &[]).unwrap().entries.is_empty());
+    }
+
+    #[test]
+    fn lists_the_collections_as_zotero_shows_them() {
+        let fixture = Fixture::new();
+        let listed = collections(&fixture.path()).unwrap();
+        // 我的文库's first, each followed by what is under it; the one in Zotero's trash is left out.
+        // A collection counts what is under it, and only the items `read` would take (not item 4, in Zotero's trash).
+        let seen: Vec<_> = listed.iter().map(|c| (c.id, c.library, c.path.as_str(), c.depth, c.items)).collect();
+        assert_eq!(seen, [(1, 1, "植物", 0, 1), (5, 1, "植物/叶", 1, 0), (2, 1, "植物/根", 1, 1), (4, 2, "Lab shelf", 0, 1)]);
+        assert_eq!(count_items([&listed[0], &listed[2]]), 1);
+        assert_eq!(count_items(&listed), 2);
+        assert!(under_picked(&listed, &[1], 2) && !under_picked(&listed, &[2], 2) && !under_picked(&listed, &[2], 1) && !under_picked(&listed, &[4], 5));
+        // Zotero 6 has no trash for collections.
+        fixture.db.execute_batch("DROP TABLE deletedCollections").unwrap();
+        assert!(collections(&fixture.path()).unwrap().iter().any(|c| c.path == "Trashed"));
+    }
+
+    #[test]
+    fn reads_only_the_collections_chosen() {
+        let fixture = Fixture::new();
+        let titles = |library, only: &[i64]| read(&fixture.path(), library, only).unwrap().entries.into_iter().map(|e| e.paper.title).collect::<Vec<_>>();
+        assert_eq!(titles(None, &[2]), ["Root atlas"]);
+        // A collection takes its subcollections' items too.
+        assert_eq!(titles(None, &[1]), ["Root atlas"]);
+        assert!(titles(None, &[5]).is_empty());
+        assert_eq!(titles(None, &[1, 4, 2]), ["Root atlas", "Group preprint"]);
+        assert!(titles(Some(1), &[4]).is_empty());
+        let one = read(&fixture.path(), None, &[2]).unwrap();
+        assert_eq!((one.entries[0].paper.tags.clone(), one.other_attachments), (vec!["单细胞".to_string(), "Zotero/植物/根".to_string()], 1));
+    }
+
+    #[test]
+    fn a_collection_is_chosen_by_path_name_or_id() {
+        let fixture = Fixture::new();
+        let listed = collections(&fixture.path()).unwrap();
+        let chosen = |wanted: &[&str]| choose_collections(&listed, &wanted.iter().map(|w| w.to_string()).collect::<Vec<_>>());
+        for (wanted, ids) in [(vec!["植物/根"], vec![2]), (vec![" 植物 / 根 "], vec![2]), (vec!["根"], vec![2]), (vec!["2"], vec![2]), (vec!["lab SHELF"], vec![4]), (vec!["根", "2", "植物"], vec![2, 1]), (vec!["", " "], vec![])] {
+            assert_eq!(chosen(&wanted).unwrap(), ids, "{wanted:?}");
+        }
+        let error = chosen(&["茎"]).unwrap_err().to_string();
+        assert!(error.contains("没有名为「茎」") && error.contains("植物/根（id 2，1 条）"), "{error}");
+        let twins = [listed[2].clone(), Collection { id: 9, path: "别处/根".into(), ..listed[2].clone() }];
+        let error = choose_collections(&twins, &["根".into()]).unwrap_err().to_string();
+        assert!(error.contains("用路径或 id") && error.contains("别处/根（id 9）"), "{error}");
+        assert_eq!(choose_collections(&twins, &["别处/根".into()]).unwrap(), [9]);
     }
 
     #[test]
@@ -412,10 +601,19 @@ mod tests {
         let group = call("import_zotero", serde_json::json!({"path": fixture.path(), "zoteroLibrary": "Root Lab"})).unwrap();
         assert_eq!((group["total"].as_u64(), group["added"].as_u64(), group["zoteroLibrary"].as_str()), (Some(1), Some(1), Some("Root Lab")));
         assert_eq!(group["results"][0]["title"], "Group preprint");
+        assert_eq!(listed["collections"].as_array().unwrap().iter().map(|c| c["path"].as_str().unwrap()).collect::<Vec<_>>(), ["植物", "植物/叶", "植物/根", "Lab shelf"]);
+        assert!(listed["collections"][0].get("members").is_none());
+        let shelf = call("import_zotero", serde_json::json!({"path": fixture.path(), "zoteroCollections": ["植物"]})).unwrap();
+        assert_eq!((shelf["total"].as_u64(), shelf["zoteroCollections"].clone()), (Some(1), serde_json::json!(["植物"])));
+        // A collection of another library than the one named is not there.
+        let elsewhere = call("import_zotero", serde_json::json!({"path": fixture.path(), "zoteroLibrary": "Root Lab", "zoteroCollections": "植物"})).unwrap_err();
+        assert!(elsewhere.contains("没有名为「植物」") && elsewhere.contains("Lab shelf"), "{elsewhere}");
         let wrong = call("import_zotero", serde_json::json!({"path": fixture.path(), "zoteroLibrary": "Nobody"})).unwrap_err();
         assert!(wrong.contains("Root Lab") && wrong.contains("Empty Lab"), "{wrong}");
         let cli = crate::tools::cli_args(&crate::tools::catalog().into_iter().find(|t| t.name == "import_zotero").unwrap().input_schema, &["--path".into(), "x".into(), "--zotero-library".into(), "我的文库".into()]).unwrap();
         assert_eq!(cli["zoteroLibrary"], "我的文库");
+        let cli = crate::tools::cli_args(&crate::tools::catalog().into_iter().find(|t| t.name == "import_zotero").unwrap().input_schema, &["--path".into(), "x".into(), "--zotero-collections".into(), "植物/根".into()]).unwrap();
+        assert_eq!(cli["zoteroCollections"], serde_json::json!(["植物/根"]));
     }
 
     #[test]
@@ -497,9 +695,9 @@ mod tests {
         assert_eq!(fixture.read().entries[0].paper.title, "Updated through WAL");
         let wrong = fixture.root.join("wrong.sqlite");
         drop(Connection::open(&wrong).unwrap());
-        assert!(read(&wrong, None).err().unwrap().to_string().contains("无法读取 Zotero"));
+        assert!(read(&wrong, None, &[]).err().unwrap().to_string().contains("无法读取 Zotero"));
         let missing = fixture.root.join("absent.sqlite");
-        assert!(read(&missing, None).is_err());
+        assert!(read(&missing, None, &[]).is_err());
         assert!(!missing.exists());
     }
 
@@ -507,7 +705,7 @@ mod tests {
     fn locked_database_explains_how_to_release_it_and_can_be_retried() {
         let fixture = Fixture::new();
         fixture.db.execute_batch("BEGIN EXCLUSIVE").unwrap();
-        let error = read(&fixture.path(), None).err().unwrap();
+        let error = read(&fixture.path(), None, &[]).err().unwrap();
         let message = format!("{error:#}");
         assert!(message.contains("正在被占用"));
         assert!(message.contains("退出"));
@@ -531,7 +729,8 @@ mod tests {
             assert!(attachment_path(&fixture.root, "KEY", path, 0).is_err(), "{path}");
         }
         assert!(attachment_path(&fixture.root, "../bad", "storage:paper.pdf", 0).is_err());
-        let cycle = BTreeMap::from([(1, ("one".into(), Some(2))), (2, ("two".into(), Some(1)))]);
-        assert!(collection_path(1, &cycle).is_none());
+        let node = |name: &str, parent| Node { name: name.into(), parent: Some(parent), library: 1 };
+        let cycle = Tree { nodes: BTreeMap::from([(1, node("one", 2)), (2, node("two", 1))]), own: BTreeMap::new(), kids: BTreeMap::new() };
+        assert!(cycle.path(1).is_none());
     }
 }
