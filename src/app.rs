@@ -84,6 +84,8 @@ pub enum Edge {
     Manuscript,
     /// Between two columns of the paper table (`Workspace::column_drag` says which).
     Column,
+    /// Between the two halves of a split PDF, while they are 自由 (`Library::halves_drag`).
+    Halves,
 }
 
 /// The edge between two columns of the paper table, as it was when the pointer took it.
@@ -327,6 +329,8 @@ pub enum Cmd {
     SetDensity(String),
     /// Which partition the 分区 column shows (`journals::ZONES`).
     SetJournalZone(String),
+    /// 设置 › 网络 › 网页搜索: an engine's key, `websearch::AUTO` or `websearch::OFF`.
+    SetWebSearchEngine(String),
     /// The voice 朗读 reads in, a key of `speech::VOICES`.
     SetSpeechVoice(String),
     /// The Latin or the Chinese interface font; empty is the platform's own.
@@ -386,6 +390,8 @@ pub enum Cmd {
     PickZotero,
     /// One library of the Zotero database chosen to import (`zotero::Library::id`), or `None`: all of them.
     ChooseZoteroLibrary(Option<i64>),
+    /// A collection of the Zotero database ticked or unticked (`zotero::Collection::id`).
+    ChooseZoteroCollection(i64),
     ShowZotero,
     ImportPdfs,
     ImportFolder,
@@ -462,6 +468,8 @@ pub enum Cmd {
     RemoveFile(String),
     /// Try once more to get the text of a stored file.
     RereadFile(String),
+    /// Make a stored PDF smaller: its pictures written anew (#242).
+    CompressFile(String),
     /// Have a model that sees pictures read the pages of a file that gave no text.
     ReadPages(String),
     SetTab(Tab),
@@ -521,6 +529,8 @@ pub enum Cmd {
     SwapPanes,
     /// The PDF's tools float at the page's right edge, or stand in its toolbar (`Settings::pdf_tools_floating`).
     FloatPdfTools(bool),
+    /// 分屏 自由 or 固定 (`Settings::pdf_split_free`, #245): halves of any width, each zoomed on its own, or of one size zoomed together.
+    PdfSplitFree(bool),
     /// Out of the layout for asking about a paper: the tab it was come to from, with the library around it.
     LeaveAsk,
     /// The paper's conversation floats over its PDF, or stands beside it (`Settings::floating`).
@@ -1619,8 +1629,9 @@ pub enum Modal {
     ImportReport,
     /// `open`: Zotero holds its database right now, as far as the usual place of it tells.
     Zotero { open: bool },
-    /// The database picked holds more than one library with items: which of them to import (`None`: all).
-    ZoteroLibraries { path: PathBuf, libraries: Vec<zotero::Library>, chosen: Option<i64> },
+    /// The database picked holds more than one library with items, or collections: which library to import (`None`: all),
+    /// and which of its collections (`picked`, `zotero::Collection::id`; none: the whole library).
+    ZoteroLibraries { path: PathBuf, libraries: Vec<zotero::Library>, chosen: Option<i64>, collections: Vec<zotero::Collection>, picked: Vec<i64> },
     ZoteroReport,
     /// What came of looking for each paper's open full text (`Library::fetching`).
     FetchReport,
@@ -1748,8 +1759,12 @@ pub struct Library {
     pub seek_bar: (f32, f32),
     pub seek_held: Option<f32>,
     pdf_events: Option<Subscription>,
-    /// Another file of the paper in the other half of the viewer (#185), while there is one.
+    /// Another file of the paper in the other half of the viewer (#185), while there is one; 分屏 自由, the same file too.
     pub beside: Option<Beside>,
+    /// 分屏 自由: the first half's share of the room the two halves have (0.5 is even); 固定 is always even.
+    pub split_share: f32,
+    /// The band between the halves as the pointer took it: where along the split it was, the share then, the room the halves have.
+    pub halves_drag: Option<(f32, f32, f32)>,
     /// Papers pinned beside the one on show, in the order of their panes.
     pub pins: Vec<Pinned>,
     /// Papers read in windows of their own.
@@ -1782,6 +1797,12 @@ pub struct Library {
     pub detail_scroll: ScrollHandle,
     /// Files whose text is being extracted.
     pub extracting: HashSet<String>,
+    /// PDFs being made smaller (`Cmd::CompressFile`).
+    pub shrinking: HashSet<String>,
+    /// PDFs made smaller before (`Store::shrunk_files`), and those found in this window to get no smaller:
+    /// neither is offered the button again.
+    pub shrunk: HashSet<String>,
+    pub no_smaller: HashSet<String>,
     /// The file of each paper chosen to read, when it is not the main text (`Cmd::ReadFile`).
     pub read_file: HashMap<String, String>,
     /// Where each file was read at when another took its place or its paper was left (`PdfView::place`):
@@ -2284,6 +2305,14 @@ impl Library {
     /// Put the viewer away, both its halves while it shows two files.
     pub fn close_pdf(&mut self) {
         (self.pdf, self.pdf_events, self.beside) = (None, None, None);
+        // The next paper opens with even halves.
+        self.split_share = 0.5;
+    }
+
+    /// The other half shows the same file as the half worked in: 分屏 自由 on one file, two viewers of it.
+    pub fn beside_itself(&self, cx: &App) -> bool {
+        let (Some(pdf), Some(beside)) = (&self.pdf, &self.beside) else { return false };
+        pdf.read(cx).resource_id() == beside.view.read(cx).resource_id()
     }
 
     /// The paper of a viewer that is not the panel's: one kept beside, or read in a window of its own.
@@ -2294,7 +2323,9 @@ impl Library {
     /// Note where the files on show are read at, here and in the library's database, before they are put
     /// away: another paper opened, the library closed or the app quit (#194).
     pub fn keep_places(&mut self, cx: &App) {
-        let views = self.pdf.iter().chain(self.beside.as_ref().map(|beside| &beside.view)).chain(self.pins.iter().map(|pin| &pin.view)).chain(self.windows.iter().map(|w| &w.view));
+        // The same file in both halves (分屏 自由) is read at where the half worked in is.
+        let beside = self.beside.as_ref().filter(|_| !self.beside_itself(cx)).map(|beside| &beside.view);
+        let views = self.pdf.iter().chain(beside).chain(self.pins.iter().map(|pin| &pin.view)).chain(self.windows.iter().map(|w| &w.view));
         let mut places: Vec<(String, (usize, f32))> = views.map(|view| { let view = view.read(cx); (view.resource_id().to_string(), view.place()) }).collect();
         // A kept podcast is read at a sample of its sound.
         places.extend(self.podcast_place());
@@ -2534,6 +2565,7 @@ impl Library {
         // A paper's record may have changed: how its citations read is worked out again.
         self.citing.read.made_from = 0;
         self.origins = self.store.file_origins()?;
+        self.shrunk = self.store.shrunk_files()?;
         self.gallery.items = self.store.list_figures()?;
         self.extract.proposals = wisp_core::extract::Proposals::new(self.store.list_proposals()?);
         self.extract_settle();
@@ -2669,6 +2701,9 @@ impl Workspace {
         for (label, split) in [("不分屏", Split::Off), ("左右分屏", Split::Side), ("上下分屏", Split::Stacked)] {
             items.push(MenuItem { label: t(label).into(), checked: current == split, note: None, cmd: Cmd::PdfSplit(split) });
         }
+        // 固定 or 自由: the same as the button on the bar beside 分屏, kept from paper to paper.
+        let free = self.settings.pdf_split_free;
+        items.push(MenuItem { label: t("自由调整：拖动分隔线，每一半各自缩放").into(), checked: free, note: None, cmd: Cmd::PdfSplitFree(!free) });
         // What the other half shows: the same file, or another of the paper's (a supplementary figure beside the text).
         // The translation has the other half while it is on.
         let choices = lib.selected.as_deref().map(|paper| lib.pdf_choices(paper)).unwrap_or_default();
@@ -3271,6 +3306,11 @@ impl Workspace {
                 self.save_settings(cx);
                 window.refresh();
             }
+            Cmd::SetWebSearchEngine(engine) => {
+                self.settings.web_search.engine = engine;
+                self.save_settings(cx);
+                cx.notify();
+            }
             Cmd::SetJournalZone(value) => {
                 self.settings.journal_zone = value;
                 self.save_settings(cx);
@@ -3385,7 +3425,21 @@ impl Workspace {
             }
             Cmd::PickZotero => self.pick_zotero(cx),
             Cmd::ChooseZoteroLibrary(id) => {
-                if let Some(Modal::ZoteroLibraries { chosen, .. }) = self.modal.as_mut() { *chosen = id }
+                if let Some(Modal::ZoteroLibraries { chosen, collections, picked, .. }) = self.modal.as_mut() {
+                    *chosen = id;
+                    // Ticks in another library than the one now chosen would import nothing of it.
+                    picked.retain(|p| id.is_none_or(|l| collections.iter().any(|c| c.id == *p && c.library == l)));
+                }
+            }
+            Cmd::ChooseZoteroCollection(id) => {
+                if let Some(Modal::ZoteroLibraries { collections, picked, .. }) = self.modal.as_mut() {
+                    if let Some(at) = picked.iter().position(|p| *p == id) { picked.remove(at); }
+                    else if !zotero::under_picked(collections, picked, id) {
+                        // A collection takes in what is under it: ticks there are now part of this one.
+                        picked.retain(|p| !zotero::under_picked(collections, &[id], *p));
+                        picked.push(id);
+                    }
+                }
             }
             Cmd::ShowZotero => {
                 self.modal_error.clear();
@@ -3714,6 +3768,7 @@ impl Workspace {
                 }
             }
             Cmd::RereadFile(id) => self.reread_file(id, cx),
+            Cmd::CompressFile(id) => self.compress_file(id, cx),
             Cmd::ReadPages(id) => self.write_run_start(true, Some(id), cx),
             Cmd::SetTab(tab) => {
                 // Without a model the question box is not drawn: the keyboard stays with the window, so Esc is still heard.
@@ -3852,6 +3907,11 @@ impl Workspace {
                     if split == Split::Off { self.close_beside(cx) } else if let Some(beside) = self.lib.as_mut().and_then(|lib| lib.beside.as_mut()) { beside.split = split }
                     return cx.notify();
                 }
+                // 自由: the file again in a viewer of its own beside it (with 译文 on, the split says where the translation stands).
+                if split != Split::Off && self.settings.pdf_split_free && self.lib.as_ref().is_some_and(|lib| !lib.facing_shown()) {
+                    self.split_itself(split, None, false, cx);
+                    return;
+                }
                 // It is for this paper: the next one opens whole.
                 if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.choose_split(split, cx)) }
             }
@@ -3882,6 +3942,7 @@ impl Workspace {
                 self.settings.pdf_first = !self.settings.pdf_first;
                 self.save_settings(cx);
             }
+            Cmd::PdfSplitFree(free) => self.set_split_free(free, cx),
             Cmd::FloatPdfTools(on) => {
                 // Only where the tools are drawn changes; a tool in use stays in use.
                 self.settings.pdf_tools_floating = on;
@@ -4935,6 +4996,8 @@ impl Workspace {
             seek_held: None,
             pdf_events: None,
             beside: None,
+            split_share: 0.5,
+            halves_drag: None,
             pins: vec![],
             windows: vec![],
             main_at: 0,
@@ -4961,6 +5024,9 @@ impl Workspace {
             table_scroll: UniformListScrollHandle::new(),
             detail_scroll: ScrollHandle::new(),
             extracting: HashSet::new(),
+            shrinking: HashSet::new(),
+            shrunk: HashSet::new(),
+            no_smaller: HashSet::new(),
             read_file: HashMap::new(),
             file_places,
             back: vec![],
@@ -5345,14 +5411,19 @@ impl Workspace {
 
     /// A viewer of a file of the selected paper, with its own marks, at the place it was left, and what it says heard.
     pub(crate) fn pdf_view(&mut self, file: &PaperFile, cx: &mut Context<Self>) -> Option<(Entity<PdfView>, Subscription)> {
+        self.pdf_view_at(file, None, None, cx)
+    }
+
+    /// A viewer of a file at a zoom and a place of its own (`None`: the fit papers open at, where the file was left).
+    pub(crate) fn pdf_view_at(&mut self, file: &PaperFile, zoom: Option<Zoom>, place: Option<(usize, f32)>, cx: &mut Context<Self>) -> Option<(Entity<PdfView>, Subscription)> {
         let lib = self.lib.as_mut()?;
         let path = lib.store.file_path(file);
         let annotations = match lib.store.pdf_annotations(&file.paper_id, &file.id) {
             Ok(annotations) => annotations,
             Err(error) => { self.fail(format!("{error:#}"), cx); return None }
         };
-        let zoom = lib.zoom;
-        let place = lib.file_places.get(&file.id).copied();
+        let zoom = zoom.unwrap_or(lib.zoom);
+        let place = place.or_else(|| lib.file_places.get(&file.id).copied());
         let pdf = cx.new(|cx| {
             let mut pdf = PdfView::new(&path, zoom, file, annotations, cx);
             // A file read before, of this paper, opens where it was left.
@@ -5390,6 +5461,11 @@ impl Workspace {
         // As the halves stand now; split anew, side by side where there is room for two pages.
         let split = crate::pdf::beside_split(lib.beside.as_ref().map(|beside| beside.split), inner, width);
         if file == shown {
+            // 自由: the file again in a viewer of its own beside it.
+            if self.settings.pdf_split_free {
+                self.split_itself(split, None, false, cx);
+                return;
+            }
             self.close_beside(cx);
             return pdf.update(cx, |pdf, cx| pdf.set_split(split, cx));
         }
@@ -5564,9 +5640,52 @@ impl Workspace {
 
     pub(crate) fn close_beside(&mut self, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
+        // The same file in the other half: its place is the half worked in's, which stays.
+        let itself = lib.beside_itself(cx);
         let Some(beside) = lib.beside.take() else { return };
         let view = beside.view.read(cx);
-        lib.file_places.insert(view.resource_id().to_string(), view.place());
+        if !itself { lib.file_places.insert(view.resource_id().to_string(), view.place()); }
+        cx.notify();
+    }
+
+    /// 分屏 自由 on one file (#245): the file worked in is shown again in the other half, a viewer of its own at
+    /// the same zoom, so each half is zoomed on its own and the band between them is dragged. The other half opens
+    /// at `place` (where the half worked in is, without one) and is the first, at the left or the top, when `first`.
+    /// Its viewer, or `None` when there is no file to show twice.
+    fn split_itself(&mut self, split: Split, place: Option<(usize, f32)>, first: bool, cx: &mut Context<Self>) -> Option<Entity<PdfView>> {
+        let lib = self.lib.as_ref()?;
+        let pdf = lib.pdf.clone()?;
+        let paper = lib.selected.clone()?;
+        if split == Split::Off || lib.facing_shown() { return None }
+        if lib.beside_itself(cx) { return lib.beside.as_ref().map(|beside| beside.view.clone()) }
+        let (file, zoom, here) = { let view = pdf.read(cx); (view.resource_id().to_string(), view.zoom(), view.place()) };
+        let paper_file = lib.paper_files(&paper).into_iter().find(|f| f.id == file && f.format == "pdf").cloned()?;
+        self.close_beside(cx);
+        pdf.update(cx, |pdf, cx| pdf.set_split(Split::Off, cx));
+        let (view, events) = self.pdf_view_at(&paper_file, Some(zoom), Some(place.unwrap_or(here)), cx)?;
+        let lib = self.lib.as_mut()?;
+        lib.beside = Some(Beside { view: view.clone(), _events: events, split, first });
+        cx.notify();
+        Some(view)
+    }
+
+    /// 分屏 自由 or 固定 (#245). A file split on itself changes how it is drawn and stays where it is: 自由 is two
+    /// viewers of it, each with its own zoom; 固定 is one viewer showing it twice, its halves even and zoomed together.
+    fn set_split_free(&mut self, free: bool, cx: &mut Context<Self>) {
+        self.settings.pdf_split_free = free;
+        self.save_settings(cx);
+        let Some(lib) = self.lib.as_mut() else { return };
+        let Some(pdf) = lib.pdf.clone() else { return };
+        if free {
+            if lib.beside.is_some() || lib.facing_shown() { return cx.notify() }
+            if let Some((split, place, first)) = pdf.update(cx, |pdf, cx| pdf.part(cx)) { self.split_itself(split, Some(place), first, cx); }
+        } else {
+            lib.split_share = 0.5;
+            if !lib.beside_itself(cx) { return cx.notify() }
+            let Some(beside) = lib.beside.take() else { return };
+            let place = beside.view.read(cx).place();
+            pdf.update(cx, |pdf, cx| pdf.join(beside.split, place, beside.first, cx));
+        }
         cx.notify();
     }
 
@@ -5597,7 +5716,7 @@ impl Workspace {
         };
         let wanted = lib.pdf_file(paper).map(|f| f.id.clone());
         // A file in the other half is gone to there; the half worked in keeps its own.
-        if lib.selected.as_deref() == Some(paper) && let Some(other) = lib.beside.as_ref().map(|beside| beside.view.clone()) && wanted.as_deref() == Some(other.read(cx).resource_id()) {
+        if lib.selected.as_deref() == Some(paper) && let Some(other) = lib.beside.as_ref().map(|beside| beside.view.clone()) && wanted.as_deref() == Some(other.read(cx).resource_id()) && !lib.beside_itself(cx) {
             self.work_in(&other, cx);
             return cx.notify();
         }
@@ -5663,6 +5782,11 @@ impl Workspace {
                 let main = lib.pdf.as_ref() == Some(&view);
                 let (inner, width) = { let pdf = view.read(cx); (pdf.split(), pdf.width()) };
                 let split = crate::pdf::beside_split(lib.beside.as_ref().filter(|_| main).map(|beside| beside.split), inner, width);
+                // 自由: the other half is a viewer of the same file, there at the figure.
+                if main && self.settings.pdf_split_free && !lib.facing_shown() {
+                    if let Some(other) = self.split_itself(split, None, false, cx) { other.update(cx, |pdf, cx| pdf.arrive(vec![], Some((*page, *top)), mark.clone(), cx)) }
+                    return;
+                }
                 if main { self.close_beside(cx) }
                 view.update(cx, |pdf, cx| pdf.keep_beside(split, *page, *top, mark.clone(), cx));
             }
@@ -5818,21 +5942,25 @@ impl Workspace {
         let library = lib.info.id.clone();
         let listing = path.clone();
         cx.spawn(async move |this, cx| {
-            let listed = cx.background_executor().spawn(async move { zotero::libraries(&listing) }).await;
+            // Collections that cannot be listed leave the choice of a library, as before there were any.
+            let (listed, collections) = cx.background_executor().spawn(async move { (zotero::libraries(&listing), zotero::collections(&listing).unwrap_or_default()) }).await;
             this.update(cx, |this, cx| {
                 // Closed meanwhile, or another library opened: nothing goes on.
                 if this.lib.as_ref().is_none_or(|l| l.info.id != library) || !matches!(this.modal, Some(Modal::Zotero { .. })) { return }
                 let offered: Vec<zotero::Library> = listed.map(|all| all.into_iter().filter(|l| l.items > 0).collect()).unwrap_or_default();
-                if offered.len() < 2 { return this.import_zotero(path, None, cx) }
+                // An empty collection imports nothing, and neither does what is under it.
+                let collections: Vec<zotero::Collection> = collections.into_iter().filter(|c| c.items > 0 && offered.iter().any(|l| l.id == c.library)).collect();
+                if offered.is_empty() || (offered.len() < 2 && collections.is_empty()) { return this.import_zotero(path, None, vec![], cx) }
                 this.modal_error.clear();
-                this.modal = Some(Modal::ZoteroLibraries { path, chosen: Some(offered[0].id), libraries: offered });
+                this.modal = Some(Modal::ZoteroLibraries { path, chosen: Some(offered[0].id), libraries: offered, collections, picked: vec![] });
                 cx.notify();
             }).ok();
         }).detach();
     }
 
     /// `only`: one library of the database (`zotero::Library::id`); `None` imports all of them.
-    fn import_zotero(&mut self, path: PathBuf, only: Option<i64>, cx: &mut Context<Self>) {
+    /// `collections`: only the items in these (`zotero::Collection::id`) and what is under them; none, the whole library.
+    fn import_zotero(&mut self, path: PathBuf, only: Option<i64>, collections: Vec<i64>, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
         if lib.zotero.as_ref().is_some_and(|run| run.running) { return }
         let library = lib.info.id.clone();
@@ -5843,7 +5971,7 @@ impl Workspace {
         self.modal = Some(Modal::ZoteroReport);
         cx.notify();
         cx.spawn(async move |this, cx| {
-            let parsed = cx.background_executor().spawn(async move { zotero::read(&path, only) }).await;
+            let parsed = cx.background_executor().spawn(async move { zotero::read(&path, only, &collections) }).await;
             let entries = this.update(cx, |this, cx| {
                 let run = this.lib.as_mut().filter(|l| l.info.id == library)?.zotero.as_mut().filter(|r| r.id == run_id)?;
                 let entries = match parsed {
@@ -6240,6 +6368,52 @@ impl Workspace {
             this.ensure_pdf(cx);
             this.import_next_url(queue, cx);
         });
+    }
+
+    /// Make a stored PDF smaller (`shrink`), out of the window's way, and keep the result when it is worth it.
+    fn compress_file(&mut self, id: String, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        let Some(file) = lib.files.iter().find(|f| f.id == id) else { return };
+        if file.format != "pdf" || !lib.shrinking.insert(id.clone()) { return }
+        let (library, path) = (lib.info.id.clone(), lib.store.file_path(file));
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let shrunk = cx.background_executor().spawn(async move { std::fs::read(&path).map_err(|e| anyhow::anyhow!(tf!("无法读取文件：{e}", "Cannot read file: {e}"))).and_then(|data| wisp_core::shrink::shrink(&data)) }).await;
+            this.update(cx, |this, cx| {
+                let Some(lib) = this.lib.as_mut().filter(|l| l.info.id == library) else { return };
+                lib.shrinking.remove(&id);
+                let (before, after) = match &shrunk { Ok(s) => (file_size(s.before as u64), file_size(s.bytes.len() as u64)), Err(_) => Default::default() };
+                match shrunk {
+                    Ok(shrunk) if shrunk.worth() => {
+                        let kept = lib.store.replace_file(&id, &shrunk.bytes).and_then(|_| lib.reload());
+                        match kept {
+                            Ok(()) => {
+                                // The viewer reads the file anew, at the place it was left.
+                                let showing = lib.pdf.as_ref().is_some_and(|view| view.read(cx).resource_id() == id);
+                                if showing {
+                                    lib.keep_places(cx);
+                                    lib.close_pdf();
+                                    this.ensure_pdf(cx);
+                                }
+                                this.say(tf!("已压缩：{before} → {after}。原文件移到了 removed 文件夹。", "Compressed: {before} → {after}. The original moved to the removed folder."), cx);
+                            }
+                            Err(err) => this.fail(format!("{err:#}"), cx),
+                        }
+                    }
+                    Ok(_) => {
+                        lib.no_smaller.insert(id);
+                        this.say(tf!("压缩后是 {after}（原来 {before}），小不到一成，文件保持原样。", "Compressed it would be {after} (now {before}): less than a tenth smaller, so the file stays as it is."), cx);
+                    }
+                    Err(err) => {
+                        lib.no_smaller.insert(id);
+                        this.fail(tf!("没有压缩：{err:#}", "Not compressed: {err:#}"), cx);
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Try once more to get the text of a stored file: after the reader has
@@ -6842,7 +7016,9 @@ impl Workspace {
         let Some(lib) = self.lib.as_mut() else { return false };
         let chat = chat_of!(lib, talk);
         if chat.ctx.is_none() { return false }
-        let catalog = tools::library_catalog();
+        let mut catalog = tools::library_catalog();
+        // Web search is offered only while an engine can be asked: switched off or without a key, the model would only hear why not.
+        if wisp_core::websearch::ready(&self.settings, "").is_err() { catalog.retain(|tool| tool.name != "web_search") }
         let build = |chat: &Chat| ai::chat_request_with(&profile, chat.ctx.as_ref()?, &chat.wire, &catalog, &outside).ok();
         let mut request = match chat.ctx.as_ref().map(|ctx| ai::chat_request_with(&profile, ctx, &chat.wire, &catalog, &outside)) {
             Some(Ok(request)) => request,
@@ -8082,7 +8258,7 @@ impl Workspace {
         cx.notify();
         let work = cx.background_executor().spawn(async move {
             let mut store = Store::open(&info.dir).map_err(|e| format!("{e:#}"))?;
-            tools::call_in_with(&mut store, &info, name, &args, &wisp_net::get_text, &wisp_net::download, Some(&wisp_net::notes::publish))
+            tools::call_in_with(&mut store, &info, name, &args, &wisp_net::get_text, &wisp_net::download, wisp_net::reach())
         });
         cx.spawn(async move |this, cx| {
             let result = work.await;
@@ -8175,9 +8351,9 @@ impl Workspace {
                 if form.chosen.is_some() { self.complete_apply(window, cx) } else if form.by_id { self.complete_lookup(cx) } else { self.complete_find(cx) }
             }
             Modal::Zotero { .. } => self.run(Cmd::PickZotero, window, cx),
-            Modal::ZoteroLibraries { path, chosen, .. } => {
-                let (path, chosen) = (path.clone(), *chosen);
-                self.import_zotero(path, chosen, cx);
+            Modal::ZoteroLibraries { path, chosen, picked, .. } => {
+                let (path, chosen, picked) = (path.clone(), *chosen, picked.clone());
+                self.import_zotero(path, chosen, picked, cx);
             }
             Modal::ZoteroReport => self.run(Cmd::CloseModal, window, cx),
             Modal::FetchReport => self.run(Cmd::CloseModal, window, cx),
@@ -8445,7 +8621,7 @@ fn run_tool(info: &LibraryInfo, sources: &[ai::Source], call: PreparedCall, allo
     let result = call.args.and_then(|args| {
         let mut store = Store::open(&info.dir).map_err(|e| format!("{e:#}"))?;
         // As the tool table has it; what is written into a manuscript cites as the conversation does (`compose::call`).
-        let mut value = wisp_core::compose::call_with(&mut store, info, &call.name, &args, sources, &wisp_net::get_text, &wisp_net::download, Some(&wisp_net::notes::publish))?;
+        let mut value = wisp_core::compose::call_with(&mut store, info, &call.name, &args, sources, &wisp_net::get_text, &wisp_net::download, wisp_net::reach())?;
         ai::add_labels(&mut value, sources);
         Ok(value)
     });
@@ -8837,9 +9013,9 @@ impl Workspace {
                 "notedestination" => Some(Cmd::NoteDestination(arg != "local")),
                 "notepick" => arg.parse().ok().map(Cmd::NotePick),
                 "submit" => Some(Cmd::SubmitModal),
-                "reread" | "byeye" => {
+                "reread" | "byeye" | "compress" => {
                     let Some(file) = self.lib.as_ref().and_then(|lib| lib.selected.as_deref().and_then(|id| lib.pdf_file(id)).map(|file| file.id.clone())) else { return };
-                    Some(if name == "reread" { Cmd::RereadFile(file) } else { Cmd::ReadPages(file) })
+                    Some(match name { "reread" => Cmd::RereadFile(file), "compress" => Cmd::CompressFile(file), _ => Cmd::ReadPages(file) })
                 }
                 "width" => {
                     self.settings.detail_width = arg.parse().unwrap_or(0.);
@@ -9132,6 +9308,13 @@ impl Workspace {
                 "swap" => Some(Cmd::SwapPanes),
                 // `pdftools` / `pdftools:bar`: the PDF's tools floating at the page's right edge, or back in its toolbar.
                 "pdftools" => Some(Cmd::FloatPdfTools(arg != "bar")),
+                // `pdffree`, `pdffree:off`: 分屏 自由 or 固定. `halves:0.3`: 自由, the first half's share of the room.
+                "pdffree" => Some(Cmd::PdfSplitFree(arg != "off")),
+                "halves" => {
+                    if let Some(lib) = self.lib.as_mut() { lib.split_share = crate::pdf::dragged_share(arg.parse().unwrap_or(0.5), 0., (lib.pdf_area(cx).0 - crate::pdf::DIVIDER).max(0.)) }
+                    cx.notify();
+                    return;
+                }
                 // `float` / `float:off`: the paper's conversation over its PDF, or beside it; `fold` / `fold:off` folds it up or opens it.
                 "float" => Some(Cmd::FloatChat(arg != "off")),
                 "fold" => Some(Cmd::FoldChat(arg != "off")),

@@ -244,6 +244,7 @@ pub fn provider_tile(preset: &str) -> (Hsla, Hsla) {
         "gemini" => (0x5B9BFF, 0x7A5CF0),
         "ark" => (0x2FC4D8, 0x1677E0),
         "typesafe" => (0x2B2F3A, 0x0F1115),
+        "opencode-go" => (0x4A4A50, 0x1A1A1E),
         _ => (0x9AA0AA, 0x6E737D),
     };
     (c(top), c(bottom))

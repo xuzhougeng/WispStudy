@@ -55,6 +55,8 @@ struct PdfBar {
     facing: bool,
     /// The tools float at the page's edge (`Settings::pdf_tools_floating`).
     floating: bool,
+    /// 分屏 自由 (`Settings::pdf_split_free`): the halves are dragged wider or narrower, each zoomed on its own.
+    free: bool,
     can_pin: bool,
     keep: bool,
     /// Beside the conversation: the bar ends in the way to put the PDF away.
@@ -388,6 +390,9 @@ impl Workspace {
             .enumerate()
             .map(|(i, file)| {
                 let reading = lib.extracting.contains(&file.id);
+                let shrinking = lib.shrinking.contains(&file.id);
+                // A heavy PDF is offered to be made smaller, until it has been or turned out not to get smaller.
+                let heavy = file.format == "pdf" && file.size_bytes >= wisp_core::shrink::HEAVY && !lib.shrunk.contains(&file.id) && !lib.no_smaller.contains(&file.id);
                 // By a model's eyes, when the file gave no text of its own.
                 let by_eye = lib.writing.sorting.reading && lib.writing.sorting.working.contains(&file.id);
                 let text = lib.store.fulltext_pages(&file.id).ok().flatten();
@@ -396,6 +401,7 @@ impl Workspace {
                     _ => None,
                 };
                 let note = match &text {
+                    _ if shrinking => t("正在压缩…").to_string(),
                     _ if reading => t("正在提取文字…").to_string(),
                     _ if by_eye => t("模型正在读页面…").to_string(),
                     Some(Ok(pages)) => {
@@ -432,7 +438,7 @@ impl Workspace {
                             .flex()
                             .items_center()
                             .gap(px(8.))
-                            .child(if reading || by_eye { ui::spinner(SharedString::from(format!("file-busy-{}", file.id)), 16., Theme::accent()).into_any_element() } else { ui::icon("file-text", 18., Theme::accent()).into_any_element() })
+                            .child(if reading || by_eye || shrinking { ui::spinner(SharedString::from(format!("file-busy-{}", file.id)), 16., Theme::accent()).into_any_element() } else { ui::icon("file-text", 18., Theme::accent()).into_any_element() })
                             .child(
                                 div()
                                     .flex()
@@ -443,6 +449,7 @@ impl Workspace {
                                     .child(div().truncate().text_size(text_px(12.)).text_color(if failure.is_some() { Theme::warning() } else { Theme::text_tertiary() }).child(format!("{} · {}{}", match attachments.iter().position(|a| a == &file.id) { Some(n) => format!("S{}", n + 1), None if file.kind == "fulltext" => t("正文").to_string(), None => t("附件").to_string() }, file_size(file.size_bytes), if note.is_empty() { String::new() } else { format!(" · {note}") }))),
                             )
                             // A PDF is read in the viewer here, an attachment as well as the main text.
+                            .when(heavy && !shrinking, |d| d.child(small(("file-compress", i), t("压缩")).tooltip(ui::tip(t("把过大的图片缩小，文字、页面和标注不变。原文件移到 removed 文件夹。"))).on_click(self.on(Cmd::CompressFile(file.id.clone()), cx))))
                             .when(file.format == "pdf", |d| d.child(small(("file-read", i), t("阅读")).on_click(self.on(Cmd::ReadFile(file.id.clone()), cx))))
                             .child(ui::ghost_button(("file-open", i), Some("link"), None).tooltip(ui::tip(t("用系统应用打开"))).on_click(self.on(Cmd::OpenFile(file.id.clone()), cx)))
                             .child(ui::ghost_button(("file-remove", i), Some("x"), None).on_click(self.on(Cmd::RemoveFile(file.id.clone()), cx))),
@@ -715,8 +722,17 @@ impl Workspace {
         // whichever is worked in.
         let pair = lib.beside.as_ref().map(|beside| (beside.view.clone(), beside.split, beside.first));
         let pdf_height = lib.pdf_area(cx).1;
-        let half_width = match &pair { Some((_, Split::Side, _)) => ((width - crate::pdf::DIVIDER) / 2.).max(0.), _ => width };
-        for view in std::iter::once(&pdf).chain(pair.as_ref().map(|(view, ..)| view)) {
+        // 自由, the halves share the room as the band between them was dragged; 固定, evenly.
+        let free = self.settings.pdf_split_free;
+        let share = if free { lib.split_share } else { 0.5 };
+        let room = (width - crate::pdf::DIVIDER).max(0.);
+        let first_width = (room * share).round();
+        let widths = match &pair {
+            // The viewer worked in, the other one.
+            Some((_, Split::Side, first)) => if *first { (room - first_width, first_width) } else { (first_width, room - first_width) },
+            _ => (width, width),
+        };
+        for (view, half_width) in std::iter::once((&pdf, widths.0)).chain(pair.as_ref().map(|(view, ..)| (view, widths.1))) {
             view.update(cx, |pdf, cx| {
                 pdf.set_width(half_width);
                 pdf.library_chat = library_chat;
@@ -732,16 +748,49 @@ impl Workspace {
             None => pdf.into_any_element(),
             Some((other, split, first)) => {
                 let (one, two) = if first { (other, pdf) } else { (pdf, other) };
-                let half = |view: Entity<crate::pdf::PdfView>| div().flex_1().min_w_0().min_h_0().overflow_hidden().child(view);
+                // The half worked in (the toolbar, the keys and the wheel's zoom speak of it) has a line of the accent along its top.
+                let worked = if first { 1 } else { 0 };
+                let half = |view: Entity<crate::pdf::PdfView>, grow: f32, at: usize| {
+                    let mut half = div().relative().flex_basis(px(0.)).min_w_0().min_h_0().overflow_hidden().child(view);
+                    half.style().flex_grow = Some(grow);
+                    half.when(at == worked, |d| d.child(div().absolute().top_0().left_0().w_full().h(px(2.)).bg(Theme::accent())))
+                };
                 // The same band as between the halves of one file split.
+                let stacked = split == Split::Stacked;
                 let line = div().flex_none().bg(Theme::line_strong());
-                let line = if split == Split::Stacked { line.h(px(crate::pdf::DIVIDER)).w_full() } else { line.w(px(crate::pdf::DIVIDER)).h_full() };
-                div().size_full().flex().when(split == Split::Stacked, |d| d.flex_col()).child(half(one)).child(line).child(half(two)).into_any_element()
+                let line = if stacked { line.h(px(crate::pdf::DIVIDER)).w_full() } else { line.w(px(crate::pdf::DIVIDER)).h_full() };
+                let halves = div().size_full().flex().when(stacked, |d| d.flex_col()).child(half(one, share, 0)).child(line).child(half(two, 1. - share, 1));
+                // 自由: the band is taken and dragged; twice, the halves are even again. Over both halves, so neither takes the press.
+                let grip = free.then(|| {
+                    let held = self.resizing == Some(Edge::Halves);
+                    let length = if stacked { (pdf_height - crate::pdf::DIVIDER).max(0.) } else { room };
+                    let at = (length * share).round() + crate::pdf::DIVIDER / 2.;
+                    let grip = div().id("pdf-halves-edge").group("pdf-halves-edge").absolute().flex().justify_center().items_center().occlude();
+                    let grip = if stacked { grip.left_0().w_full().top(px(at - 4.5)).h(px(9.)).cursor_row_resize() } else { grip.top_0().h_full().left(px(at - 4.5)).w(px(9.)).cursor_col_resize() };
+                    let mark = div().when(held, |d| d.bg(Theme::accent())).when(!held, |d| d.group_hover("pdf-halves-edge", |s| s.bg(Theme::accent().opacity(0.5))));
+                    let mark = if stacked { mark.h(px(2.)).w_full() } else { mark.w(px(2.)).h_full() };
+                    grip.on_mouse_down(MouseButton::Left, cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                        cx.stop_propagation();
+                        let Some(lib) = this.lib.as_mut() else { return };
+                        if event.click_count >= 2 {
+                            this.resizing = None;
+                            lib.split_share = 0.5;
+                        } else {
+                            let along = if stacked { f32::from(event.position.y) } else { f32::from(event.position.x) };
+                            lib.halves_drag = Some((along, lib.split_share, length));
+                            this.resizing = Some(Edge::Halves);
+                        }
+                        cx.notify();
+                    }))
+                    .on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| this.end_drag(cx)))
+                    .child(mark)
+                });
+                div().size_full().relative().child(halves).children(grip).into_any_element()
             }
         };
         // The tools stand in the toolbar, or float at the page's right edge: a habit, kept for every paper.
         let floating = self.settings.pdf_tools_floating;
-        let bar = PdfBar { width, file_id: file_id.clone(), paper_id, file_title, others, page, count, percent, zoom, fit: lib.zoom, cutting, split, pen, facing, floating, can_pin, keep: lib.keep, beside, aloud, paned, hidden: hidden.to_vec() };
+        let bar = PdfBar { width, file_id: file_id.clone(), paper_id, file_title, others, page, count, percent, zoom, fit: lib.zoom, cutting, split, pen, facing, floating, free, can_pin, keep: lib.keep, beside, aloud, paned, hidden: hidden.to_vec() };
         // One line whatever the width: what it has no room for gives way level by level, the last of them under ⋯.
         let mut level = 0;
         let parts = loop {
@@ -826,6 +875,12 @@ impl Workspace {
             let split_label = match bar.split { _ if replaced => t("原地替换"), Split::Off => t("分屏"), Split::Side => t("左右分屏"), Split::Stacked => t("上下分屏") };
             let (split, width) = button("pdf-split", None, "columns-2", split_label, replaced || bar.split != Split::Off, None, named);
             put((split.on_click(self.on_menu(MenuKind::PdfSplit, cx)), width));
+            // Split, how the halves are held: 固定, even and zoomed together; 自由, the band dragged and each half zoomed on its own.
+            if bar.split != Split::Off && !bar.facing {
+                let (label, icon, tip) = if bar.free { (t("自由"), "lock-open", t("自由：拖动中间的分隔线调整两边宽度；点一下某一边，缩放只改这一边。点此改回固定")) } else { (t("固定"), "lock", t("固定：两边一样宽，缩放一起变。点此改为自由：分隔线可以拖动，两边各自缩放")) };
+                let (hold, width) = button("pdf-split-free", Some(icon), icon, label, bar.free, Some(tip.to_string()), named);
+                put((hold.on_click(self.on(Cmd::PdfSplitFree(!bar.free), cx)), width));
+            }
             // Cut a piece out of a page (a figure, a table): to keep in the figure library, or as a picture for the next question.
             let (cut, width) = button("pdf-cut", None, "scissors", if bar.cutting { t("取消截图") } else { t("截图") }, bar.cutting, None, named);
             put((cut.on_click(self.on(Cmd::PdfCut, cx)), width));
@@ -940,6 +995,8 @@ impl Workspace {
         if self.settings.pdf_tools_at.is_none() && marks_open && width - list - 16. >= geo::TOOLS.0 + 8. { right = list + 16. }
         let held = self.lib.as_ref().and_then(|lib| lib.float_drag).is_some_and(|drag| drag.held_tools());
         let split_tip = match split { Split::Off => "分屏", Split::Side => "左右分屏", Split::Stacked => "上下分屏" };
+        let free = self.settings.pdf_split_free;
+        let facing = self.lib.as_ref().is_some_and(|lib| lib.facing_shown());
         div()
             .absolute()
             .top(px(top))
@@ -976,6 +1033,11 @@ impl Workspace {
                     })),
             )
             .child(tool("pdf-float-split", "columns-2", split != Split::Off, split_tip).on_click(self.on_menu(MenuKind::PdfSplit, cx)))
+            .when(split != Split::Off && !facing, |d| d.child(if free {
+                tool("pdf-float-split-free", "lock-open", true, "自由：拖动中间的分隔线调整两边宽度；点一下某一边，缩放只改这一边。点此改回固定").on_click(self.on(Cmd::PdfSplitFree(false), cx))
+            } else {
+                tool("pdf-float-split-free", "lock", false, "固定：两边一样宽，缩放一起变。点此改为自由：分隔线可以拖动，两边各自缩放").on_click(self.on(Cmd::PdfSplitFree(true), cx))
+            }))
             .child(tool("pdf-float-cut", "scissors", cutting, if cutting { "取消截图" } else { "截图" }).on_click(self.on(Cmd::PdfCut, cx)))
             .child(tool("pdf-float-box", "square", pen == Tool::Box, "在页面上拖出方框，框住图表或文字").on_click(self.on(Cmd::PdfTool(Tool::Box), cx)))
             .child(tool("pdf-float-note", "sticky-note", pen == Tool::Note, "点击页面任意位置添加便签").on_click(self.on(Cmd::PdfTool(Tool::Note), cx)))

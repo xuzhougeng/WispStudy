@@ -88,20 +88,25 @@ pub(super) fn import_zotero(store: &mut Store, args: &Value) -> Result<Value> {
     // Only a library named asks the database what it holds; every library needs no list.
     let listed = if wanted.trim().is_empty() { vec![] } else { zotero::libraries(&path)? };
     let library = zotero::choose(&listed, wanted)?;
-    let imported = zotero::read(&path, library)?;
+    let named = super::texts(args, "zoteroCollections")?;
+    // Only the collections of the library chosen can be named.
+    let collections: Vec<zotero::Collection> = if named.is_empty() { vec![] } else { zotero::collections(&path)?.into_iter().filter(|c| library.is_none_or(|l| c.library == l)).collect() };
+    let only = zotero::choose_collections(&collections, &named)?;
+    let imported = zotero::read(&path, library, &only)?;
     let rows = imported.entries.into_iter().map(|entry| Row { record: zotero::import_entry(store, entry), ..Default::default() }).collect();
     let mut result = report(&path, rows);
     // Zotero copies attachments here; text is extracted by the reading tools.
     result.as_object_mut().unwrap().remove("textless");
     result["otherAttachments"] = json!(imported.other_attachments);
     if let Some(chosen) = listed.iter().find(|l| Some(l.id) == library) { result["zoteroLibrary"] = json!(chosen.name) }
+    if !only.is_empty() { result["zoteroCollections"] = json!(only.iter().filter_map(|id| collections.iter().find(|c| c.id == *id)).map(|c| &c.path).collect::<Vec<_>>()) }
     Ok(result)
 }
 
-/// What `import_zotero` can take from a database, one library at a time.
+/// What `import_zotero` can take from a database: one library at a time, or some of its collections.
 pub(super) fn zotero_libraries(args: &Value) -> Result<Value> {
     let path = input_path(args)?;
-    Ok(json!({"path": path, "libraries": zotero::libraries(&path)?}))
+    Ok(json!({"path": path, "libraries": zotero::libraries(&path)?, "collections": zotero::collections(&path)?}))
 }
 
 pub(super) fn import_pdf(store: &mut Store, args: &Value) -> Result<Value> {

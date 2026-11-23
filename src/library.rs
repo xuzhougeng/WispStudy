@@ -436,6 +436,20 @@ impl Workspace {
         cx.notify();
     }
 
+    /// The band between the halves of a split PDF is being dragged (分屏 自由): it follows the pointer, each half keeping some room.
+    pub fn drag_halves(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if self.resizing != Some(Edge::Halves) { return }
+        if event.pressed_button != Some(MouseButton::Left) { return self.end_drag(cx) }
+        let Some(lib) = self.lib.as_mut() else { return self.end_drag(cx) };
+        let Some((from, share, room)) = lib.halves_drag else { return self.end_drag(cx) };
+        let stacked = lib.beside.as_ref().is_some_and(|beside| beside.split == crate::pdf::Split::Stacked);
+        let along = if stacked { f32::from(event.position.y) } else { f32::from(event.position.x) };
+        let share = crate::pdf::dragged_share(share, along - from, room);
+        if (share - lib.split_share).abs() * room < 0.5 { return }
+        lib.split_share = share;
+        cx.notify();
+    }
+
     /// The edge between two columns of the paper table is being dragged: it follows the pointer.
     pub fn drag_column(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
         if self.resizing != Some(Edge::Column) { return }

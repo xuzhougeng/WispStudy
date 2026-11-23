@@ -20,11 +20,12 @@ wisp import_pdf -l L-实际ID --path "PDF collection"
 wisp import_zotero -l L-实际ID --path /path/to/Zotero/zotero.sqlite
 wisp list_zotero_libraries --path /path/to/Zotero/zotero.sqlite
 wisp import_zotero -l L-实际ID --path /path/to/Zotero/zotero.sqlite --zotero-library "Root Lab"
+wisp import_zotero -l L-实际ID --path /path/to/Zotero/zotero.sqlite --zotero-collections "植物/根"
 ```
 
 `import_pdf` 支持递归导入文件夹，子文件夹名称转为标签；`--paper-id` 可将单个 PDF 附到已有文献。离线提取 DOI 和全文，未补全的题目用文件名，不自动联网查询元数据。已有记录保留，回收站条目跳过，相同条目的相同附件内容只保存一次；内容完全相同的文件换了名字再导入，算作已持有它的那篇文献，不新建记录。
 
-`import_references` 按内容识别 BibTeX / RIS，不自动携带 PDF。`import_zotero` 复用桌面的只读迁移流程，复制可访问的本地 PDF；默认导入个人库和所有群组库，`--zotero-library` 只导入其中一个（「我的文库」、群组名称，或 `list_zotero_libraries` 列出的 `id`；名称对不上时报错并列出有哪些）。建议先退出 Zotero，详见 [Zotero 导入](ZOTERO.md)。这些本地导入不联网、不移动源文件。
+`import_references` 按内容识别 BibTeX / RIS，不自动携带 PDF。`import_zotero` 复用桌面的只读迁移流程，复制可访问的本地 PDF；默认导入个人库和所有群组库，`--zotero-library` 只导入其中一个（「我的文库」、群组名称，或 `list_zotero_libraries` 列出的 `id`；名称对不上时报错并列出有哪些），`--zotero-collections` 只导入其中几个分类（分类路径如 `植物/根`、名称或分类 `id`，几个时写 JSON 数组；每个含其子分类）。建议先退出 Zotero，详见 [Zotero 导入](ZOTERO.md)。这些本地导入不联网、不移动源文件。
 
 PDF / Zotero 的 JSON 含新增、跳过、附件数量和逐项 `results`。必须检查 `failed` 和 `results[].problems`：有些记录已入库，但附件可能缺失，部分失败仍可能退出 0。PDF 的 `textless` / `textError` 表示文件已保存但未提取出文字。Zotero 附件的文本在阅读时提取。本地导入不生成在线检索的批次号，不能用 `undo_import` 撤销。
 
@@ -85,8 +86,8 @@ wisp search_fulltext --help             # 一个工具的参数
 | `import_library` | 把另一个 Wisp Study 导出的 `.wispstudy` 文件（或改名前的 `.wisppaper` 文件）导入为新文献库，`--path` 必填（会创建文件和数据库） |
 | `import_pdf` | 复制本地 PDF 或递归导入文件夹，`--path` 必填；单文件可用 `--paper-id` 附到已有条目（会改动文献库） |
 | `import_references` | 导入本地 BibTeX / RIS 文件，`--path` 必填，按内容识别格式（会改动文献库） |
-| `import_zotero` | 从本机 `zotero.sqlite` 迁移文献、笔记、标签和 PDF，`--path` 必填；`--zotero-library` 只导入其中一个文献库（会改动目标文献库） |
-| `list_zotero_libraries` | 列出本机 `zotero.sqlite` 里的个人库和群组库，各有 `id`、名称和会导入的条目数，`--path` 必填（只读） |
+| `import_zotero` | 从本机 `zotero.sqlite` 迁移文献、笔记、标签和 PDF，`--path` 必填；`--zotero-library` 只导入其中一个文献库，`--zotero-collections` 只导入其中几个分类（会改动目标文献库） |
+| `list_zotero_libraries` | 列出本机 `zotero.sqlite` 里的个人库和群组库，各有 `id`、名称和会导入的条目数；以及各文献库的分类（`collections`：`id`、`path`、所属文献库 `library` 和含子分类的条目数），`--path` 必填（只读） |
 | `library_status` | 一个库的概况：各状态的数量、自定义词条、状态值的显示名称 |
 | `list_papers` | 搜索、筛选、翻页；规则与界面上的列表相同。年份可以是区间（`--year-from 2020 --year-to 2026`，只给一头也可以），期刊可以按影响因子（`--min-impact 10`）和分区（`--zone cas:2` 是中科院 1–2 区，`xr:1` 新锐 1 区，`jcr:1` JCR Q1）筛 |
 | `get_paper` | 一篇文献的完整记录、词条和附件；`journalMetrics` 是它的期刊的影响因子与分区（查不到为 null） |
@@ -98,6 +99,7 @@ wisp search_fulltext --help             # 一个工具的参数
 | `find_passages` | 在一篇文献里找出最贴近给定句子的原文：稿件里引用它的那句话依据的是哪一句（摘要和全文里的句子，全文里的带页码；语言不同时用 `queries` 给出检索词） |
 | `find_sentences` | 写作参考：库里各篇文献在同一部分（摘要、导言、方法、结果、讨论）的句子；给 `--query` 时按相近程度排，不给时返回各篇这一部分的开头 |
 | `search_online` | 在 PubMed、Europe PMC、Crossref 或 arXiv 试运行一个检索式，不写入；标出每条结果是否已在库中 |
+| `web_search` | 用网页搜索引擎搜索互联网（DeepSeek 或 Jina，按桌面「设置 › 网络 › 网页搜索」；`--engine` 指定一个），返回标题、网址、摘要、站点和发布时间；`--content` 附上网页正文，`--count` 默认 8。不需要文献库，不写入。DeepSeek 的 Key 与它的模型共用，Jina 的 Key 也可以放在环境变量 `JINA_API_KEY` |
 | `find_metadata` | 为缺 DOI 或题目的文献按题目到 Crossref、Europe PMC 和 arXiv 查找可能对应的记录，不写入；返回各来源的情况和候选（相似度、一致与不一致之处、是否已是库里的另一篇）。`--paper-id` 必填，`--title`、`--author`、`--year` 可选。写入由人在窗口里核对后确认 |
 | `list_searches` / `save_search` / `remove_search` | 查看、保存、删除检索式（后两个会改动文献库） |
 | `run_search` | 运行一个保存的检索式并导入，已有的文献跳过，返回批次号（会改动文献库） |
@@ -120,6 +122,7 @@ wisp search_fulltext --help             # 一个工具的参数
 | `edit_section` | 写或修改稿件的一节：`--edits` 是一个 JSON 数组，每项是 `old`（从这一节逐字摘出的原文，留空表示加在末尾）和 `new`（改成的文字，留空表示删去）；或用 `--text` 给出这一节的全部新正文。引用写作 `[@Key]` 或 `[@文献ID]`。改动前的文字留作这一节的一个历史版本（会改动稿件） |
 | `set_outline` | 设定一份稿件的大纲：`--sections` 是一个 JSON 数组，按顺序列出各节（保留的节带 `id`，可以改名、改类型、换位置；不带的是新加的），可同时给 `--title`、`--language`。没列出的节，没写过内容的去掉，写过的保留在最后（会改动稿件） |
 | `find_pdf` | 为没有 PDF 的文献查找开放获取的全文（arXiv、OpenAlex 和 Europe PMC 列出的开放获取文件、部分出版商的开放获取文章），下载后附到原条目并读出文字；取回的文件是论文的补充材料（开头几页只有附图、附表）时不保存，接着试下一个地址；`--paper-id` 只处理一篇，`--limit` 一次最多几篇，`--look-only` 只列出候选地址不下载。不绕过付费墙或登录；会把 DOI 或 PMID 发给这些服务（会改动文献库） |
+| `compress_pdf` | 压缩文献库里过大的 PDF：长边超过 2400 像素的图片缩到 2400 像素，照片存为 JPEG，线条图保持无损，文字、页面和标注不变，并核对每页文字与原来一致；至少小一成才替换，附件 ID 不变。`--resource-id` 只压缩一个附件，`--paper-id` 压缩一篇文献的所有 PDF。结果里 `outcome` 是 `compressed`、`not_worth` 或 `failed`，`original` 是移到 `removed/` 的原文件。带密码或权限保护的 PDF 不处理（会改动文献库） |
 | `import_url` | 按网址添加一篇文献（`--url https://…`）：文献在出版商网站上的页面，或 PDF 本身的地址。网址只用本机的网络请求一次（校园网能下载的就能取到）；网页上的 `citation_doi`、`citation_pmid` 等标签给出编号，按编号查询信息后添加（已有的不重复），再下载网页标出的 PDF（`citation_pdf_url`），拿不到时找开放获取的版本（同 `find_pdf`）。网页打不开但网址里写着 DOI 时按这个 DOI 添加；PDF 地址按拖入的 PDF 处理。结果里 `outcome` 是 `added`、`attached`、`held`、`in_trash`、`not_recognised` 或 `failed`，`pdf` 是 `saved`、`had` 或 `none`（`pdfReason` 说明原因）。一个网址最多花两分钟（查询信息和找开放获取的版本都算在内），到时已经添加的文献保留，原因里会说「花的时间太长」；缺的 PDF 可以再用 `find_pdf` 找。不登录、不带 cookie、不冒充浏览器，除 PDF 地址外不跟随网页上的链接（会改动文献库） |
 
 全文检索第一次用到某个 PDF 时会提取它的文字并缓存到库里，同时按标题把它分成导言、方法、结果、讨论并切成句子，之后即时返回。

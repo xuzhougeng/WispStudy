@@ -84,11 +84,18 @@
           <li>在 Zotero 里等同步完成，把要带走的 PDF 打开一次，确认已经下载到本机，然后<strong>退出 Zotero</strong>。只关窗口，它可能还在后台占着数据库。</li>
           <li>在 Wisp Study 里点「添加文献 › 从 Zotero 导入…」，读一遍说明，点「选择 zotero.sqlite…」，选 Zotero 数据目录里的 <code>zotero.sqlite</code>。数据目录在 Zotero 的「设置 › 高级 › 文件和文件夹」里能打开。</li>
         </ol>
+        <p>Zotero 里除了「我的文库」还加入了群组时，数据库里就不止一个文献库。v0.17.0 起，选好 <code>zotero.sqlite</code> 之后先问导入哪一个：每一行是一个文献库和它的条目数（不算笔记、附件和 Zotero 回收站里的），最后一行「全部」是合在一起。默认选中「我的文库」，选好点「导入」。只有一个文献库里有条目时，不问这一步，直接导入。</p>
+
+        <figure class="shot">
+          <img src="../img/t/migrate-09-zotero-libraries.jpg" width="1372" height="867" loading="lazy" alt="「从 Zotero 导入」对话框：这个数据库里有 3 个文献库有条目，选择要导入的：我的文库 7 条（选中）、组会文献 3 条、课题组共享文库 5 条，分隔线下是全部 15 条；按钮是取消和导入。背后是一个空的文献库。">
+          <figcaption><b>图 2</b>　一个带两个群组的 Zotero 数据库：先选导入哪一个，也可以选「全部」。这张截图来自 v0.17.0 上另一个为演示做的小数据库。</figcaption>
+        </figure>
+
         <p>导入用只读方式打开 Zotero 的数据库，PDF 是复制过来的，原文件不动，这一步也不联网。本例的 Zotero 库很小，6 篇，几秒钟就完成了：</p>
 
         <figure class="shot">
           <img src="../img/t/migrate-02-zotero-report.jpg" width="1372" height="867" loading="lazy" alt="「Zotero 导入」结果窗口：6 / 6 项已处理，导入完成；新增 6 篇，新增 PDF 4 个，待处理 1 项；其中一篇下面写着找不到 PDF，请先在 Zotero 中下载或修复路径。左侧标签栏出现精读、Zotero/拟南芥、Zotero/方法/注释等标签。">
-          <figcaption><b>图 2</b>　Zotero 导入的结果。黄色的一行是还要处理的：那篇的记录进来了，PDF 没找到。左侧多了一串 <code>Zotero/…</code> 标签。</figcaption>
+          <figcaption><b>图 3</b>　Zotero 导入的结果。黄色的一行是还要处理的：那篇的记录进来了，PDF 没找到。左侧多了一串 <code>Zotero/…</code> 标签。</figcaption>
         </figure>
 
         <p>这一次的结果是「新增 6 篇 · 已有 0 篇 · 回收站 0 篇 · 失败 0 篇 · 新增 PDF 4 个 · 待处理 1 项」，另有 1 个网页快照没有迁移。看左侧的标签：Zotero 里的标签原样带来（「精读」「数据库」），分类变成了 <code>Zotero/方法/注释</code> 这样带路径的标签，点一下就能筛出那个分类。挂在文献下的笔记合进了文献的笔记，Extra 里的 PMID 也认了出来。</p>
@@ -104,7 +111,7 @@
 
         <figure class="shot">
           <img src="../img/t/migrate-03-pdf-report.jpg" width="1372" height="867" loading="lazy" alt="「PDF 导入」明细窗口：11 / 11 项已处理，导入完成；已导入 9、待完善 1、已跳过 1；新增 9、附到已有文献 1、在回收站里未导入 1。逐个文件列出结果：scan_0032.pdf 已添加但没认出 DOI，DRG_scRNA.pdf 的文献在回收站里没有导入，其余为已添加。左下角侧栏是「PDF 导入完成 11/11」。">
-          <figcaption><b>图 3</b>　导入明细。黄字是要你再看一眼的：一个没认出 DOI，一个对应回收站里的文献。点一行打开那篇文献。</figcaption>
+          <figcaption><b>图 4</b>　导入明细。黄字是要你再看一眼的：一个没认出 DOI，一个对应回收站里的文献。点一行打开那篇文献。</figcaption>
         </figure>
 
         <ul>
@@ -122,7 +129,7 @@
 
         <figure class="shot">
           <img src="../img/t/migrate-04-doi.jpg" width="1372" height="867" loading="lazy" alt="「通过 DOI / PMID 添加」对话框，输入框里是 10.3389/fpls.2025.1666531，下面说明题目、作者、期刊、年份和摘要会从 Crossref 与 Europe PMC 查询后填入，查询会把这个编号发送给这两个服务。">
-          <figcaption><b>图 4</b>　一次添加一篇。对话框写明了会把编号发给 Crossref 和 Europe PMC。</figcaption>
+          <figcaption><b>图 5</b>　一次添加一篇。对话框写明了会把编号发给 Crossref 和 Europe PMC。</figcaption>
         </figure>
 
         <p>点「查询并添加」，几秒后玉米根的那篇进来，题目、作者、期刊、摘要都填好了。再打开一次，填 PMID <code>42021342</code>，进来的是芦苇入侵那篇（Genome Biology，2026）。也可以粘贴 doi.org 的链接。到这里库里有 21 篇，「缺 PDF」视图里有 9 篇。</p>
@@ -140,14 +147,14 @@
 
         <figure class="shot">
           <img src="../img/t/migrate-05-complete-candidates.jpg" width="1372" height="867" loading="lazy" alt="「按题目补全」对话框：题目框里是输入的题目；下面写着 Crossref 5 条、Europe PMC 2 条、arXiv 没有查到；两条候选，一条是 2024 年的预印本（DOI 10.1101/2024.08.30.610433），一条是 2025 年 New Phytologist 的正式发表版本（DOI 10.1111/nph.20446），都标着「题目一致」。">
-          <figcaption><b>图 5</b>　每个来源各查到几条写在上面。同一题目的预印本和正式发表版本是两条候选，选哪条由你决定。</figcaption>
+          <figcaption><b>图 6</b>　每个来源各查到几条写在上面。同一题目的预印本和正式发表版本是两条候选，选哪条由你决定。</figcaption>
         </figure>
 
         <p>这一次 Crossref 查到 5 条，Europe PMC 2 条，arXiv 没有查到，合并成两条候选：2024 年的预印本和 2025 年 New Phytologist 上的正式版本，都标着「题目一致」。排在前面只说明题目更像。本例选了正式发表的版本，点它逐个字段核对：</p>
 
         <figure class="shot">
           <img src="../img/t/migrate-06-complete-fields.jpg" width="1372" height="867" loading="lazy" alt="「按题目补全 · 核对这条记录」：候选的出处是 Crossref、Europe PMC；下面逐个字段列出题目、作者、年份、期刊、发表状态、DOI、PMID、摘要，每个字段旁有勾选框和「现在」的内容，题目现在是 scan_0032（文件名），其余现在空着，全部已勾选；右下角按钮是「写入 8 个字段」。">
-          <figcaption><b>图 6</b>　每个字段下面写着「现在」是什么。默认只勾空着的字段和只是文件名的题目；已有的内容要你勾上才会被替换。</figcaption>
+          <figcaption><b>图 7</b>　每个字段下面写着「现在」是什么。默认只勾空着的字段和只是文件名的题目；已有的内容要你勾上才会被替换。</figcaption>
         </figure>
 
         <p>8 个字段都是空的或只是文件名，默认全勾上。点「写入 8 个字段」，提示「已补全」，这一行有了题目、作者和年份。</p>
@@ -160,7 +167,7 @@
 
         <figure class="shot">
           <img src="../img/t/migrate-07-nopdf.jpg" width="1372" height="867" loading="lazy" alt="「缺 PDF」视图，列出 9 篇全文为「有链接」的文献；列表上方一条绿色说明：可以替你找开放获取的全文，要付费或登录的不会去取，查找时会把 DOI 或 PMID 发给 OpenAlex、Europe PMC 和出版商；右边按钮「为 9 篇查找开放全文」。">
-          <figcaption><b>图 7</b>　「缺 PDF」视图顶部的说明写明了会发出什么、发给谁。</figcaption>
+          <figcaption><b>图 8</b>　「缺 PDF」视图顶部的说明写明了会发出什么、发给谁。</figcaption>
         </figure>
 
         <p>它只找能免费合法取得的版本：arXiv，OpenAlex 和 Europe PMC 列出的开放获取文件，以及被它们标为开放获取的 Springer / BMC、Nature、Frontiers 文章在出版商那里的 PDF。不登录，不绕过付费墙。没有 DOI、PMID 或 arXiv 编号的文献查不了。</p>
@@ -168,7 +175,7 @@
 
         <figure class="shot">
           <img src="../img/t/migrate-08-fetch-report.jpg" width="1372" height="867" loading="lazy" alt="「全文查找」窗口：9 / 9 篇已处理，查找完成；已保存 2，下载失败 7；逐篇列出原因，例如 GreenCells 和 Multiome 两篇是 OpenAlex 给的地址返回的不是 PDF，多半是登录页或验证页，茶树表皮毛那篇是 academic.oup.com 返回 HTTP 403。背后的「缺 PDF」只剩 7 篇。">
-          <figcaption><b>图 8</b>　9 篇里保存了 2 篇，另外 7 篇找到了地址，出版商却不给程序下载。每篇下面写着原因。</figcaption>
+          <figcaption><b>图 9</b>　9 篇里保存了 2 篇，另外 7 篇找到了地址，出版商却不给程序下载。每篇下面写着原因。</figcaption>
         </figure>
 
         <p>保存下来的是芦苇那篇（来自 Springer）和玉米根那篇（来自 Frontiers），PDF 附到了原来的条目上，文字也读了出来。另外 7 篇都是开放获取的文章，地址也找到了，但 MDPI 和牛津大学出版社返回 HTTP 403，其余几家返回的是登录页或验证页，没有被当成 PDF 存下来。「缺 PDF」里还剩 7 篇。</p>
@@ -191,7 +198,7 @@
 
   <nav class="pager" aria-label="上一篇和下一篇">
     <a class="prev" href="home.html"><small>上一篇 · 02</small><strong>先聊，后建库</strong></a>
-    <a class="next" href="read.html"><small>下一篇 · 04</small><strong>精读一篇文献</strong></a>
+    <a class="next" href="pdf.html"><small>下一篇 · 04</small><strong>只想读一个 PDF</strong></a>
   </nav>
 </main>
 
@@ -207,7 +214,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>关于这篇教程</b>　截图和数字来自 2026 年 11 月在 macOS 上用 v0.10.0 的一次实际操作。模型每次的回答不一样，你照做时措辞和数字会有出入，步骤是一样的。</p>
+      <p><b>关于这篇教程</b>　截图和数字来自 2026 年 11 月在 macOS 上用 v0.10.0 的一次实际操作；图 2 是 v0.17.0 上的操作。模型每次的回答不一样，你照做时措辞和数字会有出入，步骤是一样的。</p>
       <p><b>助手可能出错</b>　它的建议和回答都要你确认；关键的数字和结论请对照原文。</p>
     </div>
   </div>

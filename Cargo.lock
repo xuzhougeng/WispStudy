@@ -8674,6 +8674,8 @@ dependencies = [
  "hayagriva",
  "hayro-interpret",
  "icu_segmenter",
+ "image",
+ "lopdf",
  "merman",
  "pdf-extract",
  "rusqlite",

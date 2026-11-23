@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>只想读一个 PDF · Wisp Study 教程</title>
+<meta name="description" content="把一个 PDF 拖到首页，或用「打开方式 › Wisp Study」打开，直接进入阅读模式；读完再决定是建成文献库，还是移到已有的文献库。">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../app-icon.png">
+<link rel="stylesheet" href="../style.css">
+<link rel="stylesheet" href="../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">跳到正文</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="站点">
+      <a href="index.html" aria-current="page">教程</a>
+      <a href="../index.html#ideas">理念</a>
+      <a href="../index.html#tools">工具</a>
+      <a href="../index.html#download">下载</a>
+    </nav>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="位置"><a href="index.html">教程</a><span>›</span>阅读</nav>
+
+  <header class="doc-head">
+    <p class="kicker">教程 04　·　阅读</p>
+    <h1>只想读一个 PDF：拖进来就读</h1>
+    <p class="lead">同事在群里发来一篇 PDF，你只想马上读一读、标几笔，还没想好它该进哪个文献库，甚至还没有文献库。把它拖到首页就是阅读模式，标注和读到的位置都记着；读完再决定留不留、放在哪里。</p>
+    <dl class="facts">
+      <div><dt>场景</dt><dd>收到一篇讲种子植物根向重力性演化的 Nature Communications 论文，先读，再收进「植物单细胞转录组」。</dd></div>
+      <div><dt>需要</dt><dd>一个 PDF。不需要模型；要提问或看译文时才要在「设置 › AI」里配置一个。</dd></div>
+      <div><dt>用时</dt><dd>约 5 分钟，不算读的时间。</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="本篇的小节">
+      <h2>本篇</h2>
+      <ol>
+        <li><a href="#s1">把 PDF 拖到首页</a></li>
+        <li><a href="#s2">退出阅读：它在一段对话里</a></li>
+        <li><a href="#s3">留下来：建成文献库，或移到已有的库</a></li>
+        <li><a href="#s4">再打开同一份文件</a></li>
+        <li><a href="#s5">从访达或资源管理器打开</a></li>
+        <li class="plain"><a href="#recap">回顾</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>把 PDF 拖到首页</h2>
+        <p>打开 Wisp Study，停在首页：本例只有一个文献库「植物单细胞转录组」，60 篇，都还没有 PDF。从访达把下载好的 <code>s41467-gravitropism.pdf</code> 拖到窗口里，拖到哪里都行，只要是首页。</p>
+
+        <figure class="shot">
+          <img src="../img/t/pdf-01-home.jpg" width="1372" height="867" loading="lazy" alt="Wisp Study 首页：标题下一行说明，右上角是导入文献库、数据目录、设置；一张文献库卡片「植物单细胞转录组」，60 篇文献，旁边是新建文献库的虚线卡片；右下角是蓝色的助手按钮。">
+          <figcaption><b>图 1</b>　首页。把一个 PDF 拖到这里，不用先选文献库。</figcaption>
+        </figure>
+
+        <p>松手后窗口直接进入这篇的阅读模式：整个窗口是这份 PDF，顶上是题目和「信息」「PDF」「提问」三个标签页，工具栏和文献库里的一样，有「译文」「分屏」「截图」「方框」「便签」「文本框」「朗读」「播客」。刚打开时题目就是文件名 <code>s41467-gravitropism</code>，左上角写着文件名。</p>
+
+        <figure class="shot">
+          <img src="../img/t/pdf-02-read.jpg" width="1372" height="867" loading="lazy" alt="阅读模式下打开的 PDF 第 1 页，Nature Communications 的论文 Evolution of fast root gravitropism in seed plants；窗口顶上的题目是文件名 s41467-gravitropism，右边是信息、PDF、提问三个标签和还原图标；工具栏左边是 s41467-gravitropism.pdf 和 1 / 10 页、适应宽度 · 169%。">
+          <figcaption><b>图 2</b>　拖进来的 PDF 直接进入阅读模式。题目一开始是文件名，查到 DOI 后会换成论文题目。</figcaption>
+        </figure>
+
+        <p>这篇的首页印着 DOI。应用在后台查它，本例十几秒后，窗口顶上的题目换成了 Evolution of fast root gravitropism in seed plants，作者、期刊、年份也补上了。查询只发出这个 DOI，不上传 PDF。首页上没有 DOI 的文件，题目就一直是文件名，之后可以在「信息」里补全。</p>
+        <p>接下来就是读：高亮、下划线、文本框、截图、点正文里的图号看图，用法和<a href="read.html">精读一篇文献</a>里一样，标注和读到的位置都会记下。</p>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>退出阅读：它在一段对话里</h2>
+        <p>按 <kbd>Esc</kbd>（或点右上角的还原图标）退出阅读模式。这篇 PDF 并没有凭空放着：它是一段新对话里的文献，对话以论文题目命名，写着「这次对话收进了 1 篇文献」，顶上是「文献 1」「历史」「新对话」和「建成文献库」，右边是这篇的详情。</p>
+
+        <figure class="shot">
+          <img src="../img/t/pdf-03-conversation.jpg" width="1372" height="867" loading="lazy" alt="对话页：左上角「← 首页」，标题「Evolution of fast root...」，下面一行「这次对话收进了 1 篇文献」；右上方是文献 1、历史、新对话和「建成文献库」；中间写着「还没有配置模型」和「打开设置」按钮；右边是这篇文献的详情，PDF 标签页打开在第 1 页。">
+          <figcaption><b>图 3</b>　退出阅读模式后看到的对话。本例没有配置模型，中间提示去设置；配置了模型，就可以在这里就这篇提问。</figcaption>
+        </figure>
+
+        <p>本例没有配置模型，对话中间写着「还没有配置模型」。配置了模型，这里就能就这篇提问，也可以在「提问」标签页里问，见<a href="read.html#s4">精读一篇文献</a>的第 4 节。</p>
+        <p>点左上角「← 首页」回去，再点首页右下角的助手按钮，这段对话就在「最近对话」里，写着收进了 1 篇和日期。之后点它，接着读。</p>
+
+        <figure class="shot">
+          <img src="../img/t/pdf-04-recent.jpg" width="1372" height="867" loading="lazy" alt="首页助手的对话页：上方是输入框和四个开头（调研一个想法、审一份稿件、找几篇文献、从 Word 建文献库），下面「最近对话」一行：Evolution of fast root...，1 篇，2026.11.23。">
+          <figcaption><b>图 4</b>　读过的 PDF 留在「最近对话」里。</figcaption>
+        </figure>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>留下来：建成文献库，或移到已有的库</h2>
+        <p>读完觉得值得留，有两条路。</p>
+        <p><b>这篇开了一个新方向</b>，就在对话里点「建成文献库」。对话框里名称先填着对话的名字，主题空着，标识色可选；名称旁的 AI 图标在配置了模型时可以让模型拟名称和主题。确认后窗口就地变成这个文献库，PDF、标注和对话都留在原处，成为它的内容。和先聊后建库是同一个对话框，见<a href="home.html">先聊，后建库</a>。</p>
+
+        <figure class="shot">
+          <img src="../img/t/pdf-05-promote.jpg" width="1372" height="867" loading="lazy" alt="「建成文献库」对话框：名称一栏是 Evolution of fast root...，旁边一个 AI 图标；主题一栏空着；标识色一行七个色点；下方说明对话、收进的文献和交来的稿件都留在原处，成为这个文献库的内容；按钮是取消和建成文献库。">
+          <figcaption><b>图 5</b>　「建成文献库」：这段对话和这篇 PDF 原地成为一个新的文献库。</figcaption>
+        </figure>
+
+        <p><b>它属于已有的课题</b>，本例就是：它讲根的向重力性，放进「植物单细胞转录组」做背景文献。在右边详情的「信息」页点「移到文献库…」（文献的右键菜单里也有），选目标文献库，点「移过去」。对话框写明 PDF、标注、读到的位置和关于它的对话都一起过去，这段对话里不再有它。</p>
+
+        <figure class="shot">
+          <img src="../img/t/pdf-06-move.jpg" width="1372" height="867" loading="lazy" alt="「移到文献库」对话框：文献题目 Evolution of fast root gravitropism in seed plants，说明「PDF、标注、读到的位置和关于它的对话都一起过去；这段对话里不再有它。」；下面一行「植物单细胞转录组 60 篇」已选中；按钮是取消和移过去。背后右侧的「信息」页能看到作者、Nature Communications 10(1), 3480 · 2019、IF 18.1 · JCR Q1 · 中科院 1区 Top 和「移到文献库…」按钮。">
+          <figcaption><b>图 6</b>　「移到文献库…」。背后的「信息」页里，DOI 查到的作者、期刊和指标已经补全。</figcaption>
+        </figure>
+
+        <p>点「移过去」，窗口打开「植物单细胞转录组」，这篇排在最前面并选中，顶上提示「已移到「植物单细胞转录组」。」，「全部文献」从 60 变成 61。原来那段对话里没问过问题，就一并删除了（移到数据目录的 <code>removed</code> 文件夹，不是彻底删掉），「最近对话」里不再有它；问过问题的对话会留下。</p>
+
+        <figure class="shot">
+          <img src="../img/t/pdf-07-moved.jpg" width="1372" height="867" loading="lazy" alt="文献库「植物单细胞转录组」，全部文献 61；列表第一行是 Evolution of fast root gravitropism in seed plants，18.1，2019，已存 PDF，已选中；右边是它的信息页；顶上提示「已移到「植物单细胞转录组」。」">
+          <figcaption><b>图 7</b>　移过去之后，这篇是文献库里的一篇，PDF 和标注都在。</figcaption>
+        </figure>
+
+        <aside class="note"><b>提示</b>移到文献库后，收录状态是「待判断」，因为收不收要按这个库的主题再判断。</aside>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>再打开同一份文件</h2>
+        <p>过几天又在下载文件夹里看到这份 PDF，改了名叫 <code>Zhang 2019 gravitropism.pdf</code>。再拖到首页，它直接在「植物单细胞转录组」里打开这篇的阅读模式：应用按文件内容认文件，改了名字也认得出，标注和读到的位置都在。哪个文献库里都没有的 PDF，才会成为一段新对话。</p>
+        <aside class="note"><b>提示</b>只在首页、而且只拖一个 PDF 时是这样。一次拖几个 PDF，或者拖 Word 稿件，打开的是助手的对话页，文件放进输入框，等你说要做什么，见<a href="home.html">先聊，后建库</a>。在文献库里把 PDF 拖进窗口，是导入这个库。</aside>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>从访达或资源管理器打开</h2>
+        <p>不开 Wisp Study 也行：在访达或资源管理器里右键 PDF，选「打开方式 › Wisp Study」。窗口来到前面，和拖到首页一样进入阅读模式；窗口当时停在哪里都可以，不必先回首页。一次选了几个 PDF，只打开第一个，顶上提示其余几个没有打开。</p>
+        <aside class="note"><b>提示</b>Windows 上这一项由安装程序登记，便携版没有。Wisp Study 不会把自己设成 PDF 的默认打开方式，双击 PDF 还是用原来的阅读器。这一节没有截图：访达的菜单没有截，本例在开发版里模拟了这一步，窗口停在文献库的列表上时打开另一个 PDF，同样直接进入了它的阅读模式。</aside>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>回顾</h2>
+        <ul>
+          <li>把一个 PDF 拖到首页，或「打开方式 › Wisp Study」，直接进入阅读模式；首页上的 DOI 在后台查，补全题目和作者。</li>
+          <li>没有放进任何文献库的 PDF，在一段以它命名的对话里，「最近对话」里找得到。</li>
+          <li>值得留下时，「建成文献库」开一个新库，或「移到文献库…」放进已有的库，PDF、标注和读到的位置一起过去。</li>
+          <li>应用按文件内容认文件，同一份 PDF 再打开，回到它所在的地方。</li>
+          <li>下一步：在文献库里精读一篇，见<a href="read.html">精读一篇文献</a>。</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="上一篇和下一篇">
+    <a class="prev" href="migrate.html"><small>上一篇 · 03</small><strong>把已有的文献搬进来</strong></a>
+    <a class="next" href="read.html"><small>下一篇 · 05</small><strong>精读一篇文献</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>参考</h2>
+      <ol>
+        <li><a href="index.html">全部教程</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">功能详解：每个页面能做什么</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">数据与隐私：文件放在哪里，哪些数据会离开本机</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">问题与想法：Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>关于这篇教程</b>　截图来自 2026 年 11 月在 macOS 上用 v0.17.0 的一次实际操作，没有配置模型。</p>
+      <p><b>助手可能出错</b>　它的建议和回答都要你确认；关键的数字和结论请对照原文。</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

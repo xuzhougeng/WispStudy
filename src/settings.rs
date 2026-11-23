@@ -22,6 +22,7 @@ use wisp_core::provider::{self, Provider};
 use wisp_core::libraries;
 use wisp_core::settings::{Language, Spacing, Task, TextWidth};
 use wisp_core::update::{self, Release};
+use wisp_core::websearch;
 
 const SIDEBAR_W: f32 = 224.;
 const COLUMN_W: f32 = 640.;
@@ -103,6 +104,8 @@ pub struct SettingsView {
     fields: ProviderFields,
     /// The proxy for everything.
     proxy: Entity<TextInput>,
+    /// The key of each web search engine, in the order of `websearch::ENGINES`.
+    search_keys: Vec<Entity<TextInput>>,
     /// Whose name the comments and tracked changes of a Word export carry.
     author: Entity<TextInput>,
     translation_prompt: Entity<TextInput>,
@@ -377,7 +380,17 @@ impl Workspace {
                 let translation_prompt = cx.new(|cx| TextInput::new("留空则使用默认要求：译成简体中文，保留术语、基因名、物种学名和数字原样，只输出译文。", cx).multiline(3).with_text(&self.settings.translation_prompt));
                 let font_search = cx.new(|cx| TextInput::new(t("搜索已安装的字体"), cx));
                 let font_names = cx.text_system().all_font_names().into_iter().filter(|name| !name.starts_with('.')).collect();
-                let subscriptions = vec![
+                let search_keys: Vec<Entity<TextInput>> = websearch::ENGINES
+                    .iter()
+                    .map(|engine| {
+                        let placeholder = if engine.key == "deepseek" { t("留空则使用「AI」页 DeepSeek 服务的 Key").to_string() } else { tf!("留空则读取环境变量 {}", "Leave blank to read {}", engine.key_env) };
+                        let stored = self.settings.web_search.keys.get(engine.key).cloned().unwrap_or_default();
+                        let input = cx.new(|cx| TextInput::new(placeholder, cx).with_text(&stored));
+                        input.update(cx, |input, _| input.masked = true);
+                        input
+                    })
+                    .collect();
+                let mut subscriptions = vec![
                     cx.subscribe_in(&font_search, window, |this, input, event: &InputEvent, window, cx| {
                         if *event == InputEvent::Changed {
                             if let Some(view) = this.settings_view.as_mut() { view.font_scroll = ScrollHandle::new() }
@@ -406,7 +419,17 @@ impl Workspace {
                         }
                     }),
                 ];
-                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, author, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, recording: None, shortcut_error: None, balance: None, _subscriptions: subscriptions });
+                for (engine, input) in websearch::ENGINES.iter().zip(&search_keys) {
+                    subscriptions.push(cx.subscribe(input, |this, input, event: &InputEvent, cx| {
+                        if *event != InputEvent::Changed { return }
+                        let key = input.read(cx).text().trim().to_string();
+                        let keys = &mut this.settings.web_search.keys;
+                        if key.is_empty() { keys.remove(engine.key); } else { keys.insert(engine.key.to_string(), key); }
+                        this.save_settings(cx);
+                        cx.notify();
+                    }));
+                }
+                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, search_keys, author, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, recording: None, shortcut_error: None, balance: None, _subscriptions: subscriptions });
                 self.read_balance_shown(cx);
             }
         }
@@ -753,6 +776,11 @@ impl Workspace {
         if view.protocol == protocol { return }
         let same_service = view.protocol != Protocol::Anthropic && protocol != Protocol::Anthropic;
         view.protocol = protocol;
+        // OpenCode Go speaks all three, each at its own address: go there, models and key untouched.
+        if provider::is_opencode_go(view.fields.base_url.read(cx).text()) {
+            view.fields.base_url.update(cx, |input, cx| input.set_text(provider::opencode_go_base(protocol), cx));
+            return self.save_provider(cx);
+        }
         // Chat completions and Responses are two interfaces of one service: its address and models stay.
         if same_service { return self.save_provider(cx) }
         // The other protocol's address would only fail: offer this one's default. The models stay to be renamed.
@@ -1689,7 +1717,30 @@ impl Workspace {
                 )
                 .child(note(t("留空时使用环境变量 ALL_PROXY、HTTPS_PROXY、HTTP_PROXY（NO_PROXY 同样有效）。模型服务可以在「AI」页单独指定代理，或者填 direct 不走代理。命令行 wisp 使用同一个设置。代理地址连同其中的用户名和密码以明文保存在本机的 settings.json 里。"))),
             )
+            .child(self.web_search_group(view, window, cx))
             .into_any_element()
+    }
+
+    /// 网页搜索: which engine the tool `web_search` asks, and each engine's key.
+    fn web_search_group(&self, view: &SettingsView, window: &Window, cx: &mut Context<Self>) -> Div {
+        let chosen = self.settings.web_search.engine.trim();
+        let (state, colors) = match websearch::ready(&self.settings, "") {
+            Ok(ready) => (tf!("使用 {}", "Using {}", ready.engine.name), theme::status_colors("included")),
+            Err(_) if chosen == websearch::OFF => (t("已关闭").to_string(), theme::status_colors("pending")),
+            Err(_) => (t("缺少 API Key").to_string(), theme::status_colors("uncertain")),
+        };
+        let mut choices = vec![(t("自动"), Cmd::SetWebSearchEngine(websearch::AUTO.into()))];
+        choices.extend(websearch::ENGINES.iter().map(|engine| (engine.name, Cmd::SetWebSearchEngine(engine.key.into()))));
+        choices.push((t("关闭"), Cmd::SetWebSearchEngine(websearch::OFF.into())));
+        let at = if chosen == websearch::OFF { choices.len() - 1 } else { websearch::ENGINES.iter().position(|engine| engine.key == chosen).map_or(0, |i| i + 1) };
+        let mut rows = vec![
+            row(t("搜索引擎"), Some(t("「自动」用第一个有 Key 的引擎。关闭后助手不再搜索网页。").into()), div().flex().items_center().gap(px(8.)).child(ui::chip(state, colors.0, colors.1)).child(segmented("web-search-engine", choices, at, self, cx))).into_any_element(),
+        ];
+        for (engine, input) in websearch::ENGINES.iter().zip(&view.search_keys) {
+            let detail = if engine.key == "deepseek" { tf!("与 DeepSeek 模型共用一个 Key：留空时使用「AI」页 DeepSeek 服务的 Key 或环境变量 {}。", "Shares the key of DeepSeek's models: blank uses the DeepSeek service's key on the AI page, or {}.", engine.key_env) } else { tf!("在 {} 申请；留空时读取环境变量 {}。", "Get one at {}; blank reads {}.", engine.site, engine.key_env) };
+            rows.push(row(tf!("{} API Key", "{} API key", engine.name), Some(detail.into()), div().w(px(INPUT_W)).child(ui::field(input, window, cx))).into_any_element());
+        }
+        group(Some(t("网页搜索")), rows).child(note(t("助手和 wisp 命令的 web_search 工具用它搜索互联网，查文献数据库之外的信息（软件文档、指南、机构页面、新闻）。搜索词会发给所选的服务，按它的价格计费。Key 以明文保存在本机的 settings.json 里。")))
     }
 
     fn about_page(&self, cx: &mut Context<Self>) -> AnyElement {
