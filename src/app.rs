@@ -4396,7 +4396,7 @@ impl Workspace {
         if self.menu.take().is_some() {
         } else if self.palette.is_some() {
             self.close_palette(window, cx);
-        } else if self.modal.as_ref().is_some_and(|modal| matches!(modal, Modal::Figure(form) if form.collects())) && !self.figure_dialog_focused(window, cx) {
+        } else if self.modal.as_ref().is_some_and(|modal| matches!(modal, Modal::Figure(form) if form.beside_page())) && !self.figure_dialog_focused(window, cx) {
             // The figure dialog standing beside the page: Esc on the page (a selection copied from) does not put away what was written.
         } else if self.modal.is_some() {
             self.run(Cmd::CloseModal, window, cx);
@@ -5400,6 +5400,11 @@ impl Workspace {
             PdfEvent::RemoveAnnotation { resource, id } => self.change_pdf_annotation(resource, |store| store.remove_pdf_annotation(resource, id), cx),
             PdfEvent::AddShape { paper, resource, page, kind, rect, note } => self.change_pdf_annotation(resource, |store| store.add_pdf_shape(paper, resource, *page, *kind, *rect, note).map(|_| ()), cx),
             PdfEvent::MoveShape { resource, id, rect } => self.change_pdf_annotation(resource, |store| store.move_pdf_shape(resource, id, *rect), cx),
+            PdfEvent::OpenFigure(id) => self.open_figure_on_page(id, cx),
+            PdfEvent::Reframe { page, bbox, png } => {
+                let resource = view.read(cx).resource_id().to_string();
+                self.reframe_piece(&resource, *page, *bbox, png, cx);
+            }
             PdfEvent::Picture(png, to_library) => {
                 let talk = if *to_library { Talk::Library } else { Talk::Paper };
                 self.attach_images(talk, vec![Picture::Bytes(png.clone())], cx);

@@ -48,6 +48,11 @@ pub enum PdfEvent {
     AddShape { paper: String, resource: String, page: usize, kind: Kind, rect: [f32; 4], note: String },
     /// A box moved or sized, a note moved, on its page.
     MoveShape { resource: String, id: String, rect: [f32; 4] },
+    /// The number on the corner of a figure kept was clicked: its dialog, to change it or take it out.
+    OpenFigure(String),
+    /// The frame of the figure whose dialog is open was moved or sized: the piece it frames now, as a picture,
+    /// with its 1-based page and box. It is the dialog's until the dialog is saved.
+    Reframe { page: usize, bbox: [f32; 4], png: Vec<u8> },
 }
 
 /// The names of the colours, in the order of `annotation::COLORS`.
@@ -80,6 +85,31 @@ struct ShapeDrag {
     corner: Option<usize>,
     from: (f32, f32),
     moved: bool,
+}
+
+impl ShapeDrag {
+    /// The pointer held it to a point of a 0-based page of `size` points: where it stands now, its corners in
+    /// order; `None` off its page or before the pointer went far enough to be a drag.
+    fn follow(&mut self, page: usize, x: f32, y: f32, scale: f32, (w, h): (f32, f32)) -> Option<[f32; 4]> {
+        if page != self.page { return None }
+        let (dx, dy) = (x - self.from.0, y - self.from.1);
+        if !self.moved && dx.abs().max(dy.abs()) * scale < 3. { return None }
+        self.moved = true;
+        let [x0, y0, x1, y1] = self.rect;
+        let rect = match self.corner {
+            // The corner held goes with the pointer, the one across from it stays.
+            Some(corner) => {
+                let (x, y) = (x.clamp(0., w), y.clamp(0., h));
+                match corner { 0 => [x, y, x1, y1], 1 => [x0, y, x, y1], 2 => [x0, y0, x, y], _ => [x, y0, x1, y] }
+            }
+            None => {
+                let dx = dx.clamp(-x0, (w - x1).max(-x0));
+                let dy = dy.clamp(-y0, (h - y1).max(-y0));
+                [x0 + dx, y0 + dy, x1 + dx, y1 + dy]
+            }
+        };
+        Some([rect[0].min(rect[2]), rect[1].min(rect[3]), rect[0].max(rect[2]), rect[1].max(rect[3])])
+    }
 }
 
 /// A highlight that was clicked, and the menu beside it: the highlight's id, its 0-based page, and in that page's points
@@ -786,13 +816,26 @@ pub struct PdfView {
     spoken: Spoken,
     /// The figures of the figure library cut from this file, and the piece whose dialog is open (`set_figures`).
     figures: Vec<KeptFigure>,
-    collecting: Option<(usize, [f32; 4])>,
+    collecting: Option<Collecting>,
+    /// The frame of `collecting` held by an edge (moved) or a corner (sized); its `id` is empty.
+    frame_drag: Option<ShapeDrag>,
+}
+
+/// The piece of a page in the figure dialog on show: one just cut out (`figure` is `None`) or a figure kept,
+/// opened again. Its frame has grips, and moved or sized it frames another piece (`PdfEvent::Reframe`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Collecting {
+    pub figure: Option<String>,
+    /// 1-based.
+    pub page: usize,
+    pub rect: [f32; 4],
 }
 
 /// A figure of the figure library as its page shows it: a dashed frame in `Theme::success`, so a piece kept is
 /// told from one only marked (`Kind::Cut`, the accent).
 #[derive(Clone, Debug, PartialEq)]
 pub struct KeptFigure {
+    pub id: String,
     /// 1-based, as the figure has it.
     pub page: usize,
     pub rect: [f32; 4],
@@ -885,6 +928,7 @@ impl PdfView {
             spoken: Spoken::default(),
             figures: Vec::new(),
             collecting: None,
+            frame_drag: None,
         }
     }
 
@@ -1625,7 +1669,7 @@ impl PdfView {
     }
 
     /// A page as one of the views draws it. The two share its picture and what is marked on it.
-    fn page(&mut self, pane: usize, index: usize) -> AnyElement {
+    fn page(&mut self, pane: usize, index: usize, cx: &mut Context<Self>) -> AnyElement {
         let (w, h) = self.sizes.get(index).copied().unwrap_or((595., 842.));
         let scale = self.scale_of(index);
         let (width, height) = (w * scale, h * scale);
@@ -1682,15 +1726,28 @@ impl PdfView {
         }).collect();
         // The figures kept from this page: a dashed frame in the colour of a figure kept, its number on the corner.
         // It takes no clicks: what it frames is still the page's, to select and copy. A mark at the same place draws it.
-        let kept: Vec<Div> = self.figures.iter().filter(|f| f.page == index + 1 && !self.annotations.iter().any(|a| a.kind == Kind::Cut && a.page == f.page && same_place(self.rect_of(a), f.rect))).map(|f| {
+        // Its number is what is clicked to open the figure again, to change it, frame it anew or take it out.
+        let editing = self.collecting.as_ref().and_then(|c| c.figure.clone());
+        let kept: Vec<Div> = self.figures.iter().filter(|f| f.page == index + 1 && editing.as_ref() != Some(&f.id) && !self.annotations.iter().any(|a| a.kind == Kind::Cut && a.page == f.page && same_place(self.rect_of(a), f.rect))).map(|f| {
             let [x0, y0, x1, y1] = f.rect;
-            let chip = div().absolute().left(px(-2.)).top(px(-2.)).flex().items_center().gap(px(3.)).max_w(px(((x1 - x0) * scale).max(24.))).px(px(4.)).py(px(1.)).rounded_br(px(4.)).bg(Theme::success()).text_color(gpui::white()).text_size(px(10.)).line_height(px(14.))
+            let id = f.id.clone();
+            let chip = div().id(SharedString::from(format!("kept-{}", f.id))).absolute().left(px(-2.)).top(px(-2.)).flex().cursor_pointer()
+                .tooltip(ui::tip(t("已收藏到图片库：点开可以修改、重新框选或移出")))
+                // A press on the number is not a press on the page.
+                .on_mouse_down(MouseButton::Left, cx.listener(move |_, _, _, cx| { cx.stop_propagation(); cx.emit(PdfEvent::OpenFigure(id.clone())) })).items_center().gap(px(3.)).max_w(px(((x1 - x0) * scale).max(24.))).px(px(4.)).py(px(1.)).rounded_br(px(4.)).bg(Theme::success()).text_color(gpui::white()).text_size(px(10.)).line_height(px(14.))
                 .child(ui::icon("check", 10., gpui::white()))
                 .when(!f.label.is_empty(), |d| d.child(div().min_w_0().truncate().child(f.label.clone())));
             div().absolute().left(px(x0 * scale - 1.)).top(px(y0 * scale - 1.)).w(px((x1 - x0) * scale + 2.)).h(px((y1 - y0) * scale + 2.)).border_2().border_dashed().border_color(Theme::success()).rounded(px(2.)).child(chip)
         }).collect();
-        // The piece in the figure dialog, as it was cut, until the dialog is put away.
-        let collecting = self.collecting.filter(|(page, _)| *page == index + 1).map(|(_, [x0, y0, x1, y1])| div().absolute().left(px(x0 * scale)).top(px(y0 * scale)).w(px((x1 - x0) * scale)).h(px((y1 - y0) * scale)).border_2().border_color(Theme::accent()).bg(Theme::selection()));
+        // The piece in the figure dialog, as it was cut, until the dialog is put away; its corners size it and its
+        // edge moves it while text is selected (`frame_at`).
+        let collecting = self.collecting.as_ref().filter(|c| c.page == index + 1).map(|c| {
+            let [x0, y0, x1, y1] = c.rect;
+            let grips = free.then(|| [(0., 0.), (1., 0.), (1., 1.), (0., 1.)].map(|(fx, fy)| {
+                div().absolute().left(px((x1 - x0) * scale * fx - GRIP / 2. - 2.)).top(px((y1 - y0) * scale * fy - GRIP / 2. - 2.)).size(px(GRIP)).rounded(px(2.)).bg(gpui::white()).border_1().border_color(Theme::accent())
+            }));
+            div().absolute().left(px(x0 * scale)).top(px(y0 * scale)).w(px((x1 - x0) * scale)).h(px((y1 - y0) * scale)).border_2().border_color(Theme::accent()).bg(Theme::selection()).children(grips.into_iter().flatten())
+        });
         // A box being drawn.
         let drawing = self.drawing.filter(|(page, _)| *page == index).map(|(_, [x0, y0, x1, y1])| div().absolute().left(px(x0.min(x1) * scale)).top(px(y0.min(y1) * scale)).w(px((x1 - x0).abs() * scale)).h(px((y1 - y0).abs() * scale)).border_2().border_color(Theme::highlight_swatch(wisp_core::annotation::BOX_COLOR)).rounded(px(2.)));
         // Sticky notes, folded to an icon at their spot; the open one ringed. A note being written shows where it will go.
@@ -1791,7 +1848,7 @@ impl PdfView {
         cx.emit(PdfEvent::Worked);
         cx.emit(PdfEvent::Pressed);
         let chosen = self.mark_menu.take();
-        (self.selection, self.selecting, self.translation, self.pressed_mark, self.shape_drag) = (None, false, None, None, None);
+        (self.selection, self.selecting, self.translation, self.pressed_mark, self.shape_drag, self.frame_drag) = (None, false, None, None, None, None);
         // The half pressed in is the one worked in; a drag stays in it. The line between the two is neither.
         let Some(pane) = self.pane_under(event.position) else {
             if self.cutting { self.cut = None }
@@ -1825,6 +1882,12 @@ impl PdfView {
                 return cx.notify();
             }
             Tool::Select => {}
+        }
+        // The frame of the figure in the dialog: its corners size it, its edge moves it.
+        if let Some(corner) = self.frame_at(page, x, y) && let Some(c) = self.collecting.as_ref() {
+            self.frame_drag = Some(ShapeDrag { id: String::new(), page, rect: c.rect, corner, from: (x, y), moved: false });
+            self.selecting = true;
+            return cx.notify();
         }
         // A box or a note is taken hold of: dragged it moves (or, by a corner, changes size), clicked it opens.
         self.mark_menu = chosen;
@@ -1878,24 +1941,13 @@ impl PdfView {
         // A box or note held follows the pointer on its own page, kept inside the page.
         let (scale, (w, h)) = (self.scale_of(page), self.sizes.get(page).copied().unwrap_or((595., 842.)));
         if let Some(held) = self.shape_drag.as_mut() {
-            if page != held.page { return }
-            let (dx, dy) = (x - held.from.0, y - held.from.1);
-            if !held.moved && dx.abs().max(dy.abs()) * scale < 3. { return }
-            held.moved = true;
-            let [x0, y0, x1, y1] = held.rect;
-            let rect = match held.corner {
-                // The corner held goes with the pointer, the one across from it stays.
-                Some(corner) => {
-                    let (x, y) = (x.clamp(0., w), y.clamp(0., h));
-                    match corner { 0 => [x, y, x1, y1], 1 => [x0, y, x, y1], 2 => [x0, y0, x, y], _ => [x, y0, x1, y] }
-                }
-                None => {
-                    let dx = dx.clamp(-x0, (w - x1).max(-x0));
-                    let dy = dy.clamp(-y0, (h - y1).max(-y0));
-                    [x0 + dx, y0 + dy, x1 + dx, y1 + dy]
-                }
-            };
-            self.shape_shown = Some((held.id.clone(), [rect[0].min(rect[2]), rect[1].min(rect[3]), rect[0].max(rect[2]), rect[1].max(rect[3])]));
+            let Some(rect) = held.follow(page, x, y, scale, (w, h)) else { return };
+            self.shape_shown = Some((held.id.clone(), rect));
+            return cx.notify();
+        }
+        if let Some(held) = self.frame_drag.as_mut() {
+            let Some(rect) = held.follow(page, x, y, scale, (w, h)) else { return };
+            if let Some(c) = self.collecting.as_mut() { c.rect = rect }
             return cx.notify();
         }
         if let Some((draw_page, corners)) = self.drawing.as_mut() {
@@ -1924,6 +1976,15 @@ impl PdfView {
     fn release(&mut self, at: Option<Point<Pixels>>, cx: &mut Context<Self>) {
         let pressed = self.pressed_mark.take();
         if !std::mem::take(&mut self.selecting) && pressed.is_none() { return }
+        // The dialog's frame let go of: the piece it frames now goes to the dialog.
+        if let Some(held) = self.frame_drag.take() {
+            // Sized down to nothing, it was a slip of the hand: the frame is as it was.
+            if let Some(c) = self.collecting.as_mut() && (c.rect[2] - c.rect[0] < 8. || c.rect[3] - c.rect[1] < 8.) { c.rect = held.rect }
+            if held.moved && let Some(c) = self.collecting.as_ref() && c.rect != held.rect && let Some(png) = self.picture_of(held.page, c.rect) {
+                cx.emit(PdfEvent::Reframe { page: held.page + 1, bbox: c.rect, png });
+            }
+            return cx.notify();
+        }
         // A box or note let go of: moved, it is kept where it is now (shown there until the owner has saved it);
         // clicked, a note opens and a box shows its menu.
         if let Some(held) = self.shape_drag.take() {
@@ -2047,10 +2108,24 @@ impl PdfView {
     }
 
     /// The figures of the library cut from this file, and the piece whose dialog is open: drawn on their pages.
-    pub fn set_figures(&mut self, figures: Vec<KeptFigure>, collecting: Option<(usize, [f32; 4])>, cx: &mut Context<Self>) {
+    pub fn set_figures(&mut self, figures: Vec<KeptFigure>, collecting: Option<Collecting>, cx: &mut Context<Self>) {
+        // The frame being held is the pointer's until it is let go.
+        if self.frame_drag.is_some() && self.collecting.as_ref().map(|c| &c.figure) == collecting.as_ref().map(|c| &c.figure) { return self.figures = figures }
         if self.figures == figures && self.collecting == collecting { return }
         (self.figures, self.collecting) = (figures, collecting);
         cx.notify();
+    }
+
+    /// The frame of the dialog's piece under a point of a 0-based page: a corner (to size it) or its edge (to move it).
+    fn frame_at(&self, page: usize, x: f32, y: f32) -> Option<Option<usize>> {
+        let c = self.collecting.as_ref().filter(|c| c.page == page + 1)?;
+        let [x0, y0, x1, y1] = c.rect;
+        let scale = self.scale_of(page);
+        let (reach, grip) = (EDGE_REACH / scale, GRIP / scale);
+        let corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
+        if let Some(corner) = corners.iter().position(|(cx, cy)| (x - cx).abs() <= grip && (y - cy).abs() <= grip) { return Some(Some(corner)) }
+        let inside = |grow: f32| x >= x0 - grow && x <= x1 + grow && y >= y0 - grow && y <= y1 + grow;
+        (inside(reach) && !inside(-reach)).then_some(None)
     }
 
     /// A figure of the library stands at this place of a 0-based page.
@@ -2527,7 +2602,7 @@ impl Render for PdfView {
         // A view's pages, with its sideways bar over their foot.
         let mut pane = |pane: usize| {
             let entity = cx.entity();
-            let pages = list(self.panes[pane].list.clone(), move |index, _, cx| entity.update(cx, |this, _| this.page(pane, index))).size_full().pt(px(PAGE_GAP));
+            let pages = list(self.panes[pane].list.clone(), move |index, _, cx| entity.update(cx, |this, cx| this.page(pane, index, cx))).size_full().pt(px(PAGE_GAP));
             div().size_full().relative().child(pages).children(bars.next().flatten())
         };
         // The pages once, or twice with a line between: each half scrolls on its own.
