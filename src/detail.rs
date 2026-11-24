@@ -453,7 +453,7 @@ impl Workspace {
                             )
                             // A PDF is read in the viewer here, an attachment as well as the main text.
                             .when(heavy && !shrinking, |d| d.child(small(("file-compress", i), t("压缩")).tooltip(ui::tip(t("把过大的图片缩小，文字、页面和标注不变。原文件移到 removed 文件夹。"))).on_click(self.on(Cmd::CompressFile(file.id.clone()), cx))))
-                            .when(file.format == "pdf", |d| d.child(small(("file-read", i), t("阅读")).on_click(self.on(Cmd::ReadFile(file.id.clone()), cx))))
+                            .when(file.format == "pdf", |d| d.child(small(("file-read", i), crate::i18n::tc("阅读·打开文件", "阅读")).on_click(self.on(Cmd::ReadFile(file.id.clone()), cx))))
                             .child(ui::ghost_button(("file-open", i), Some("link"), None).tooltip(ui::tip(t("用系统应用打开"))).on_click(self.on(Cmd::OpenFile(file.id.clone()), cx)))
                             .child(ui::ghost_button(("file-remove", i), Some("x"), None).on_click(self.on(Cmd::RemoveFile(file.id.clone()), cx))),
                     )
@@ -566,7 +566,7 @@ impl Workspace {
             // The paper itself and what comes with it, each with its own way to add one.
             .child(section(t("正文 PDF")).child(div().flex().flex_col().gap(px(6.)).children(main_rows).child(div().flex().child(ui::secondary_button("attach-main", t("添加正文 PDF")).on_click(self.on(Cmd::AttachAs(id.clone(), "fulltext"), cx))))))
             .child(section(t("附件／补充材料")).child(div().flex().flex_col().gap(px(6.)).children(attachment_rows).when(files.iter().all(|f| f.kind == "fulltext"), |d| d.child(div().text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(t("补图、补表、补充方法等文件放在这里；PDF 附件可以在阅读器里打开，提问时会和正文一起读。")))).child(div().flex().child(ui::secondary_button("attach-more", t("添加附件")).on_click(self.on(Cmd::AttachAs(id.clone(), "supplement"), cx))))))
-            .child(div().text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(tf!("来源：{} · 添加于 {}", "Source: {} · Added {}", p.source, time::date_text(&p.added_at))))
+            .child(div().text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(tf!("来源：{} · 添加于 {}", "Source: {} · Added {}", crate::i18n::phrase(&p.source), time::date_text(&p.added_at))))
             .into_any_element()
     }
 

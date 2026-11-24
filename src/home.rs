@@ -316,7 +316,7 @@ impl Workspace {
                                     .justify_between()
                                     .text_size(text_px(12.))
                                     .text_color(Theme::text_tertiary())
-                                    .child(tf!("{} 篇文献", "{} papers", info.paper_count))
+                                    .child(tn!("{n} 篇文献", "{n}", info.paper_count, "paper"))
                                     // Left while its assistant was answering, it goes on: said in place of when it was opened.
                                     .child(match self.off_screen_mark(&info.id) {
                                         Some(mark) => mark.into_any_element(),

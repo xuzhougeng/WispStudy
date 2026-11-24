@@ -465,7 +465,7 @@ impl Workspace {
                     .child(div().flex_1().min_w_0().truncate().child(ui::one_line(&info.name)))
                     // Left while it was answering, it goes on: said here until the answer is in.
                     .children(self.off_screen_mark(&info.id))
-                    .when(info.paper_count > 0, |d| d.child(div().flex_none().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tf!("{} 篇", "{} papers", info.paper_count))))
+                    .when(info.paper_count > 0, |d| d.child(div().flex_none().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tn!("{n} 篇", "{n}", info.paper_count, "paper"))))
                     .child(div().flex_none().w(px(84.)).text_right().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(time::date_text(&info.opened_at)))
                     .into_any_element()
             })

@@ -76,7 +76,7 @@ impl Workspace {
                 .when(!chosen, |d| d.hover(|s| s.bg(Theme::hover())))
                 .child(div().flex_none().size(px(10.)).rounded_full().bg(accent.strong()))
                 .child(div().flex_1().min_w_0().font_weight(if chosen { FontWeight::SEMIBOLD } else { FontWeight::NORMAL }).child(ui::one_line(&info.name)))
-                .child(div().flex_none().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tf!("{} 篇", "{} papers", info.paper_count)))
+                .child(div().flex_none().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tn!("{n} 篇", "{n}", info.paper_count, "paper")))
                 .on_click(self.on(Cmd::ChooseMoveTarget(info.id.clone()), cx))
         });
         let note = if draft { t("PDF、标注、读到的位置和关于它的对话都一起过去；这段对话里不再有它。") } else { t("PDF、标注、读到的位置和关于它的对话都一起过去，收录状态回到待判断；原来的那条留在本库的回收站里。") };
