@@ -3,13 +3,46 @@
 //! so the person judges it by what it finds, not by how it reads.
 
 use crate::i18n::{label, t};
-use crate::app::{Cmd, GuideIdea, Page, Workspace};
+use crate::app::{Cmd, Page, Workspace};
+use crate::input::TextInput;
 use crate::settings::SettingsPage;
 use crate::theme::{Theme, text_px};
 use crate::ui;
 use gpui::{prelude::FluentBuilder, *};
-
+use serde_json::Value;
+use wisp_core::ai;
+use wisp_core::settings::Task;
 use wisp_core::sources;
+
+/// A search the assistant proposed in the guide, with what a trial run of it found.
+pub struct GuideIdea {
+    pub idea: ai::QueryIdea,
+    /// Whether the person wants it saved and run.
+    pub chosen: bool,
+    pub trial: Option<Result<Value, String>>,
+}
+
+/// The guide page of a library: a choice of where to start, then searches
+/// composed from a topic for the person to judge.
+pub struct Guide {
+    /// Still at the first choice (a new library), not yet composing searches.
+    pub choosing: bool,
+    pub keywords: Entity<TextInput>,
+    /// The databases to compose searches for.
+    pub kinds: Vec<String>,
+    pub busy: bool,
+    pub error: String,
+    pub ideas: Vec<GuideIdea>,
+    /// Bumped with every generation, so answers to an earlier one are dropped.
+    round: u64,
+}
+
+impl Guide {
+    pub(crate) fn new(topic: &str, cx: &mut App) -> Guide {
+        let keywords = cx.new(|cx| TextInput::new("研究主题或关键词，中文英文都可以。例如：植物根尖 单细胞转录组 干细胞微环境", cx).multiline(2).with_text(topic));
+        Guide { choosing: false, keywords, kinds: vec!["pubmed".into()], busy: false, error: String::new(), ideas: vec![], round: 0 }
+    }
+}
 
 /// One way to start, as a card to click.
 fn choice(id: &'static str, icon: &'static str, title: &'static str, about: &'static str, recommended: bool) -> Stateful<Div> {
@@ -174,5 +207,57 @@ impl Workspace {
             .child(div().px(px(10.)).py(px(8.)).rounded(px(6.)).bg(Theme::bg_sunken()).text_size(text_px(13.)).line_height(text_px(20.)).child(entry.idea.query.clone()))
             .child(found)
             .into_any_element()
+    }
+}
+
+impl Workspace {
+    /// Ask the model for searches on the guide's topic, then try each one so
+    /// the person can judge them by what they find.
+    pub(crate) fn guide_generate(&mut self, cx: &mut Context<Self>) {
+        let profile = self.settings.profile_for_or_default(Task::Chat);
+        let Some(lib) = self.lib.as_mut() else { return };
+        if lib.guide.busy { return }
+        let keywords = lib.guide.keywords.read(cx).text().trim().to_string();
+        lib.guide.error.clear();
+        if keywords.is_empty() && lib.info.topic.trim().is_empty() {
+            lib.guide.error = t("先写下研究主题或几个关键词。").into();
+            return cx.notify();
+        }
+        let (system, prompt) = ai::query_prompt(&lib.info.name, &lib.info.topic, &keywords, &lib.guide.kinds);
+        let request = match ai::plain_request(&profile, &system, &prompt) {
+            Ok(request) => request,
+            Err(err) => {
+                lib.guide.error = err;
+                return cx.notify();
+            }
+        };
+        lib.guide.busy = true;
+        lib.guide.round += 1;
+        let (round, library, protocol) = (lib.guide.round, lib.info.id.clone(), profile.protocol);
+        cx.notify();
+        let work = cx.background_executor().spawn(async move { wisp_net::complete(request, protocol).and_then(|reply| ai::parse_queries(&reply)) });
+        cx.spawn(async move |this, cx| {
+            let ideas = work.await;
+            this.update(cx, |this, cx| {
+                let Some(lib) = this.lib.as_mut().filter(|l| l.info.id == library && l.guide.round == round) else { return };
+                lib.guide.busy = false;
+                match ideas {
+                    Err(err) => lib.guide.error = err,
+                    Ok(ideas) => {
+                        lib.guide.ideas = ideas.into_iter().map(|idea| GuideIdea { idea, chosen: false, trial: None }).collect();
+                        let trials: Vec<(usize, Value)> = lib.guide.ideas.iter().enumerate().map(|(i, entry)| (i, serde_json::json!({"source": entry.idea.source, "query": entry.idea.query, "limit": 8}))).collect();
+                        for (index, args) in trials {
+                            this.library_tool("search_online", args, cx, move |this, result, _| {
+                                // Only for the ideas this trial was started for.
+                                if let Some(lib) = this.lib.as_mut().filter(|l| l.guide.round == round) && let Some(entry) = lib.guide.ideas.get_mut(index) { entry.trial = Some(result) }
+                            });
+                        }
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 }

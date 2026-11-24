@@ -10,7 +10,7 @@ use serde_json::Value;
 use wisp_core::model::{SCREENINGS};
 use wisp_core::sources;
 use wisp_core::store::ImportBatch;
-use wisp_core::time;
+use wisp_core::{libraries, time, tools};
 
 /// 「命中 90 篇，取回 5 篇，新增 5 篇，跳过 0 篇」, or why the run failed.
 fn run_summary(batch: &ImportBatch) -> (String, bool) {
@@ -203,5 +203,37 @@ impl Workspace {
                 .children(known.map(|known| ui::chip(known, Theme::text_secondary(), Theme::bg_sunken())))
         });
         panel.child(div().flex().items_center().child(div().flex_1().text_size(text_px(12.)).text_color(Theme::text_secondary()).child(head)).child(close)).children(rows).into_any_element()
+    }
+}
+
+impl Workspace {
+    /// While the app runs, look once a minute for saved searches whose turn
+    /// has come, in every library that updates on its own, and run them.
+    /// What was missed while the app was closed is due at the first look.
+    pub(crate) fn watch_searches(&mut self, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(std::time::Duration::from_secs(20)).await;
+            loop {
+                let Ok(root) = this.update(cx, |this, _| this.root.clone()) else { break };
+                // One look at a time: the next waits for this one's runs to end.
+                let outcome = cx.background_executor().spawn(async move { tools::call(&root, "sync_searches", &serde_json::json!({}), &wisp_net::get_text, &wisp_net::download) }).await;
+                let alive = this.update(cx, |this, cx| {
+                    let Ok(outcome) = outcome else { return };
+                    let runs = outcome["runs"].as_array().cloned().unwrap_or_default();
+                    if runs.is_empty() { return }
+                    this.libraries = libraries::list(&this.root);
+                    // The open library shows what came in; the others show it when opened.
+                    let Some(open) = this.lib.as_ref().map(|l| l.info.id.clone()) else { return cx.notify() };
+                    let mine: Vec<&Value> = runs.iter().filter(|run| run["libraryId"] == open.as_str()).collect();
+                    if mine.is_empty() { return }
+                    this.change(cx, |_| Ok(()));
+                    let added: u64 = mine.iter().filter_map(|run| run["added"].as_u64()).sum();
+                    if added > 0 { this.say(tf!("自动更新：新增 {added} 篇待判断的文献", "Automatic update: {added} new papers awaiting screening"), cx) }
+                });
+                if alive.is_err() { break }
+                cx.background_executor().timer(std::time::Duration::from_secs(60)).await;
+            }
+        })
+        .detach();
     }
 }

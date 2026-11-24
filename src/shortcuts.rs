@@ -23,7 +23,7 @@ pub struct Shortcut {
 
 pub const GROUPS: [&str; 2] = ["应用", "文献库"];
 
-/// What each one does is in `Workspace::shortcut` (app.rs).
+/// What each one does is in `Workspace::shortcut` (commands.rs).
 pub const SHORTCUTS: [Shortcut; 17] = [
     Shortcut { id: "palette", label: "命令面板", group: 0, default: "secondary-k" },
     Shortcut { id: "settings", label: "打开设置", group: 0, default: "secondary-," },
