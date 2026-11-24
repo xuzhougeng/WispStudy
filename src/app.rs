@@ -489,6 +489,8 @@ pub enum Cmd {
     RereadFile(String),
     /// Make a stored PDF smaller: its pictures written anew (#242).
     CompressFile(String),
+    /// Save a copy of a stored PDF with its reading marks written in as PDF annotations (#273), where the person picks.
+    ExportMarkedPdf(String),
     /// Have a model that sees pictures read the pages of a file that gave no text.
     ReadPages(String),
     SetTab(Tab),
@@ -733,7 +735,10 @@ pub enum Cmd {
     ConfirmPart(String),
     ConfirmTickAll(bool),
     ConfirmSort,
+    /// A click on a row: the keys act on it, and it is shown in full under the list again.
     ConfirmCursor(String),
+    /// The × of the row shown in full under the list: it is put away until a row is clicked. Esc here leaves for the queue, as the page's foot says.
+    ConfirmClose,
     /// Write what is ticked; take that back.
     ConfirmApply,
     ConfirmUndo,
@@ -818,6 +823,8 @@ pub enum Cmd {
     WriteFigures(crate::write_figures::Do),
     /// Looking for words in the manuscript (`write_seek.rs`).
     Seek(crate::write_seek::Do),
+    /// Looking for words through the whole library: full texts, marks, notes (`library_find.rs`).
+    LibraryFind(crate::library_find::Do),
     // The figure library (`src/figures.rs`)
     /// Only the figures with this tag; the tag chosen already, or none, shows all of them.
     FigureTag(String),
@@ -1750,6 +1757,8 @@ pub struct Library {
     /// What the sidebar counts beside its views and tags, under the search and filters set (`filter::counts`).
     pub counts: filter::Counts,
     pub search: Entity<TextInput>,
+    /// What the search box holds looked for through the whole library, on show in the list's place (`library_find.rs`).
+    pub finding: crate::library_find::Finding,
     pub page: Page,
     pub selected: Option<String>,
     /// The papers marked in the list with Shift or ⌘ / Ctrl, for doing something with all of them.
@@ -1852,6 +1861,8 @@ pub struct Library {
     /// Where each file was read at when another took its place or its paper was left (`PdfView::place`):
     /// read from the library's database when it opens, written there by `keep_places` (#194).
     pub file_places: HashMap<String, (usize, f32)>,
+    /// What can be undone and redone of each file's marks, by the file's id (`Workspace::step_marks`): in memory, gone with the library.
+    pub mark_history: HashMap<String, wisp_core::annotation::History>,
     /// The papers read before the one on show, the last one last, and those gone back from (`Workspace::step_history`).
     pub back: Vec<String>,
     pub forward: Vec<String>,
@@ -2844,6 +2855,7 @@ impl Workspace {
             part(items, breaks);
             items.push(plain(t("在新窗口中阅读"), Cmd::PaperWindow(paper.clone())));
             if !self.settings.pdf_tools_floating { items.push(plain(t("用系统应用打开"), Cmd::OpenFile(view.resource_id().to_string()))) }
+            if view.has_exported_marks() { items.push(plain(t("导出带标注的 PDF…"), Cmd::ExportMarkedPdf(view.resource_id().to_string()))) }
             items.push(ticked(t("工具悬浮在页面右侧"), self.settings.pdf_tools_floating, Cmd::FloatPdfTools(!self.settings.pdf_tools_floating)));
         }
     }
@@ -3602,6 +3614,7 @@ impl Workspace {
             }
 
             Cmd::SetView(view) => {
+                if self.lib.as_ref().is_some_and(|lib| lib.finding.open) { self.run_find(crate::library_find::Do::Close, window, cx) }
                 if let Some(lib) = self.lib.as_mut() {
                     lib.filters.view = view;
                     lib.page = Page::Papers;
@@ -3691,6 +3704,7 @@ impl Workspace {
             Cmd::WriteCited(what) => self.cite_do(what, window, cx),
             Cmd::Revise(what) => self.run_revise(what, cx),
             Cmd::Seek(what) => self.run_seek(what, window, cx),
+            Cmd::LibraryFind(what) => self.run_find(what, window, cx),
             Cmd::Agent(what) => self.run_agent(what, window, cx),
             Cmd::WriteFigures(what) => self.run_write_figures(what, window, cx),
             Cmd::WriteStop => {
@@ -3884,6 +3898,7 @@ impl Workspace {
             }
             Cmd::RereadFile(id) => self.reread_file(id, cx),
             Cmd::CompressFile(id) => self.compress_file(id, cx),
+            Cmd::ExportMarkedPdf(id) => self.export_marked_pdf(id, None, cx),
             Cmd::ReadPages(id) => self.write_run_start(true, Some(id), cx),
             Cmd::SetTab(tab) => {
                 // Without a model the question box is not drawn: the keyboard stays with the window, so Esc is still heard.
@@ -4667,7 +4682,7 @@ impl Workspace {
                 if let Some(lib) = self.lib.as_mut() { lib.screen.filter = filter }
             }
             Cmd::ScreenDecide(..) | Cmd::ScreenMode(_) | Cmd::ScreenGo(_) | Cmd::ScreenUndo | Cmd::ScreenAskOne(_) | Cmd::ScreenBeside => self.run_screen(cmd, window, cx),
-            Cmd::ConfirmTick(_) | Cmd::ConfirmChoose(..) | Cmd::ConfirmPart(_) | Cmd::ConfirmTickAll(_) | Cmd::ConfirmSort | Cmd::ConfirmCursor(_) | Cmd::ConfirmApply | Cmd::ConfirmUndo => self.run_confirm(cmd, window, cx),
+            Cmd::ConfirmTick(_) | Cmd::ConfirmChoose(..) | Cmd::ConfirmPart(_) | Cmd::ConfirmTickAll(_) | Cmd::ConfirmSort | Cmd::ConfirmCursor(_) | Cmd::ConfirmClose | Cmd::ConfirmApply | Cmd::ConfirmUndo => self.run_confirm(cmd, window, cx),
 
             Cmd::OpenGuide(choosing) => {
                 if let Some(lib) = self.lib.as_mut() {
@@ -4799,6 +4814,9 @@ impl Workspace {
                 lib.library_chat.materials_open = false;
                 lib.library_chat.input.read(cx).focus(window);
             }
+        } else if self.lib.as_ref().is_some_and(|l| l.page == Page::Extract && l.selected.is_none() && l.extract_detail_shown()) {
+            // 提取's row in full under the list, once no paper stands beside it: the list gets its room back.
+            self.run(Cmd::Extract(crate::extract::Do::Close), window, cx);
         } else if self.lib.as_ref().is_some_and(|l| l.page == Page::Trash && !l.trash_chosen.is_empty()) {
             if let Some(lib) = self.lib.as_mut() { (lib.trash_chosen, lib.trash_anchor) = (vec![], None) }
         } else if self.lib.as_ref().is_some_and(|l| !l.marked.is_empty()) {
@@ -4811,6 +4829,9 @@ impl Workspace {
             self.run(Cmd::LeaveAsk, window, cx);
         } else if self.lib.as_ref().is_some_and(|l| l.selected.is_some()) {
             self.select(None, window, cx);
+        } else if self.lib.as_ref().is_some_and(|l| l.page == Page::Papers && l.finding.open) {
+            // The places found in the whole library give the list back.
+            self.run(Cmd::LibraryFind(crate::library_find::Do::Close), window, cx);
         } else if self.lib.as_ref().is_some_and(|l| l.page == Page::Screen && l.screen.mode != ScreenMode::Batch) {
             // Out of a round or the confirmation, back to the queue.
             self.run(Cmd::ScreenMode(ScreenMode::Batch), window, cx);
@@ -5013,13 +5034,16 @@ impl Workspace {
             cx.subscribe(&scope_find, |this, input, event: &InputEvent, cx| {
                 if *event == InputEvent::Changed { this.scope_typed(input.read(cx).text().to_string(), cx) }
             }),
-            cx.subscribe(&search, |this, input, event: &InputEvent, cx| {
+            cx.subscribe_in(&search, window, |this, input, event: &InputEvent, window, cx| {
                 if *event == InputEvent::Changed && let Some(lib) = this.lib.as_mut() {
                     lib.filters.search = input.read(cx).text().to_string();
                     lib.page = Page::Papers;
                     lib.refilter();
+                    this.find_typed(input.read(cx).text().to_string(), cx);
                     cx.notify();
                 }
+                // Enter: the words looked for through the whole library.
+                if *event == InputEvent::Submit { this.run(Cmd::LibraryFind(crate::library_find::Do::Open), window, cx) }
             }),
             cx.subscribe(&notes, |this, input, event: &InputEvent, cx| {
                 if *event == InputEvent::Changed {
@@ -5108,6 +5132,7 @@ impl Workspace {
             folding: HashSet::new(),
             counts: filter::Counts::default(),
             search,
+            finding: Default::default(),
             page: Page::Papers,
             selected: None,
             tab: Tab::Info,
@@ -5160,6 +5185,7 @@ impl Workspace {
             no_smaller: HashSet::new(),
             read_file: HashMap::new(),
             file_places,
+            mark_history: HashMap::new(),
             back: vec![],
             forward: vec![],
             guide,
@@ -5856,7 +5882,7 @@ impl Workspace {
 
     /// Show a file of a paper in the viewer: an attachment by its id, or (`None`) the main text. The file on
     /// show keeps its place for when it is come back to, and each file has its own marks.
-    fn show_file(&mut self, paper: &str, file: Option<String>, cx: &mut Context<Self>) {
+    pub(crate) fn show_file(&mut self, paper: &str, file: Option<String>, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
         match file {
             Some(file) => lib.read_file.insert(paper.to_string(), file),
@@ -6013,6 +6039,7 @@ impl Workspace {
                 if let Some(paper) = self.lib.as_ref().and_then(|lib| lib.pins.iter().find(|pin| pin.view == view).map(|pin| pin.paper.clone())) { self.work_in_pane(&paper, cx) }
             }
             PdfEvent::Copied => self.say(t("已复制"), cx),
+            PdfEvent::StepMarks(back) => self.step_marks(&view, *back, cx),
             PdfEvent::Translate(text, profile) => self.translate_passage(text.clone(), profile.clone(), cx),
             PdfEvent::ReadAloud(..) | PdfEvent::Figure(_) if self.lib.as_ref().is_some_and(|lib| lib.apart(&view).is_some()) => self.say(t("朗读和收进图片库只对正在读的那篇：先在列表里选中它。"), cx),
             PdfEvent::ReadAloud(page, text) => self.read_aloud(Some((*page, text.clone())), cx),
@@ -6021,6 +6048,7 @@ impl Workspace {
             PdfEvent::AnnotationNote { resource, id, note } => self.change_pdf_annotation(resource, |store| store.update_pdf_annotation_note(resource, id, note), cx),
             PdfEvent::RecolorAnnotation { resource, id, color } => self.change_pdf_annotation(resource, |store| store.recolor_pdf_annotation(resource, id, color), cx),
             PdfEvent::RemoveAnnotation { resource, id } => self.change_pdf_annotation(resource, |store| store.remove_pdf_annotation(resource, id), cx),
+            PdfEvent::ExportMarked => { let id = view.read(cx).resource_id().to_string(); self.export_marked_pdf(id, None, cx) }
             PdfEvent::AddShape { paper, resource, page, kind, rect, note } => self.change_pdf_annotation(resource, |store| store.add_pdf_shape(paper, resource, *page, *kind, *rect, note).map(|_| ()), cx),
             PdfEvent::MoveShape { resource, id, rect } => self.change_pdf_annotation(resource, |store| store.move_pdf_shape(resource, id, *rect), cx),
             PdfEvent::AddText { paper, resource, page, rect, text, style } => self.change_pdf_annotation(resource, |store| store.add_pdf_text(paper, resource, *page, *rect, text, style).map(|_| ()), cx),
@@ -6113,10 +6141,34 @@ impl Workspace {
         // file, every one of them (a paper pinned beside may be the one on show as well).
         let views: Vec<Entity<PdfView>> = lib.pdf.iter().chain(lib.beside.as_ref().map(|beside| &beside.view)).chain(lib.pins.iter().map(|pin| &pin.view)).chain(lib.windows.iter().map(|w| &w.view)).filter(|view| view.read(cx).resource_id() == resource).cloned().collect();
         if views.is_empty() { return }
+        // The file's marks before and after the write are what its undo takes back (`annotation::Change`).
+        let before = lib.store.pdf_annotations("", resource).unwrap_or_default();
         match change(&mut lib.store).and_then(|()| lib.store.pdf_annotations("", resource)) {
             Ok(annotations) => {
+                lib.mark_history.entry(resource.to_string()).or_default().record(wisp_core::annotation::Change::between(&before, &annotations));
                 for pdf in views { pdf.update(cx, |pdf, cx| pdf.annotations_saved(annotations.clone(), cx)) }
                 self.say(t("PDF 标注已保存"), cx);
+            }
+            Err(error) => self.fail(format!("{error:#}"), cx),
+        }
+    }
+
+    /// ⌘Z (`back`) or ⇧⌘Z in a viewer: the last change of the marks of the file it shows is taken back, or done again.
+    /// Each file has its own: the key never changes a file out of sight. Every viewer of the file shows the marks
+    /// as they now are, and the one the key was pressed in brings the mark into view.
+    fn step_marks(&mut self, view: &Entity<PdfView>, back: bool, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        let resource = view.read(cx).resource_id().to_string();
+        let mut history = lib.mark_history.remove(&resource).unwrap_or_default();
+        let stepped = lib.store.step_pdf_marks(&resource, &mut history, back).and_then(|change| Ok((change, lib.store.pdf_annotations("", &resource)?)));
+        lib.mark_history.insert(resource.clone(), history);
+        match stepped {
+            Ok((None, _)) => self.say(if back { t("没有可以撤销的标注改动") } else { t("没有可以重做的标注改动") }, cx),
+            Ok((Some(change), annotations)) => {
+                let views: Vec<Entity<PdfView>> = lib.pdf.iter().chain(lib.beside.as_ref().map(|beside| &beside.view)).chain(lib.pins.iter().map(|pin| &pin.view)).chain(lib.windows.iter().map(|w| &w.view)).filter(|other| other.read(cx).resource_id() == resource).cloned().collect();
+                for pdf in views { pdf.update(cx, |pdf, cx| pdf.annotations_saved(annotations.clone(), cx)) }
+                if let Some((page, rect)) = change.place(back) { view.update(cx, |pdf, cx| pdf.reveal(page, rect, cx)) }
+                self.say(if back { t("已撤销标注改动") } else { t("已重做标注改动") }, cx);
             }
             Err(error) => self.fail(format!("{error:#}"), cx),
         }
@@ -6667,6 +6719,46 @@ impl Workspace {
                     }
                 }
                 cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// A copy of a stored PDF with all its marks written in as PDF annotations, which other readers show (#273):
+    /// saved where the person picks, or at `to` (a scripted run). The file in the library is not touched.
+    /// A file without marks to write is said so, and nothing is saved: a plain copy is what 在文件夹中显示 gives.
+    pub(crate) fn export_marked_pdf(&mut self, id: String, to: Option<PathBuf>, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_ref() else { return };
+        let Some(file) = lib.files.iter().find(|f| f.id == id && f.format == "pdf") else { return };
+        let marks = match lib.store.pdf_annotations(&file.paper_id, &file.id) {
+            Ok(marks) => marks.into_iter().filter(|mark| wisp_core::annotpdf::exported(mark.kind)).collect::<Vec<_>>(),
+            Err(err) => return self.fail(format!("{err:#}"), cx),
+        };
+        if marks.is_empty() { return self.say(t("这个文件还没有标注（截图标记不算），没有可写进 PDF 的。"), cx) }
+        let source = lib.store.file_path(file);
+        let title = std::path::Path::new(&file.title).file_stem().map(|stem| stem.to_string_lossy().to_string()).unwrap_or_default();
+        let stem = wisp_core::archive::file_stem(&title, "paper");
+        let name = tf!("{stem}（带标注）.pdf", "{stem} (annotated).pdf");
+        let directory = dirs::document_dir().or_else(dirs::home_dir).unwrap_or_else(|| self.root.clone());
+        let picked = to.is_none().then(|| cx.prompt_for_new_path(&directory, Some(&name)));
+        cx.spawn(async move |this, cx| {
+            let mut path = match (picked, to) {
+                (Some(picked), _) => match picked.await { Ok(Ok(Some(path))) => path, _ => return },
+                (None, Some(to)) => to,
+                (None, None) => return,
+            };
+            if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")) {
+                let mut named = path.into_os_string();
+                named.push(".pdf");
+                path = PathBuf::from(named);
+            }
+            let target = path.clone();
+            let result = cx.background_executor().spawn(async move { wisp_core::annotpdf::write(&source, &marks, &target) }).await;
+            this.update(cx, |this, cx| match result {
+                Ok(marked) if marked.left > 0 => this.say(tf!("已导出带 {} 处标注的 PDF 到 {}（{} 处所在的页这个文件没有，没有写进去）", "Exported the PDF with {} marks to {} ({} on pages the file lacks were left out)", marked.written, path.display(), marked.left), cx),
+                Ok(marked) => this.say(tf!("已导出带 {} 处标注的 PDF 到 {}", "Exported the PDF with {} marks to {}", marked.written, path.display()), cx),
+                Err(err) => this.fail(tf!("没有导出：{err:#}", "Not exported: {err:#}"), cx),
             })
             .ok();
         })
@@ -9361,6 +9453,11 @@ impl Workspace {
                     let Some(file) = self.lib.as_ref().and_then(|lib| lib.selected.as_deref().and_then(|id| lib.pdf_file(id)).map(|file| file.id.clone())) else { return };
                     Some(match name { "reread" => Cmd::RereadFile(file), "compress" => Cmd::CompressFile(file), _ => Cmd::ReadPages(file) })
                 }
+                // The file on show with its marks, written to a path without the save dialog.
+                "exportpdf" => {
+                    let Some(file) = self.lib.as_ref().and_then(|lib| lib.pdf.as_ref()).map(|view| view.read(cx).resource_id().to_string()) else { return };
+                    return self.export_marked_pdf(file, Some(PathBuf::from(arg)), cx);
+                }
                 "width" => {
                     self.settings.detail_width = arg.parse().unwrap_or(0.);
                     cx.notify();
@@ -9402,7 +9499,8 @@ impl Workspace {
                 "zotero-report" => Some(Cmd::ShowZotero),
                 // `screen` starts the assistant on the pending papers, `screen:decided` on the decided ones, `screen:included` on the included ones;
                 // `screen:unincluded` asks to move the decided papers not included to the trash.
-                // `screen:single`, `screen:confirm` and `screen:batch` are the page's three faces; `screen:go;<n>` the n-th paper of a round.
+                // `screen:single`, `screen:confirm` and `screen:batch` are the page's three faces; `screen:go;<n>` the n-th paper of a round;
+                // `screen:close` the × of 确认's row in full under the list.
                 "screen" => Some(match arg {
                     "decided" => Cmd::ScreenRecheck(false),
                     "included" => Cmd::ScreenRecheck(true),
@@ -9412,6 +9510,7 @@ impl Workspace {
                     "batch" => Cmd::ScreenMode(ScreenMode::Batch),
                     "apply" => Cmd::ConfirmApply,
                     "unconfirm" => Cmd::ConfirmUndo,
+                    "close" => Cmd::ConfirmClose,
                     go if go.starts_with("go;") => Cmd::ScreenGo(go[3..].parse().unwrap_or(0)),
                     _ => Cmd::ScreenStart,
                 }),
@@ -9743,6 +9842,14 @@ impl Workspace {
                     }
                     None
                 }
+                // 全库查找: `libfind` what the search box holds, `libfind:<words>` those (as the palette's row), `libfind:go;<n>`
+                // the n-th row of the places (a paper, a place), `libfind:close` the list again.
+                "libfind" => Some(Cmd::LibraryFind(match arg.split_once(';') {
+                    Some(("go", n)) => crate::library_find::Do::Go(n.parse().unwrap_or(0)),
+                    _ if arg == "close" => crate::library_find::Do::Close,
+                    _ if arg.is_empty() => crate::library_find::Do::Open,
+                    _ => crate::library_find::Do::Query(arg.to_string()),
+                })),
                 // Ask the library a question (no commas in it: they separate the steps).
                 "ask" => {
                     if let Some(lib) = self.lib.as_ref() { lib.library_chat.input.update(cx, |input, cx| input.set_text(arg, cx)) }

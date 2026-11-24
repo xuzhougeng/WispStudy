@@ -290,6 +290,7 @@ impl Workspace {
                 items.push(item(t("复制文件名"), Cmd::CopyText(file.title.clone())));
                 if file.kind == "fulltext" { items.push(item(t("重新读取文字"), Cmd::RereadFile(id.clone()))) }
                 if file.format == "pdf" && !lib.shrinking.contains(id) && !lib.shrunk.contains(id) && !lib.no_smaller.contains(id) { items.push(item(t("压缩 PDF"), Cmd::CompressFile(id.clone()))) }
+                if file.format == "pdf" { items.push(item(t("导出带标注的 PDF…"), Cmd::ExportMarkedPdf(id.clone()))) }
                 breaks.push(items.len());
                 items.push(item(t("移除附件"), Cmd::RemoveFile(id.clone())));
             }
@@ -371,6 +372,8 @@ impl Workspace {
         // 提取 moves along its rows.
         if lib.page == Page::Extract { return self.extract_nav(nav, window, cx) }
         if lib.page == Page::Trash { return self.trash_nav(nav, window, cx) }
+        // The places found in the whole library, in the list's place.
+        if lib.page == Page::Papers && lib.finding.open { return self.find_nav(nav, window, cx) }
         // The papers in the order the page shows them.
         let ids: Vec<String> = match lib.page {
             Page::Papers => lib.shown.iter().map(|&i| lib.papers[i].id.clone()).collect(),

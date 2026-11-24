@@ -1006,8 +1006,8 @@ impl Workspace {
         // while that is open and leaves room (as wide as `PdfView::annotation_panel` makes it).
         let area = (width, pdf_height);
         let (mut right, top) = geo::tools_at(self.settings.pdf_tools_at, area);
-        let list = (width - 16.).clamp(0., 360.);
-        if self.settings.pdf_tools_at.is_none() && marks_open && width - list - 16. >= geo::TOOLS.0 + 8. { right = list + 16. }
+        let list = (width - 24.).clamp(0., 360.);
+        if self.settings.pdf_tools_at.is_none() && marks_open && width - list - 24. >= geo::TOOLS.0 + 8. { right = list + 24. }
         let held = self.lib.as_ref().and_then(|lib| lib.float_drag).is_some_and(|drag| drag.held_tools());
         let split_tip = match split { Split::Off => "分屏", Split::Side => "左右分屏", Split::Stacked => "上下分屏", Split::Triple => "三栏对照" };
         let free = self.settings.pdf_split_free;

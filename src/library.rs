@@ -1030,7 +1030,11 @@ impl Workspace {
             if lib.papers.is_empty() {
                 ui::empty_state("library", t("这个文献库还是空的"), t("点击左侧「添加文献」：粘贴 DOI 或 PMID、导入 BibTeX / RIS，或者直接把 PDF 或整个文件夹拖进窗口（子文件夹的名字会成为标签）。")).into_any_element()
             } else {
-                ui::empty_state("search", t("没有匹配的文献"), t("调整搜索词或筛选条件。")).child(ui::secondary_button("empty-clear", t("清空筛选")).on_click(self.on(Cmd::ClearFilters, cx))).into_any_element()
+                ui::empty_state("search", t("没有匹配的文献"), t("调整搜索词或筛选条件。"))
+                    .child(div().flex().gap(px(8.)).child(ui::secondary_button("empty-clear", t("清空筛选")).on_click(self.on(Cmd::ClearFilters, cx)))
+                        // The words may be in a paper's text or marks rather than its record.
+                        .when(!f.search.trim().is_empty(), |d| d.child(ui::secondary_button("empty-find", t("在全文和标注里找")).on_click(self.on(Cmd::LibraryFind(crate::library_find::Do::Open), cx)))))
+                    .into_any_element()
             }
         } else {
             // A bar at the right edge shows where in a long list the rows on show are, and is dragged to go elsewhere.
@@ -1040,7 +1044,10 @@ impl Workspace {
                 .into_any_element()
         };
         let marked = lib.marked.len();
-        let status = if marked > 0 {
+        let finding = lib.finding.open;
+        let status = if finding {
+            tf!("↑↓ 选择 · Enter 打开原处 · Esc 返回列表", "↑↓ Choose · Enter to open the place · Esc back to the list")
+        } else if marked > 0 {
             tf!("已选 {marked} 篇 · 右键批量操作 · Esc 取消", "{marked} selected · Right-click for batch actions · Esc to cancel")
         } else if let Some(run) = lib.import.as_ref().filter(|run| run.running()) {
             if run.ids == 0 { tf!("正在导入 PDF，已完成 {} / {}", "Importing PDFs, {} / {} complete", run.rows.len(), run.total) } else { tf!("正在导入，已完成 {} / {}", "Importing, {} / {} complete", run.rows.len(), run.total) }
@@ -1081,7 +1088,8 @@ impl Workspace {
                             .border_1()
                             .border_color(if lib.search.focus_handle(cx).is_focused(window) { Theme::accent() } else { Theme::bg_sunken() })
                             .child(ui::icon("search", 15., Theme::text_tertiary()))
-                            .child(lib.search.clone()),
+                            .child(lib.search.clone())
+                            .children(self.find_offer(width, cx)),
                     )
                     .when(roomy, |d| {
                         d.child(ui::secondary_button("sort", t("排序")).child(ui::icon("sort-down", 14., Theme::text_secondary())).on_click(self.on_menu(MenuKind::Sort, cx)))
@@ -1101,15 +1109,17 @@ impl Workspace {
                     cx.notify();
                 }))
             }).children(row))
-            .child(div().flex().flex_none().h(text_px(32.)).px(px(8.)).border_t_1().border_b_1().border_color(Theme::line()).bg(Theme::bg_sunken()).text_size(text_px(12.)).text_color(Theme::text_tertiary())
+            // The places found in the whole library take the list's place, their line where the column names are.
+            .when(finding, |d| d.child(self.render_found_head(cx)))
+            .when(!finding, |d| d.child(div().flex().flex_none().h(text_px(32.)).px(px(8.)).border_t_1().border_b_1().border_color(Theme::line()).bg(Theme::bg_sunken()).text_size(text_px(12.)).text_color(Theme::text_tertiary())
                 // A right click on the names: which columns are on show.
                 .on_mouse_down(MouseButton::Right, cx.listener(|this, event: &MouseDownEvent, _, cx| {
                     cx.stop_propagation();
                     this.open_menu(MenuKind::Columns, event.position, cx);
                 }))
-                .children(header))
+                .children(header)))
             // The papers without a PDF: the open ones among them can be fetched in one go.
-            .when(lib.filters.view == View::NoPdf && lookable > 0 && lib.fetching.as_ref().is_none_or(|run| !run.running()), |d| {
+            .when(!finding && lib.filters.view == View::NoPdf && lookable > 0 && lib.fetching.as_ref().is_none_or(|run| !run.running()), |d| {
                 d.child(
                     div()
                         .flex()
@@ -1125,7 +1135,7 @@ impl Workspace {
                         .child(ui::primary_button("find-pdfs", tf!("为 {lookable} 篇查找开放全文", "Find open full text for {lookable} papers")).h(text_px(30.)).flex_none().on_click(self.on(Cmd::FindPdfs(None), cx))),
                 )
             })
-            .child(body)
+            .child(if finding { self.render_found(width, cx) } else { body })
             .child(
                 div()
                     .flex()
@@ -1139,7 +1149,11 @@ impl Workspace {
                     .text_size(text_px(12.))
                     .text_color(Theme::text_tertiary())
                     .gap(px(12.))
-                    .child(div().flex_none().child(if filtered || shown != total { tf!("显示 {shown} / {total} 篇", "Showing {shown} / {total} papers") } else { tf!("共 {total} 篇", "{total} papers in total") }))
+                    .child(div().flex_none().child(match self.found_foot() {
+                        Some(said) => said,
+                        None if filtered || shown != total => tf!("显示 {shown} / {total} 篇", "Showing {shown} / {total} papers"),
+                        None => tf!("共 {total} 篇", "{total} papers in total"),
+                    }))
                     .child(div().min_w_0().truncate().child(status)),
             )
             // Last, so it is drawn over the column names and the list.
