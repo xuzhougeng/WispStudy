@@ -4722,6 +4722,9 @@ impl Workspace {
                 lib.library_chat.materials_open = false;
                 lib.library_chat.input.read(cx).focus(window);
             }
+        } else if self.lib.as_ref().is_some_and(|l| l.page == Page::Extract && l.selected.is_none() && l.extract_detail_shown()) {
+            // 提取's row in full under the list, once no paper stands beside it: the list gets its room back.
+            self.run(Cmd::Extract(crate::extract::Do::Close), window, cx);
         } else if self.lib.as_ref().is_some_and(|l| l.page == Page::Trash && !l.trash_chosen.is_empty()) {
             if let Some(lib) = self.lib.as_mut() { (lib.trash_chosen, lib.trash_anchor) = (vec![], None) }
         } else if self.lib.as_ref().is_some_and(|l| !l.marked.is_empty()) {
