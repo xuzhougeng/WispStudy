@@ -448,6 +448,8 @@ const PREVIEW_SCALE: f32 = 1.5;
 const PAGE_GAP: f32 = 12.;
 /// The room left at either side of a page.
 const MARGIN: f32 = 16.;
+// The bar down the pages stands in the margin beside a page fitted to the width, and covers none of it.
+const _: () = assert!(crate::scrollbar::STRIP <= MARGIN);
 /// Logical pixels a PDF point takes at 100 %: a point is 1/72 inch, a pixel 1/96.
 const POINT_PX: f32 = 96. / 72.;
 const ZOOM_MIN: f32 = 25.;
@@ -4147,7 +4149,7 @@ impl PdfView {
     /// the file, without depending on a hit target over the PDF text.
     fn annotation_panel(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let button = |id, label: &'static str| div().id(id).px(px(8.)).py(px(4.)).rounded(px(5.)).cursor_pointer().hover(|s| s.bg(Theme::hover())).child(label);
-        let width = (self.width - 16.).clamp(0., 360.);
+        let width = (self.width - 24.).clamp(0., 360.);
         let list = self.annotations_open.then(|| {
             let rows = self.annotations.iter().map(|annotation| {
                 let (id, edit_id, remove_id) = (annotation.id.clone(), annotation.id.clone(), annotation.id.clone());
@@ -4178,7 +4180,8 @@ impl PdfView {
                 .when(self.annotations.is_empty(), |d| d.child(div().p(px(12.)).text_color(Theme::text_secondary()).child(t("选中 PDF 文字后，可添加下划线或高亮；「方框」「便签」「文本框」三个工具可以框出区域、在任意位置记笔记，或直接把字写在页面上。"))))
                 .children(rows)
         });
-        div().absolute().top(px(8.)).right(px(8.)).max_w(px(width)).flex().flex_col().items_end().gap(px(6.)).text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text()).occlude()
+        // In from the right edge by the width of the bar down the pages, which stands beside it.
+        div().absolute().top(px(8.)).right(px(crate::scrollbar::STRIP + 4.)).max_w(px(width)).flex().flex_col().items_end().gap(px(6.)).text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text()).occlude()
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(div().id("pdf-annotations-toggle").px(px(10.)).py(px(5.)).rounded(px(6.)).bg(Theme::bg_body()).border_1().border_color(Theme::line_strong()).cursor_pointer()
                 .child(tf!("标注 ({})", "Annotations ({})", self.annotations.len()))
@@ -4291,7 +4294,15 @@ impl Render for PdfView {
                 return div().size_full().relative().children(map.clone()).children(labels.next().flatten());
             }
             let pages = list(self.panes[pane].list.clone(), move |index, _, cx| entity.update(cx, |this, cx| this.page(pane, index, cx))).size_full().pt(px(PAGE_GAP));
-            div().size_full().relative().child(pages).children(bars.next().flatten()).children(labels.next().flatten())
+            // Up the right edge, the bar that goes down the pages; it stops above the sideways bar. Pressed, its view is the one worked in, and leads its group.
+            let pressed = cx.entity();
+            let down = crate::scrollbar::scrollbar(("pdf-down", pane), self.panes[pane].list.clone()).on_press(move |_, cx| pressed.update(cx, |this: &mut Self, cx| {
+                this.active = pane;
+                cx.emit(PdfEvent::Worked);
+                cx.emit(PdfEvent::Pressed);
+            }));
+            let down = div().absolute().top_0().right_0().bottom(px(if self.max_x > 0. { BAR_HEIGHT + 2. } else { 0. })).w(px(crate::scrollbar::STRIP)).child(down);
+            div().size_full().relative().child(pages).child(down).children(bars.next().flatten()).children(labels.next().flatten())
         };
         // The pages once, or twice with a line between: each half scrolls on its own.
         let pages = match self.split {
