@@ -1011,7 +1011,7 @@ impl Workspace {
         // A conversation not yet made a library lists what it has kept, under the labels its answers use.
         let draft = lib.info.draft;
         let rows: Vec<(&wisp_core::model::Paper, String, &str, usize)> = match &chat.ctx {
-            _ if draft => lib.papers.iter().map(|paper| (paper, chat.sources().iter().find(|source| source.paper_id == paper.id).map(|source| source.label.clone()).unwrap_or_default(), "", 0)).collect(),
+            _ if draft => lib.papers.iter().map(|paper| (paper, chat.sources().iter().find(|source| source.paper_id == paper.id && source.library.is_empty()).map(|source| source.label.clone()).unwrap_or_default(), "", 0)).collect(),
             Some(ctx) => ctx.given.iter().filter(|given| lib.scope_has(&given.paper_id)).filter_map(|given| Some((lib.paper(&given.paper_id)?, ctx.sources.iter().find(|source| source.paper_id == given.paper_id).map(|source| source.label.clone()).unwrap_or_default(), given.record, given.pages))).collect(),
             None => lib.scope_listed().into_iter().map(|paper| (paper, String::new(), "", 0)).collect(),
         };
@@ -1290,6 +1290,9 @@ impl Workspace {
                     let attachment = file.and_then(|n| { let found = self.lib.as_ref()?.attachments(&source.paper_id).get(n - 1).map(|f| (f.id.clone(), f.title.clone()))?; Some((n, found.0, found.1)) });
                     let label = match &attachment {
                         Some((n, _, title)) => tf!("{} 附件 S{n} {title}", "{} Attachment S{n} {title}", source.label),
+                        // A paper read in another library says which, right after its label, where a narrow chip does not cut it:
+                        // the click opens that library.
+                        None if !source.library_name.is_empty() => format!("{}（{}）", source.label, source.library_name),
                         None => source.label.clone(),
                     };
                     let text = match page {
@@ -1298,6 +1301,7 @@ impl Workspace {
                         Some(page) => format!("{label} p.{page} · {}", source.title),
                         None => format!("{label} · {}", source.title),
                     };
+
                     // What looking the quotation up in the paper's text came to: said on the chip, not left to trust.
                     let check = chat.checks.get(&(source.label.clone(), file, page, quote.clone()));
                     let (mark, verdict, color) = quote_verdict(check).unwrap_or(("file-text", String::new(), Theme::accent()));
@@ -1308,7 +1312,8 @@ impl Workspace {
                     };
                     source_chip(SharedString::from(format!("cite-{side}-{i}-{n}")), if quote.is_empty() { 300. } else { 520. })
                         .text_color(Theme::text_secondary())
-                        .on_click(self.on(Cmd::GotoFile(source.paper_id.clone(), attachment.map(|(_, id, _)| id), page, quote), cx))
+                        // A paper of another library is followed by its label, which says the library to open (`Cmd::GotoCited`).
+                        .on_click(self.on(if source.library.is_empty() { Cmd::GotoFile(source.paper_id.clone(), attachment.map(|(_, id, _)| id), page, quote) } else { Cmd::GotoCited(talk, source.label.clone(), None, page, quote) }, cx))
                         .child(ui::icon(mark, 12., color))
                         .child(div().min_w_0().truncate().child(text))
                         .when(!verdict.is_empty(), |d| d.child(div().flex_none().text_color(color).child(verdict)))

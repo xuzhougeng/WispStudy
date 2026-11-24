@@ -1146,14 +1146,14 @@ mod answer_import_tests {
 
     #[test]
     fn carries_known_and_unresolved_conversation_labels_into_new_draft() {
-        let sources = vec![Source { label: "P1".into(), paper_id: "paper-id".into(), title: "A study".into() }];
+        let sources = vec![Source { label: "P1".into(), paper_id: "paper-id".into(), title: "A study".into(), ..Default::default() }];
         let papers = vec![Paper { id: "paper-id".into(), authors: "A Author".into(), year: Some(2020), doi: "10.1/example".into(), ..Default::default() }];
         let lookup = answer_source_labels("Result [P1 p.2], again [P1 p.3], unknown [P9].", &sources, &papers);
         assert_eq!(lookup.matches("[P1]").count(), 1);
         assert!(lookup.contains("A study") && lookup.contains("paper-id") && lookup.contains("10.1/example"));
         assert!(lookup.contains("[P9] 无法解析"));
         assert!(answer_source_labels("No citations", &sources, &papers).is_empty());
-        let ambiguous = vec![sources[0].clone(), Source { label: "P1".into(), paper_id: "other".into(), title: "Other".into() }];
+        let ambiguous = vec![sources[0].clone(), Source { label: "P1".into(), paper_id: "other".into(), title: "Other".into(), ..Default::default() }];
         assert!(answer_source_labels("[P1]", &ambiguous, &papers).contains("多个来源"));
     }
 }

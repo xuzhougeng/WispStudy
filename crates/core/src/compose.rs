@@ -502,7 +502,7 @@ mod tests {
     fn a_conversations_citations_become_the_manuscripts_with_their_passages() {
         let (mut store, made, paper) = library();
         let section = made.sections[1].id.clone();
-        let sources = vec![Source { label: "P1".into(), paper_id: paper.id.clone(), title: paper.title.clone() }];
+        let sources = vec![Source { label: "P1".into(), paper_id: paper.id.clone(), title: paper.title.clone(), ..Default::default() }];
         let mut args = json!({"section": section, "edits": [{"old": "", "new": "WOX5 维持静止中心 [P1 \"WOX5 maintains the quiescent centre of the root.\"]。另一句没有依据 [P1 \"The paper never says this sentence at all.\"]。"}]});
         let pieces = {
             let (papers, kept) = (store.list_papers().unwrap(), store.cite_keys().unwrap());

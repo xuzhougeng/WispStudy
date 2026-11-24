@@ -2028,5 +2028,8 @@
   "显示下一页": "Show the next page",
   "两页并排：旁边一栏显示下一页": "Two pages across: the next page in a column beside",
   "再开一栏下一页：跟着原文": "One more column: the next page, with the original",
-  "已经有三栏了。点一栏左上角的标签，可以让它改为显示下一页。": "Three columns already. Click the label at a column's top left to have it show the next page."
+  "已经有三栏了。点一栏左上角的标签，可以让它改为显示下一页。": "Three columns already. Click the label at a column's top left to have it show the next page.",
+  "问我的文献库": "Ask my libraries",
+  "在我的文献库里查一查：": "Look this up in my libraries: ",
+  "这次对话的文献列表读不出来。": "The papers of this conversation could not be read."
 }
