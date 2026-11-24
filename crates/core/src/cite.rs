@@ -797,6 +797,22 @@ impl Formatter {
     }
 }
 
+/// The stretch `within` of `text` as a reader reads it: each of `labels` (`Formatter::labels` of that text) that
+/// lies in the stretch stands in its group's place, the rest is as written. A label that does not fit the text
+/// (made from an earlier version of it) is passed over, so the words there stay as they are written.
+pub fn read_as(text: &str, labels: &[(Range<usize>, String)], within: Range<usize>) -> String {
+    let (mut out, mut at) = (String::new(), within.start);
+    for (range, label) in labels {
+        if range.start < at || range.end > within.end || !text.get(range.clone()).is_some_and(|written| written.starts_with('[') && written.ends_with(']')) { continue }
+        let Some(before) = text.get(at..range.start) else { continue };
+        out.push_str(before);
+        out.push_str(label);
+        at = range.end;
+    }
+    out.push_str(text.get(at..within.end).unwrap_or(""));
+    out
+}
+
 /// The bracketed citations of a text, a group each, in order: old-style ones are left as they are written.
 fn written_groups(text: &str, index: &Index) -> Vec<Vec<Cited>> {
     let mut groups: Vec<Vec<Cited>> = vec![];
@@ -1176,5 +1192,23 @@ mod tests {
         let nature = Style::Csl(std::sync::Arc::new(crate::csl::load("csl:nature", std::path::Path::new("/nowhere")).unwrap()));
         let format = Formatter::new(&[one, two], &index, &nature, "en");
         assert_eq!(placed(&format, one), [pair("[@Zhang2024 p.2 \"quoted\"]", "[1]"), pair("[@Smith2019; @Zhang2024b]", "[2,3]")]);
+    }
+
+    #[test]
+    fn a_text_read_through_has_its_citations_as_a_reader_reads_them() {
+        let papers = library();
+        let index = Index::new(&papers, [], &BTreeMap::new());
+        let text = "根 [@Zhang2024 p.2 \"quoted\"] 与茎 [@Smith2019; @Zhang2024b] [@Gone2000]。\n| 文献 | 说法 |\n|---|---|\n| [@Smith2019] | 茎 |";
+        let format = Formatter::new(&[text], &index, &Style::AuthorYear, "en");
+        let labels = format.labels(text, &index);
+        // The whole text; a key nothing has stays as it is written.
+        assert_eq!(read_as(text, &labels, 0..text.len()), "根 (Zhang et al., 2024a) 与茎 (Smith & Jones, 2019; Zhang et al., 2024b) [@Gone2000]。\n| 文献 | 说法 |\n|---|---|\n| (Smith & Jones, 2019) | 茎 |");
+        // A stretch of it (what stands between two pictures): only the groups inside it.
+        let from = text.find('|').unwrap();
+        assert_eq!(read_as(text, &labels, from..text.len()), "| 文献 | 说法 |\n|---|---|\n| (Smith & Jones, 2019) | 茎 |");
+        assert_eq!(read_as(text, &labels, 0..from - 1), "根 (Zhang et al., 2024a) 与茎 (Smith & Jones, 2019; Zhang et al., 2024b) [@Gone2000]。");
+        // Labels of another text are passed over and nothing breaks: here they point into the middle of words.
+        assert_eq!(read_as("根与茎都长得很快，叶子随后。", &labels, 0..42), "根与茎都长得很快，叶子随后。");
+        assert_eq!(read_as("short", &labels, 0..5), "short");
     }
 }

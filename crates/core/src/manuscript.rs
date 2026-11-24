@@ -308,14 +308,29 @@ fn bare_picture(body: &str, line: &markdown::Line) -> bool {
 
 /// A section's text as Markdown to stand under a heading of level
 /// `under`: each line a paragraph of its own, as the editor has them, the
-/// items of a list and the lines of fenced code kept together, and a
-/// heading written in the section set that many levels deeper.
+/// items of a list, the lines of fenced code and the rows of a table kept
+/// together, and a heading written in the section set that many levels deeper.
 pub fn section_markdown(body: &str, under: u8) -> String {
     let mut blocks: Vec<String> = vec![];
     // What the block being made is: a list, code, or neither.
     let (mut list, mut code) = (false, false);
-    for line in markdown::lines(body) {
-        let text = &body[line.range.clone()];
+    let lines = markdown::lines(body);
+    let written: Vec<&str> = lines.iter().map(|line| &body[line.range.clone()]).collect();
+    // The lines still to pass over: the rows of a table already taken whole.
+    let mut taken = 0;
+    for (at, line) in lines.iter().enumerate() {
+        if taken > 0 {
+            taken -= 1;
+            continue;
+        }
+        let text = written[at];
+        // A table is its lines one under the other: a blank line between two rows and it is no table to any reader.
+        let rows = if line.code || line.item.is_some() || line.heading > 0 || line.quote > 0 { 0 } else { markdown::table_lines(&written[at..]) };
+        if rows > 0 {
+            blocks.push(written[at..at + rows].iter().map(|row| row.trim()).collect::<Vec<_>>().join("\n"));
+            (list, code, taken) = (false, false, rows - 1);
+            continue;
+        }
         if line.code {
             match blocks.last_mut().filter(|_| code) {
                 Some(block) => {
@@ -1755,6 +1770,25 @@ mod tests {
         assert!(text.contains("<w:p><w:pPr><w:pStyle w:val=\"Heading2\"/></w:pPr><w:r><w:t xml:space=\"preserve\">Roots</w:t></w:r></w:p>"));
         assert!(text.contains("<w:r><w:rPr><w:b/></w:rPr><w:t xml:space=\"preserve\">grew</w:t></w:r>"));
         assert!(!text.contains("**") && !text.contains("---"));
+    }
+
+    #[test]
+    fn a_table_written_in_a_section_keeps_its_rows_together() {
+        // What an assistant writes into a section: a line, a table, a line. Every other line is a paragraph of its own.
+        let body = "对照如下：\n| 维度 | 顶刊 | 子刊 |\n|---|---|:-:|\n| 数据 | 自造 | 二次挖掘 |\n| 验证 | **有** | 无 |\n一句话：数据决定。\n另一段。";
+        let written = section_markdown(body, 2);
+        assert_eq!(written, "对照如下：\n\n| 维度 | 顶刊 | 子刊 |\n|---|---|:-:|\n| 数据 | 自造 | 二次挖掘 |\n| 验证 | **有** | 无 |\n\n一句话：数据决定。\n\n另一段。");
+        // Read back, it is a table: before, each row was a paragraph of pipes.
+        let blocks = markdown::parse(&written);
+        assert!(matches!(&blocks[1], markdown::Block::Table { rows, aligns } if rows.len() == 3 && aligns.len() == 3 && rows[2][1].text == "有"), "{blocks:?}");
+        assert_eq!(blocks.len(), 4);
+        // A line with a pipe and no line of dashes under it is a paragraph; so is a table's line inside fenced code, and a list's item.
+        assert_eq!(section_markdown("a | b\nc | d", 2), "a | b\n\nc | d");
+        assert_eq!(section_markdown("```\n| a | b |\n|---|---|\n```", 2), "```\n| a | b |\n|---|---|\n```");
+        assert_eq!(section_markdown("- a | b\n- --- | ---", 2), "- a | b\n- --- | ---");
+        // The exported file has it the same way.
+        let manuscript = Manuscript { title: "T".into(), sections: vec![Section { name: "讨论".into(), kind: "discussion".into(), body: body.into(), ..Default::default() }], ..Default::default() };
+        assert!(markdown(&manuscript).contains("\n\n| 维度 | 顶刊 | 子刊 |\n|---|---|:-:|\n| 数据 | 自造 | 二次挖掘 |\n| 验证 | **有** | 无 |\n\n"));
     }
 
     #[test]

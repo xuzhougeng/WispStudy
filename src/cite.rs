@@ -53,6 +53,16 @@ pub struct Read {
     formatter: Option<cite::Formatter>,
     /// Each citation group of the part being written that names papers: where it is written, and how it reads.
     pub here: Vec<(std::ops::Range<usize>, String)>,
+    /// The same for every section in the manuscript's order, as of when the formatter was made: what 预览 reads.
+    pub whole: Vec<Vec<(std::ops::Range<usize>, String)>>,
+}
+
+impl Read {
+    /// The reference list as the exported file has it, in the style's order and with its numbers: each paper's id
+    /// and its entry. Empty until the citations were read once.
+    pub fn references(&self) -> &[(String, cite::Rich)] {
+        self.formatter.as_ref().map_or(&[], |formatter| formatter.references())
+    }
 }
 
 /// What the manuscript cites. Worked out once before the writing page is
@@ -164,8 +174,14 @@ fn read_here(lib: &mut Library, key: &str, root: &std::path::Path, cx: &App) -> 
     let made_from = hasher.finish().max(1);
     if made_from != lib.citing.read.made_from {
         let style = lib.citing.read.style.as_ref().map(|(_, style)| style.clone()).unwrap_or_default();
-        let formatter = cite::Formatter::new(&texts, &index(lib), &style, language);
+        let (formatter, whole) = {
+            let index = index(lib);
+            let formatter = cite::Formatter::new(&texts, &index, &style, language);
+            let whole = texts.iter().map(|text| formatter.labels(text, &index)).collect();
+            (formatter, whole)
+        };
         lib.citing.read.formatter = Some(formatter);
+        lib.citing.read.whole = whole;
         lib.citing.read.made_from = made_from;
     }
     let current = lib.writing.editor.read(cx).text();
@@ -525,33 +541,28 @@ impl Workspace {
             .child(if entries.is_empty() { div().flex().flex_col().flex_1().min_h_0().px(px(14.)).child(empty).into_any_element() } else { div().id("cite-references").flex().flex_col().flex_1().min_h_0().overflow_y_scroll().track_scroll(&citing.sources.scroll).px(px(10.)).pb(px(12.)).gap(px(1.)).children(rows).into_any_element() })
     }
 
-    /// The end of the manuscript read through: its reference list, as a paper ends in one.
+    /// The end of the manuscript read through: its reference list, as a paper ends in one. The entries are the
+    /// exported file's (`Read::references`): in the style's order, numbered where the citations in the text are,
+    /// with what the style sets in italics. A paper in the trash is not among them; it is said over the list.
     pub(crate) fn render_references_read(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let lib = self.lib.as_ref()?;
         let listed = &lib.citing.listed;
         let issues: Vec<AnyElement> = listed.issues(true, "").map(|issue| div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(if issue.trashed { Theme::warning() } else { Theme::danger() }).child(format!("{}：{}", issue.place, issue.said)).into_any_element()).collect();
         if listed.whole.is_empty() && issues.is_empty() { return None }
-        let rows: Vec<AnyElement> = listed
-            .whole
-            .iter()
-            .map(|entry| {
-                let reference = &entry.reference;
-                div()
-                    .id(SharedString::from(format!("cite-read-{}", reference.paper_id)))
-                    .px(px(8.))
-                    .mx(px(-8.))
-                    .py(px(4.))
-                    .rounded(px(6.))
-                    .cursor_pointer()
-                    .hover(|s| s.bg(Theme::hover()))
-                    .text_size(text_px(13.))
-                    .line_height(text_px(21.))
-                    .text_color(if reference.trashed { Theme::text_tertiary() } else { Theme::text() })
-                    .child(reference.text.clone())
-                    .on_click(self.on(Cmd::GotoSource(reference.paper_id.clone(), None, String::new()), cx))
-                    .into_any_element()
-            })
-            .collect();
+        let mut row = |paper: &str| div().id(SharedString::from(format!("cite-read-{paper}"))).px(px(8.)).mx(px(-8.)).py(px(4.)).rounded(px(6.)).cursor_pointer().hover(|s| s.bg(Theme::hover())).text_size(text_px(13.)).line_height(text_px(21.)).on_click(self.on(Cmd::GotoSource(paper.to_string(), None, String::new()), cx));
+        let styled = lib.citing.read.references();
+        let rows: Vec<AnyElement> = if styled.is_empty() {
+            listed.whole.iter().map(|entry| row(&entry.reference.paper_id).text_color(if entry.reference.trashed { Theme::text_tertiary() } else { Theme::text() }).child(entry.reference.text.clone()).into_any_element()).collect()
+        } else {
+            styled
+                .iter()
+                .map(|(paper, entry)| {
+                    let looks = entry.looks.iter().filter(|(range, look)| entry.text.get(range.clone()).is_some() && (look.italic || look.bold)).map(|(range, look)| (range.clone(), HighlightStyle { font_style: look.italic.then_some(FontStyle::Italic), font_weight: look.bold.then_some(FontWeight::SEMIBOLD), ..Default::default() }));
+                    row(paper).text_color(Theme::text()).child(StyledText::new(entry.text.clone()).with_highlights(looks)).into_any_element()
+                })
+                .collect()
+        };
+        let count = if styled.is_empty() { listed.whole.len() } else { styled.len() };
         Some(
             div()
                 .flex()
@@ -562,8 +573,8 @@ impl Workspace {
                         .flex()
                         .items_baseline()
                         .gap(px(8.))
-                        .child(div().text_size(text_px(17.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text()).child(t("参考文献")))
-                        .when(!listed.whole.is_empty(), |d| d.child(div().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(tf!("{} 篇", "{} papers", listed.whole.len())))),
+                        .child(div().text_size(text_px(20.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text()).child(t("参考文献")))
+                        .when(count > 0, |d| d.child(div().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(tf!("{} 篇", "{} papers", count)))),
                 )
                 .children(issues)
                 .child(div().flex().flex_col().gap(px(2.)).children(rows))
