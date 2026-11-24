@@ -739,8 +739,11 @@ pub fn describe_result(result: &Result<Value, String>) -> String {
             } else if let Some(edited) = value["edited"].as_u64() {
                 let missed = value["missed"].as_array().map_or(0, Vec::len);
                 let name = value["section"]["name"].as_str().unwrap_or("");
+                // Sentences that repeat the papers they cite were handed back to the model (`compose::copied`): the person is told so too.
+                let copied = value["copied"].as_array().map_or(0, Vec::len);
                 match (edited, missed) {
                     (0, 0) => format!("「{name}」不用改"),
+                    _ if copied > 0 => format!("已写入「{name}」，{copied} 句和所引文献的原文大段相同"),
                     (_, 0) => format!("已写入「{name}」"),
                     (0, _) => format!("「{name}」的 {missed} 处没有对上原文，没有改"),
                     _ => format!("已写入「{name}」，另有 {missed} 处没有对上原文"),

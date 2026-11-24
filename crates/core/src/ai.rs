@@ -578,6 +578,8 @@ pub fn citation_spans(answer: &str) -> Vec<(std::ops::Range<usize>, Vec<Citation
             let part = part.trim();
             let mut words = part.split_whitespace();
             let Some(first) = words.next() else { continue };
+            // "[@P3 p.5]": a label written after the manuscript's `[@Key]`, as a smaller model does when it writes a manuscript.
+            let first = first.strip_prefix('@').unwrap_or(first);
             let page = |word: &str| word.trim_start_matches("p.").trim_start_matches('p').parse::<usize>().ok();
             if first.starts_with('P') && first.len() > 1 && first[1..].bytes().all(|b| b.is_ascii_digit()) {
                 // "[P3 S2 p.4]": page 4 of the paper's second attachment.
