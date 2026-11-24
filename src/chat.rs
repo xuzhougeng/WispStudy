@@ -718,12 +718,12 @@ impl Workspace {
         let scope = match &chat.ctx {
             Some(ctx) if talk == Talk::Paper && ctx.full > 1 => {
                 let mut line = tf!("已提供这 {} 篇文献的记录和 {} 页全文", "Provided the records of these {} papers and {} full-text pages", ctx.full, ctx.pages);
-                if ctx.pages_omitted > 0 { line.push_str(&tf!("（另有 {} 页超出长度未提供）", " ({} more pages exceeded the length limit)", ctx.pages_omitted)) }
+                if ctx.pages_omitted > 0 { line.push_str(&tn!("（另有 {n} 页超出长度未提供）", " ({n} more over the length limit)", ctx.pages_omitted, "page")) }
                 line
             }
             Some(ctx) if talk == Talk::Paper => {
-                let mut line = if ctx.pages > 0 { tf!("已提供这篇文献的记录和 {} 页全文", "Provided this paper's record and {} full-text pages", ctx.pages) } else { t("这篇文献没有可读取的全文，只提供了记录和摘要").to_string() };
-                if ctx.pages_omitted > 0 { line.push_str(&tf!("（另有 {} 页超出长度未提供）", " ({} more pages exceeded the length limit)", ctx.pages_omitted)) }
+                let mut line = if ctx.pages > 0 { tn!("已提供这篇文献的记录和 {n} 页全文", "Provided this paper's record and {n} of full text", ctx.pages, "page") } else { t("这篇文献没有可读取的全文，只提供了记录和摘要").to_string() };
+                if ctx.pages_omitted > 0 { line.push_str(&tn!("（另有 {n} 页超出长度未提供）", " ({n} more over the length limit)", ctx.pages_omitted, "page")) }
                 // The files read, by name: the main text and each attachment with its number, as the answers cite them.
                 let files: Vec<String> = ctx.files.iter().map(|file| match file.attachment {
                     Some(n) => tf!("附件 S{n} {} {} 页", "Attachment S{n} {} {} pp.", file.title, file.pages),
@@ -733,10 +733,10 @@ impl Workspace {
                 line
             }
             Some(ctx) => {
-                let mut line = tf!("已提供 {} 篇文献的记录", "Provided records for {} papers", ctx.full);
+                let mut line = if ctx.full == 1 { t("已提供 1 篇文献的记录").to_string() } else { tf!("已提供 {} 篇文献的记录", "Provided records for {} papers", ctx.full) };
                 if ctx.titles_only > 0 { line.push_str(&tf!("，{} 篇仅题目", ", {} titles only", ctx.titles_only)) }
                 if ctx.omitted > 0 { line.push_str(&tf!("，{} 篇未提供", ", {} omitted", ctx.omitted)) }
-                if ctx.pages > 0 { line.push_str(&tf!("，{} 页相关全文", ", {} relevant full-text pages", ctx.pages)) }
+                if ctx.pages > 0 { line.push_str(&tn!("，{n} 页相关全文", ", {n} of relevant full text", ctx.pages, "page")) }
                 line + &textless_note
             }
             // Beside the manuscript the line is kept to one: the conversation taken up again is the manuscript's last.

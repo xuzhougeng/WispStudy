@@ -830,10 +830,10 @@ impl Workspace {
             if field.kind == FieldKind::Text { continue }
             filters.push((("f-field", i).into(), field.name.clone(), f.fields.get(&field.id).cloned().unwrap_or_default(), FilterKey::Field(field.id.clone())));
         }
-        filters.push(("f-source".into(), t("来源").into(), f.source.clone(), FilterKey::Source));
+        filters.push(("f-source".into(), t("来源").into(), crate::i18n::phrase(&f.source), FilterKey::Source));
         filters.push(("f-preprint".into(), t("预印本").into(), match f.preprint.as_str() { "yes" => t("只看").into(), "no" => t("不含").into(), _ => String::new() }, FilterKey::Preprint));
         // A chip says the name alone when unset, "name: value" when set.
-        let said = |name: &str, value: &str| if value.is_empty() { name.to_string() } else { format!("{name}：{value}") };
+        let said = |name: &str, value: &str| if value.is_empty() { name.to_string() } else { tf!("{name}：{value}", "{name}: {value}") };
         let chip = |(id, name, value, key): &(ElementId, String, String, FilterKey), this: &Self, cx: &mut Context<Self>| {
             let set = !value.is_empty();
             div()

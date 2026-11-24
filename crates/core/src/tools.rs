@@ -347,7 +347,7 @@ pub fn catalog() -> Vec<ToolDef> {
         scoped(
             "ocr_pdf",
             "识别 PDF 页面上的文字",
-            "文字识别（OCR）：为读不出文字的 PDF（扫描件、字体没有文字编码的文件；list_papers 的 fulltext 为 textless）读出页面上的文字，按页保存，之后提问、找句子和写作都用得上，并记下是哪个引擎读的。引擎在「设置 › 网络 › 文字识别」选择：DeepSeek OCR 把整个文件上传到 DeepSeek 识别，每个文件最多 1000 页、100 MB，按页计费。只处理没有读出文字的 PDF，已有文字的不动；设了打开密码的读不了。给 resourceId 只读这个附件，给 paperId 读这篇文献的 PDF，都不给时处理文献库里所有读不出文字的 PDF（一次最多 limit 个，结果里的 remaining 是还剩几个）。",
+            "文字识别（OCR）：为读不出文字的 PDF（扫描件、字体没有文字编码的文件；list_papers 的 fulltext 为 textless）读出页面上的文字，按页保存，之后提问、找句子和写作都用得上，并记下是哪个引擎读的。引擎在「设置 › 网络 › 文字识别」选择：DeepSeek OCR 把整个文件上传到 DeepSeek 识别，每个文件最多 1000 页、100 MB，按页计费。只处理没有读出文字的 PDF，已有文字的不动；例外是点名的文件（给了 resourceId 或 paperId）识别过、却有页面没读出文字时，只把这些页再送去读一次，读出的文字放回原处（结果里的 retriedPages、filledPages 是送去几页、读出几页）。设了打开密码的读不了。给 resourceId 只读这个附件，给 paperId 读这篇文献的 PDF，都不给时处理文献库里所有读不出文字的 PDF（一次最多 limit 个，结果里的 remaining 是还剩几个）。",
             json!({
                 "resourceId": {"type": "string", "description": "要识别的 PDF 附件 ID，见 get_paper 的 files。"},
                 "paperId": {"type": "string", "description": "识别这篇文献里读不出文字的 PDF。"},
@@ -808,9 +808,14 @@ fn ocr_pdf(store: &mut Store, args: &Value, reach: Reach) -> Result<Value> {
     let (mut todo, mut rows) = (vec![], vec![]);
     for file in files.into_iter().filter(|f| f.kind == "fulltext" && f.format == "pdf") {
         match store.fulltext_pages(&file.id)? {
-            Some(Err(why)) if crate::fulltext::readable_by_eye(&why) => todo.push(file),
+            Some(Err(why)) if crate::fulltext::readable_by_eye(&why) => todo.push((file, vec![])),
             // Pages a model read in part are read whole.
-            Some(Ok(_)) if structures.get(&file.id).is_some_and(|info| info.read_in_part()) => todo.push(file),
+            Some(Ok(_)) if structures.get(&file.id).is_some_and(|info| info.read_in_part()) => todo.push((file, vec![])),
+            // Of a file asked for by name whose pages were read and some came back empty, those pages again.
+            Some(Ok(pages)) if named && !crate::ocr::blank_pages(structures.get(&file.id), &pages).is_empty() => {
+                let blank = crate::ocr::blank_pages(structures.get(&file.id), &pages);
+                todo.push((file, blank));
+            }
             // Of a file asked for by name, why it is left alone.
             Some(Err(why)) if named => rows.push(json!({"resourceId": file.id, "paperId": file.paper_id, "title": file.title, "outcome": "unreadable", "error": why})),
             Some(Ok(_)) if !resource.is_empty() => rows.push(json!({"resourceId": file.id, "paperId": file.paper_id, "title": file.title, "outcome": "has_text", "note": "这个文件已经有文字，没有再识别。"})),
@@ -823,10 +828,25 @@ fn ocr_pdf(store: &mut Store, args: &Value, reach: Reach) -> Result<Value> {
     }
     let mut remaining = todo.len();
     let mut streak = 0;
-    for file in todo.into_iter().take(if named { usize::MAX } else { limit }) {
+    for (file, blank) in todo.into_iter().take(if named { usize::MAX } else { limit }) {
         if streak >= OCR_GIVE_UP { break }
         remaining -= 1;
-        let made = std::fs::read(store.file_path(&file)).map_err(|e| format!("无法读取文件：{e}")).and_then(|bytes| read(engine, &file.title, &bytes));
+        let bytes = std::fs::read(store.file_path(&file)).map_err(|e| format!("无法读取文件：{e}"));
+        let made = if blank.is_empty() {
+            bytes.and_then(|bytes| read(engine, &file.title, &bytes))
+        } else {
+            // Only the pages that came back empty go, and are put back in their places; a file the reader
+            // here cannot cut goes whole.
+            let kept = store.fulltext_pages(&file.id)?.and_then(Result::ok).unwrap_or_default();
+            let raw = store.ocr_pages(&file.id)?.map(|(_, raw)| raw).unwrap_or_default();
+            bytes.and_then(|bytes| read(engine, &file.title, &crate::ocr::only_pages(&bytes, &blank).unwrap_or(bytes)))
+                .and_then(|reading| Ok(crate::ocr::Reading { engine: reading.engine, pages: crate::ocr::refill(&kept, &raw, &blank, reading.pages)? }))
+        };
+        // Pages read again: how many were sent and how many have text now.
+        let again = (!blank.is_empty()).then(|| {
+            let filled = made.as_ref().map_or(0, |reading| blank.iter().filter(|at| reading.pages.get(**at).is_some_and(|page| !page.text.trim().is_empty())).count());
+            (blank.len(), filled)
+        });
         let row = match made {
             Ok(reading) if reading.pages.iter().all(|page| page.text.trim().is_empty()) => {
                 streak = 0;
@@ -838,9 +858,16 @@ fn ocr_pdf(store: &mut Store, args: &Value, reach: Reach) -> Result<Value> {
                 let count = reading.pages.len();
                 let (texts, raw): (Vec<String>, Vec<String>) = reading.pages.into_iter().map(|page| (page.text, page.raw)).unzip();
                 let with_text = texts.iter().filter(|text| !text.trim().is_empty()).count();
-                store.save_read_pages(&file.id, texts, reading.engine.name, count)?;
-                store.save_ocr_pages(&file.id, reading.engine.key, &raw)?;
+                // Pages read again that still have no text change nothing that was kept.
+                if again.is_none_or(|(_, filled)| filled > 0) {
+                    store.save_read_pages(&file.id, texts, reading.engine.name, count)?;
+                    store.save_ocr_pages(&file.id, reading.engine.key, &raw)?;
+                }
                 let mut row = json!({"resourceId": file.id, "paperId": file.paper_id, "title": file.title, "outcome": "read", "engine": reading.engine.name, "pages": count, "pagesWithText": with_text});
+                if let Some((sent, filled)) = again {
+                    (row["retriedPages"], row["filledPages"]) = (json!(sent), json!(filled));
+                    if filled < sent { row["note"] = json!(format!("没有文字的 {sent} 页又读了一次，{filled} 页读出了文字；剩下的多半是只有图的页面。")) }
+                }
                 if !cut.is_empty() { row["cutPages"] = json!(cut); row["note"] = json!("cutPages 里的页面内容太多，没有读完，文字不全。") }
                 row
             }
@@ -3115,11 +3142,14 @@ pub(crate) mod tests {
         // Without a way to read lent, the tool says so; nothing to read is said too.
         assert!(call(&root, "ocr_pdf", &json!({})).unwrap_err().contains("没有提供文字识别"));
         let asked = std::cell::RefCell::new(vec![]);
+        // Whether the engine reads the second page: not the first times.
+        let fills = std::cell::Cell::new(false);
         let read = |engine: &str, name: &str, bytes: &[u8]| -> Result<Reading, String> {
             asked.borrow_mut().push((engine.to_string(), name.to_string(), bytes.len()));
             if engine == "model" { return Err("这里画不出页面".into()) }
             let raw = "<｜ref｜>Leaves grow from the shoot apical meristem.<｜/ref｜><｜box｜>[[50, 40, 950, 90]]<｜/box｜>".to_string();
-            Ok(Reading { engine: ocr::engine("deepseek").unwrap(), pages: vec![Page { text: ocr::plain(&raw), raw, cut: false }, Page::default(), Page { text: "Cut".into(), raw: "Cut".into(), cut: true }] })
+            let second = if fills.get() { Page { text: "Petioles hold the blade.".into(), raw: "Petioles hold the blade.".into(), cut: false } } else { Page::default() };
+            Ok(Reading { engine: ocr::engine("deepseek").unwrap(), pages: vec![Page { text: ocr::plain(&raw), raw, cut: false }, second, Page { text: "Cut".into(), raw: "Cut".into(), cut: true }] })
         };
         let reach = Reach { read: Some(&read), ..Default::default() };
         let lent = |args: Value| call_with(&root, "ocr_pdf", &args, &offline, &no_download, reach);
@@ -3144,10 +3174,27 @@ pub(crate) mod tests {
         assert!(engine == "deepseek" && raw.len() == 3 && raw[0].starts_with("<｜ref｜>"));
         assert_eq!(call(&root, "get_paper", &json!({"id": leaf})).unwrap()["fulltext"], "stored");
         assert!(call(&root, "read_fulltext", &json!({"paperId": leaf})).unwrap()["pages"][0]["text"].as_str().unwrap().starts_with("Leaves grow"));
-        // Once read it is left alone: said of a file named, and nothing done for the library.
-        assert_eq!(lent(json!({"resourceId": file.id})).unwrap()["files"][0]["outcome"], "has_text");
+        // Read, the library is left alone, though a page came back empty.
         assert_eq!(lent(json!({})).unwrap()["files"], json!([]));
         assert_eq!(asked.borrow().len(), 2);
+        // Named, the page that came back empty is read again (this file the reader here cannot cut goes whole,
+        // and the page is taken from it). Still empty, nothing kept changes and the row says so.
+        let again = lent(json!({"resourceId": file.id})).unwrap();
+        let row = &again["files"][0];
+        assert_eq!((row["outcome"].as_str(), row["retriedPages"].as_u64(), row["filledPages"].as_u64(), row["pagesWithText"].as_u64()), (Some("read"), Some(1), Some(0), Some(2)));
+        assert!(row["note"].as_str().unwrap().contains("只有图"));
+        assert_eq!(asked.borrow().len(), 3);
+        // Read this time, its text takes the page's place and the others stay as they were.
+        fills.set(true);
+        let again = lent(json!({"paperId": leaf})).unwrap();
+        assert_eq!((again["files"][0]["retriedPages"].as_u64(), again["files"][0]["filledPages"].as_u64()), (Some(1), Some(1)));
+        let store = Store::open(&dir).unwrap();
+        assert_eq!(store.fulltext_pages(&file.id).unwrap().unwrap().unwrap(), vec!["Leaves grow from the shoot apical meristem.".to_string(), "Petioles hold the blade.".to_string(), "Cut".to_string()]);
+        let (_, raw) = store.ocr_pages(&file.id).unwrap().unwrap();
+        assert!(raw[0].starts_with("<｜ref｜>") && raw[1] == "Petioles hold the blade.");
+        // With every page read it is left alone: said of a file named.
+        assert_eq!(lent(json!({"resourceId": file.id})).unwrap()["files"][0]["outcome"], "has_text");
+        assert_eq!(asked.borrow().len(), 4);
         assert!(lent(json!({"resourceId": "R-missing"})).unwrap_err().contains("附件不存在"));
         assert!(super::CONFIRMING.contains(&"ocr_pdf") && super::WRITING.contains(&"ocr_pdf"));
         std::fs::remove_dir_all(root).ok();

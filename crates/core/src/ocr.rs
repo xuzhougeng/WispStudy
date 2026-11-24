@@ -201,6 +201,44 @@ impl Reading {
     }
 }
 
+/// The pages (from 0) of a file whose text was read off its pages that came back without any: those a second
+/// reading sends again. None of a file that gave its own text (a page of it without words is a figure, not a page
+/// left unread) or that was read only in part (the pages not read yet come first).
+pub fn blank_pages(info: Option<&crate::store::StructureInfo>, pages: &[String]) -> Vec<usize> {
+    if info.is_none_or(|info| info.text_by.is_empty() || info.read_in_part()) { return vec![] }
+    pages.iter().enumerate().filter(|(_, page)| page.trim().is_empty()).map(|(index, _)| index).collect()
+}
+
+/// A PDF of only these pages of `pdf` (from 0, in order): what is sent to read a few pages again, so the pages
+/// that have their text are not read, nor billed, twice.
+pub fn only_pages(pdf: &[u8], keep: &[usize]) -> Result<Vec<u8>, String> {
+    let mut doc = lopdf::Document::load_mem(pdf).map_err(|err| format!("无法解析这个 PDF 的结构（{err}）。"))?;
+    let count = doc.get_pages().len() as u32;
+    let gone: Vec<u32> = (1..=count).filter(|number| !keep.contains(&(*number as usize - 1))).collect();
+    if gone.len() as u32 == count { return Err("要读的页面不在这个 PDF 里。".into()) }
+    doc.delete_pages(&gone);
+    doc.prune_objects();
+    let mut bytes = vec![];
+    doc.save_to(&mut bytes).map_err(|err| format!("无法写出要读的页面（{err}）。"))?;
+    Ok(bytes)
+}
+
+/// The whole file again with the pages read a second time in their places: `pages` and `raw` are what was kept
+/// (`raw` may be shorter: a file no engine read before), `at` the pages sent, `read` what came back for them, or for
+/// the whole file when it was sent whole. A page that came back without text keeps what it had.
+pub fn refill(pages: &[String], raw: &[String], at: &[usize], read: Vec<Page>) -> Result<Vec<Page>, String> {
+    let mut whole: Vec<Page> = pages.iter().enumerate().map(|(index, text)| Page { text: text.clone(), raw: raw.get(index).cloned().unwrap_or_default(), cut: false }).collect();
+    let read: Vec<(usize, Page)> = match read.len() {
+        n if n == at.len() => at.iter().copied().zip(read).collect(),
+        n if n == pages.len() => read.into_iter().enumerate().filter(|(index, _)| at.contains(index)).collect(),
+        n => return Err(format!("送去 {} 页，读回 {n} 页，对不上哪一页是哪一页。", at.len())),
+    };
+    for (index, page) in read {
+        if !page.text.trim().is_empty() && let Some(slot) = whole.get_mut(index) { *slot = page }
+    }
+    Ok(whole)
+}
+
 /// The front end's way of reading a file: the engine asked for (empty: as settings say), the file's name and its bytes.
 pub type Read<'a> = &'a dyn Fn(&str, &str, &[u8]) -> Result<Reading, String>;
 
@@ -792,5 +830,53 @@ mod tests {
         // A box that is no box gives the text no place.
         assert!(blocks("<｜ref｜>x<｜/ref｜><｜box｜>[[1, 2, 3]]<｜/box｜>").is_empty());
         assert_eq!(plain("<｜ref｜>x<｜/ref｜><｜box｜>[[1, 2, 3]]<｜/box｜>"), "x");
+    }
+
+    /// A PDF of one line of text a page.
+    fn pages_saying(lines: &[&str]) -> Vec<u8> {
+        use lopdf::{Document, Object, Stream, dictionary};
+        let mut doc = Document::with_version("1.5");
+        let pages_id = doc.new_object_id();
+        let font = doc.add_object(dictionary! {"Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica"});
+        let kids: Vec<Object> = lines.iter().map(|line| {
+            let content = doc.add_object(Stream::new(dictionary! {}, format!("BT /F1 12 Tf 72 720 Td ({line}) Tj ET").into_bytes()));
+            doc.add_object(dictionary! {"Type" => "Page", "Parent" => pages_id, "Contents" => content}).into()
+        }).collect();
+        doc.objects.insert(pages_id, Object::Dictionary(dictionary! {"Type" => "Pages", "Kids" => kids, "Count" => lines.len() as i64, "MediaBox" => vec![0.into(), 0.into(), 612.into(), 792.into()], "Resources" => dictionary! {"Font" => dictionary! {"F1" => font}}}));
+        let catalog = doc.add_object(dictionary! {"Type" => "Catalog", "Pages" => pages_id});
+        doc.trailer.set("Root", catalog);
+        let mut bytes = vec![];
+        doc.save_to(&mut bytes).unwrap();
+        bytes
+    }
+
+    #[test]
+    fn pages_left_empty_are_read_again_and_put_back_in_their_places() {
+        use crate::store::StructureInfo;
+        let pages: Vec<String> = ["Roots", "", "  ", "Shoots"].map(String::from).to_vec();
+        // Only of a file whose pages were read off them, and read to the end.
+        let read_by = |text_by: &str, pages_read: usize| StructureInfo { text_by: text_by.into(), pages_read, page_count: 4, ..Default::default() };
+        assert_eq!(blank_pages(Some(&read_by("DeepSeek OCR", 4)), &pages), vec![1, 2]);
+        assert!(blank_pages(Some(&read_by("", 0)), &pages).is_empty());
+        assert!(blank_pages(Some(&read_by("DeepSeek OCR", 2)), &pages).is_empty());
+        assert!(blank_pages(None, &pages).is_empty());
+        // The pages sent are those pages alone, in their order.
+        let pdf = pages_saying(&["Roots", "Petioles", "Stipules", "Shoots"]);
+        let sent = only_pages(&pdf, &[1, 2]).unwrap();
+        let read = crate::fulltext::pdf_pages(&sent).unwrap();
+        assert_eq!(read.len(), 2);
+        assert!(read[0].contains("Petioles") && read[1].contains("Stipules"), "{read:?}");
+        assert!(only_pages(&pdf, &[9]).is_err() && only_pages(b"not a pdf", &[0]).is_err());
+        // What comes back takes their places; a page still empty keeps what it had, and so does its raw answer.
+        let page = |text: &str| Page { text: text.into(), raw: format!("<{text}>"), cut: false };
+        let raw: Vec<String> = ["<Roots>", "", "", "<Shoots>"].map(String::from).to_vec();
+        let whole = refill(&pages, &raw, &[1, 2], vec![page("Petioles"), page("")]).unwrap();
+        assert_eq!(whole.iter().map(|page| page.text.as_str()).collect::<Vec<_>>(), ["Roots", "Petioles", "  ", "Shoots"]);
+        assert_eq!((whole[0].raw.as_str(), whole[1].raw.as_str(), whole[3].raw.as_str()), ("<Roots>", "<Petioles>", "<Shoots>"));
+        // The file sent whole: the pages asked for are taken from it, the others stay. A file no engine read has no raw answers.
+        let whole = refill(&pages, &[], &[2], vec![page("x"), page("y"), page("Stipules"), page("z")]).unwrap();
+        assert_eq!(whole.iter().map(|page| page.text.as_str()).collect::<Vec<_>>(), ["Roots", "", "Stipules", "Shoots"]);
+        assert_eq!(whole[0].raw, "");
+        assert!(refill(&pages, &raw, &[1, 2], vec![page("a"), page("b"), page("c")]).is_err());
     }
 }

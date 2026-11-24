@@ -668,8 +668,10 @@ impl Render for MindMapView {
             .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.zoom_to(this.zoom * ZOOM_STEP, None, cx)))
             .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.zoom_to(this.zoom / ZOOM_STEP, None, cx)))
             .on_action(cx.listener(|this, _: &ZoomFit, _, cx| { this.fit = true; cx.notify() }))
-            // Esc puts down a node being carried, then the question about a draft.
+            // Esc puts down a node being carried, then the question about a draft. In a node's field it ends the
+            // edit and nothing more: the field hands Esc on for a dialog around it to close, and that is the map.
             .on_action(cx.listener(|this, _: &Dismiss, _, cx| {
+                if this.editing.is_some() { return }
                 if this.grab.take().is_some() || std::mem::take(&mut this.asking) { cx.notify() } else { cx.propagate() }
             }))
             .on_key_down(cx.listener(Self::key))

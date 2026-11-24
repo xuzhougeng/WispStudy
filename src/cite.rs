@@ -358,7 +358,7 @@ impl Workspace {
         let Some((references, _)) = self.cited_references(cx) else { return };
         if references.is_empty() { return self.fail(t("还没有引用文献。"), cx) }
         cx.write_to_clipboard(ClipboardItem::new_string(cite::reference_list(&references)));
-        self.say(tf!("已复制 {} 条参考文献", "Copied {} references", references.len()), cx);
+        self.say(tn!("已复制 {n} 条参考文献", "Copied {n}", references.len(), "reference"), cx);
     }
 
     /// The cited papers as BibTeX, under the keys the manuscript cites them by.
@@ -485,7 +485,7 @@ impl Workspace {
         let (part, all) = (scope("cite-scope-part", t("本节").into(), false), scope("cite-scope-whole", tf!("全文", "Manuscript"), true));
         let small = |id: &'static str, name: &'static str| ui::ghost_button(id, None, Some(name.into())).h(text_px(22.)).px(px(6.)).text_size(text_px(12.));
         let empty = if !whole && !listed.whole.is_empty() {
-            ui::empty_state("library", t("这一节还没有引用"), &tf!("全文引用了 {} 篇，点「全文」查看。在候选句上点「引用」，或在上面找一篇文献，就引用到光标处。", "The manuscript cites {} papers: see Manuscript. Click Cite on a candidate, or find a paper above, to cite it at the caret.", listed.whole.len()))
+            ui::empty_state("library", t("这一节还没有引用"), &tn!("全文引用了 {n} 篇，点「全文」查看。在候选句上点「引用」，或在上面找一篇文献，就引用到光标处。", "The manuscript cites {n}: see Manuscript. Click Cite on a candidate, or find a paper above, to cite it at the caret.", listed.whole.len(), "paper"))
         } else {
             ui::empty_state("library", t("还没有引用"), t("在候选句上点「引用」，或在上面按作者、题目找一篇文献，就引用到光标处。"))
         };
@@ -532,7 +532,7 @@ impl Workspace {
                         .pl(px(18.))
                         .pr(px(10.))
                         .pb(px(4.))
-                        .child(div().flex_1().min_w_0().truncate().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(if whole { tf!("全文引用 {} 篇", "{} papers cited in the manuscript", entries.len()) } else { tf!("本节引用 {} 篇", "{} papers cited in this section", entries.len()) }))
+                        .child(div().flex_1().min_w_0().truncate().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(if whole { tn!("全文引用 {n} 篇", "{n} cited in the manuscript", entries.len(), "paper") } else { tn!("本节引用 {n} 篇", "{n} cited in this section", entries.len(), "paper") }))
                         .children(source_actions)
                         .child(small("cite-copy", t("复制")).on_click(self.on(Cmd::WriteCopyReferences, cx)))
                         .child(small("cite-bib", t("导出 BibTeX")).on_click(self.on(Cmd::WriteExportCited, cx))),
@@ -574,7 +574,7 @@ impl Workspace {
                         .items_baseline()
                         .gap(px(8.))
                         .child(div().text_size(text_px(20.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text()).child(t("参考文献")))
-                        .when(count > 0, |d| d.child(div().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(tf!("{} 篇", "{} papers", count)))),
+                        .when(count > 0, |d| d.child(div().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(tn!("{n} 篇", "{n}", count, "paper")))),
                 )
                 .children(issues)
                 .child(div().flex().flex_col().gap(px(2.)).children(rows))

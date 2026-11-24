@@ -189,7 +189,8 @@ fn recognition(request: &str) -> Option<String> {
     // Only the body is at hand: a file to read is a form that names a purpose.
     if !request.starts_with("--") || !request.contains("name=\"purpose\"") { return None }
     let name = request.split("filename=\"").nth(1).and_then(|rest| rest.split('"').next()).unwrap_or("");
-    let pages = request.matches("/Type /Page").count().saturating_sub(request.matches("/Type /Pages").count()).max(2);
+    // A page object says `/Type /Page`, or `/Type/Page` as a file written anew (lopdf: pages sent again) has it.
+    let pages = request.match_indices("/Type").filter(|(at, _)| { let rest = request[at + 5..].trim_start(); rest.starts_with("/Page") && !rest.starts_with("/Pages") }).count().max(2);
     println!("ocr: {name}, {pages} pages, {} bytes", request.len());
     let body = if name.contains("fail") {
         "\n\n{\"error\": {\"message\": \"OCR did not finish in time\", \"type\": \"gateway_timeout_error\", \"param\": null, \"code\": \"gateway_timeout_error\"}}".to_string()

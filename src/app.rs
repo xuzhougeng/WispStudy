@@ -1253,12 +1253,12 @@ pub struct ZoteroRun {
 impl ZoteroRun {
     pub fn summary(&self) -> String {
         if self.running { return tf!("正在导入 Zotero · {}/{} · {}", "Importing Zotero · {}/{} · {}", self.rows.len(), self.total, self.current) }
-        tf!("新增 {} 篇 · 已有 {} 篇 · 回收站 {} 篇 · 失败 {} 篇 · 新增 PDF {} 个 · 待处理 {} 项", "{} added · {} existing · {} in trash · {} failed · {} PDFs added · {} pending",
+        let pdfs = tn!("新增 PDF {n} 个", "{n} added", self.rows.iter().map(|r| r.files_added).sum::<usize>(), "PDF");
+        tf!("新增 {} 篇 · 已有 {} 篇 · 回收站 {} 篇 · 失败 {} 篇 · {pdfs} · 待处理 {} 项", "{} added · {} existing · {} in trash · {} failed · {pdfs} · {} pending",
             self.rows.iter().filter(|r| r.added).count(),
             self.rows.iter().filter(|r| !r.added && r.paper_id.is_some()).count(),
             self.rows.iter().filter(|r| r.in_trash).count(),
             self.rows.iter().filter(|r| r.paper_id.is_none() && !r.in_trash).count(),
-            self.rows.iter().map(|r| r.files_added).sum::<usize>(),
             self.rows.iter().map(|r| r.problems.len()).sum::<usize>())
     }
 }
@@ -3117,7 +3117,7 @@ impl Workspace {
                             let which = crate::library::zone_sort(&self.settings);
                             (f.zone.clone(), (1..=3).map(|last| filter::zone_value(which, last)).map(|value| (value.clone(), crate::library::zone_label(&value), kept(&|f| f.zone = value.clone()))).collect())
                         }
-                        FilterKey::Source => (f.source.clone(), counted(filter::source_counts(&lib.papers))),
+                        FilterKey::Source => (f.source.clone(), filter::source_counts(&lib.papers).into_iter().take(40).map(|(v, n)| (v.clone(), crate::i18n::phrase(&v), Some(n))).collect()),
                         FilterKey::Reading => (f.reading.clone(), fixed(&READINGS)),
                         FilterKey::Screening => (f.screening.clone(), fixed(&SCREENINGS)),
                         FilterKey::Fulltext => (f.fulltext.clone(), fixed(&FULLTEXTS)),
@@ -4018,6 +4018,7 @@ impl Workspace {
             Cmd::PdfMap => {
                 let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) else { return };
                 if self.ensure_map(&pdf, cx).is_none() { return }
+                self.join_for_map(&pdf, cx);
                 if !pdf.update(cx, |pdf, cx| pdf.toggle_map(cx)) { self.say(t("已经有三栏了：先关掉一栏，或在某一栏的标签里选「显示导图」。"), cx) }
             }
             Cmd::FacingRun => self.run_facing(cx),
@@ -5729,6 +5730,14 @@ impl Workspace {
         cx.notify();
     }
 
+    /// The map is to come as a column of the viewer worked in: under 分屏 自由 a file split on itself is two viewers,
+    /// which have no third column, so they become one viewer showing the file twice first, as for 译文 (`toggle_facing`),
+    /// and the map stands to the right of both halves. `PdfEvent::MapGone` parts them again.
+    fn join_for_map(&mut self, view: &Entity<PdfView>, cx: &mut Context<Self>) {
+        if view.read(cx).map_shown() || self.lib.as_ref().is_none_or(|lib| lib.pdf.as_ref() != Some(view) || !lib.beside_itself(cx)) { return }
+        self.join_itself(cx);
+    }
+
     /// One viewer showing its file twice, each half scrolled on its own, becomes two viewers of the file (分屏 自由):
     /// not while another viewer stands beside it, nor while 译文 is on show.
     pub(crate) fn part_itself(&mut self, cx: &mut Context<Self>) {
@@ -5907,6 +5916,8 @@ impl Workspace {
                 });
                 if !shown { self.say(t("已经有三栏了：先关掉一栏，或在某一栏的标签里选「显示导图」。"), cx) }
             }
+            // Under 分屏 自由 the file shown twice is two viewers again once the map is gone (`part_itself` checks the rest).
+            PdfEvent::MapGone => if self.settings.pdf_split_free && self.lib.as_ref().is_some_and(|lib| lib.pdf.as_ref() == Some(&view)) { self.part_itself(cx) },
             // 加到导图: the passage is a node under the one chosen, pointing back at its page; the map comes into view.
             PdfEvent::MapPassage(page, text) => {
                 let Some(map) = self.ensure_map(&view, cx) else { return };
@@ -5915,6 +5926,7 @@ impl Workspace {
                 // A node is a few words: a long passage is cut for it, and kept whole as what it points at.
                 let words = if quote.chars().count() > 60 { quote.chars().take(60).collect::<String>() + "…" } else { quote.clone() };
                 map.update(cx, |map, cx| map.add_passage(&words, wisp_core::mindmap::Anchor { file, page: *page, quote }, cx));
+                self.join_for_map(&view, cx);
                 if !view.update(cx, |pdf, cx| pdf.map_shown() || pdf.toggle_map(cx)) { self.say(t("已加到导图。现在有三栏，关掉一栏就能看到它。"), cx) }
             }
             PdfEvent::Pressed => {
@@ -8258,7 +8270,10 @@ impl Workspace {
         }
         let engine = engine.and_then(Result::ok);
         // Pages to look at: only a PDF has them. Parts to sort: the texts the rules had to guess at.
-        let mut todo: Vec<String> = lib.writing.structures.iter().filter(|(id, _)| only.as_ref().is_none_or(|only| only == *id)).filter(|(id, info)| if reading { (info.method == "none" || info.read_in_part()) && lib.files.iter().any(|f| f.id == **id && f.format == "pdf") } else { info.worth_asking() }).map(|(id, _)| id.clone()).collect();
+        // A file asked for by name whose pages were read and some came back empty: those pages again (never the
+        // whole library's, which would send the pages of figures again with every run).
+        let blank = |id: &str, info: &StructureInfo| only.is_some() && !wisp_core::ocr::blank_pages(Some(info), &lib.store.fulltext_pages(id).ok().flatten().and_then(Result::ok).unwrap_or_default()).is_empty();
+        let mut todo: Vec<String> = lib.writing.structures.iter().filter(|(id, _)| only.as_ref().is_none_or(|only| only == *id)).filter(|(id, info)| if reading { (info.method == "none" || info.read_in_part() || blank(id, info)) && lib.files.iter().any(|f| f.id == **id && f.format == "pdf") } else { info.worth_asking() }).map(|(id, _)| id.clone()).collect();
         if todo.is_empty() { return }
         todo.reverse();
         let sorting = &mut lib.writing.sorting;
@@ -8300,14 +8315,40 @@ impl Workspace {
         let pages = lib.store.fulltext_pages(&file.id).ok().flatten().and_then(Result::ok).unwrap_or_default();
         // A file read in part goes on from the first page not read.
         let before = if reading && lib.writing.structures.get(&file.id).is_some_and(StructureInfo::read_in_part) { pages.clone() } else { vec![] };
+        // A file read whole with pages that came back empty: only those are read again, and put back in their places.
+        let blank = if reading { wisp_core::ocr::blank_pages(lib.writing.structures.get(&file.id), &pages) } else { vec![] };
+        let raw = if blank.is_empty() { vec![] } else { lib.store.ocr_pages(&file.id).ok().flatten().map(|(_, raw)| raw).unwrap_or_default() };
         lib.writing.sorting.working.push(file_id.clone());
         let name = title.clone();
         let work = cx.background_executor().spawn(async move {
+            // Pages read again that still came back empty: said, and nothing kept changes.
+            let still_blank = |whole: &[wisp_core::ocr::Page], at: &[usize]| at.iter().all(|at| whole.get(*at).is_none_or(|page| page.text.trim().is_empty()));
+            let blank_left = |n: usize| tf!("没有文字的 {n} 页又读了一次，仍然没有文字，多半是只有图的页面。", "The {n} pages without text were read again and still have none; they are most likely figures only.");
             if let Some(ready) = engine {
                 let bytes = std::fs::read(&path).map_err(|err| tf!("无法读取文件：{err}", "Cannot read file: {err}"))?;
+                if !blank.is_empty() {
+                    // Only those pages go (a file the reader here cannot cut goes whole, and they are taken from it).
+                    let sent = wisp_core::ocr::only_pages(&bytes, &blank).unwrap_or(bytes);
+                    let read = wisp_net::send_file(&wisp_core::ocr::request(&ready, &file_name, &sent)?, ready.engine)?;
+                    let whole = wisp_core::ocr::refill(&pages, &raw, &blank, read)?;
+                    if still_blank(&whole, &blank) { return Err(blank_left(blank.len())) }
+                    return Ok(Made::Recognised(whole));
+                }
                 let pages = wisp_net::send_file(&wisp_core::ocr::request(&ready, &file_name, &bytes)?, ready.engine)?;
                 if pages.iter().all(|page| page.text.trim().is_empty()) { return Err(t("页面上没有识别出文字。").to_string()) }
                 Ok(Made::Recognised(pages))
+            } else if reading && !blank.is_empty() {
+                // A model looks at pictures of those pages, as many as one run reads.
+                let at: Vec<usize> = blank.iter().copied().take(READ_PAGES).collect();
+                let mut read = vec![];
+                for picture in crate::pdf::page_pictures_at(&path, &at)? {
+                    let request = ai::read_page_request(&profile, ai::ImageData { media_type: "image/png".into(), data: ai::base64(&picture) })?;
+                    read.push(wisp_core::ocr::Page { text: ai::page_reading(&wisp_net::complete(request, protocol)?), ..Default::default() });
+                }
+                let whole = wisp_core::ocr::refill(&pages, &[], &at, read)?;
+                if still_blank(&whole, &at) { return Err(blank_left(at.len())) }
+                let count = whole.len();
+                Ok(Made::Read(whole.into_iter().map(|page| page.text).collect(), count))
             } else if reading {
                 let mut pages = before;
                 let (pictures, count) = crate::pdf::page_pictures(&path, pages.len(), READ_PAGES)?;
@@ -9597,7 +9638,7 @@ impl Workspace {
                     return;
                 }
                 "menu" => {
-                    let kind = match arg { "sort" => MenuKind::Sort, "columns" => MenuKind::Columns, "year" => MenuKind::Filter(FilterKey::Year), "impact" => MenuKind::Filter(FilterKey::Impact), "zones" => MenuKind::Filter(FilterKey::Zone), "zoom" => MenuKind::PdfZoom, "pdfsplit" => MenuKind::PdfSplit, "pdfmore" => MenuKind::PdfMore, "panes" => MenuKind::Panes, "layout" => MenuKind::Layout, "pdffiles" => MenuKind::PdfFiles, "fulltext" => MenuKind::Filter(FilterKey::Fulltext), "manuscripts" => MenuKind::Manuscripts, "export" => MenuKind::ManuscriptExport, "retry" => MenuKind::ExtractRetry, "podcasts" => MenuKind::Podcasts, "speed" => MenuKind::PlaySpeed, _ => MenuKind::Add };
+                    let kind = match arg { "sort" => MenuKind::Sort, "columns" => MenuKind::Columns, "year" => MenuKind::Filter(FilterKey::Year), "impact" => MenuKind::Filter(FilterKey::Impact), "zones" => MenuKind::Filter(FilterKey::Zone), "zoom" => MenuKind::PdfZoom, "pdfsplit" => MenuKind::PdfSplit, "pdfmore" => MenuKind::PdfMore, "panes" => MenuKind::Panes, "layout" => MenuKind::Layout, "pdffiles" => MenuKind::PdfFiles, "fulltext" => MenuKind::Filter(FilterKey::Fulltext), "source" => MenuKind::Filter(FilterKey::Source), "manuscripts" => MenuKind::Manuscripts, "export" => MenuKind::ManuscriptExport, "retry" => MenuKind::ExtractRetry, "podcasts" => MenuKind::Podcasts, "speed" => MenuKind::PlaySpeed, _ => MenuKind::Add };
                     self.open_menu(kind, point(px(if matches!(arg, "zoom" | "manuscripts" | "export" | "retry") { 900. } else { 20. }), px(120.)), cx);
                     return;
                 }
