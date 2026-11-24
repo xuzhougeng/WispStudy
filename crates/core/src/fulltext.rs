@@ -144,18 +144,22 @@ fn tidy(page: &str) -> String {
 /// it; these do not.
 pub fn bare(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    for c in text.chars() {
-        match c {
-            'ﬀ' => out.push_str("ff"),
-            'ﬁ' => out.push_str("fi"),
-            'ﬂ' => out.push_str("fl"),
-            'ﬃ' => out.push_str("ffi"),
-            'ﬄ' => out.push_str("ffl"),
-            c if c.is_alphanumeric() => out.extend(c.to_lowercase()),
-            _ => {}
-        }
-    }
+    for c in text.chars() { bare_char(c, |b| out.push(b)) }
     out
+}
+
+/// What `bare` makes of one character: nothing, itself in lowercase, or the letters of a ligature.
+fn bare_char(c: char, mut push: impl FnMut(char)) {
+    match c {
+        'ﬀ' => "ff".chars().for_each(push),
+        'ﬁ' => "fi".chars().for_each(push),
+        'ﬂ' => "fl".chars().for_each(push),
+        'ﬃ' => "ffi".chars().for_each(push),
+        'ﬄ' => "ffl".chars().for_each(push),
+        c if c.is_ascii_alphanumeric() => push(c.to_ascii_lowercase()),
+        c if c.is_alphanumeric() => c.to_lowercase().for_each(push),
+        _ => {}
+    }
 }
 
 /// Which glyphs are raised citation numbers, by their boxes (`[left, top,
@@ -273,19 +277,40 @@ pub fn find_all(glyphs: &[String], boxes: &[[f32; 4]], query: &str) -> Vec<std::
     let wanted: Vec<char> = bare(query).chars().collect();
     if wanted.is_empty() { return vec![] }
     for stream in streams(glyphs, boxes) {
-        let mut found: Vec<std::ops::Range<usize>> = vec![];
-        let mut at = 0;
-        while at + wanted.len() <= stream.len() {
-            if stream[at..at + wanted.len()].iter().map(|(c, _)| c).eq(wanted.iter()) {
-                found.push(stream[at].1..stream[at + wanted.len() - 1].1 + 1);
-                at += wanted.len();
-            } else {
-                at += 1;
-            }
-        }
+        let found: Vec<std::ops::Range<usize>> = occurrences(&stream, &wanted).map(|(first, last)| stream[first].1..stream[last].1 + 1).collect();
         if !found.is_empty() { return found }
     }
     vec![]
+}
+
+/// Every place words typed to look for stand in a text, compared as the find bar of a PDF compares them
+/// (`find_all`: `bare` text, so case, spaces, hyphens and line breaks do not matter): the byte ranges of
+/// the text they cover, in order and apart. Chinese, written without spaces, is found inside a run of it.
+pub fn find_text(text: &str, query: &str) -> Vec<std::ops::Range<usize>> {
+    let wanted: Vec<char> = bare(query).chars().collect();
+    if wanted.is_empty() { return vec![] }
+    let mut stream: Vec<(char, usize)> = Vec::with_capacity(text.len());
+    for (at, c) in text.char_indices() {
+        bare_char(c, |b| stream.push((b, at)));
+    }
+    let end = |at: usize| at + text[at..].chars().next().map_or(0, char::len_utf8);
+    occurrences(&stream, &wanted).map(|(first, last)| stream[first].1..end(stream[last].1)).collect()
+}
+
+/// Where `wanted` stands in a stream of compared characters, apart: the first and the last place of each.
+fn occurrences<'a>(stream: &'a [(char, usize)], wanted: &'a [char]) -> impl Iterator<Item = (usize, usize)> + 'a {
+    let mut at = 0;
+    std::iter::from_fn(move || {
+        while at + wanted.len() <= stream.len() {
+            if stream[at].0 == wanted[0] && stream[at..at + wanted.len()].iter().map(|(c, _)| c).eq(wanted.iter()) {
+                let found = (at, at + wanted.len() - 1);
+                at += wanted.len();
+                return Some(found);
+            }
+            at += 1;
+        }
+        None
+    })
 }
 
 /// Glyph boxes (`[left, top, right, bottom]`, in drawing order) merged into

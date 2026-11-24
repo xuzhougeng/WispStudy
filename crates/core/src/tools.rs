@@ -12,6 +12,7 @@ mod web;
 use crate::complete;
 use crate::extract::{self, Proposal};
 use crate::filter::{self, Filters, filter_papers};
+use crate::find;
 use crate::fulltext::{self, terms};
 use crate::libraries::{self, LibraryInfo};
 use crate::model::{FULLTEXTS, Paper, PaperFile, READINGS, SCREENINGS, one_of};
@@ -209,9 +210,10 @@ pub fn catalog() -> Vec<ToolDef> {
         scoped(
             "search_fulltext",
             "检索全文",
-            "在已保存的全文中检索短语或关键词，返回命中的文献、页码和逐字片段。不区分大小写和空白；整句命中排在各词分散命中之前。没有保存全文的文献不在检索范围内。",
+            "在已保存的全文中检索短语或关键词，返回命中的文献、页码和逐字片段。不区分大小写和空白，跨行和行末连字符断开的词也能找到；整句命中排在各词分散命中之前。in 为 all 时还查附件的正文、阅读标注（标出的原文和写在标注上的话）、笔记、题目和摘要，每处命中的 kind 说明在哪里找到（fulltext、mark、notes、title、abstract），这些只按整个短语查。没有保存全文的文献不在全文的检索范围内。",
             json!({
                 "query": {"type": "string", "description": "要找的短语或关键词。"},
+                "in": {"type": "string", "enum": ["fulltext", "all"], "description": "fulltext（默认）只查全文；all 还查附件、标注、笔记、题目和摘要。"},
                 "paperId": {"type": "string", "description": "只在这一篇文献中检索。"},
                 "limit": {"type": "integer", "description": "最多返回多少处命中，默认 20，最大 100。"},
             }),
@@ -1359,19 +1361,67 @@ fn search_fulltext(store: &mut Store, args: &Value) -> Result<Value> {
     let words = terms(query);
     let only = text(args, "paperId")?;
     let limit = number(args, "limit", 20, 100)?.max(1);
+    let everywhere = match text(args, "in")? {
+        "" | "fulltext" => false,
+        "all" => true,
+        other => bail!("in 只能是 fulltext 或 all，不能是「{other}」。"),
+    };
     extract_missing(store, (!only.is_empty()).then_some(only))?;
     let papers = store.list_papers()?;
     let titles: BTreeMap<&str, &str> = papers.iter().map(|p| (p.id.as_str(), p.title.as_str())).collect();
     let texts = store.all_fulltext()?;
-    let mut hits = vec![];
+    // (score, paper, 0-based page, snippet, exact, what else the hit says)
+    let mut hits: Vec<(f32, &str, usize, String, bool, Map<String, Value>)> = vec![];
     for (paper_id, (_, pages)) in texts.iter().filter(|(id, _)| only.is_empty() || id.as_str() == only) {
         for (n, page) in pages.iter().enumerate() {
-            if let Some((score, at, exact)) = page_match(&searchable(page), &phrase, &words) { hits.push((score, paper_id.as_str(), n, snippet(page, at), exact)) }
+            // The whole phrase as the find bar of a PDF finds it; else the words scattered over the page.
+            let exact = fulltext::find_text(page, query);
+            let found = match exact.first() {
+                Some(first) => Some((1000. + exact.len() as f32, first.start, true)),
+                None => page_match(&searchable(page), &phrase, &words),
+            };
+            if let Some((score, at, exact)) = found { hits.push((score, paper_id.as_str(), n, snippet(page, at), exact, Map::new())) }
         }
+    }
+    // The other places only by the whole phrase: the attachments' text a page each, and each mark, note, title and abstract.
+    let elsewhere = if everywhere { find::in_library(store, query, (!only.is_empty()).then_some(only), find::Texts::Attachments, limit, &|| false)? } else { find::Found::default() };
+    let mut pages_found: BTreeMap<(String, String, usize), usize> = BTreeMap::new();
+    for hit in &elsewhere.hits {
+        let Some(paper) = titles.get_key_value(hit.paper_id.as_str()).map(|(id, _)| *id) else { continue };
+        if hit.place == find::Place::Text {
+            let key = (hit.paper_id.clone(), hit.file.clone(), hit.page);
+            if let Some(&at) = pages_found.get(&key) {
+                hits[at].0 += 1.;
+                continue;
+            }
+            pages_found.insert(key, hits.len());
+        }
+        let mut more = Map::new();
+        more.insert("kind".into(), json!(hit.place.key()));
+        if !hit.file.is_empty() && let Some(n) = store.paper_files(paper)?.iter().filter(|f| f.kind != "fulltext" && f.format == "pdf").position(|f| f.id == hit.file) { more.insert("file".into(), json!(format!("S{}", n + 1))); }
+        if let Some(mark) = &hit.mark {
+            more.insert("mark".into(), json!(mark.kind.key()));
+            more.insert("written".into(), json!(mark.written));
+        }
+        // The person's own words first, then the record, then the pages.
+        let score = match hit.place { find::Place::Mark | find::Place::Notes => 3000., find::Place::Title | find::Place::Abstract => 2000., find::Place::Text => 1001. };
+        hits.push((score, paper, hit.page.saturating_sub(1), hit.passage.clone(), true, more));
     }
     hits.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(b.1)).then(a.2.cmp(&b.2)));
     let total = hits.len();
-    let shown: Vec<Value> = hits.into_iter().take(limit).map(|(_, id, n, text, exact)| json!({"paperId": id, "title": titles.get(id).copied().unwrap_or(""), "page": n + 1, "exact": exact, "snippet": text})).collect();
+    let shown: Vec<Value> = hits
+        .into_iter()
+        .take(limit)
+        .map(|(_, id, n, text, exact, more)| {
+            let mut hit = json!({"paperId": id, "title": titles.get(id).copied().unwrap_or(""), "page": n + 1, "exact": exact, "snippet": text});
+            let Some(fields) = hit.as_object_mut() else { return hit };
+            // The record and the notes have no page.
+            if more.get("kind").is_some_and(|kind| kind == "title" || kind == "abstract" || kind == "notes") { fields.remove("page"); }
+            if everywhere && !more.contains_key("kind") { fields.insert("kind".into(), json!("fulltext")); }
+            fields.extend(more);
+            hit
+        })
+        .collect();
     // The papers with a PDF whose text could not be had: the search did not see into them.
     let mut unreadable: Vec<Value> = vec![];
     for (_, paper_id, reason) in store.fulltext_failures()?.into_iter().filter(|(_, id, _)| only.is_empty() || id.as_str() == only) {
@@ -2959,6 +3009,30 @@ pub(crate) mod tests {
         store.import_file(&paper.id, &source, "fulltext").unwrap();
         drop(store);
         assert_eq!(call(&root, "search_fulltext", &json!({"query": "auxin"})).unwrap()["hits"][0]["snippet"], "Auxin sets the gradient.");
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn fulltext_with_marks_and_notes() {
+        let root = std::env::temp_dir().join(format!("wisp-tools-{}", new_id("T")));
+        let info = libraries::create(&root, "L", "", "blue").unwrap();
+        let mut store = Store::open(&info.dir).unwrap();
+        let paper = store.add_paper(Paper { title: "Roots".into(), notes: "Their auxin\nmaxima move.".into(), ..Default::default() }).unwrap();
+        let source = root.join("a.pdf");
+        std::fs::write(&source, "not read").unwrap();
+        let file = store.import_file(&paper.id, &source, "fulltext").unwrap();
+        store.save_fulltext_pages(&file.id, &Ok(vec!["Auxin maxima form at the tip.".into()])).unwrap();
+        store.add_pdf_shape(&paper.id, &file.id, 1, crate::annotation::Kind::Note, [1., 1., 1., 1.], "auxin maxima again").unwrap();
+        drop(store);
+        // As before by default: the full texts, and no kind.
+        let plain = call(&root, "search_fulltext", &json!({"query": "auxin maxima"})).unwrap();
+        assert_eq!((plain["total"].as_u64(), plain["hits"][0].get("kind")), (Some(1), None));
+        let all = call(&root, "search_fulltext", &json!({"query": "auxin maxima", "in": "all"})).unwrap();
+        let kinds: Vec<&str> = all["hits"].as_array().unwrap().iter().map(|h| h["kind"].as_str().unwrap()).collect();
+        assert_eq!(kinds, ["notes", "mark", "fulltext"]);
+        assert_eq!((all["hits"][1]["mark"].as_str(), all["hits"][1]["written"].as_bool(), all["hits"][1]["page"].as_u64(), all["hits"][0].get("page")), (Some("note"), Some(true), Some(1), None));
+        assert_eq!(all["hits"][0]["snippet"], "Their auxin maxima move.");
+        assert!(call(&root, "search_fulltext", &json!({"query": "auxin", "in": "marks"})).unwrap_err().contains("in 只能是"));
         std::fs::remove_dir_all(root).ok();
     }
 

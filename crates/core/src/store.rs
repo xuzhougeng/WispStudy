@@ -1627,6 +1627,21 @@ impl Store {
         }
         Ok(out)
     }
+
+    /// The page text of every file that has some, a file at a time, the papers in the trash left out: by paper,
+    /// its full texts first. `each` is handed a file and its pages, and stops the reading by answering `false`.
+    pub fn each_text(&self, mut each: impl FnMut(PaperFile, Vec<String>) -> bool) -> Result<()> {
+        let mut stmt = self.db.prepare(
+            "SELECT r.id, r.paper_id, r.resource_type, r.title, r.format, r.local_path, r.size_bytes, r.added_at, t.pages FROM resources r JOIN fulltext_text t ON t.resource_id = r.id \
+             WHERE t.error = '' AND r.paper_id NOT IN (SELECT paper_id FROM trashed_papers) ORDER BY r.paper_id, r.resource_type, r.added_at",
+        )?;
+        let mut rows = stmt.query([])?;
+        while let Some(r) = rows.next()? {
+            let file = PaperFile { id: r.get(0)?, paper_id: r.get(1)?, kind: r.get(2)?, title: r.get(3)?, format: r.get(4)?, local_path: r.get(5)?, size_bytes: r.get::<_, i64>(6)? as u64, added_at: r.get(7)? };
+            if !each(file, json_strings(&r.get::<_, String>(8)?)) { break }
+        }
+        Ok(())
+    }
 }
 
 fn row_to_paper(r: &rusqlite::Row) -> rusqlite::Result<Paper> {

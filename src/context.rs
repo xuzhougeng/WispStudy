@@ -368,6 +368,8 @@ impl Workspace {
         // 提取 moves along its rows.
         if lib.page == Page::Extract { return self.extract_nav(nav, window, cx) }
         if lib.page == Page::Trash { return self.trash_nav(nav, window, cx) }
+        // The places found in the whole library, in the list's place.
+        if lib.page == Page::Papers && lib.finding.open { return self.find_nav(nav, window, cx) }
         // The papers in the order the page shows them.
         let ids: Vec<String> = match lib.page {
             Page::Papers => lib.shown.iter().map(|&i| lib.papers[i].id.clone()).collect(),

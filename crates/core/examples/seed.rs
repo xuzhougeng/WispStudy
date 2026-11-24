@@ -7,6 +7,7 @@
 //! full text, so 写作 has sentences to show. PDFs after `--supplement` are
 //! the first paper's attachments S1, S2, …
 
+use wisp_core::annotation::{Kind, TextStyle};
 use wisp_core::libraries;
 use wisp_core::model::{FieldDef, FieldKind, Paper};
 use wisp_core::store::Store;
@@ -52,7 +53,20 @@ fn main() -> anyhow::Result<()> {
     }
     if let (Some(id), Some(pdf)) = (first.as_ref(), pdf) {
         let file = store.import_file(id, &pdf, "fulltext")?;
-        store.save_fulltext_pages(&file.id, &wisp_core::fulltext::file_pages(&pdf))?;
+        let text = wisp_core::fulltext::file_pages(&pdf);
+        store.save_fulltext_pages(&file.id, &text)?;
+        // Reading marks, for 全库查找 to find: the first long sentence of the first page highlighted with a note,
+        // a sticky note there, a text box on the last page.
+        let sentence = text.ok().and_then(|pages| pages.first()?.split(". ").map(str::trim).find(|s| s.len() >= 40).map(String::from));
+        if let (Some(pages), Some(sentence)) = (wisp_core::pdftext::file_marks(std::fs::read(&pdf)?), sentence) {
+            let glyphs: Vec<String> = pages[0].iter().map(|m| m.text.clone()).collect();
+            let Some((range, _)) = wisp_core::fulltext::find_quote(&glyphs, &[], &sentence) else { anyhow::bail!("the first sentence is not among the page's glyphs") };
+            let stretch = &pages[0][range];
+            let highlight = store.add_pdf_annotation(id, &file.id, 1, Kind::Highlight, &wisp_core::pdftext::marks_text(stretch), &wisp_core::pdftext::mark_boxes(stretch))?;
+            store.update_pdf_annotation_note(&file.id, &highlight.id, "回头核对这一句和方法部分是否一致")?;
+            store.add_pdf_shape(id, &file.id, 1, Kind::Note, [72., 90., 72., 90.], "这一页的数据要和图 2 对照")?;
+            store.add_pdf_text(id, &file.id, pages.len(), [72., 72., 300., 110.], "比较两种激素的作用", &TextStyle::default())?;
+        }
     }
     if let Some(id) = &first {
         for path in &supplements { store.import_file(id, path, "supplement")?; }
