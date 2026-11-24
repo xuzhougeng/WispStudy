@@ -95,6 +95,7 @@ pub mod selection;
 pub mod settings;
 pub mod shrink;
 pub mod skill;
+pub mod slideref;
 pub mod sources;
 pub mod store;
 pub mod structure;

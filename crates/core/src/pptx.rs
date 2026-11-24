@@ -18,6 +18,11 @@
 //! PowerPoint's outline shows them and a theme chosen later reaches them;
 //! every size, colour and place is written on the slide itself, so the
 //! deck looks the same in PowerPoint, Keynote and LibreOffice.
+//!
+//! A deck can instead stand on the masters and layouts of a file of the
+//! person's (`write_on`, `slideref::Reference`): the same slides, laid out
+//! in the places that file's layouts have for a title and a text (`Stage`),
+//! saying sizes and frames and leaving colours, fonts and bullets to it.
 
 use crate::manuscript::{crc32, stored_zip, xml_escape as escape};
 use crate::markdown;
@@ -131,11 +136,60 @@ const SOFT: &str = "656D76";
 const ACCENT: &str = "2F5BA8";
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Frame {
-    x: f32,
-    y: f32,
-    w: f32,
-    h: f32,
+pub(crate) struct Frame {
+    pub x: f32,
+    pub y: f32,
+    pub w: f32,
+    pub h: f32,
+}
+
+/// A placeholder of a layout that a slide fills.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Holder {
+    /// Its `<p:ph …/>`, as a slide names it.
+    pub tag: String,
+    pub frame: Frame,
+    /// The sizes its letters may have, the largest first; never none.
+    pub sizes: Vec<f32>,
+}
+
+/// One of the three kinds of slide a deck has, on a layout of a reference: where its title stands and what is under it.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Place {
+    /// The layout's part.
+    pub layout: String,
+    pub title: Holder,
+    /// Under the title: the subtitle of the first slide, the points of the others. None: a box of the slide's own.
+    pub under: Option<Holder>,
+    /// The layout's own places for the slide's number and for a line at the foot, as `<p:ph …/>`.
+    pub number: Option<String>,
+    pub foot: Option<String>,
+    /// The colour of small text of the slide's own (a caption, a line at the foot, a subtitle the layout has no place for), as the child of an `a:solidFill`.
+    pub soft: String,
+}
+
+/// Where things stand on the slides of a deck that is written on the masters and layouts of another file
+/// (`slideref::Reference`), in points. The look is the layouts': a slide says its words and their sizes only.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct Stage {
+    pub wide: f32,
+    pub high: f32,
+    /// The first slide, a slide that opens a part of the talk, every other one.
+    pub cover: Place,
+    pub opening: Place,
+    pub content: Place,
+    /// The room a placeholder keeps free around its text: left and right together, top and bottom together.
+    pub pad: (f32, f32),
+    /// How far the words of a point of each level stand in.
+    pub margins: [f32; 2],
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum Kind {
+    Cover,
+    Opening,
+    #[default]
+    Content,
 }
 
 struct Words {
@@ -147,6 +201,7 @@ struct Words {
 /// A slide of the file, everything in its place.
 #[derive(Default)]
 struct Page<'a> {
+    kind: Kind,
     /// Which of the deck's slides it shows (from 0); none for the first slide, the deck's title.
     slide: Option<usize>,
     /// It goes on with the points of the slide before it.
@@ -223,35 +278,70 @@ fn before(size: f32, level: usize) -> f32 {
     if level == 0 { size * 0.5 } else { size * 0.2 }
 }
 
-fn points_height(points: &[Point], size: f32, width: f32) -> f32 {
-    points.iter().enumerate().map(|(n, point)| {
-        let (letters, inset) = level(size, point.level);
-        (if n == 0 { 0.0 } else { before(size, point.level) }) + line_count(&plain(&point.text), letters, width - inset) as f32 * letters * LINE
-    }).sum()
+/// How the points of a slide are measured: the sizes they may have, how far the words of each level stand in, and
+/// the room their box keeps free around them. The deck's own design (`OWN`), or a layout of a reference.
+#[derive(Clone, Copy)]
+struct Rule<'a> {
+    sizes: &'a [f32],
+    /// None: as the size says (`level`).
+    margins: Option<[f32; 2]>,
+    pad: (f32, f32),
 }
 
-/// The largest size at which the points fit a box.
-fn fitted(points: &[Point], width: f32, height: f32) -> Option<f32> {
-    SIZES.into_iter().find(|size| points_height(points, *size, width) <= height)
-}
+const OWN: Rule<'static> = Rule { sizes: &SIZES, margins: None, pad: (0.0, 0.0) };
 
-/// How many of the points stay on this slide when not all fit: those that
-/// fit at a size easy to read, never none, and none without the point it stands under.
-fn taken(points: &[Point], width: f32, height: f32) -> usize {
-    let fit = (1..=points.len()).take_while(|n| points_height(&points[..*n], SPLIT, width) <= height).last().unwrap_or(1);
-    let whole = (1..=fit).rev().find(|n| points.get(*n).is_none_or(|next| next.level == 0));
-    whole.unwrap_or(fit)
-}
+impl Rule<'_> {
+    fn level(&self, size: f32, of: usize) -> (f32, f32) {
+        let (letters, inset) = level(size, of);
+        (letters, self.margins.map_or(inset, |margins| margins[of.min(1)]))
+    }
 
-/// The points of a slide that go in a box, their size, and how many they are.
-fn placed(points: &[Point], width: f32, height: f32) -> (f32, usize) {
-    match fitted(points, width, height) {
-        Some(size) => (size, points.len()),
-        None => {
-            let count = taken(points, width, height);
-            (fitted(&points[..count], width, height).unwrap_or(SIZES[SIZES.len() - 1]), count)
+    /// How high the points stand at a size in a box of this width, without the room the box keeps free above and below.
+    fn height(&self, points: &[Point], size: f32, width: f32) -> f32 {
+        points.iter().enumerate().map(|(n, point)| {
+            let (letters, inset) = self.level(size, point.level);
+            (if n == 0 { 0.0 } else { before(size, point.level) }) + line_count(&plain(&point.text), letters, width - self.pad.0 - inset) as f32 * letters * LINE
+        }).sum()
+    }
+
+    /// The largest size at which the points fit a box.
+    fn fitted(&self, points: &[Point], width: f32, height: f32) -> Option<f32> {
+        self.sizes.iter().copied().find(|size| self.height(points, *size, width) <= height - self.pad.1)
+    }
+
+    /// The size at which points that fit at none are counted out over several slides.
+    fn split(&self) -> f32 {
+        SPLIT.clamp(self.sizes[self.sizes.len() - 1], self.sizes[0])
+    }
+
+    /// How many of the points stay on this slide when not all fit: those that
+    /// fit at a size easy to read, never none, and none without the point it stands under.
+    fn taken(&self, points: &[Point], width: f32, height: f32) -> usize {
+        let fit = (1..=points.len()).take_while(|n| self.height(&points[..*n], self.split(), width) <= height - self.pad.1).last().unwrap_or(1);
+        let whole = (1..=fit).rev().find(|n| points.get(*n).is_none_or(|next| next.level == 0));
+        whole.unwrap_or(fit)
+    }
+
+    /// The points of a slide that go in a box, their size, and how many they are.
+    fn placed(&self, points: &[Point], width: f32, height: f32) -> (f32, usize) {
+        match self.fitted(points, width, height) {
+            Some(size) => (size, points.len()),
+            None => {
+                let count = self.taken(points, width, height);
+                (self.fitted(&points[..count], width, height).unwrap_or(self.sizes[self.sizes.len() - 1]), count)
+            }
         }
     }
+}
+
+/// The size of a text in a placeholder of a layout: on one line at one of the three largest sizes it may have (as
+/// `heading`), else on two below the largest, else the largest at which it stays inside, else the smallest.
+fn held(text: &str, holder: &Holder, pad: (f32, f32), bold: bool) -> f32 {
+    let (width, height) = (holder.frame.w - pad.0, holder.frame.h - pad.1);
+    let lines = |size: f32| line_count(&plain(text), if bold { size * BOLD } else { size }, width);
+    let fits = |size: f32, most: usize| lines(size) <= most && lines(size) as f32 * size * LINE <= height.max(size * LINE);
+    let sizes = || holder.sizes.iter().copied();
+    sizes().take(3).find(|size| fits(*size, 1)).or_else(|| sizes().skip(1).find(|size| fits(*size, 2))).or_else(|| sizes().find(|size| fits(*size, usize::MAX))).unwrap_or(holder.sizes[holder.sizes.len() - 1])
 }
 
 /// A heading's size and lines: on one line at the largest size it can be, else on two below the largest, else at the smallest.
@@ -295,57 +385,96 @@ fn chinese(deck: &Deck) -> bool {
     titles.chars().filter(|c| wide(*c)).count() * 3 > titles.chars().filter(|c| c.is_alphabetic()).count()
 }
 
-/// The slides of the file for a deck.
-fn lay(deck: &Deck) -> Vec<Page<'_>> {
+/// The slides of the file for a deck: in its own design, or on the layouts of a reference.
+fn lay<'a>(deck: &'a Deck, on: Option<&Stage>) -> Vec<Page<'a>> {
     let across = WIDE - 2.0 * SIDE;
+    let sizes: Vec<f32>;
+    let rule = match on {
+        None => OWN,
+        Some(stage) => {
+            sizes = stage.content.under.as_ref().map_or(SIZES.to_vec(), |under| under.sizes.clone());
+            Rule { sizes: &sizes, margins: Some(stage.margins), pad: stage.pad }
+        }
+    };
+    let pad = rule.pad;
     let mut pages = vec![];
     if !deck.title.trim().is_empty() {
-        let (size, lines) = heading(deck.title.trim(), &[40.0, 34.0, 28.0], across);
-        let (top, height) = (196.0, lines as f32 * size * LINE);
-        let subtitle = deck.subtitle.trim();
-        pages.push(Page {
-            rule: Some(Frame { x: SIDE, y: top - 22.0, w: 56.0, h: 4.0 }),
-            title: Some(Words { frame: Frame { x: SIDE, y: top, w: across, h: height }, size, text: deck.title.trim().to_string() }),
-            subtitle: (!subtitle.is_empty()).then(|| Words { frame: Frame { x: SIDE, y: top + height + 18.0, w: across, h: line_count(subtitle, 18.0, across) as f32 * 18.0 * LINE }, size: 18.0, text: subtitle.to_string() }),
-            ..Default::default()
-        });
+        let (title, subtitle) = (deck.title.trim(), deck.subtitle.trim());
+        match on {
+            None => {
+                let (size, lines) = heading(title, &[40.0, 34.0, 28.0], across);
+                let (top, height) = (196.0, lines as f32 * size * LINE);
+                pages.push(Page {
+                    kind: Kind::Cover,
+                    rule: Some(Frame { x: SIDE, y: top - 22.0, w: 56.0, h: 4.0 }),
+                    title: Some(Words { frame: Frame { x: SIDE, y: top, w: across, h: height }, size, text: title.to_string() }),
+                    subtitle: (!subtitle.is_empty()).then(|| Words { frame: Frame { x: SIDE, y: top + height + 18.0, w: across, h: line_count(subtitle, 18.0, across) as f32 * 18.0 * LINE }, size: 18.0, text: subtitle.to_string() }),
+                    ..Default::default()
+                });
+            }
+            Some(stage) => {
+                let place = &stage.cover;
+                let under = (!subtitle.is_empty()).then(|| match &place.under {
+                    Some(holder) => Words { frame: holder.frame, size: held(subtitle, holder, pad, false), text: subtitle.to_string() },
+                    // A layout without a place for it: a box of the slide's own under the title's.
+                    None => {
+                        let frame = place.title.frame;
+                        Words { frame: Frame { y: (frame.y + frame.h + 12.0).min(stage.high - 60.0), h: line_count(subtitle, 18.0, frame.w) as f32 * 18.0 * LINE, ..frame }, size: 18.0, text: subtitle.to_string() }
+                    }
+                });
+                pages.push(Page { kind: Kind::Cover, title: Some(Words { frame: place.title.frame, size: held(title, &place.title, pad, true), text: title.to_string() }), subtitle: under, ..Default::default() });
+            }
+        }
     }
     for (n, slide) in deck.slides.iter().enumerate() {
         let title = slide.title.trim();
         if slide.points.is_empty() && slide.picture.is_none() {
             // A title alone opens a part of the talk.
             if title.is_empty() { continue }
-            let (size, lines) = heading(title, &[36.0, 30.0, 26.0], across);
-            pages.push(Page {
-                slide: Some(n),
-                rule: Some(Frame { x: SIDE, y: 210.0, w: 56.0, h: 4.0 }),
-                title: Some(Words { frame: Frame { x: SIDE, y: 232.0, w: across, h: lines as f32 * size * LINE }, size, text: title.to_string() }),
-                source: slide.source.trim(),
-                notes: slide.notes.trim().to_string(),
-                ..Default::default()
-            });
+            let mut page = Page { kind: Kind::Opening, slide: Some(n), source: slide.source.trim(), notes: slide.notes.trim().to_string(), ..Default::default() };
+            match on {
+                None => {
+                    let (size, lines) = heading(title, &[36.0, 30.0, 26.0], across);
+                    page.rule = Some(Frame { x: SIDE, y: 210.0, w: 56.0, h: 4.0 });
+                    page.title = Some(Words { frame: Frame { x: SIDE, y: 232.0, w: across, h: lines as f32 * size * LINE }, size, text: title.to_string() });
+                }
+                Some(stage) => page.title = Some(Words { frame: stage.opening.title.frame, size: held(title, &stage.opening.title, pad, true), text: title.to_string() }),
+            }
+            pages.push(page);
             continue;
         }
         let mut rest = &slide.points[..];
         loop {
             let first = rest.len() == slide.points.len();
             let mut page = Page { slide: Some(n), continues: !first, source: slide.source.trim(), ..Default::default() };
-            let mut top = TOP;
-            if !title.is_empty() {
-                let text = if first { title.to_string() } else { format!("{title}{}", if chinese(deck) { "（续）" } else { " (cont.)" }) };
-                let (size, lines) = heading(&text, &[30.0, 26.0, 22.0], across);
-                let height = lines as f32 * size * LINE;
-                page.title = Some(Words { frame: Frame { x: SIDE, y: TOP, w: across, h: height }, size, text });
-                top = BODY_TOP.max(TOP + height + 22.0);
-            }
-            let body = Frame { x: SIDE, y: top, w: across, h: BODY_END - top };
+            let text = if first { title.to_string() } else { format!("{title}{}", if chinese(deck) { "（续）" } else { " (cont.)" }) };
+            let body = match on {
+                None => {
+                    let mut top = TOP;
+                    if !title.is_empty() {
+                        let (size, lines) = heading(&text, &[30.0, 26.0, 22.0], across);
+                        let height = lines as f32 * size * LINE;
+                        page.title = Some(Words { frame: Frame { x: SIDE, y: TOP, w: across, h: height }, size, text });
+                        top = BODY_TOP.max(TOP + height + 22.0);
+                    }
+                    Frame { x: SIDE, y: top, w: across, h: BODY_END - top }
+                }
+                Some(stage) => {
+                    let place = &stage.content;
+                    if !title.is_empty() { page.title = Some(Words { frame: place.title.frame, size: held(&text, &place.title, pad, true), text }) }
+                    let body = place.under.as_ref().map_or(Frame { x: SIDE, y: BODY_TOP, w: stage.wide - 2.0 * SIDE, h: stage.high - 60.0 - BODY_TOP }, |under| under.frame);
+                    // A line at the foot that the layout has no place for is a box of the slide's own: the points end above it.
+                    let end = if page.source.is_empty() || place.foot.is_some() { body.y + body.h } else { (body.y + body.h).min(foot_top(stage) - 6.0) };
+                    Frame { h: end - body.y, ..body }
+                }
+            };
             let picture = slide.picture.as_ref().filter(|_| first);
             let mut count = rest.len();
             // The column the picture stands in, and how far down its box may reach.
             let mut column = None;
             match picture {
                 None => {
-                    let (size, fits) = placed(rest, body.w, body.h);
+                    let (size, fits) = rule.placed(rest, body.w, body.h);
                     count = fits;
                     page.points = Some((body, size, &rest[..count]));
                 }
@@ -353,16 +482,16 @@ fn lay(deck: &Deck) -> Vec<Page<'_>> {
                 Some(picture) => {
                     let shape = picture.width as f32 / picture.height as f32;
                     // A wide picture goes under the points, when they leave it most of the slide.
-                    let above = SIZES.into_iter().find(|size| points_height(rest, *size, body.w) <= body.h * 0.42).filter(|_| shape >= 2.0);
+                    let above = rule.sizes.iter().copied().find(|size| rule.height(rest, *size, body.w) + pad.1 <= body.h * 0.42).filter(|_| shape >= 2.0);
                     if let Some(size) = above {
-                        let height = points_height(rest, size, body.w);
+                        let height = rule.height(rest, size, body.w) + pad.1;
                         page.points = Some((Frame { h: height, ..body }, size, rest));
                         column = Some(Frame { y: body.y + height + 18.0, h: body.h - height - 18.0, ..body });
                     } else {
                         // Beside them otherwise; a tall picture needs less of the width.
-                        let beside = if shape < 0.85 { 320.0 } else { 452.0 };
+                        let beside = if shape < 0.85 { 320.0 } else { 452.0 } * body.w / across;
                         let width = body.w - beside - GAP;
-                        let (size, fits) = placed(rest, width, body.h);
+                        let (size, fits) = rule.placed(rest, width, body.h);
                         count = fits;
                         page.points = Some((Frame { w: width, ..body }, size, &rest[..count]));
                         column = Some(Frame { x: body.x + width + GAP, w: beside, ..body });
@@ -389,6 +518,11 @@ fn lay(deck: &Deck) -> Vec<Page<'_>> {
     pages
 }
 
+/// Where the line at the foot stands on a slide of a reference whose layout has no place for it.
+fn foot_top(stage: &Stage) -> f32 {
+    stage.high - (HIGH - FOOT)
+}
+
 // ---- the parts
 
 const HEAD: &str = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n";
@@ -411,6 +545,7 @@ fn place(frame: Frame) -> String {
 /// How a text's letters look.
 struct Look<'a> {
     size: f32,
+    /// The colour, as the child of an `a:solidFill`; empty leaves it to the layout the text stands on.
     colour: &'a str,
     bold: bool,
     lang: &'a str,
@@ -418,8 +553,14 @@ struct Look<'a> {
 
 impl Look<'_> {
     fn properties(&self, bold: bool, italic: bool) -> String {
-        format!("lang=\"{}\" sz=\"{}\"{}{} dirty=\"0\"><a:solidFill><a:srgbClr val=\"{}\"/></a:solidFill>", self.lang, (self.size * 100.0) as i32, if self.bold || bold { " b=\"1\"" } else { "" }, if italic { " i=\"1\"" } else { "" }, self.colour)
+        let fill = if self.colour.is_empty() { String::new() } else { format!("<a:solidFill>{}</a:solidFill>", self.colour) };
+        format!("lang=\"{}\" sz=\"{}\"{}{} dirty=\"0\">{fill}", self.lang, (self.size * 100.0) as i32, if self.bold || bold { " b=\"1\"" } else { "" }, if italic { " i=\"1\"" } else { "" })
     }
+}
+
+/// A colour of the deck's own design, as the child of an `a:solidFill`.
+fn own(colour: &str) -> String {
+    format!("<a:srgbClr val=\"{colour}\"/>")
 }
 
 /// A text as the runs of a paragraph: its `**bold**` and `*italic*` are looks, a line break in it is one in the paragraph.
@@ -458,6 +599,17 @@ impl Shapes {
         ));
     }
 
+    /// A placeholder of the layout the slide stands on, filled: how its words look is the layout's. Without a frame it stands where the layout has it.
+    fn held(&mut self, name: &str, holder: &str, frame: Option<Frame>, fitting: bool, paragraphs: &str) {
+        let id = self.id();
+        self.xml.push_str(&format!(
+            "<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"{name} {}\"/><p:cNvSpPr><a:spLocks noGrp=\"1\"/></p:cNvSpPr><p:nvPr>{holder}</p:nvPr></p:nvSpPr><p:spPr>{}</p:spPr><p:txBody><a:bodyPr>{}</a:bodyPr><a:lstStyle/>{paragraphs}</p:txBody></p:sp>",
+            id - 1,
+            frame.map(place).unwrap_or_default(),
+            if fitting { "<a:normAutofit/>" } else { "" }
+        ));
+    }
+
     fn rule(&mut self, frame: Frame) {
         let id = self.id();
         self.xml.push_str(&format!("<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"Rule {}\"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr>{}<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:solidFill><a:srgbClr val=\"{ACCENT}\"/></a:solidFill><a:ln><a:noFill/></a:ln></p:spPr></p:sp>", id - 1, place(frame)));
@@ -479,37 +631,77 @@ fn line(align: &str, runs: &str) -> String {
     format!("<a:p><a:pPr algn=\"{align}\"><a:buNone/></a:pPr>{runs}</a:p>")
 }
 
-/// A slide's XML. `number` is the one it shows at its foot; the first slide shows none.
-fn slide_xml(page: &Page, lang: &str, number: Option<usize>) -> String {
+/// A slide's XML. `number` is the one it shows at its foot; the first slide shows none. On the layouts of a
+/// reference (`on`) the title and the points fill their placeholders and say their sizes only.
+fn slide_xml(page: &Page, on: Option<&Stage>, lang: &str, number: Option<usize>) -> String {
     let mut shapes = Shapes { xml: String::new(), last: 1 };
-    let look = |size: f32, colour: &'static str, bold: bool| Look { size, colour, bold, lang };
+    let place = on.map(|stage| match page.kind {
+        Kind::Cover => &stage.cover,
+        Kind::Opening => &stage.opening,
+        Kind::Content => &stage.content,
+    });
+    let (ink, soft) = match place {
+        None => (own(INK), own(SOFT)),
+        Some(place) => (String::new(), place.soft.clone()),
+    };
+    let look = |size: f32, quiet: bool| Look { size, colour: if quiet { &soft } else { &ink }, bold: false, lang };
     if let Some(rule) = page.rule { shapes.rule(rule) }
-    if let Some(title) = &page.title { shapes.text("Title", "<p:ph type=\"title\"/>", title.frame, &line("l", &runs(&title.text, &look(title.size, INK, true)))) }
-    if let Some(subtitle) = &page.subtitle { shapes.text("Subtitle", "", subtitle.frame, &line("l", &runs(&subtitle.text, &look(subtitle.size, SOFT, false)))) }
+    if let Some(title) = &page.title {
+        match place {
+            None => shapes.text("Title", "<p:ph type=\"title\"/>", title.frame, &line("l", &runs(&title.text, &Look { bold: true, ..look(title.size, false) }))),
+            Some(place) => shapes.held("Title", &place.title.tag, Some(title.frame), true, &format!("<a:p>{}</a:p>", runs(&title.text, &look(title.size, false)))),
+        }
+    }
+    if let Some(subtitle) = &page.subtitle {
+        match place.and_then(|place| place.under.as_ref()) {
+            Some(holder) => shapes.held("Subtitle", &holder.tag, Some(subtitle.frame), true, &format!("<a:p>{}</a:p>", runs(&subtitle.text, &look(subtitle.size, false)))),
+            None => shapes.text("Subtitle", "", subtitle.frame, &line("l", &runs(&subtitle.text, &look(subtitle.size, true)))),
+        }
+    }
     if let Some((frame, size, points)) = page.points {
+        let rule = on.map_or(OWN, |stage| Rule { sizes: &[], margins: Some(stage.margins), pad: stage.pad });
         let paragraphs: String = points.iter().enumerate().map(|(n, point)| {
-            let (letters, inset) = level(size, point.level);
+            let (letters, inset) = rule.level(size, point.level);
+            let above = (if n == 0 { 0.0 } else { before(size, point.level) } * 100.0) as i32;
+            let words = runs(&point.text, &look(letters, false));
+            // On a layout of a reference the marks of the points and how far they stand in are the layout's.
+            if on.is_some() { return format!("<a:p><a:pPr lvl=\"{}\"><a:lnSpc><a:spcPct val=\"100000\"/></a:lnSpc><a:spcBef><a:spcPts val=\"{above}\"/></a:spcBef></a:pPr>{words}</a:p>", point.level) }
             let (hang, mark) = if point.level == 0 { (inset, "•") } else { (letters * 0.9, "–") };
-            let above = if n == 0 { 0.0 } else { before(size, point.level) };
             format!(
-                "<a:p><a:pPr marL=\"{}\" indent=\"-{}\" lvl=\"{}\" algn=\"l\"><a:lnSpc><a:spcPct val=\"100000\"/></a:lnSpc><a:spcBef><a:spcPts val=\"{}\"/></a:spcBef><a:buClr><a:srgbClr val=\"{SOFT}\"/></a:buClr><a:buFont typeface=\"Arial\"/><a:buChar char=\"{mark}\"/></a:pPr>{}</a:p>",
+                "<a:p><a:pPr marL=\"{}\" indent=\"-{}\" lvl=\"{}\" algn=\"l\"><a:lnSpc><a:spcPct val=\"100000\"/></a:lnSpc><a:spcBef><a:spcPts val=\"{above}\"/></a:spcBef><a:buClr><a:srgbClr val=\"{SOFT}\"/></a:buClr><a:buFont typeface=\"Arial\"/><a:buChar char=\"{mark}\"/></a:pPr>{words}</a:p>",
                 emu(inset),
                 emu(hang),
-                point.level,
-                (above * 100.0) as i32,
-                runs(&point.text, &look(letters, INK, false))
+                point.level
             )
         }).collect();
-        shapes.text("Content", "<p:ph idx=\"1\"/>", frame, &paragraphs);
+        match place.and_then(|place| place.under.as_ref()) {
+            Some(holder) => shapes.held("Content", &holder.tag, Some(frame), true, &paragraphs),
+            None => shapes.text("Content", "<p:ph idx=\"1\"/>", frame, &paragraphs),
+        }
     }
     if let Some((frame, _)) = page.picture { shapes.picture(frame, "rId2", &plain(page.caption.as_ref().map_or("", |caption| caption.text.as_str()))) }
-    if let Some(caption) = &page.caption { shapes.text("Caption", "", caption.frame, &line("ctr", &runs(&caption.text, &look(caption.size, SOFT, false)))) }
-    let foot = |x: f32, w: f32| Frame { x, y: FOOT, w, h: SMALL * LINE };
-    if !page.source.is_empty() { shapes.text("Source", "", foot(SIDE, WIDE - 2.0 * SIDE - 60.0), &line("l", &runs(page.source, &look(SMALL, SOFT, false)))) }
-    if let Some(number) = number {
-        // A field, so that the number follows the slide when the person moves it.
-        let field = format!("<a:fld id=\"{{7D9F4D5A-2B6E-4E0B-9C5F-3A1B2C4D5E6F}}\" type=\"slidenum\"><a:rPr {}</a:rPr><a:t>{number}</a:t></a:fld>", look(SMALL, SOFT, false).properties(false, false));
-        shapes.text("Number", "", foot(WIDE - SIDE - 48.0, 48.0), &line("r", &field));
+    if let Some(caption) = &page.caption { shapes.text("Caption", "", caption.frame, &line("ctr", &runs(&caption.text, &look(caption.size, true)))) }
+    // A field, so that the number follows the slide when the person moves it.
+    let field = |properties: String| number.map(|number| format!("<a:fld id=\"{{7D9F4D5A-2B6E-4E0B-9C5F-3A1B2C4D5E6F}}\" type=\"slidenum\"><a:rPr {properties}</a:rPr><a:t>{number}</a:t></a:fld>"));
+    match (on, place) {
+        (Some(stage), Some(place)) => {
+            // The layout's own places for the line at the foot and the number, where it has them; a layout without a place for the number shows none.
+            if !page.source.is_empty() {
+                match &place.foot {
+                    Some(holder) => shapes.held("Footer", holder, None, false, &format!("<a:p><a:r><a:rPr lang=\"{lang}\" dirty=\"0\"/><a:t>{}</a:t></a:r></a:p>", escape(page.source))),
+                    None => {
+                        let side = stage.content.title.frame.x.clamp(12.0, stage.wide / 4.0);
+                        shapes.text("Source", "", Frame { x: side, y: foot_top(stage), w: stage.wide - 2.0 * side, h: SMALL * LINE }, &line("l", &runs(page.source, &look(SMALL, true))));
+                    }
+                }
+            }
+            if let (Some(holder), Some(field)) = (&place.number, field(format!("lang=\"{lang}\" dirty=\"0\">"))) { shapes.held("Slide Number", holder, None, false, &format!("<a:p>{field}</a:p>")) }
+        }
+        _ => {
+            let foot = |x: f32, w: f32| Frame { x, y: FOOT, w, h: SMALL * LINE };
+            if !page.source.is_empty() { shapes.text("Source", "", foot(SIDE, WIDE - 2.0 * SIDE - 60.0), &line("l", &runs(page.source, &look(SMALL, true)))) }
+            if let Some(field) = field(look(SMALL, true).properties(false, false)) { shapes.text("Number", "", foot(WIDE - SIDE - 48.0, 48.0), &line("r", &field)) }
+        }
     }
     format!("{HEAD}<p:sld {SPACES}><p:cSld><p:spTree>{GROUP}{}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>", shapes.xml)
 }
@@ -597,16 +789,105 @@ fn relations(of: &[(String, &str, String)]) -> String {
     format!("{HEAD}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\">{all}</Relationships>")
 }
 
-/// The deck as a .pptx file.
+const TYPES: &str = "application/vnd.openxmlformats-";
+
+/// The parts the slides of a file are made of.
+struct Slides<'a> {
+    /// (name, content) of the slides, their notes and the relations of both.
+    files: Vec<(String, Vec<u8>)>,
+    /// (part, kind of content) of those that are parts.
+    kinds: Vec<(String, &'static str)>,
+    /// The pictures, each once: its name in the file and its bytes.
+    media: Vec<(String, &'a [u8])>,
+}
+
+/// A relation's target, said from a part in a folder under `folder` (`ppt/slides`): beside it when it can be.
+fn reach(folder: &str, part: &str) -> String {
+    match part.strip_prefix(folder).and_then(|rest| rest.strip_prefix('/')) {
+        Some(rest) => format!("../{rest}"),
+        None => format!("/{part}"),
+    }
+}
+
+/// The slides as parts under `folder` (`ppt`). `layout` names the layout's part a page stands on, `notes_master` the
+/// part of the notes' master, `taken` says which names a picture cannot have.
+fn slides<'a>(pages: &[Page<'a>], on: Option<&Stage>, lang: &str, folder: &str, notes_master: &str, taken: &dyn Fn(&str) -> bool) -> Slides<'a> {
+    let one = |id: &str, kind: &'static str, target: String| (id.to_string(), kind, target);
+    let mut out = Slides { files: vec![], kinds: vec![], media: vec![] };
+    // A picture shown on several slides is in the file once.
+    let mut known: Vec<(u32, &Picture)> = vec![];
+    let mut free = 0;
+    for (n, page) in pages.iter().enumerate() {
+        let number = n + 1;
+        let layout = match on {
+            None => "../slideLayouts/slideLayout1.xml".to_string(),
+            Some(stage) => reach(folder, match page.kind {
+                Kind::Cover => &stage.cover.layout,
+                Kind::Opening => &stage.opening.layout,
+                Kind::Content => &stage.content.layout,
+            }),
+        };
+        let mut related = vec![one("rId1", "slideLayout", layout)];
+        if let Some((_, picture)) = page.picture {
+            let sum = crc32(&picture.bytes);
+            let at = known.iter().position(|(other, held)| *other == sum && held.bytes == picture.bytes).unwrap_or_else(|| {
+                let name = loop {
+                    free += 1;
+                    let name = format!("{folder}/media/image{free}.{}", picture.kind);
+                    if !taken(&name) { break name }
+                };
+                known.push((sum, picture));
+                out.media.push((name, picture.bytes.as_slice()));
+                known.len() - 1
+            });
+            related.push(one("rId2", "image", reach(folder, &out.media[at].0)));
+        }
+        if !page.notes.is_empty() {
+            related.push(one("rId3", "notesSlide", format!("../notesSlides/notesSlide{number}.xml")));
+            out.kinds.push((format!("{folder}/notesSlides/notesSlide{number}.xml"), "officedocument.presentationml.notesSlide"));
+            out.files.push((format!("{folder}/notesSlides/notesSlide{number}.xml"), notes_xml(&page.notes, lang).into_bytes()));
+            out.files.push((format!("{folder}/notesSlides/_rels/notesSlide{number}.xml.rels"), relations(&[one("rId1", "notesMaster", reach(folder, notes_master)), one("rId2", "slide", format!("../slides/slide{number}.xml"))]).into_bytes()));
+        }
+        out.kinds.push((format!("{folder}/slides/slide{number}.xml"), "officedocument.presentationml.slide"));
+        out.files.push((format!("{folder}/slides/slide{number}.xml"), slide_xml(page, on, lang, page.slide.map(|_| number)).into_bytes()));
+        out.files.push((format!("{folder}/slides/_rels/slide{number}.xml.rels"), relations(&related).into_bytes()));
+    }
+    out
+}
+
+/// What the file is called and when it was made, for the finder of files.
+fn core_xml(deck: &Deck) -> String {
+    let dated = deck.date.get(..19).map(|date| format!("<dcterms:created xsi:type=\"dcterms:W3CDTF\">{date}Z</dcterms:created><dcterms:modified xsi:type=\"dcterms:W3CDTF\">{date}Z</dcterms:modified>")).unwrap_or_default();
+    format!(
+        "{HEAD}<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:dcterms=\"http://purl.org/dc/terms/\" xmlns:dcmitype=\"http://purl.org/dc/dcmitype/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><dc:title>{}</dc:title><dc:creator>Wisp Study</dc:creator>{dated}</cp:coreProperties>",
+        escape(deck.title.trim())
+    )
+}
+
+/// The relations of the file itself: its presentation and what it is called.
+fn root_relations(main: &str) -> String {
+    format!("{HEAD}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RELATION}/officeDocument\" Target=\"{}\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/></Relationships>", escape(main))
+}
+
+fn written(bytes: Vec<u8>, pages: &[Page]) -> Written {
+    let numbers = |of: fn(&Page) -> bool| {
+        let mut found: Vec<usize> = pages.iter().filter(|page| of(page)).filter_map(|page| page.slide).map(|n| n + 1).collect();
+        found.dedup();
+        found
+    };
+    Written { bytes, pages: pages.len(), continued: numbers(|page| page.continues), clipped: numbers(|page| page.clipped) }
+}
+
+/// The deck as a .pptx file, in its own design.
 pub fn write(deck: &Deck) -> Written {
-    let pages = lay(deck);
+    let pages = lay(deck, None);
     let lang = if chinese(deck) { "zh-CN" } else { "en-US" };
     let noted = pages.iter().any(|page| !page.notes.is_empty());
     let one = |id: &str, kind: &'static str, target: String| (id.to_string(), kind, target);
     let mut files: Vec<(String, Vec<u8>)> = vec![];
     let mut add = |name: String, text: String| files.push((name, text.into_bytes()));
     let mut types = String::new();
-    let mut part = |name: &str, kind: &str| types.push_str(&format!("<Override PartName=\"/{name}\" ContentType=\"application/vnd.openxmlformats-{kind}+xml\"/>"));
+    let mut part = |name: &str, kind: &str| types.push_str(&format!("<Override PartName=\"/{name}\" ContentType=\"{TYPES}{kind}+xml\"/>"));
 
     // The presentation: its master, its theme, the notes' master, then the slides in their order.
     let mut listed = vec![one("rId1", "slideMaster", "slideMasters/slideMaster1.xml".into()), one("rId2", "theme", "theme/theme1.xml".into())];
@@ -640,63 +921,63 @@ pub fn write(deck: &Deck) -> Written {
         add("ppt/notesMasters/notesMaster1.xml".into(), notes_master_xml());
         add("ppt/notesMasters/_rels/notesMaster1.xml.rels".into(), relations(&[one("rId1", "theme", "../theme/theme2.xml".into())]));
     }
-
-    // A picture shown on several slides is in the file once.
-    let mut media: Vec<(u32, &Picture, String)> = vec![];
-    for (n, page) in pages.iter().enumerate() {
-        let number = n + 1;
-        let mut related = vec![one("rId1", "slideLayout", "../slideLayouts/slideLayout1.xml".into())];
-        if let Some((_, picture)) = page.picture {
-            let sum = crc32(&picture.bytes);
-            let known = media.iter().position(|(other, held, _)| *other == sum && held.bytes == picture.bytes);
-            let at = known.unwrap_or_else(|| {
-                media.push((sum, picture, format!("image{}.{}", media.len() + 1, picture.kind)));
-                media.len() - 1
-            });
-            related.push(one("rId2", "image", format!("../media/{}", media[at].2)));
-        }
-        if !page.notes.is_empty() {
-            related.push(one("rId3", "notesSlide", format!("../notesSlides/notesSlide{number}.xml")));
-            part(&format!("ppt/notesSlides/notesSlide{number}.xml"), "officedocument.presentationml.notesSlide");
-            add(format!("ppt/notesSlides/notesSlide{number}.xml"), notes_xml(&page.notes, lang));
-            add(format!("ppt/notesSlides/_rels/notesSlide{number}.xml.rels"), relations(&[one("rId1", "notesMaster", "../notesMasters/notesMaster1.xml".into()), one("rId2", "slide", format!("../slides/slide{number}.xml"))]));
-        }
-        part(&format!("ppt/slides/slide{number}.xml"), "officedocument.presentationml.slide");
-        add(format!("ppt/slides/slide{number}.xml"), slide_xml(page, lang, page.slide.map(|_| number)));
-        add(format!("ppt/slides/_rels/slide{number}.xml.rels"), relations(&related));
-    }
-
-    // What the file is called and when it was made, for the finder of files.
-    let dated = deck.date.get(..19).map(|date| format!("<dcterms:created xsi:type=\"dcterms:W3CDTF\">{date}Z</dcterms:created><dcterms:modified xsi:type=\"dcterms:W3CDTF\">{date}Z</dcterms:modified>")).unwrap_or_default();
+    let made = slides(&pages, None, lang, "ppt", "ppt/notesMasters/notesMaster1.xml", &|_| false);
+    for (name, kind) in &made.kinds { part(name, kind) }
     part("docProps/core.xml", "package.core-properties");
-    add(
-        "docProps/core.xml".into(),
-        format!(
-            "{HEAD}<cp:coreProperties xmlns:cp=\"http://schemas.openxmlformats.org/package/2006/metadata/core-properties\" xmlns:dc=\"http://purl.org/dc/elements/1.1/\" xmlns:dcterms=\"http://purl.org/dc/terms/\" xmlns:dcmitype=\"http://purl.org/dc/dcmitype/\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><dc:title>{}</dc:title><dc:creator>Wisp Study</dc:creator>{dated}</cp:coreProperties>",
-            escape(deck.title.trim())
-        ),
-    );
-    add(
-        "_rels/.rels".into(),
-        format!("{HEAD}<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"{RELATION}/officeDocument\" Target=\"ppt/presentation.xml\"/><Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/></Relationships>"),
-    );
+    add("docProps/core.xml".into(), core_xml(deck));
+    add("_rels/.rels".into(), root_relations("ppt/presentation.xml"));
     let content_types = format!("{HEAD}<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Default Extension=\"png\" ContentType=\"image/png\"/><Default Extension=\"jpg\" ContentType=\"image/jpeg\"/>{types}</Types>");
 
     let mut all: Vec<(&str, &[u8])> = vec![("[Content_Types].xml", content_types.as_bytes())];
-    all.extend(files.iter().map(|(name, bytes)| (name.as_str(), bytes.as_slice())));
-    let pictures: Vec<(String, &[u8])> = media.iter().map(|(_, picture, name)| (format!("ppt/media/{name}"), picture.bytes.as_slice())).collect();
-    all.extend(pictures.iter().map(|(name, bytes)| (name.as_str(), *bytes)));
-    let numbers = |of: fn(&Page) -> bool| {
-        let mut found: Vec<usize> = pages.iter().filter(|page| of(page)).filter_map(|page| page.slide).map(|n| n + 1).collect();
-        found.dedup();
-        found
+    all.extend(files.iter().chain(&made.files).map(|(name, bytes)| (name.as_str(), bytes.as_slice())));
+    all.extend(made.media.iter().map(|(name, bytes)| (name.as_str(), *bytes)));
+    written(stored_zip(&all), &pages)
+}
+
+/// The deck as a .pptx file that stands on the masters and layouts of another: the reference's background, colours,
+/// fonts and marks, its slides left out. The title and the points fill the placeholders of three of its layouts
+/// (`slideref::Reference` says which and where they stand); what a layout has no place for (a picture, its caption)
+/// is laid out here as in the deck's own design.
+pub fn write_on(deck: &Deck, reference: &crate::slideref::Reference) -> Result<Written> {
+    let stage = reference.stage();
+    let pages = lay(deck, Some(stage));
+    let lang = if chinese(deck) { "zh-CN" } else { "en-US" };
+    let folder = reference.folder();
+    let mut zip = crate::docx::Zip::default();
+    // First in the file, as every program writes it; what it says is known at the end.
+    zip.set("[Content_Types].xml", b"");
+    let kept = reference.kept()?;
+    let has = |name: &str| kept.iter().any(|(part, _)| part == name);
+    let mut kinds: Vec<(String, String)> = vec![];
+    // Notes need a master: the reference's, or the deck's own under a name that is free.
+    let noted = pages.iter().any(|page| !page.notes.is_empty());
+    let mut added = vec![];
+    let notes_master = match reference.notes_master() {
+        Some(part) => part.to_string(),
+        None if noted => {
+            let theme = (1..).map(|n| format!("{folder}/theme/theme{n}.xml")).find(|name| !has(name)).unwrap_or_default();
+            let master = (1..).map(|n| format!("{folder}/notesMasters/notesMaster{n}.xml")).find(|name| !has(name)).unwrap_or_default();
+            kinds.push((theme.clone(), format!("{TYPES}officedocument.theme+xml")));
+            kinds.push((master.clone(), format!("{TYPES}officedocument.presentationml.notesMaster+xml")));
+            added.push((crate::docx::rels_of(&master), relations(&[("rId1".to_string(), "theme", reach(folder, &theme))]).into_bytes()));
+            added.push((theme, theme_xml().into_bytes()));
+            added.push((master.clone(), notes_master_xml().into_bytes()));
+            master
+        }
+        None => String::new(),
     };
-    Written {
-        bytes: stored_zip(&all),
-        pages: pages.len(),
-        continued: numbers(|page| page.continues),
-        clipped: numbers(|page| page.clipped),
-    }
+    let made = slides(&pages, Some(stage), lang, folder, &notes_master, &has);
+    let (presentation, relations) = reference.presentation(pages.len(), (noted && reference.notes_master().is_none()).then_some(notes_master.as_str()))?;
+    zip.set(reference.main(), presentation.as_bytes());
+    zip.set(&crate::docx::rels_of(reference.main()), relations.as_bytes());
+    for (name, bytes) in kept.iter().chain(&added).chain(&made.files) { zip.set(name, bytes) }
+    for (name, bytes) in &made.media { zip.set(name, bytes) }
+    zip.set("docProps/core.xml", core_xml(deck).as_bytes());
+    zip.set("_rels/.rels", root_relations(reference.main()).as_bytes());
+    kinds.extend(made.kinds.iter().map(|(name, kind)| (name.clone(), format!("{TYPES}{kind}+xml"))));
+    kinds.push(("docProps/core.xml".into(), format!("{TYPES}package.core-properties+xml")));
+    zip.set("[Content_Types].xml", reference.content_types(&kinds)?.as_bytes());
+    Ok(written(zip.write(), &pages))
 }
 
 #[cfg(test)]
@@ -811,13 +1092,13 @@ mod tests {
         let long = "根尖静止中心的干细胞微环境由 WOX5 与生长素梯度共同维持，敲除任何一方都会让周围的干细胞提前分化";
         let mut many: Vec<Point> = (0..14).map(|_| Point { text: long.into(), level: 0 }).collect();
         // A few points are set large, many small, and what fits at no size is counted out over slides.
-        let size = |count: usize| lay(&Deck { slides: vec![Slide { title: "要点".into(), points: many[..count].to_vec(), ..Default::default() }], ..Default::default() })[0].points.unwrap().1;
+        let size = |count: usize| lay(&Deck { slides: vec![Slide { title: "要点".into(), points: many[..count].to_vec(), ..Default::default() }], ..Default::default() }, None)[0].points.unwrap().1;
         assert_eq!((size(2), size(6), size(8)), (24.0, 20.0, 16.0));
         // The point under another is never the first of a slide.
-        let cut = taken(&many, 848.0, 358.0);
+        let cut = OWN.taken(&many, 848.0, 358.0);
         many[cut] = Point { text: long.repeat(3), level: 1 };
         let deck = Deck { slides: vec![Slide { title: "要点".into(), points: many.clone(), notes: "讲稿".into(), ..Default::default() }, Slide { title: "下一页".into(), points: points(&["一条"]), ..Default::default() }], ..Default::default() };
-        let pages = lay(&deck);
+        let pages = lay(&deck, None);
         let counts: Vec<usize> = pages.iter().map(|page| page.points.unwrap().2.len()).collect();
         assert_eq!((counts[0], counts.iter().sum::<usize>(), pages.len()), (cut - 1, 15, counts.len()));
         assert!(pages.len() >= 3 && pages[1].points.unwrap().2[0].level == 0 && pages[1].points.unwrap().2[1].level == 1);
@@ -826,15 +1107,15 @@ mod tests {
         assert_eq!((pages[0].notes.as_str(), pages[1].notes.as_str()), ("讲稿", ""));
         for page in &pages {
             let (frame, size, points) = page.points.unwrap();
-            assert!(points_height(points, size, frame.w) <= frame.h, "{size}");
+            assert!(OWN.height(points, size, frame.w) <= frame.h, "{size}");
         }
         let written = write(&deck);
         assert_eq!((written.pages, written.continued), (pages.len(), vec![1]));
         // An English deck says it in English; one point too long for a slide still gets one.
         let english = Deck { slides: vec![Slide { title: "Points".into(), points: (0..30).map(|_| Point { text: "The quiescent centre keeps the surrounding stem cells from differentiating.".into(), level: 0 }).collect(), ..Default::default() }], ..Default::default() };
-        assert_eq!(lay(&english)[1].title.as_ref().unwrap().text, "Points (cont.)");
+        assert_eq!(lay(&english, None)[1].title.as_ref().unwrap().text, "Points (cont.)");
         let endless = Deck { slides: vec![Slide { points: vec![Point { text: long.repeat(40), level: 0 }], ..Default::default() }], ..Default::default() };
-        assert_eq!(lay(&endless).len(), 1);
+        assert_eq!(lay(&endless, None).len(), 1);
     }
 
     #[test]
@@ -846,7 +1127,7 @@ mod tests {
             for with in [&few[..], &[]] {
                 for caption in ["", "Fig. 2 | WOX5 in the root tip.", legend.as_str()] {
                     let deck = Deck { slides: vec![Slide { title: "A title that is long enough to need a second line when it is set in large letters on a slide".into(), points: with.to_vec(), picture: Some(picture(width, height)), caption: caption.into(), source: "Zhang et al., 2021".into(), ..Default::default() }], ..Default::default() };
-                    let pages = lay(&deck);
+                    let pages = lay(&deck, None);
                     let (page, about) = (&pages[0], format!("{width}x{height}, {} points, caption of {}", with.len(), caption.len()));
                     let (frame, shown) = page.picture.unwrap();
                     let mut frames = vec![page.title.as_ref().unwrap().frame, frame];
@@ -867,13 +1148,13 @@ mod tests {
         // A wide picture stands under the points, another beside them.
         let under = |width: u32, height: u32| {
             let deck = Deck { slides: vec![Slide { title: "T".into(), points: few.clone(), picture: Some(picture(width, height)), ..Default::default() }], ..Default::default() };
-            let page = &lay(&deck)[0];
+            let page = &lay(&deck, None)[0];
             page.picture.unwrap().0.y > page.points.unwrap().0.y + 1.0
         };
         assert_eq!((under(1600, 400), under(1200, 900), under(500, 1400)), (true, false, false));
         // The first slide and one that opens a part stay inside the slide too, however long their titles.
         let title = "A single-cell atlas of the root stem cell niche and its maintenance by auxin gradients under compacted soil ".repeat(2);
-        for page in lay(&Deck { title: title.clone(), subtitle: "Zhang et al., 2021".into(), slides: vec![Slide { title, ..Default::default() }], ..Default::default() }) {
+        for page in lay(&Deck { title: title.clone(), subtitle: "Zhang et al., 2021".into(), slides: vec![Slide { title, ..Default::default() }], ..Default::default() }, None) {
             for words in [page.title.as_ref(), page.subtitle.as_ref()].into_iter().flatten() { assert!(words.frame.y + words.frame.h <= FOOT, "{}", words.frame.y + words.frame.h) }
         }
     }

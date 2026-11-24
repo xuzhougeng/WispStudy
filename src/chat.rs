@@ -275,10 +275,11 @@ fn source_chip(id: SharedString, max_width: f32) -> Stateful<Div> {
     div().id(id).flex().items_center().gap(px(4.)).min_w_0().max_w(px(max_width)).h(text_px(24.)).px(px(8.)).rounded(px(6.)).border_1().border_color(Theme::line()).text_size(text_px(12.)).cursor_pointer().hover(|s| s.bg(Theme::hover()).border_color(Theme::accent()))
 }
 
-/// A Word file that goes, or went, with a question: its name, quiet.
+/// A file that goes, or went, with a question (a Word file, or a PowerPoint file as the reference for slides): its name, quiet.
 pub(crate) fn document_chip(path: &str) -> Div {
     let name = std::path::Path::new(path).file_name().map(|name| name.to_string_lossy().to_string()).unwrap_or_else(|| path.to_string());
-    div().flex().flex_none().items_center().gap(px(6.)).max_w(px(280.)).h(text_px(26.)).pl(px(8.)).pr(px(8.)).rounded(px(8.)).border_1().border_color(Theme::line()).bg(Theme::bg_body()).text_size(text_px(12.)).text_color(Theme::text_secondary()).child(ui::icon("file-text", 13., Theme::text_tertiary())).child(div().min_w_0().truncate().child(ui::one_line(&name)))
+    let icon = if crate::comments::is_deck(std::path::Path::new(path)) { "presentation" } else { "file-text" };
+    div().flex().flex_none().items_center().gap(px(6.)).max_w(px(280.)).h(text_px(26.)).pl(px(8.)).pr(px(8.)).rounded(px(8.)).border_1().border_color(Theme::line()).bg(Theme::bg_body()).text_size(text_px(12.)).text_color(Theme::text_secondary()).child(ui::icon(icon, 13., Theme::text_tertiary())).child(div().min_w_0().truncate().child(ui::one_line(&name)))
 }
 
 /// A picture of a conversation, cropped to a square.
@@ -934,7 +935,7 @@ impl Workspace {
         enum Start {
             Say(&'static str),
             Command(&'static str),
-            /// A Word file is picked to go with the next question.
+            /// A file is picked to go with the next question: a Word file, or a PowerPoint file as the reference for slides.
             Pick(&'static str),
         }
         use Start::*;
@@ -942,7 +943,7 @@ impl Workspace {
             ("search", "找文献", &[Say("按这个文献库的主题在 PubMed 和 Europe PMC 试检索，看看还有哪些文献没有收进来。"), Say("给还没有 PDF 的文献查找开放全文。"), Command("search")]),
             ("file-text", "读文献", &[Say("这些文献主要在研究哪些问题？按主题归类。"), Say("哪些文献的结论相互支持或矛盾？"), Say("我还没读的文献里，哪几篇最值得先读？为什么？"), Command("compare")]),
             ("list-todo", "整理", &[Say("给这些文献按主题打上标签，优先用已有的标签。"), Say("把我还没读的文献里最值得先读的几篇加上星标。"), Say("读一遍这些文献，为自定义词条提出取值。")]),
-            ("pen-line", "写", &[Command("review"), Command("write"), Command("cite"), Pick("给一个写好的 Word 文件换引用格式：选文件，或把它拖进来。")]),
+            ("pen-line", "写", &[Command("review"), Command("write"), Command("cite"), Pick("给一个写好的 Word 文件换引用格式：选文件，或把它拖进来。"), Pick("照自己的一份幻灯片做汇报：选 .pptx 文件，或把它拖进来。")]),
         ];
         // A width of its own: a card that shares the row's width is measured before its lines wrap, and is then too short for them.
         // So the page's width is worked out here (less its padding, edge lines and a scroll bar): two cards to a row while each keeps a readable width, else one, as wide as reads well.

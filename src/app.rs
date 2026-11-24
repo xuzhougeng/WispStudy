@@ -1432,7 +1432,8 @@ pub struct Chat {
     /// Pictures that go with the next question, and how many more are still being read.
     pub attachments: Vec<ChatImage>,
     pub attaching: usize,
-    /// Word files that go with the next question, for the assistant to restyle their citations (`wisp_core::restyle`).
+    /// Files that go with the next question, by their paths: Word files, for the assistant to restyle their citations
+    /// (`wisp_core::restyle`), and PowerPoint files, the reference slides are made after (`wisp_core::slideref`).
     pub documents: Vec<PathBuf>,
     /// Which of the slash commands on offer is picked.
     pub slash: usize,
@@ -4214,16 +4215,17 @@ impl Workspace {
                 if let Some(lib) = self.lib.as_ref() { lib.chat(paper).input.read(cx).focus(window) }
             }
             Cmd::AttachImages(paper) => {
-                // The assistant of the library also takes a Word file, to restyle its citations; in a conversation not yet
-                // made a library a Word file is a manuscript to review and a PDF a paper, taken in as a drop takes them.
+                // The assistant of the library also takes a Word file, to restyle its citations, and a PowerPoint file, as the
+                // reference slides are made after; in a conversation not yet made a library a Word file is a manuscript to
+                // review and a PDF a paper, taken in as a drop takes them.
                 let documents = paper == Talk::Library;
                 let draft = documents && self.in_draft();
-                let extensions: Vec<SharedString> = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"].into_iter().chain(documents.then_some("docx")).chain(draft.then_some("pdf")).map(SharedString::from).collect();
-                let picked = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: Some(if draft { t("添加图片、Word 文件或 PDF") } else if documents { t("添加图片或 Word 文件") } else { t("添加图片") }.into()), extensions: Some(extensions) });
+                let extensions: Vec<SharedString> = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"].into_iter().chain(if documents { ["docx", "pptx", "potx"].as_slice() } else { [].as_slice() }.iter().copied()).chain(draft.then_some("pdf")).map(SharedString::from).collect();
+                let picked = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: Some(if draft { t("添加图片、Word、PowerPoint 文件或 PDF") } else if documents { t("添加图片、Word 或 PowerPoint 文件") } else { t("添加图片") }.into()), extensions: Some(extensions) });
                 cx.spawn(async move |this, cx| {
                     if let Ok(Ok(Some(paths))) = picked.await {
                         this.update(cx, |this, cx| {
-                            let (files, pictures): (Vec<PathBuf>, Vec<PathBuf>) = paths.into_iter().partition(|path| documents && (crate::comments::is_word(path) || (draft && crate::draft::starts_one(path))));
+                            let (files, pictures): (Vec<PathBuf>, Vec<PathBuf>) = paths.into_iter().partition(|path| documents && (crate::comments::is_word(path) || crate::comments::is_deck(path) || (draft && crate::draft::starts_one(path))));
                             if draft && !files.is_empty() { this.import_paths(files, cx) } else if !files.is_empty() { this.attach_documents(paper, files, cx) }
                             if !pictures.is_empty() { this.attach_images(paper, pictures.into_iter().map(Picture::File).collect(), cx) }
                         })
@@ -6239,8 +6241,10 @@ impl Workspace {
         // On the home page a Word file or a PDF goes with the first question to its assistant (`draft.rs`).
         if self.lib.is_none() { return self.home_attach(paths, cx) }
         // On the assistant's page a Word file goes with the next question: it was written elsewhere and stays so, its citations are what is asked about.
-        // In a conversation not yet made a library it is the manuscript to review, as below.
-        let (documents, paths): (Vec<PathBuf>, Vec<PathBuf>) = paths.into_iter().partition(|path| self.lib.as_ref().is_some_and(|lib| lib.page == Page::Ask && !lib.info.draft) && path.is_file() && crate::comments::is_word(path));
+        // In a conversation not yet made a library it is the manuscript to review, as below. A PowerPoint file goes with the next
+        // question in both: the reference slides are made after, read where it is.
+        let (asking, draft) = self.lib.as_ref().map_or((false, false), |lib| (lib.page == Page::Ask, lib.info.draft));
+        let (documents, paths): (Vec<PathBuf>, Vec<PathBuf>) = paths.into_iter().partition(|path| asking && path.is_file() && ((!draft && crate::comments::is_word(path)) || crate::comments::is_deck(path)));
         if !documents.is_empty() { self.attach_documents(Talk::Library, documents, cx) }
         if paths.is_empty() { return }
         // Elsewhere a Word file is a manuscript to go on with; Markdown and plain text are, on the writing page.
@@ -6771,7 +6775,7 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Word files to go with the next question of a conversation: kept by their paths, read only when the assistant's tools are.
+    /// Word and PowerPoint files to go with the next question of a conversation: kept by their paths, read only when the assistant's tools are.
     pub(crate) fn attach_documents(&mut self, talk: Talk, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
         let chat = lib.chat_mut(talk);
@@ -6860,8 +6864,13 @@ impl Workspace {
             Some((text, images, files)) => (text, Some(images), files),
             None => (chat.input.read(cx).text().trim().to_string(), None, chat.documents.iter().map(|path| path.display().to_string()).collect::<Vec<_>>()),
         };
-        // A Word file sent without a word is to have its citations looked at.
-        let question = if question.is_empty() && !files.is_empty() { t("看看这个 Word 文件的引用，我想重排它的引用格式。").to_string() } else { question };
+        // A Word file sent without a word is to have its citations looked at; a PowerPoint file, to be read as the reference for slides.
+        let (decks, words): (Vec<String>, Vec<String>) = files.iter().cloned().partition(|file| crate::comments::is_deck(std::path::Path::new(file)));
+        let question = match (question.is_empty(), words.is_empty(), decks.is_empty()) {
+            (true, false, _) => t("看看这个 Word 文件的引用，我想重排它的引用格式。").to_string(),
+            (true, true, false) => t("看看这份幻灯片：之后做幻灯片时以它为参考。").to_string(),
+            _ => question,
+        };
         let asked_again = again.is_some();
         // A review is begun once, by the question that first asked for it.
         let begin_review = !asked_again && talk == Talk::Library && question.strip_prefix("/review").is_some_and(|rest| rest.starts_with(char::is_whitespace));
@@ -7008,8 +7017,9 @@ impl Workspace {
             Some(note) => format!("{prompt}\n\n{note}"),
             None => prompt,
         };
-        // The Word files that came with the question: the assistant is told where they are and what it can do with them.
-        let prompt = if files.is_empty() { prompt } else { format!("{prompt}\n\n{}", wisp_core::restyle::note(&files)) };
+        // The files that came with the question: the assistant is told where they are and what it can do with them.
+        let prompt = if words.is_empty() { prompt } else { format!("{prompt}\n\n{}", wisp_core::restyle::note(&words)) };
+        let prompt = if decks.is_empty() { prompt } else { format!("{prompt}\n\n{}", wisp_core::slideref::note(&decks)) };
         let images = match again {
             Some(images) => images,
             None => std::mem::take(&mut chat.attachments),
@@ -9663,7 +9673,7 @@ impl Workspace {
                     self.attach_images(Talk::Library, vec![Picture::File(arg.into())], cx);
                     None
                 }
-                // `document:<path>` puts a Word file with the library's next question, as dropping it on 助手 does.
+                // `document:<path>` puts a Word file or a PowerPoint file with the library's next question, as dropping it on 助手 does.
                 "document" => {
                     self.attach_documents(Talk::Library, vec![arg.into()], cx);
                     None
