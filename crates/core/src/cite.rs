@@ -129,6 +129,8 @@ fn parse_chat_group(group: &str) -> Option<Vec<(String, Option<usize>)>> {
     for part in inner.split([',', '，', ';', '、']) {
         let mut words = part.split_whitespace();
         let first = words.next()?;
+        // `[@P3 p.5]` is `[P3 p.5]` (`ai::citation_spans`).
+        let first = first.strip_prefix('@').unwrap_or(first);
         if first.starts_with('P') && first.len() > 1 && first[1..].bytes().all(|b| b.is_ascii_digit()) {
             let page = match words.next() { Some(word) => Some(parse_page(word)?), None => None };
             if words.next().is_some() { return None }
@@ -994,6 +996,11 @@ mod tests {
         assert_eq!(&converted.text[converted.quoted[1].at..], "[@Zhang2024b, p. 3] [P1 p.5 extra] [P1 p.0].");
         let references = find(&converted.text, &index);
         assert_eq!(references.iter().filter(|citation| citation.found.paper().is_some()).count(), 5);
+
+        // A label written with the manuscript's `@` before it is the same label, and its quotation is not left in the text.
+        let hybrid = convert_ai_citations("One [@P1 p.5 \"a sentence\"] and two [@P1; @P2 p.7].", &sources, &index);
+        assert_eq!(hybrid.text, "One [@Zhang2024, p. 5] and two [@Zhang2024; @Zhang2024b, p. 7].");
+        assert_eq!(hybrid.quoted.iter().map(|q| (q.paper_id.as_str(), q.page, q.quote.as_str())).collect::<Vec<_>>(), [("P1", Some(5), "a sentence")]);
 
         let mut ambiguous = sources.clone();
         ambiguous.push(crate::ai::Source { label: "P1".into(), paper_id: "P2".into(), title: "duplicate".into(), ..Default::default() });

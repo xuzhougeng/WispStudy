@@ -9,8 +9,9 @@
 //! such a conversation tells the model about the manuscript, `label_citations`
 //! turns the citations of a conversation (`[P3 p.5 "…"]`) into the
 //! manuscript's before a tool runs and `keep_quoted` keeps the sentences
-//! they quoted as the passages those citations rest on, and `hunks` is
-//! what changed between two texts, for the window to show.
+//! they quoted as the passages those citations rest on, `copied` finds the
+//! sentences written that repeat the paper they cite, and `hunks` is what
+//! changed between two texts, for the window to show.
 
 use crate::ai::Source;
 use crate::cite::{self, Found, Index, Quoted};
@@ -254,15 +255,31 @@ pub fn note(asked: &Asked) -> String {
         let name = manuscript.section(asked.showing).map_or("", |s| s.name.as_str());
         out.push_str(&format!("用户在「{name}」里选中了下面这段文字，这次的要求多半是针对它的：\n{selection}\n"));
     }
+    // The sentences to write after are asked for in the manuscript's language, where `find_sentences` knows it.
+    let written_in = if structure::LANGUAGES.iter().any(|(code, _)| *code == manuscript.language) { format!("language 用 \"{}\"（这种语言一句也没有时去掉 language 再看：别的语言的句子只用来看一段怎么组织，措辞不能照搬）；", manuscript.language) } else { String::new() };
     out.push_str(&format!(
         "做法：\n\
-- 稿件只通过工具改动：edit_section 写或改一节（edits 逐处修改；text 写一节的全文，用于空的一节或整节重写），set_outline 调整各节、题目和正文语言（用户要的语言和上面写的不一样时，先用它改过来）。要写进稿件的正文不要贴在对话里；对话里用几句话说明做了什么、依据哪些文献、还缺什么，让用户去右边看稿。\n\
+- 稿件只通过工具改动：edit_section 写或改一节（edits 逐处修改；text 写一节的全文，只用于空的一节，或用户明确要整节重写），set_outline 调整各节、题目和正文语言（用户要的语言和上面写的不一样时，先用它改过来）。节里已有文字时用 edits：用户写的句子，要求之外的一字不动。要写进稿件的正文不要贴在对话里；对话里用几句话说明做了什么、依据哪些文献、参照了哪几篇的写法、还缺什么，让用户去右边看稿。\n\
 - 动笔前先读：要改的一节用 read_manuscript 读它现在的文字，用户可能刚亲手改过，以稿件现在的文字为准；edits 的 old 要从中逐字摘出。\n\
 - 论断要有出处：先用 find_sentences、find_citations、search_fulltext 等在文献库里找到文献和原句，再写。写进稿件的引用和回答里一样，尽量带上它所依据的原句：[P3 p.5 \"逐字摘出的原句\"]，出自摘要的原句不写页码：[P3 \"逐字摘出的原句\"]，实在没有可摘的原句才写 [P3]。写入时会换成稿件的引用格式，引的那句原文会记为这处引用的出处，用户点一下就能核对。文献库里找不到依据的论断不要配引用，更不要编造文献；在对话里指出来。\n\
+- {}\n\
 - 正文用{language}写，是 Markdown；节的名称不要作为标题写进正文。\n\
-- 只做用户要求的范围。删去或合并写了内容的节、大段删改之前，先在对话里说明并征得同意。"
+- 只做用户要求的范围。删去或合并写了内容的节、大段删改之前，先在对话里说明并征得同意。",
+        by_example(&written_in)
     ));
     out
+}
+
+/// How the assistant is told to write: after the sentences the library's
+/// papers have in the same part, as 仿写 does for a paragraph, and in its
+/// own words, which `copied` checks of every sentence that cites a paper.
+/// `written_in` is the clause about the language to ask `find_sentences`
+/// for, when there is one.
+fn by_example(written_in: &str) -> String {
+    format!(
+        "写法要有参照：写一节或成段的新文字之前，先用 find_sentences 看文献库里的论文在同一部分是怎么写的。section 用这一节的类型（大纲里写着；类型是「其他」的一节，按它实际的内容选最接近的部分）；{written_in}先不带 query 看各篇怎么开头，再用 queries 给出要写的内容的英文关键词找相近的句子，context 设为 true 可以看到前后句。照这些句子的写法来写：一段里先说什么后说什么、句子之间怎么衔接、这个领域惯用的说法、句子的长短和详略。一段围绕一个判断，把回答同一问题的几篇文献放在一起说，不要一篇一句地罗列；换一个题目也成立的句子不写。这一部分在文献库里没有句子可参照时（sentencesInSection 为 0）照常写，并在对话里说一声。\n\
+- 用自己的话写：候选句和引用标签里的原句是参照和出处，不是正文。写进稿件的每句话都要自己写，和任何一句原文连续相同的词不超过五六个；候选句里的论断和数据，只有引用它出自的文献时才用。确实要用原话时，加引号写成直接引语。edit_section 的结果里有 copied 时，那几句和所引文献的原文大段相同：用 edits 改成自己的话；用户要的就是原话时，问他是加引号还是改写。"
+    )
 }
 
 /// A piece of text the assistant is about to write into a manuscript: the
@@ -321,6 +338,11 @@ pub fn call_with(store: &mut Store, info: &crate::libraries::LibraryInfo, name: 
     let (Some(manuscript), Some(section)) = (value["manuscript"].as_str().map(str::to_string), value["section"]["id"].as_str().map(str::to_string)) else { return Ok(value) };
     let body = store.manuscript(&manuscript).ok().flatten().and_then(|m| m.section(&section).map(|s| s.body.clone())).unwrap_or_default();
     // The section is written by now: a passage that could not be kept takes nothing back.
+    // A sentence that repeats the paper it cites is the paper's, not the manuscript's: the model is told, to say it in its own words.
+    if let Ok(copied) = copied(store, &body, &pieces) && !copied.is_empty() {
+        value["copied"] = json!(copied.iter().map(|(sentence, shared)| json!({"sentence": sentence, "shared": shared})).collect::<Vec<_>>());
+        value["copiedHint"] = json!("copied 里的句子（sentence）有一长串词（shared）和它所引文献的原文一字不差，这是照抄。用 edits 把这几句改成自己的话：意思和引用不变，说法换掉；确实要用原话时，加引号写成直接引语。相同的只是一串专有名词（物种、方法的名称）时不用改。");
+    }
     if let Ok((kept, unfound)) = keep_quoted(store, &manuscript, &section, &body, &pieces) {
         if kept > 0 { value["passagesKept"] = json!(kept) }
         if !unfound.is_empty() {
@@ -363,6 +385,113 @@ pub fn keep_quoted(store: &mut Store, manuscript_id: &str, section_id: &str, bod
     }
     if !new.is_empty() { store.keep_passages(manuscript_id, &new)?; }
     Ok((new.len(), unfound))
+}
+
+/// After `edit_section` wrote `pieces` into a section that now reads
+/// `body`: the sentences among them that repeat a paper they cite, each
+/// with the words it shares with it (`shared`). A sentence is compared with
+/// all the library holds of the paper, its abstract and the pages of its
+/// full text, whether or not it quoted a sentence for the citation.
+pub fn copied(store: &Store, body: &str, pieces: &[Piece]) -> Result<Vec<(String, String)>> {
+    // Where each piece stands in the section, without the space around it.
+    let written: Vec<Range<usize>> = pieces.iter().map(|piece| piece.text.trim()).filter(|text| !text.is_empty()).filter_map(|text| body.find(text).map(|at| at..at + text.len())).collect();
+    if written.is_empty() { return Ok(vec![]) }
+    let (papers, trash, kept) = (store.list_papers()?, store.list_trash()?, store.cite_keys()?);
+    let index = Index::new(&papers, trash.iter().map(|entry| &entry.paper), &kept);
+    // What each paper cited says, read once.
+    let mut said: std::collections::BTreeMap<String, Vec<(String, f32)>> = Default::default();
+    let mut out: Vec<(String, String)> = vec![];
+    for citation in passage::citations(body, &cite::find(body, &index)) {
+        if !written.iter().any(|range| range.contains(&citation.at.start)) || out.iter().any(|(sentence, _)| *sentence == citation.claim) { continue }
+        if !said.contains_key(&citation.paper) {
+            let mut text = papers.iter().find(|paper| paper.id == citation.paper).map(|paper| paper.abstract_text.clone()).unwrap_or_default();
+            for page in store.paper_pages(&citation.paper)?.unwrap_or_default() {
+                text.push('\n');
+                text.push_str(&page);
+            }
+            said.insert(citation.paper.clone(), words(&text));
+        }
+        if let Some(shared) = shared(&body[citation.sentence.clone()], &said[&citation.paper]) { out.push((citation.claim, shared)) }
+    }
+    Ok(out)
+}
+
+/// The longest run of words a sentence may share with a paper it cites before it is the paper's sentence
+/// written again: a term with the words around it runs to five or six.
+const REPEATED: f32 = 8.;
+
+/// Whether a sentence of the manuscript repeats `source`, a sentence or a whole paper: a run of `REPEATED`
+/// words stands in both, one after another. What the sentence puts between quotation marks is said to be
+/// another's, and is not counted.
+pub fn repeats(sentence: &str, source: &str) -> bool {
+    shared(sentence, &words(source)).is_some()
+}
+
+/// The words a sentence shares with a text of `theirs` in one run, when the run is long enough to be copied.
+fn shared(sentence: &str, theirs: &[(String, f32)]) -> Option<String> {
+    own_stretches(sentence).iter().find_map(|stretch| {
+        let ours = words(stretch);
+        let (counts, end) = shared_run(&ours, theirs);
+        if counts < REPEATED { return None }
+        // Back from where the run ends in ours, for as long as it counts.
+        let (mut start, mut left) = (end, counts);
+        while left > 0. && start > 0 {
+            start -= 1;
+            left -= ours[start].1;
+        }
+        Some(ours[start..end].iter().map(|(word, _)| word.as_str()).collect::<Vec<_>>().join(" "))
+    })
+}
+
+/// The stretches of a sentence that are in its own voice: without its citations and what it quotes.
+fn own_stretches(sentence: &str) -> Vec<String> {
+    let (mut out, mut now, mut closing) = (vec![], String::new(), None);
+    for c in sentence.chars() {
+        match (closing, c) {
+            (Some(end), c) if c == end => closing = None,
+            (Some(_), _) => {}
+            (None, '“' | '"' | '「' | '『' | '«' | '[') => {
+                closing = Some(match c { '“' => '”', '「' => '」', '『' => '』', '«' => '»', '[' => ']', _ => '"' });
+                out.push(std::mem::take(&mut now));
+            }
+            (None, c) => now.push(c),
+        }
+    }
+    out.push(now);
+    out
+}
+
+/// The words of a text to compare by, each with what it counts: runs of letters and digits in lowercase, a
+/// hyphen or an apostrophe inside one kept (`single-nucleus` is one word); a character of Chinese, Japanese
+/// or Korean is a word of its own and counts half, two of them saying about what one word does.
+fn words(text: &str) -> Vec<(String, f32)> {
+    let wide = |c: char| matches!(c, '\u{3040}'..='\u{30ff}' | '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}' | '\u{ac00}'..='\u{d7af}');
+    let (mut out, mut now) = (vec![], String::new());
+    let chars: Vec<char> = text.chars().collect();
+    for (i, c) in chars.iter().copied().enumerate() {
+        let joins = matches!(c, '-' | '\'' | '’') && !now.is_empty() && chars.get(i + 1).is_some_and(|next| next.is_alphanumeric() && !wide(*next));
+        if c.is_alphanumeric() && !wide(c) || joins {
+            now.extend(c.to_lowercase());
+            continue;
+        }
+        if !now.is_empty() { out.push((std::mem::take(&mut now), 1.)) }
+        if wide(c) { out.push((c.to_string(), 0.5)) }
+    }
+    if !now.is_empty() { out.push((now, 1.)) }
+    out
+}
+
+/// The longest run of words two texts share one after another: what its words count, and where it ends in `ours`.
+fn shared_run(ours: &[(String, f32)], theirs: &[(String, f32)]) -> (f32, usize) {
+    let (mut best, mut before, mut row) = ((0f32, 0), vec![0f32; theirs.len() + 1], vec![0f32; theirs.len() + 1]);
+    for (n, (word, counts)) in ours.iter().enumerate() {
+        for (at, (other, _)) in theirs.iter().enumerate() {
+            row[at + 1] = if word == other { before[at] + counts } else { 0. };
+            if row[at + 1] > best.0 { best = (row[at + 1], n + 1) }
+        }
+        std::mem::swap(&mut before, &mut row);
+    }
+    best
 }
 
 /// A stretch that differs between two texts: these bytes of the one before, those of the one after.
@@ -523,8 +652,34 @@ mod tests {
         let done = call(&mut store, &info, "edit_section", &json!({"section": section, "edits": [{"old": "", "new": "再写一句 [P1 \"WOX5 maintains the quiescent centre of the root.\"]，又一句 [P9]。"}]}), &sources, &nothing, &none).unwrap();
         assert_eq!((done["passagesKept"].as_u64(), done["unknownLabels"][0].as_str(), done["quotesNotFound"].is_null()), (Some(1), Some("P9"), true));
         assert!(store.manuscript(&made.id).unwrap().unwrap().section(&section).unwrap().body.ends_with("再写一句 [@Zhang2021]，又一句 [P9]。"));
+        // A sentence that repeats the paper it cites is handed back to be said in the manuscript's own words, with or without a
+        // sentence quoted for the citation; what stands between quotation marks is not, nor a sentence written before this call.
+        let done = call(&mut store, &info, "edit_section", &json!({"section": section, "edits": [{"old": "", "new": "It is known that WOX5 maintains the quiescent centre of the root [P1]. As they put it, “WOX5 maintains the quiescent centre of the root” [P1 \"WOX5 maintains the quiescent centre of the root.\"]."}]}), &sources, &nothing, &none).unwrap();
+        assert_eq!(done["copied"], json!([{"sentence": "It is known that WOX5 maintains the quiescent centre of the root.", "shared": "wox5 maintains the quiescent centre of the root"}]));
+        assert!(done["copiedHint"].as_str().unwrap().contains("改成自己的话") && done["passagesKept"] == 1);
+        assert!(crate::tools::describe_result(&Ok(done)).ends_with("」，1 句和所引文献的原文大段相同"));
+        let done = call(&mut store, &info, "edit_section", &json!({"section": section, "edits": [{"old": "", "new": "Its loss lets the centre divide [P1]."}]}), &sources, &nothing, &none).unwrap();
+        assert!(done["copied"].is_null() && done["edited"] == 1);
         // Any other tool goes as the table has it.
         assert!(call(&mut store, &info, "list_manuscripts", &json!({}), &sources, &nothing, &none).unwrap()["manuscripts"].is_array());
+    }
+
+    #[test]
+    fn a_sentence_that_repeats_its_source() {
+        let source = "Protoplast isolation is often limited by stress-induced artifacts, low cell recovery, and reduced applicability to lignified tissues.";
+        // Eight words one after another are the paper's sentence again, whatever is put around them; case and punctuation do not hide it.
+        assert!(repeats("In plants, protoplast isolation is often limited by stress-induced artifacts and low cell recovery [@Wang2026, p. 2].", source));
+        // The same said otherwise shares its terms and no more.
+        assert!(!repeats("Stress-induced artifacts and low cell recovery limit protoplast isolation, above all in lignified tissues [@Wang2026, p. 2].", source));
+        // A hyphenated term is one word: a name alone is never a run.
+        assert_eq!(words("Single-nucleus RNA sequencing (snRNA-seq) can’t").iter().map(|(word, _)| word.as_str()).collect::<Vec<_>>(), ["single-nucleus", "rna", "sequencing", "snrna-seq", "can’t"]);
+        // What is quoted as another's words is not the manuscript's own, and a citation between two stretches parts them.
+        assert!(!repeats("They note that “protoplast isolation is often limited by stress-induced artifacts, low cell recovery” in such tissues.", source));
+        assert!(!repeats("Protoplast isolation is often limited [@A] by stress-induced artifacts, low cell recovery.", source));
+        // Chinese counts by the character, two to a word: fifteen in a row are not yet a run, sixteen are.
+        let theirs = "原生质体制备会引入胁迫响应并使部分细胞类型的回收率偏低。";
+        assert!(!repeats("我们发现原生质体制备会引入胁迫响应并使。", theirs) && repeats("我们发现原生质体制备会引入胁迫响应并使部。", theirs));
+        assert!(!repeats("", source) && !repeats("Roots grow.", ""));
     }
 
     #[test]
@@ -538,6 +693,11 @@ mod tests {
         assert!(said.contains(&format!("1. {} · {} · 摘要 · 未写\n", now.sections[0].id, now.sections[0].name)));
         assert!(said.contains(&format!("用户在「{}」里选中了下面这段文字", now.sections[1].name)) && said.contains("\n六个字\n"));
         assert!(!note(&Asked { manuscript: &now, showing: "", selection: "" }).contains("选中了"));
+        // How to write: after the library's sentences of the same part, asked for in the manuscript's language when the tool knows it.
+        assert!(said.contains("先用 find_sentences 看文献库里的论文在同一部分是怎么写的") && said.contains("language 用 \"zh\"") && said.contains("用户写的句子，要求之外的一字不动") && said.contains("\n- 用自己的话写：") && said.contains("结果里有 copied 时"));
+        let odd = Manuscript { language: "la".into(), ..now.clone() };
+        let said = note(&Asked { manuscript: &odd, showing: "", selection: "" });
+        assert!(said.contains("写法要有参照") && !said.contains("language 用"));
     }
 
     #[test]

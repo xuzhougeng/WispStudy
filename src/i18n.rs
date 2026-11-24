@@ -65,6 +65,7 @@ const PHRASES: &[(&str, &str)] = &[
     ("在「{}」留了 {n} 条批注", "Left {1} {1|comment|comments} in “{0}”"),
     ("「{}」的 {n} 处没有对上原文，没有改", "{1} {1|edit|edits} to “{0}” did not match its text; nothing changed"),
     ("已写入「{}」，另有 {n} 处没有对上原文", "Wrote “{0}”; {1} more {1|edit|edits} did not match its text"),
+    ("已写入「{}」，{n} 句和所引文献的原文大段相同", "Wrote “{0}”; {1} {1|sentence repeats|sentences repeat} the paper cited"),
     ("已写入「{}」", "Wrote “{0}”"),
     ("「{}」不用改", "“{0}” needs no change"),
     ("「{}」已经是稿件《{}》", "“{0}” is already the manuscript “{1}”"),
@@ -355,7 +356,7 @@ mod tests {
         let results = [
             json!({"total": 3}), json!({"total": 1}), json!({"engine": "DeepSeek", "results": [1]}), json!({"changed": 2, "unchanged": 1}), json!({"changed": 1, "unchanged": 0}),
             json!({"commented": 2, "missed": [], "section": section}), json!({"commented": 2, "missed": ["x"], "section": section}),
-            json!({"edited": 0, "missed": [], "section": section}), json!({"edited": 1, "missed": [], "section": section}), json!({"edited": 0, "missed": ["x"], "section": section}), json!({"edited": 1, "missed": ["x"], "section": section}),
+            json!({"edited": 0, "missed": [], "section": section}), json!({"edited": 1, "missed": [], "section": section}), json!({"edited": 0, "missed": ["x"], "section": section}), json!({"edited": 1, "missed": ["x"], "section": section}), json!({"edited": 1, "missed": [], "copied": [1, 2], "section": section}),
             json!({"file": "Roots.docx", "manuscript": {"title": "Roots", "sections": [1, 2]}}), json!({"file": "Roots.docx", "already": true, "manuscript": {"title": "Roots", "sections": [1]}}),
             json!({"sections": [1, 2, 3], "added": []}), json!({"manuscripts": [1]}), json!({"sections": [1]}), json!({"files": [{"outcome": "read"}, {"outcome": "failed"}], "remaining": 0}), json!({"files": [{"outcome": "read"}], "remaining": 0}),
             json!({"pages": [1, 2]}), json!({"sentences": [1]}), json!({}),
@@ -367,6 +368,7 @@ mod tests {
         }
         assert_eq!((english_of("3 条结果").as_deref(), english_of("1 条结果").as_deref(), english_of("读了 2 页").as_deref()), (Some("3 results"), Some("1 result"), Some("Read 2 pages")));
         assert_eq!(english_of("在「Methods」留了 2 条批注，1 条的原文没有找到").as_deref(), Some("Left 2 comments in “Methods”; the words of 1 were not found"));
+        assert_eq!(english_of("已写入「Methods」，1 句和所引文献的原文大段相同").as_deref(), Some("Wrote “Methods”; 1 sentence repeats the paper cited"));
         // What a person wrote is no sentence of core's.
         assert_eq!((english_of("我的研究：A study of roots"), english_of("3 条意见"), english_of("")), (None, None, None));
     }
