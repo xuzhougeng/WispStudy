@@ -603,8 +603,8 @@ mod tests {
     #[test]
     fn citations_give_the_evidence_rows() {
         let sources = vec![
-            crate::ai::Source { label: "P1".into(), paper_id: "one".into(), title: "One".into() },
-            crate::ai::Source { label: "P2".into(), paper_id: "two".into(), title: "Two".into() },
+            crate::ai::Source { label: "P1".into(), paper_id: "one".into(), title: "One".into(), ..Default::default() },
+            crate::ai::Source { label: "P2".into(), paper_id: "two".into(), title: "Two".into(), ..Default::default() },
         ];
         let body = "## 机制\n\n根系靠乙烯感知紧实 [P1 p.5 \"Ethylene accumulates. It then signals\"]。另一组没有看到这一点 [P2]，也有人认为相反 [P1 p.7] [P2 p.2]。\n- A compact soil slows growth [P1, P9]. Unsupported sentence.";
         let rows = cited_evidence("机制", body, &sources);
@@ -633,7 +633,7 @@ mod tests {
         ]);
         assert!(rows.iter().all(|row| body.contains(&row.claim)));
         // A label that names two sources names none.
-        let twice = [sources.clone(), vec![crate::ai::Source { label: "P1".into(), paper_id: "three".into(), title: "Three".into() }]].concat();
+        let twice = [sources.clone(), vec![crate::ai::Source { label: "P1".into(), paper_id: "three".into(), title: "Three".into(), ..Default::default() }]].concat();
         assert!(cited_evidence("A", "Claim [P1].", &twice).is_empty());
     }
 
@@ -642,8 +642,8 @@ mod tests {
         let mut s = Store::in_memory(Path::new("/tmp/review-cited-test")).unwrap();
         let paper = s.add_paper(crate::model::Paper { title: "Roots".into(), ..Default::default() }).unwrap();
         let sources = vec![
-            crate::ai::Source { label: "P1".into(), paper_id: paper.id.clone(), title: "as the chat called it".into() },
-            crate::ai::Source { label: "P2".into(), paper_id: "gone".into(), title: "Gone".into() },
+            crate::ai::Source { label: "P1".into(), paper_id: paper.id.clone(), title: "as the chat called it".into(), ..Default::default() },
+            crate::ai::Source { label: "P2".into(), paper_id: "gone".into(), title: "Gone".into(), ..Default::default() },
         ];
         let body = "Roots sense compaction [P1 p.2]. Leaves do not [P2].";
         let r = writing(&mut s);
@@ -995,7 +995,7 @@ mod tests {
             let mut store = Store::open(&root).unwrap();
             let p1 = store.add_paper(Paper { title: "Roots".into(), authors: "Smith, Alice".into(), year: Some(2020), ..Default::default() }).unwrap();
             let p2 = store.add_paper(Paper { title: "Leaves".into(), authors: "Jones, Bob".into(), year: Some(2021), ..Default::default() }).unwrap();
-            let sources = vec![Source { label: "P1".into(), paper_id: p1.id.clone(), title: p1.title.clone() }, Source { label: "P2".into(), paper_id: p2.id.clone(), title: p2.title.clone() }];
+            let sources = vec![Source { label: "P1".into(), paper_id: p1.id.clone(), title: p1.title.clone(), ..Default::default() }, Source { label: "P2".into(), paper_id: p2.id.clone(), title: p2.title.clone(), ..Default::default() }];
             let original = store.create_manuscript("Existing", "en").unwrap();
             let original_text = "The user's previous draft.".to_string();
             store.save_section_body(&original.sections[0].id, &original_text).unwrap();

@@ -982,8 +982,8 @@ mod tests {
         let papers = library();
         let index = Index::new(&papers, [], &BTreeMap::new());
         let sources = vec![
-            crate::ai::Source { label: "P1".into(), paper_id: "P1".into(), title: "One".into() },
-            crate::ai::Source { label: "P2".into(), paper_id: "P2".into(), title: "Two".into() },
+            crate::ai::Source { label: "P1".into(), paper_id: "P1".into(), title: "One".into(), ..Default::default() },
+            crate::ai::Source { label: "P2".into(), paper_id: "P2".into(), title: "Two".into(), ..Default::default() },
         ];
         let original = "测试 [P1 p.5] and [P1, p.6; P2 p.7] [P1, P9] [P1 \"quote\"] [P2 p.3 “a sentence. With a stop”] [P1 p.5 extra] [P1 p.0].";
         let converted = convert_ai_citations(original, &sources, &index);
@@ -996,12 +996,12 @@ mod tests {
         assert_eq!(references.iter().filter(|citation| citation.found.paper().is_some()).count(), 5);
 
         let mut ambiguous = sources.clone();
-        ambiguous.push(crate::ai::Source { label: "P1".into(), paper_id: "P2".into(), title: "duplicate".into() });
+        ambiguous.push(crate::ai::Source { label: "P1".into(), paper_id: "P2".into(), title: "duplicate".into(), ..Default::default() });
         let result = convert_ai_citations("[P1, P2] [P2]", &ambiguous, &index);
         assert_eq!(result.text, "[P1, P2] [@Zhang2024b]");
         assert_eq!(result.keys, vec![("P2".into(), "Zhang2024b".into())]);
 
-        let removed = vec![crate::ai::Source { label: "P1".into(), paper_id: "gone".into(), title: "Gone".into() }];
+        let removed = vec![crate::ai::Source { label: "P1".into(), paper_id: "gone".into(), title: "Gone".into(), ..Default::default() }];
         let result = convert_ai_citations("[P1 p.5]", &removed, &index);
         assert_eq!(result.text, "[P1 p.5]");
         assert!(result.keys.is_empty());

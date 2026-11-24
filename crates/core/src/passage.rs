@@ -413,7 +413,7 @@ mod tests {
         ]);
         assert_eq!(&text[found[2].sentence.clone()], "Ethylene builds up. [@Lee2020]");
         // An answer of the assistant's: the sentence it quoted for a citation is that citation's passage.
-        let sources = [crate::ai::Source { label: "P1".into(), paper_id: "a".into(), title: String::new() }, crate::ai::Source { label: "P2".into(), paper_id: "b".into(), title: String::new() }];
+        let sources = [crate::ai::Source { label: "P1".into(), paper_id: "a".into(), title: String::new(), ..Default::default() }, crate::ai::Source { label: "P2".into(), paper_id: "b".into(), title: String::new(), ..Default::default() }];
         let answer = cite::convert_ai_citations("Roots sense compaction [P1 p.4 \"Roots sense soil compaction.\"]. Ethylene builds up [P2].", &sources, &index);
         assert_eq!(quoted(&answer.text, &cite::find(&answer.text, &index), &answer.quoted), [("a".to_string(), "Roots sense compaction.".to_string(), Candidate { text: "Roots sense soil compaction.".into(), part: String::new(), page: 4 })]);
     }

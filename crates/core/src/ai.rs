@@ -113,13 +113,21 @@ impl Profile {
 }
 
 /// What a label in the answer points at.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Source {
     /// `P3`
     pub label: String,
     pub paper_id: String,
     pub title: String,
+    /// The id of the library the paper is in, when that is not the conversation's own: a conversation of the
+    /// home page read it on the shelf (`tools::ACROSS`). A paper's id says which paper only together with this,
+    /// since a library copied or imported keeps its papers' ids.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub library: String,
+    /// That library's name, as it was when the paper was read: for the chip under an answer.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub library_name: String,
 }
 
 /// What a conversation is about.
@@ -186,9 +194,9 @@ impl Context {
     pub fn add_sources(&mut self, papers: &[Paper]) {
         let mut next = self.sources.iter().filter_map(|s| s.label.get(1..).and_then(|n| n.parse::<usize>().ok())).max().unwrap_or(0);
         for paper in papers {
-            if self.sources.iter().any(|s| s.paper_id == paper.id) { continue }
+            if self.sources.iter().any(|s| s.paper_id == paper.id && s.library.is_empty()) { continue }
             next += 1;
-            self.sources.push(Source { label: format!("P{next}"), paper_id: paper.id.clone(), title: paper.title.clone() });
+            self.sources.push(Source { label: format!("P{next}"), paper_id: paper.id.clone(), title: paper.title.clone(), ..Default::default() });
         }
     }
 }
@@ -258,6 +266,27 @@ pub fn draft_instructions(ctx: &Context) -> String {
     )
 }
 
+/// What a conversation started from the home page is told of the libraries on the shelf (跨库提问, #275): which
+/// they are, and that the tools of `tools::ACROSS` read them with `library` and change nothing there. Follows
+/// `draft_instructions`; nothing without a library on the shelf.
+pub fn shelf_note(shelf: &[crate::libraries::LibraryInfo]) -> String {
+    if shelf.is_empty() { return String::new() }
+    let mut out = String::from("\n\n用户已有的文献库（在首页的书架上）：\n");
+    for info in shelf {
+        let topic: String = info.topic.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(160).collect();
+        out.push_str(&format!("- 「{}」（ID {}）：{} 篇{}\n", info.name, info.id, info.paper_count, if topic.is_empty() { String::new() } else { format!("。主题：{topic}") }));
+    }
+    out.push_str(&format!(
+        "这些文献库在这次对话里可以读，不能改：{} 带上 library（名称或 ID）就是读那个文献库，不带是这次对话自己收进的文献；list_libraries 给出最新的列表。\n\
+- 用户问到「我的文献库」、点名某个库、要比较几个库，或者没有说去哪里找而书架上的库和问题相关时，先到这些库里找（list_papers 看有什么，search_fulltext 找原文，read_fulltext 核对上下文），库里没有再考虑 search_online。\n\
+- 在别的文献库里读到的文献，结果里带有 label（如 P7），和这次对话自己的文献一样用 [P7 p.3 \"原文\"] 引用；窗口会标出它来自哪个文献库，用户点击就在那个库里打开。之后再读同一篇（read_fulltext、get_paper、find_passages）只写它的标签，不必再写 library。\n\
+- 综合或比较几个文献库时，说清每条依据来自哪个库；两个库里有同一篇文献时说明这一点，不要算作两篇。\n\
+- 要给某个库里的文献加标签、改状态或导入文献，请用户打开那个文献库再做：这里的写入只对这次对话自己收进的文献有效。",
+        crate::tools::ACROSS.join("、")
+    ));
+    out
+}
+
 /// What each question of such a conversation says of the manuscripts the person handed in (a Word file taken
 /// in as a manuscript, shown at the right of the conversation): which they are, and how a review is left on
 /// them. `manuscripts` are each with the path of the Word file's copy, when it came from one. `None` without any.
@@ -288,14 +317,14 @@ pub fn build_context(library_name: &str, topic: &str, papers: &[&Paper], fields:
     let mut next = known.iter().filter_map(|s| s.label.get(1..).and_then(|n| n.parse::<usize>().ok())).max().unwrap_or(0);
     let mut labels: BTreeMap<&str, String> = BTreeMap::new();
     for p in papers {
-        let label = match known.iter().find(|s| s.paper_id == p.id) {
+        let label = match known.iter().find(|s| s.paper_id == p.id && s.library.is_empty()) {
             Some(source) => source.label.clone(),
             None => {
                 next += 1;
                 format!("P{next}")
             }
         };
-        ctx.sources.push(Source { label: label.clone(), paper_id: p.id.clone(), title: p.title.clone() });
+        ctx.sources.push(Source { label: label.clone(), paper_id: p.id.clone(), title: p.title.clone(), ..Default::default() });
         labels.insert(p.id.as_str(), label);
     }
     let mut documents = String::new();
@@ -1190,14 +1219,19 @@ pub const LAST_STEP_NOTE: &str = "（系统提示）这次提问的步数快用�
 
 /// The paper a label or an id names: `P3` (any case) or the id itself.
 fn source_of<'a>(sources: &'a [Source], value: &str) -> Option<&'a Source> {
-    sources.iter().find(|s| s.paper_id == value || s.label.eq_ignore_ascii_case(value.trim()))
+    // A label names one paper; an id names the conversation's own paper before one of another library that has the same id.
+    sources.iter().find(|s| s.label.eq_ignore_ascii_case(value.trim())).or_else(|| sources.iter().find(|s| s.paper_id == value && s.library.is_empty())).or_else(|| sources.iter().find(|s| s.paper_id == value))
 }
 
 /// Let the model name a paper by its label: `paperId`, `id` and `paper`
-/// (`list_figures`) arguments holding one are replaced by the paper's id.
+/// (`list_figures`) arguments holding one are replaced by the paper's id. A paper read in another library
+/// (`Source::library`) brings that library along, so the model need not say again where a label is from.
 pub fn resolve_labels(args: &mut Value, sources: &[Source]) {
     for key in ["paperId", "id", "paper"] {
-        if let Some(found) = args[key].as_str().and_then(|value| source_of(sources, value)) { args[key] = json!(found.paper_id) }
+        if let Some(found) = args[key].as_str().and_then(|value| source_of(sources, value)) {
+            args[key] = json!(found.paper_id);
+            if !found.library.is_empty() && args["library"].as_str().is_none_or(|library| library.trim().is_empty()) { args["library"] = json!(found.library) }
+        }
     }
     // A list of things about papers (`organise_papers`' changes) names each of them the same way.
     for list in args.as_object_mut().into_iter().flat_map(|map| map.values_mut()).filter_map(Value::as_array_mut) {
@@ -1207,14 +1241,51 @@ pub fn resolve_labels(args: &mut Value, sources: &[Source]) {
 
 /// Put the label beside every paper id in a tool result, so the answer can cite it.
 pub fn add_labels(value: &mut Value, sources: &[Source]) {
+    add_labels_of(value, sources, "")
+}
+
+/// The same for what a tool read in the library `library` (its id; none is the conversation's own): only that
+/// library's papers are named by its ids.
+pub fn add_labels_of(value: &mut Value, sources: &[Source], library: &str) {
     match value {
-        Value::Array(items) => items.iter_mut().for_each(|item| add_labels(item, sources)),
+        Value::Array(items) => items.iter_mut().for_each(|item| add_labels_of(item, sources, library)),
         Value::Object(map) => {
-            let label = ["paperId", "id"].iter().find_map(|key| map.get(*key).and_then(Value::as_str).and_then(|id| sources.iter().find(|s| s.paper_id == id))).map(|s| s.label.clone());
+            let label = ["paperId", "id"].iter().find_map(|key| map.get(*key).and_then(Value::as_str).and_then(|id| sources.iter().find(|s| s.paper_id == id && s.library == library))).map(|s| s.label.clone());
             if let Some(label) = label { map.insert("label".into(), json!(label)); }
-            map.values_mut().for_each(|item| add_labels(item, sources));
+            map.values_mut().for_each(|item| add_labels_of(item, sources, library));
         }
         _ => {}
+    }
+}
+
+/// Every string a tool result holds under `paperId` or `id`, once each, in the order they come: what may name
+/// a paper. Whether it does is the store's to say.
+pub fn ids_in(value: &Value) -> Vec<String> {
+    fn walk(value: &Value, found: &mut Vec<String>) {
+        match value {
+            Value::Array(items) => items.iter().for_each(|item| walk(item, found)),
+            Value::Object(map) => {
+                for key in ["paperId", "id"] {
+                    if let Some(id) = map.get(key).and_then(Value::as_str) && !found.iter().any(|known| known == id) { found.push(id.to_string()) }
+                }
+                map.values().for_each(|item| walk(item, found));
+            }
+            _ => {}
+        }
+    }
+    let mut found = vec![];
+    walk(value, &mut found);
+    found
+}
+
+/// Papers read in another library join what the conversation can cite, under labels that follow the highest
+/// in use: `papers` are ids and titles in the library `library` (its id and its name). One already there keeps its label.
+pub fn add_sources_of(sources: &mut Vec<Source>, library: &str, name: &str, papers: &[(String, String)]) {
+    let mut next = sources.iter().filter_map(|s| s.label.get(1..).and_then(|n| n.parse::<usize>().ok())).max().unwrap_or(0);
+    for (id, title) in papers {
+        if sources.iter().any(|s| s.paper_id == *id && s.library == library) { continue }
+        next += 1;
+        sources.push(Source { label: format!("P{next}"), paper_id: id.clone(), title: title.clone(), library: library.to_string(), library_name: name.to_string() });
     }
 }
 
@@ -1950,6 +2021,50 @@ mod tests {
     use super::*;
 
     #[test]
+    fn papers_read_in_another_library_are_cited_by_labels_of_their_own() {
+        let mut sources = vec![Source { label: "P1".into(), paper_id: "a".into(), title: "Own".into(), ..Default::default() }];
+        let mut value = json!({"papers": [{"id": "a", "title": "The same id in another library"}, {"id": "b", "title": "B"}], "hits": [{"paperId": "b", "page": 2}, {"id": "F-1"}]});
+        // What may name a paper, once each; the store says which of them do.
+        assert_eq!(ids_in(&value), ["a", "b", "F-1"]);
+        add_sources_of(&mut sources, "L2", "根毛", &[("a".into(), "The same id in another library".into()), ("b".into(), "B".into())]);
+        // Read again, a paper keeps its label.
+        add_sources_of(&mut sources, "L2", "根毛", &[("b".into(), "B".into())]);
+        assert_eq!(sources.iter().map(|s| (s.label.as_str(), s.paper_id.as_str(), s.library.as_str())).collect::<Vec<_>>(), [("P1", "a", ""), ("P2", "a", "L2"), ("P3", "b", "L2")]);
+        // That library's results carry its papers' labels, and the conversation's own results its own.
+        add_labels_of(&mut value, &sources, "L2");
+        assert_eq!((&value["papers"][0]["label"], &value["papers"][1]["label"], &value["hits"][0]["label"], value["hits"][1].get("label")), (&json!("P2"), &json!("P3"), &json!("P3"), None));
+        let mut own = json!({"id": "a"});
+        add_labels(&mut own, &sources);
+        assert_eq!(own["label"], "P1");
+        // A label of a paper read elsewhere brings its library along; the conversation's own does not, nor does an id.
+        let mut args = json!({"paperId": "P3", "page": 1});
+        resolve_labels(&mut args, &sources);
+        assert_eq!(args, json!({"paperId": "b", "page": 1, "library": "L2"}));
+        let (mut by_label, mut by_id) = (json!({"paperId": "p1"}), json!({"paperId": "a"}));
+        resolve_labels(&mut by_label, &sources);
+        resolve_labels(&mut by_id, &sources);
+        assert_eq!((by_label, by_id), (json!({"paperId": "a"}), json!({"paperId": "a"})));
+        // The conversation's own sources are kept as they always were; the others say their library.
+        assert_eq!(serde_json::to_value(&sources[0]).unwrap(), json!({"label": "P1", "paperId": "a", "title": "Own"}));
+        assert_eq!(serde_json::from_value::<Source>(json!({"label": "P1", "paperId": "a", "title": "Own"})).unwrap(), sources[0]);
+        assert_eq!(serde_json::to_value(&sources[2]).unwrap()["libraryName"], "根毛");
+        // A context built again keeps a label for the conversation's own paper only.
+        let paper = Paper { id: "a".into(), title: "Own".into(), ..Default::default() };
+        let ctx = build_context("对话", "", &[&paper], &[], &BTreeMap::new(), &[], &Scope::Library, "", &sources[1..]);
+        assert_eq!(ctx.sources[0].label, "P4");
+    }
+
+    #[test]
+    fn the_home_assistant_is_told_what_is_on_the_shelf() {
+        assert_eq!(shelf_note(&[]), "");
+        let info = crate::libraries::LibraryInfo { id: "L-1".into(), name: "根毛发育".into(), topic: "RSL4\n和生长素".into(), paper_count: 8, ..Default::default() };
+        let note = shelf_note(&[info]);
+        assert!(note.contains("- 「根毛发育」（ID L-1）：8 篇。主题：RSL4 和生长素\n"), "{note}");
+        for name in crate::tools::ACROSS { assert!(note.contains(name), "{name}") }
+        assert!(note.contains("不能改"));
+    }
+
+    #[test]
     fn quotations_checked_against_the_text() {
         let paper = Paper { title: "Root atlas".into(), abstract_text: "WOX5 maintains the quiescent centre of the root.".into(), ..Default::default() };
         let pages = vec!["Introduction. The root tip of Arabidopsis.".to_string(), "Libraries were prepared with\n10x Genomics Chromium v3 and sequenced to 50,000 reads per cell.".to_string()];
@@ -1980,7 +2095,7 @@ mod tests {
 
     #[test]
     fn an_answer_becomes_a_note() {
-        let sources = [Source { label: "P1".into(), paper_id: "a".into(), title: "Root atlas".into() }, Source { label: "P2".into(), paper_id: "b".into(), title: "Leaf atlas".into() }];
+        let sources = [Source { label: "P1".into(), paper_id: "a".into(), title: "Root atlas".into(), ..Default::default() }, Source { label: "P2".into(), paper_id: "b".into(), title: "Leaf atlas".into(), ..Default::default() }];
         let note = note_from_answer(" 方法 是什么？\n", "用了 10x 平台 [P1 p.2 \"Libraries were prepared [12] with Chromium.\"]，结论见 [P1]。\n\n与 [P2, P1 p.3] 一致，另见 [P1、P2] 和文献 [12]。", &sources, "a", "2026-11-11", false);
         assert_eq!(note, "问：方法 是什么？\n用了 10x 平台 [p.2 \"Libraries were prepared [12] with Chromium.\"]，结论见。\n\n与 [《Leaf atlas》, p.3] 一致，另见 [《Leaf atlas》] 和文献 [12]。\n（2026-11-11 提问所得 · 模型的回答，未核对原文）");
         // Without a question, and with nothing to rewrite.
@@ -2048,7 +2163,7 @@ mod tests {
         assert!(ctx.documents.contains("物种：Arabidopsis"));
         assert!(ctx.documents.contains("[P1 p.2]\nWOX5 expression"));
         assert!(!ctx.documents.contains("Introduction about leaves"));
-        assert_eq!(ctx.sources[1], Source { label: "P2".into(), paper_id: "b".into(), title: "Leaf development".into() });
+        assert_eq!(ctx.sources[1], Source { label: "P2".into(), paper_id: "b".into(), title: "Leaf development".into(), ..Default::default() });
         // What each paper was handed over as, for the list on the question page.
         assert_eq!(ctx.given, [Given { paper_id: "a".into(), record: "full", pages: 1 }, Given { paper_id: "b".into(), record: "full", pages: 0 }]);
     }
@@ -2702,7 +2817,7 @@ mod tests {
     fn labels_survive_a_reopened_conversation() {
         let (a, b, c) = (paper("a", "Alpha", ""), paper("b", "Beta", ""), paper("c", "Gamma", ""));
         // The earlier conversation knew b as P1 and a paper since removed from the list as P4.
-        let known = [Source { label: "P1".into(), paper_id: "b".into(), title: "Beta".into() }, Source { label: "P4".into(), paper_id: "gone".into(), title: "Gone".into() }];
+        let known = [Source { label: "P1".into(), paper_id: "b".into(), title: "Beta".into(), ..Default::default() }, Source { label: "P4".into(), paper_id: "gone".into(), title: "Gone".into(), ..Default::default() }];
         let ctx = build_context("L", "", &[&a, &b, &c], &[], &BTreeMap::new(), &[], &Scope::Library, "q", &known);
         let label = |id: &str| ctx.sources.iter().find(|s| s.paper_id == id).map(|s| s.label.as_str());
         assert_eq!((label("a"), label("b"), label("c"), label("gone")), (Some("P5"), Some("P1"), Some("P6"), Some("P4")));
@@ -2747,7 +2862,7 @@ mod tests {
                 Said::Tool { call: "检索全文：WOX5".into(), result: "3 条结果".into(), failed: false },
                 Said::Answer { text: "见 [P1]。".into() },
             ],
-            sources: vec![Source { label: "P1".into(), paper_id: "a".into(), title: "Alpha".into() }],
+            sources: vec![Source { label: "P1".into(), paper_id: "a".into(), title: "Alpha".into(), ..Default::default() }],
             compacted: None,
         };
         let text = serde_json::to_string(&transcript).unwrap();

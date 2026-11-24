@@ -30,12 +30,15 @@ const STACK_UNDER: f32 = 640.;
 
 /// The quiet starts under the box: an icon, the words on the line, and what they put in the box. The second and
 /// the fourth pick a Word file first: a manuscript is what they are about.
-const STARTS: [(&str, &str, &str, bool); 4] = [
+const STARTS: [(&str, &str, &str, bool); 5] = [
     ("search", "调研一个想法", "帮我调研一下这个想法：", false),
     ("file-text", "审一份稿件", "帮我审一下这份稿件：逻辑、论据和表述，意见作为批注留在稿件上。", true),
     ("library", "找几篇文献", "帮我找几篇文献：", false),
     ("list", "从 Word 建文献库", "把这份 Word 文件参考文献表里的文献都收进来，建成一个文献库。", true),
+    ("library", "问我的文献库", "在我的文献库里查一查：", false),
 ];
+/// The start that asks the libraries on the shelf (跨库提问): not offered while there is none.
+const ACROSS: usize = 4;
 /// The start whose Word file is read for the works it cites (`import_docx_references`), not taken in as a manuscript to review.
 const COLLECT: usize = 3;
 
@@ -445,7 +448,8 @@ impl Workspace {
                     .child(div().flex().flex_1().min_w_0().py(px(5.)).max_h(px(170.)).overflow_hidden().text_size(text_px(13.)).line_height(text_px(20.)).text_color(Theme::text()).child(input.clone()))
                     .child(send),
             );
-        let starts = STARTS.iter().enumerate().map(|(n, (icon, label, ..))| {
+        let shelved = self.libraries.iter().any(|info| !info.draft);
+        let starts = STARTS.iter().enumerate().filter(|(n, _)| *n != ACROSS || shelved).map(|(n, (icon, label, ..))| {
             div().id(("home-start", n)).flex().flex_none().items_center().gap(px(6.)).h(text_px(28.)).px(px(8.)).rounded(px(6.)).text_size(text_px(12.)).text_color(Theme::text_secondary()).cursor_pointer().hover(|s| s.bg(Theme::hover()).text_color(Theme::text())).active(|s| s.bg(Theme::pressed())).on_click(self.on(Cmd::Draft(Do::Start(n)), cx)).child(ui::icon(icon, 13., Theme::text_tertiary())).child(t(label))
         });
         div()

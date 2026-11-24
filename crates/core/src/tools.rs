@@ -637,6 +637,39 @@ pub fn library_catalog() -> Vec<ToolDef> {
     tools
 }
 
+/// The tools a conversation of the home page may point at a library on the shelf with `library` (跨库提问, #275):
+/// those that read papers and what is kept with them. None of them writes, and none asks for a yes.
+pub const ACROSS: [&str; 8] = ["library_status", "list_papers", "get_paper", "search_fulltext", "read_fulltext", "find_passages", "list_pdf_annotations", "list_figures"];
+
+/// The tools of the home page's assistant, whose conversation is a library of its own that is not on the shelf
+/// yet: those of a library, bound to the conversation's own papers, and beside them `list_libraries` and a
+/// `library` on the tools of `ACROSS`, with which it reads the libraries on the shelf without changing them.
+pub fn draft_catalog() -> Vec<ToolDef> {
+    let mut tools = catalog();
+    tools.retain(|t| !["create_library", "import_library", "sync_searches"].contains(&t.name));
+    for tool in &mut tools {
+        let Some(properties) = tool.input_schema["properties"].as_object_mut() else { continue };
+        if ACROSS.contains(&tool.name) {
+            properties.insert("library".into(), json!({"type": "string", "description": "要读的文献库的 ID 或名称（list_libraries 列出的那些）；省略时是这次对话自己收进的文献。别的文献库在这里只读。"}));
+        } else {
+            properties.remove("library");
+        }
+    }
+    tools
+}
+
+/// The library a call of the home page's assistant is to read, when it names another than the conversation's
+/// own (`own`): one on the shelf, for a tool of `ACROSS`. None when the call is about the conversation's own
+/// papers; a sentence for the model when the tool may not reach another library, or there is no such library.
+pub fn across(root: &Path, own: &LibraryInfo, name: &str, args: &Value) -> Result<Option<LibraryInfo>, String> {
+    let wanted = args["library"].as_str().unwrap_or("").trim();
+    if wanted.is_empty() || wanted == own.id || wanted == own.name { return Ok(None) }
+    let info = find_library(root, wanted)?;
+    if info.id == own.id { return Ok(None) }
+    if !ACROSS.contains(&name) { return Err(format!("{name} 只能用在这次对话自己收进的文献上：文献库「{}」在这里只读。要改动它，请用户打开那个文献库。", info.name)) }
+    Ok(Some(info))
+}
+
 /// The tool `name` and whether `args` fit its schema's names.
 fn checked(name: &str, args: &Value) -> Result<ToolDef, String> {
     let Some(tool) = catalog().into_iter().find(|t| t.name == name) else { return Err(format!("没有这个工具：{name}")) };
@@ -2381,6 +2414,32 @@ pub(crate) mod tests {
         assert_eq!(call(&root, "library_status", &json!({"library": "叶"})).unwrap()["papers"], 0);
         assert!(find_library(&root.join("nowhere"), "").unwrap_err().contains("还没有文献库"));
         std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn a_conversation_of_the_home_page_reads_the_shelf_and_changes_nothing_there() {
+        let (root, _) = sample();
+        let draft = libraries::create_draft(&root, "一次对话").unwrap();
+        // Its tools: the shelf listed, and `library` on the tools that read, none of which writes or asks for a yes.
+        let tools = draft_catalog();
+        assert!(tools.iter().any(|t| t.name == "list_libraries") && tools.iter().all(|t| !["create_library", "import_library", "sync_searches"].contains(&t.name)));
+        for tool in &tools {
+            assert_eq!(tool.input_schema["properties"].get("library").is_some(), ACROSS.contains(&tool.name), "{}", tool.name);
+            if ACROSS.contains(&tool.name) { assert!(!tool.writes && !tool.confirm, "{}", tool.name) }
+        }
+        for name in ACROSS { assert!(tools.iter().any(|t| t.name == name), "{name}") }
+        // A call that names no library, or the conversation itself, is about its own papers.
+        assert!(across(&root, &draft, "list_papers", &json!({})).unwrap().is_none());
+        assert!(across(&root, &draft, "list_papers", &json!({"library": draft.id})).unwrap().is_none());
+        assert!(across(&root, &draft, "list_papers", &json!({"library": "一次对话"})).unwrap().is_none());
+        // One that names a library on the shelf reads that library, by its name or its id.
+        let other = across(&root, &draft, "search_fulltext", &json!({"library": "根", "query": "x"})).unwrap().unwrap();
+        assert_eq!(other.name, "根");
+        assert_eq!(across(&root, &draft, "list_papers", &json!({"library": other.id})).unwrap().unwrap().id, other.id);
+        // A tool that changes a library does not reach it, and a library that is not there is said to be missing.
+        let refused = across(&root, &draft, "organise_papers", &json!({"library": "根"})).unwrap_err();
+        assert!(refused.contains("只读") && refused.contains("「根」"), "{refused}");
+        assert!(across(&root, &draft, "list_papers", &json!({"library": "没有的库"})).unwrap_err().contains("现有：「根」"));
     }
 
     #[test]

@@ -2567,7 +2567,8 @@ impl Library {
             let ChatItem::Answer(text) = item else { continue };
             for citation in ai::citations(text) {
                 if citation.quote.is_empty() || chat.checks.contains_key(&(citation.label.clone(), citation.file, citation.page, citation.quote.clone())) { continue }
-                let Some(source) = chat.sources().iter().find(|source| source.label == citation.label) else { continue };
+                // A paper of another library is not read here: its sentence is looked for when the citation is followed there.
+                let Some(source) = chat.sources().iter().find(|source| source.label == citation.label && source.library.is_empty()) else { continue };
                 wanted.push((citation, source.paper_id.clone()));
             }
         }
@@ -4597,7 +4598,17 @@ impl Workspace {
             Cmd::GotoCited(paper, label, file, page, quote) => {
                 let Some(lib) = self.lib.as_ref() else { return };
                 let chat = lib.chat(paper);
-                let Some(id) = chat.sources().iter().find(|source| source.label == label).map(|source| source.paper_id.clone()) else { return self.fail(tf!("这次对话里没有 {label} 这篇文献。", "Paper {label} is not in this conversation."), cx) };
+                let Some(source) = chat.sources().iter().find(|source| source.label == label).cloned() else { return self.fail(tf!("这次对话里没有 {label} 这篇文献。", "Paper {label} is not in this conversation."), cx) };
+                // Read in another library: that library is opened at the paper and the page cited. The conversation is kept
+                // as it is and found again from the home page (最近对话); one still answering goes on off screen.
+                if !source.library.is_empty() {
+                    if !self.libraries.iter().any(|info| info.id == source.library && !info.draft) { return self.fail(tf!("文献库「{}」已经不在了。", "The library “{}” is no longer there.", source.library_name), cx) }
+                    self.open_library(&source.library, window, cx);
+                    if self.lib.as_ref().is_none_or(|lib| lib.info.id != source.library) { return }
+                    if self.lib.as_ref().is_some_and(|lib| lib.paper(&source.paper_id).is_none()) { return self.fail(tf!("这篇文献已经不在文献库「{}」里了。", "This paper is no longer in the library “{}”.", source.library_name), cx) }
+                    return self.run(Cmd::GotoFile(source.paper_id, None, page, quote), window, cx);
+                }
+                let id = source.paper_id;
                 // Where the sentence was found, when it is not where the answer says.
                 let page = match chat.checks.get(&(label, file, page, quote.clone())) {
                     Some(ai::Quoted::Elsewhere(at) | ai::Quoted::Begins(at, _)) => Some(*at),
@@ -7112,6 +7123,7 @@ impl Workspace {
         // A conversation not yet made a library: what it was handed to review, said with every question, as the
         // manuscript is to the conversation that writes it (the manuscript can come after the first question).
         let draft = talk == Talk::Library && self.in_draft();
+        let shelf: Vec<LibraryInfo> = self.libraries.iter().filter(|info| draft && !info.draft).cloned().collect();
         let skills = self.skills_on();
         let reviewing = self.lib.as_ref().filter(|_| draft).and_then(|lib| {
             let handed: Vec<(&Manuscript, Option<String>)> = lib.writing.manuscripts.iter().filter(|m| m.sections.iter().any(|s| !s.body.trim().is_empty())).map(|m| (m, lib.store.manuscript_source(&m.id).ok().flatten().filter(|source| source.kind == "docx").map(|source| lib.store.source_file(&source).display().to_string()))).collect();
@@ -7213,8 +7225,11 @@ impl Workspace {
             let mut ctx = ai::build_context(&lib.info.name, &lib.info.topic, &papers, &lib.fields, &fulltext, &attachments, &scope, &prompt, &chat.known);
             // The tools reach every paper of the library, so every paper can be cited.
             ctx.add_sources(&lib.papers);
+            // What an earlier part of the conversation read in other libraries is still what its labels name.
+            ctx.sources.extend(chat.known.iter().filter(|source| !source.library.is_empty()).cloned());
             // Without a library the model is told so, and where papers are found then.
-            if draft { ctx.instructions = ai::draft_instructions(&ctx) }
+            // And which libraries are on the shelf, which it can read and not change (`tools::ACROSS`).
+            if draft { ctx.instructions = format!("{}{}", ai::draft_instructions(&ctx), ai::shelf_note(&shelf)) }
             chat.ctx = Some(ctx);
             // The panel over the conversation lists what was handed over from here on: all of it, not what its search had narrowed the list to.
             if talk == Talk::Library && lib.scope_hits.take().is_some() {
@@ -7436,7 +7451,8 @@ impl Workspace {
         let Some(lib) = self.lib.as_mut() else { return false };
         let chat = chat_of!(lib, talk);
         if chat.ctx.is_none() { return false }
-        let mut catalog = tools::library_catalog();
+        // A conversation of the home page also reads the libraries on the shelf (`tools::ACROSS`); one inside a library keeps to it.
+        let mut catalog = if lib.info.draft && talk == Talk::Library { tools::draft_catalog() } else { tools::library_catalog() };
         // Web search is offered only while an engine can be asked: switched off or without a key, the model would only hear why not.
         if wisp_core::websearch::ready(&self.settings, "").is_err() { catalog.retain(|tool| tool.name != "web_search") }
         // Pages are read for the assistant by an engine that takes the file; a model's look at pictures of them is the window's own run.
@@ -7597,7 +7613,10 @@ impl Workspace {
         // A connector's tool or a skill: looked up before the library is borrowed.
         let mut outside: Vec<_> = calls.iter().map(|call| self.outside_call(&call.name, &call.args)).collect();
         outside.reverse();
+        // The libraries on the shelf by id and name, and this one's own: a call that reads another of them says which.
+        let shelf: Vec<(String, String)> = self.libraries.iter().filter(|info| !info.draft).map(|info| (info.id.clone(), info.name.clone())).collect();
         let Some(lib) = self.lib.as_mut() else { return };
+        let own = (lib.info.id.clone(), lib.info.name.clone());
         let store = &lib.store;
         // The manuscript the conversation that writes is about.
         let about = Some(lib.writing.agent.about.clone()).filter(|id| talk == Talk::Write && !id.is_empty());
@@ -7612,12 +7631,20 @@ impl Workspace {
                 continue;
             }
             let tool = catalog.iter().find(|t| t.name == call.name);
-            let line = tools::describe_call(&call.name, call.args.as_ref().unwrap_or(&Value::Null));
-            chat.messages.push(ChatItem::Tool { call: line.clone(), result: None });
-            // The model may name a paper by its label.
+            // The model may name a paper by its label; one read in another library brings that library along.
             let composes = tools::MANUSCRIPT.contains(&call.name.as_str()) || ["read_manuscript", COMMENT].contains(&call.name.as_str());
+            let mut line = tools::describe_call(&call.name, call.args.as_ref().unwrap_or(&Value::Null));
             let args = call.args.map(|mut args| {
                 ai::resolve_labels(&mut args, chat.sources());
+                args
+            });
+            // A call that reads another library says which, by its name: the line is what the person sees of it.
+            if let Some(named) = args.as_ref().ok().and_then(|args| args["library"].as_str()).map(str::trim).filter(|named| !named.is_empty() && *named != own.0 && *named != own.1) {
+                let name = shelf.iter().find(|(id, name)| id == named || name.eq_ignore_ascii_case(named)).map_or(named, |(_, name)| name.as_str());
+                line = tf!("{line} · 文献库「{name}」", "{line} · in “{name}”");
+            }
+            chat.messages.push(ChatItem::Tool { call: line.clone(), result: None });
+            let args = args.map(|mut args| {
                 // Said of no manuscript, a call of that conversation is about its own.
                 if composes && let Some(about) = &about && args["manuscript"].as_str().is_none_or(|named| named.trim().is_empty()) && args.is_object() { args["manuscript"] = Value::String(about.clone()) }
                 args
@@ -7707,7 +7734,11 @@ impl Workspace {
         let info = lib.info.clone();
         let chat = lib.chat_mut(talk);
         let Some(protocol) = chat.protocol else { return };
-        let sources: Arc<Vec<ai::Source>> = Arc::new(chat.sources().to_vec());
+        // What the conversation can cite. A call that reads another library adds the papers it found there, so the calls
+        // of a turn share the list: two of them running side by side never give one label to two papers.
+        let sources: Arc<std::sync::Mutex<Vec<ai::Source>>> = Arc::new(std::sync::Mutex::new(chat.sources().to_vec()));
+        let (known, read) = (sources.lock().map_or(0, |sources| sources.len()), sources.clone());
+        let root = self.root.clone();
         let (generation, key) = (chat.generation, chat.key);
         chat.running = calls.iter().map(|call| call.id.clone()).collect();
         let wrote = calls.iter().any(|call| call.writes && (allowed || !call.confirm));
@@ -7719,13 +7750,13 @@ impl Workspace {
         let library = info.id.clone();
         let executor = cx.background_executor().clone();
         let tasks: Vec<gpui::Task<Vec<(String, String, bool, String)>>> = if wrote || calls.len() == 1 {
-            vec![executor.spawn(async move { calls.into_iter().map(|call| run_tool(&info, &sources, call, allowed)).collect() })]
+            vec![executor.spawn(async move { calls.into_iter().map(|call| run_tool(&root, &info, &sources, call, allowed)).collect() })]
         } else {
             calls
                 .into_iter()
                 .map(|call| {
-                    let (info, sources) = (info.clone(), sources.clone());
-                    executor.spawn(async move { vec![run_tool(&info, &sources, call, allowed)] })
+                    let (root, info, sources) = (root.clone(), info.clone(), sources.clone());
+                    executor.spawn(async move { vec![run_tool(&root, &info, &sources, call, allowed)] })
                 })
                 .collect()
         };
@@ -7747,6 +7778,8 @@ impl Workspace {
                 // The rest is the conversation's, in its place or set aside (`in_chat`).
                 this.in_chat(talk, key, cx, |this, cx| {
                     let Some(lib) = this.lib.as_mut() else { return };
+                    // Papers read in another library are citable from here on, under the labels their results carried.
+                    if let (Some(ctx), Ok(read)) = (chat_of!(lib, talk).ctx.as_mut(), read.lock()) && ctx.sources.len() == known { ctx.sources.extend(read.iter().skip(known).cloned()) }
                     // Papers brought in by a tool are citable from the next step on, under labels that follow the ones in use.
                     if wrote && let Some(ctx) = chat_of!(lib, talk).ctx.as_mut() { ctx.add_sources(&lib.papers) }
                     let chat = lib.chat_mut(talk);
@@ -9121,7 +9154,7 @@ impl Workspace {
 /// Run one tool call for the assistant on a connection of its own (the
 /// window's stays free while a PDF's text is extracted): the call's id,
 /// what the model reads, whether it failed, and the line for the window.
-fn run_tool(info: &LibraryInfo, sources: &[ai::Source], call: PreparedCall, allowed: bool) -> (String, String, bool, String) {
+fn run_tool(root: &std::path::Path, info: &LibraryInfo, sources: &std::sync::Mutex<Vec<ai::Source>>, call: PreparedCall, allowed: bool) -> (String, String, bool, String) {
     if call.confirm && !allowed {
         return (call.id, "用户没有同意这次操作，它没有执行。不要重试；需要时向用户说明它会做什么，由用户决定。".into(), true, t("没有执行：未获同意").into());
     }
@@ -9136,10 +9169,24 @@ fn run_tool(info: &LibraryInfo, sources: &[ai::Source], call: PreparedCall, allo
         };
     }
     let result = call.args.and_then(|args| {
+        // A conversation of the home page lists the shelf, and reads a library on it (`tools::ACROSS`): nothing there is changed.
+        if info.draft && call.name == "list_libraries" { return tools::call(root, &call.name, &args, &wisp_net::get_text, &wisp_net::download) }
+        if info.draft && let Some(other) = tools::across(root, info, &call.name, &args)? {
+            let mut store = Store::open(&other.dir).map_err(|e| format!("{e:#}"))?;
+            let mut value = tools::call_in_with(&mut store, &other, &call.name, &args, &wisp_net::get_text, &wisp_net::download, wisp_net::reach())?;
+            // The papers it names can be cited: each gets a label of this conversation, which says the library with it.
+            let found: Vec<(String, String)> = ai::ids_in(&value).into_iter().filter_map(|id| store.get_paper(&id).ok().map(|paper| (paper.id, paper.title))).collect();
+            let mut sources = sources.lock().map_err(|_| t("这次对话的文献列表读不出来。").to_string())?;
+            ai::add_sources_of(&mut sources, &other.id, &other.name, &found);
+            ai::add_labels_of(&mut value, &sources, &other.id);
+            if value.is_object() { value["library"] = serde_json::json!(other.name) }
+            return Ok(value);
+        }
+        let sources = sources.lock().map(|sources| sources.clone()).unwrap_or_default();
         let mut store = Store::open(&info.dir).map_err(|e| format!("{e:#}"))?;
         // As the tool table has it; what is written into a manuscript cites as the conversation does (`compose::call`).
-        let mut value = wisp_core::compose::call_with(&mut store, info, &call.name, &args, sources, &wisp_net::get_text, &wisp_net::download, wisp_net::reach())?;
-        ai::add_labels(&mut value, sources);
+        let mut value = wisp_core::compose::call_with(&mut store, info, &call.name, &args, &sources, &wisp_net::get_text, &wisp_net::download, wisp_net::reach())?;
+        ai::add_labels(&mut value, &sources);
         Ok(value)
     });
     let shown = tools::describe_result(&result);
