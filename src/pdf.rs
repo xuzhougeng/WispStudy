@@ -511,13 +511,17 @@ impl Split {
     }
 }
 
-/// What a view of the reader shows: the pages, the pages with their paragraphs translated, or the paper's mind
-/// map (`crate::mindmap`), which is no view of the pages and stands among them as a column of its own.
+/// What a view of the reader shows: the pages, the pages with their paragraphs translated, the page after the
+/// one the pages beside it are at (下一页: two pages across are a column more, not another way to lay pages
+/// out), or the paper's mind map (`crate::mindmap`), which is no view of the pages and stands among them as a
+/// column of its own.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Shows {
     #[default]
     Pages,
     Theirs,
+    /// The pages again, a page on from those it is read with (`ahead`).
+    Next,
     Map,
 }
 
@@ -546,17 +550,46 @@ impl std::ops::Deref for Shown {
 
 /// The views of a viewer from what each shows, in the order they stand in. This is the one rule of what
 /// scrolls together, and nobody sets it: a translation is read as one with the pages next to it (those
-/// before it, else those after it) and scrolls in their group; pages scroll on their own, and so do a
-/// translation with no pages beside it and the map. A group is named by the place of its pages.
+/// before it, else those after it) and scrolls in their group; the next page is the next of the nearest
+/// pages before it (their translation may stand between), else of those after it, else of a translation
+/// that stands for its pages, and scrolls in that group a page on; pages scroll on their own, and so do a
+/// translation or a next page with nothing to be of and the map. A group is named by the place of its pages.
 fn views(shows: &[Shows]) -> Shown {
     let len = shows.len().min(3);
     let mut views = [View { shows: Shows::Pages, group: 0 }; 3];
     for at in 0..len {
         let pages = |n: usize| n < len && shows[n] == Shows::Pages;
-        let group = if shows[at] != Shows::Theirs { at } else if at > 0 && pages(at - 1) { at - 1 } else if pages(at + 1) { at + 1 } else { at };
+        let group = match shows[at] {
+            Shows::Theirs => if at > 0 && pages(at - 1) { at - 1 } else if pages(at + 1) { at + 1 } else { at },
+            Shows::Next => {
+                // With every view of the paper showing its translation (原地替换), it is the next of one of those.
+                let theirs = |n: &usize| shows[*n] == Shows::Theirs;
+                (0..at).rev().find(|n| pages(*n)).or_else(|| (at + 1..len).find(|n| pages(*n))).or_else(|| (0..at).rev().find(theirs)).or_else(|| (at + 1..len).find(theirs)).unwrap_or(at)
+            }
+            Shows::Pages | Shows::Map => at,
+        };
         views[at] = View { shows: shows[at], group: group as u8 };
     }
     Shown { views, len }
+}
+
+/// How many pages on from its group's pages a view is read: none for the pages and their translation, one for
+/// 下一页, two for a second 下一页 of the same pages (three pages across), counted in the order they stand in.
+fn ahead(shown: &[View], at: usize) -> usize {
+    if shown[at].shows != Shows::Next { return 0 }
+    (0..=at).filter(|n| shown[*n].shows == Shows::Next && shown[*n].group == shown[at].group).count()
+}
+
+/// The place `by` pages on from (or, below nothing, back from) `top` among pages this tall, each with the gap
+/// under it: as far down its page as `top` is down its own, by their heights. Before the first page it is the
+/// top of the file, past the last one its foot.
+fn pages_on(tall: &[f32], top: (usize, f32), by: isize) -> (usize, f32) {
+    let Some(last) = tall.len().checked_sub(1) else { return (0, 0.) };
+    let index = top.0 as isize + by;
+    if index < 0 { return (0, 0.) }
+    if index as usize > last { return (last, tall[last]) }
+    let from = tall.get(top.0).copied().unwrap_or(1.).max(1.);
+    (index as usize, top.1 * tall[index as usize] / from)
 }
 
 /// The view that goes when `shown` views are one too many: pages scrolled on their own, then a translation
@@ -1959,12 +1992,45 @@ impl PdfView {
     /// After the views changed: what is said of a view speaks of one of the paper that is on show (the page
     /// number, the keys and a selection are never the map's), and each group is led by its pages.
     fn settle(&mut self) {
+        // A next page with no pages left to be the next of is the pages themselves.
+        let count = self.split.views();
+        for at in 0..count {
+            if self.shows[at] == Shows::Next && views(&self.shows[..count])[at].group as usize == at { self.shows[at] = Shows::Pages }
+        }
         let shown = self.shown();
         let paper = (0..shown.len()).find(|at| shown[*at].shows != Shows::Map).unwrap_or(0);
         let of_paper = |pane: usize| if shown.get(pane).is_some_and(|view| view.shows != Shows::Map) { pane } else { paper };
         (self.active, self.held) = (of_paper(self.active), of_paper(self.held));
         (self.led, self.view_menu) = ([0, 1, 2], None);
         if self.carrying.is_some_and(|(view, _)| view >= shown.len()) { self.carrying = None }
+    }
+
+    /// Whether a view shows the next page.
+    pub fn next_shown(&self) -> bool {
+        self.shown().iter().any(|view| view.shows == Shows::Next)
+    }
+
+    /// 下一页 from the 分屏 menu: two pages across. What it gives depends on what is there, each as a person
+    /// expects it (docs/dev/design.md, 操作直觉 35):
+    /// - A view shows the next page: that view is closed, and the rest stays.
+    /// - The pages once: the pages and the next page, side by side.
+    /// - Two views: a third column, right after the pages worked in (after their translation, which stays
+    ///   next to them); the other view was put where it is on purpose and stays as it is.
+    /// - Three views: there is nowhere for it to come. The label of a view can still be told to show it.
+    pub fn toggle_next(&mut self, cx: &mut Context<Self>) {
+        let count = self.split.views();
+        if let Some(view) = (0..count).rev().find(|&at| self.shows[at] == Shows::Next) { return self.close_view(view, cx) }
+        if count >= 3 { return }
+        let Some(pages) = Some(self.active).filter(|at| *at < count && self.shows[*at] == Shows::Pages).or_else(|| self.shows[..count].iter().position(|shows| *shows == Shows::Pages)) else { return };
+        // It is the person's arrangement from here on: a translation placed by the width is not moved under it.
+        self.facing_auto = false;
+        if count == 2 { self.stood = self.split }
+        self.stand(if count == 2 { Split::Triple } else { Split::Side }, cx);
+        let at = if self.shows.get(pages + 1) == Some(&Shows::Theirs) && pages + 2 < self.split.views() { pages + 2 } else { pages + 1 };
+        self.bring_to(at);
+        self.shows[at] = Shows::Next;
+        self.settle();
+        cx.notify();
     }
 
     /// A view's label: its view is closed (关闭这一栏), as its words say; a translation closed is 译文 put
@@ -4113,7 +4179,7 @@ impl PdfView {
                 .cursor_pointer()
                 .hover(|s| s.bg(Theme::hover()))
                 .occlude()
-                .child(t(match shows { Shows::Pages => "原文", Shows::Theirs => "译文", Shows::Map => "导图" }))
+                .child(t(match shows { Shows::Pages => "原文", Shows::Theirs => "译文", Shows::Next => "下一页", Shows::Map => "导图" }))
                 .child(ui::icon("chevron-down", 10., Theme::text_tertiary()))
                 .tooltip(ui::tip(t("点击更改，拖动换位")))
                 // A press on the label is not a press on the page under it: it takes hold of the view.
@@ -4145,6 +4211,8 @@ impl PdfView {
         let map = (self.maps && room).then(|| ui::menu_row("pdf-view-map", t("显示导图"), here.shows == Shows::Map, None).on_click(cx.listener(move |this, _, _, cx| this.show_in_view(view, Shows::Map, cx))));
         // A translation is offered where the owner can start one, or one is on show already.
         let theirs = (self.translates || self.facing.is_some()).then(|| ui::menu_row("pdf-view-theirs", t("显示译文"), here.shows == Shows::Theirs, None).on_click(cx.listener(move |this, _, _, cx| this.show_in_view(view, Shows::Theirs, cx))));
+        // The next page where there are pages for it to be the next of: another view that shows them.
+        let next = (here.shows == Shows::Next || (0..shown.len()).any(|at| at != view && matches!(shown[at].shows, Shows::Pages | Shows::Theirs))).then(|| ui::menu_row("pdf-view-next", t("显示下一页"), here.shows == Shows::Next, None).on_click(cx.listener(move |this, _, _, cx| this.show_in_view(view, Shows::Next, cx))));
         let before = (view > 0).then(|| ui::menu_row("pdf-view-before", t(if stacked { "移到上面" } else { "移到左边" }), false, None).on_click(cx.listener(move |this, _, _, cx| this.move_view(view, view - 1, cx))));
         let after = (view + 1 < shown.len()).then(|| ui::menu_row("pdf-view-after", t(if stacked { "移到下面" } else { "移到右边" }), false, None).on_click(cx.listener(move |this, _, _, cx| this.move_view(view, view + 1, cx))));
         let closes = here.shows == Shows::Map || shown.iter().filter(|other| other.shows != Shows::Map).count() > 1;
@@ -4162,6 +4230,7 @@ impl PdfView {
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| if this.view_menu.take().is_some() { cx.notify() }))
                 .child(pages)
+                .children(next)
                 .children(theirs)
                 .children(map)
                 .child(line())
@@ -4435,6 +4504,13 @@ impl Render for PdfView {
             let lead = Some(self.led[view.group as usize]).filter(|lead| shown.get(*lead).is_some_and(|lead| lead.group == view.group)).unwrap_or(view.group as usize);
             if lead == pane { continue }
             let (top, theirs) = (self.panes[lead].list.logical_scroll_top(), self.panes[pane].list.logical_scroll_top());
+            // A next page is read a page on from its pages, whichever of them leads.
+            let by = ahead(&shown, pane) as isize - ahead(&shown, lead) as isize;
+            let top = if by == 0 { top } else {
+                let tall: Vec<f32> = (0..self.sizes.len()).map(|index| self.sizes[index].1 * self.scale_of(index) + PAGE_GAP).collect();
+                let (item_ix, down) = pages_on(&tall, (top.item_ix, f32::from(top.offset_in_item)), by);
+                ListOffset { item_ix, offset_in_item: px(down) }
+            };
             if top.item_ix != theirs.item_ix || top.offset_in_item != theirs.offset_in_item { self.panes[pane].list.scroll_to(top) }
             self.panes[pane].scroll_x = self.panes[lead].scroll_x;
         }
@@ -4607,7 +4683,7 @@ fn same_place(a: [f32; 4], b: [f32; 4]) -> bool {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: that would bring in gpui's own `test` attribute.
-    use super::{BAR_INSET, BAR_THUMB_MIN, CARD_EDGE, CardPlace, CitationFocus, CitationStatus, DIVIDER, MARGIN, PAGE_GAP, POINT_PX, Shows, Split, Zoom, bar_thumb, beside_split, card_place, dragged_share, HALF_MIN, page_scale, pane_at, pane_origin, pane_size, spare, views, picture_serves, render_scale, search_words, zoom_step};
+    use super::{ahead, BAR_INSET, BAR_THUMB_MIN, CARD_EDGE, CardPlace, CitationFocus, CitationStatus, DIVIDER, MARGIN, PAGE_GAP, POINT_PX, Shows, Split, Zoom, bar_thumb, beside_split, card_place, dragged_share, HALF_MIN, page_scale, pane_at, pane_origin, pane_size, spare, views, picture_serves, render_scale, search_words, zoom_step};
 
     #[test]
     fn a_sentence_not_found_is_looked_for_by_its_words() {
@@ -4694,9 +4770,28 @@ mod tests {
         assert_eq!((groups(&[t]), groups(&[t, t])), (vec![0], vec![0, 1]));
         // The map scrolls on its own wherever it stands, and a translation does not take it for its pages.
         assert_eq!((groups(&[p, m]), groups(&[p, t, m]), groups(&[m, t, p]), groups(&[t, m])), (vec![0, 1], vec![0, 0, 2], vec![0, 2, 2], vec![0, 1]));
+        // 下一页 is the next of the pages before it, their translation between or not, else of those after it; of a
+        // translation that stands for its pages (原地替换); beside the map alone it scrolls on its own.
+        let n = Shows::Next;
+        assert_eq!((groups(&[p, n]), groups(&[n, p]), groups(&[p, t, n]), groups(&[p, n, p]), groups(&[p, p, n]), groups(&[n, m]), groups(&[t, n])), (vec![0, 0], vec![1, 1], vec![0, 0, 0], vec![0, 0, 2], vec![0, 1, 1], vec![0, 1], vec![0, 0]));
+        // A page on, a second one two pages on; the pages and their translation not at all.
+        let on = |shows: &[Shows]| { let shown = views(shows); (0..shown.len()).map(|at| ahead(&shown, at)).collect::<Vec<_>>() };
+        assert_eq!((on(&[p, n]), on(&[n, p]), on(&[p, n, n]), on(&[p, t, n]), on(&[p, n, p])), (vec![0, 1], vec![1, 0], vec![0, 1, 2], vec![0, 0, 1], vec![0, 1, 0]));
         // Never more views than a viewer has.
         assert_eq!(views(&[p, t, p, t]).len(), 3);
         assert_eq!((Split::Off.views(), Split::Side.views(), Split::Stacked.views(), Split::Triple.views()), (1, 2, 2, 3));
+    }
+
+    #[test]
+    fn a_page_on_is_as_far_down_its_page() {
+        use super::pages_on;
+        // Three pages, the middle one half as tall.
+        let tall = [800., 400., 800.];
+        // Half way down the first page is half way down the second; and back again.
+        assert_eq!((pages_on(&tall, (0, 400.), 1), pages_on(&tall, (1, 200.), -1), pages_on(&tall, (0, 100.), 2)), ((1, 200.), (0, 400.), (2, 100.)));
+        // Before the first page is the top of the file; past the last, its foot.
+        assert_eq!((pages_on(&tall, (0, 300.), -1), pages_on(&tall, (2, 10.), 1), pages_on(&tall, (1, 0.), 5)), ((0, 0.), (2, 800.), (2, 800.)));
+        assert_eq!(pages_on(&[], (3, 9.), 1), (0, 0.));
     }
 
     #[test]
