@@ -578,7 +578,9 @@ impl Workspace {
             if done.changed > 0 { said.push(tf!("改动 {} 段", "{} paragraphs changed", done.changed)) }
             if done.added > 0 { said.push(tf!("新增 {} 段", "{} added", done.added)) }
             if done.removed > 0 { said.push(tf!("删去 {} 段", "{} removed", done.removed)) }
-            if track && done.changed + done.added + done.removed > 0 { said.push(t("都记为修订").to_string()) }
+            // A table written in the manuscript is put into the file: its text is not among the paragraphs counted.
+            if done.tables > 0 { said.push(tf!("新增表格 {} 张", "{} tables added", done.tables)) }
+            if track && done.changed + done.added + done.removed + done.tables > 0 { said.push(t("都记为修订").to_string()) }
         } else if lib.writing.comments.source.as_ref().is_some_and(|source| source.kind == "docx") {
             said.push(t("原来的 Word 文件不在了，按新文档导出").to_string());
         }
