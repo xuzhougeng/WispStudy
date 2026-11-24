@@ -22,6 +22,7 @@ use wisp_core::provider::{self, Provider};
 use wisp_core::libraries;
 use wisp_core::ocr;
 use wisp_core::settings::{Language, Spacing, Task, TextWidth};
+use wisp_core::storage;
 use wisp_core::update::{self, Release};
 use wisp_core::websearch;
 
@@ -44,11 +45,12 @@ pub enum SettingsPage {
     Ai,
     Customize,
     Network,
+    Storage,
     About,
 }
 
 impl SettingsPage {
-    pub(crate) const ALL: [SettingsPage; 7] = [SettingsPage::General, SettingsPage::Appearance, SettingsPage::Shortcuts, SettingsPage::Ai, SettingsPage::Customize, SettingsPage::Network, SettingsPage::About];
+    pub(crate) const ALL: [SettingsPage; 8] = [SettingsPage::General, SettingsPage::Appearance, SettingsPage::Shortcuts, SettingsPage::Ai, SettingsPage::Customize, SettingsPage::Network, SettingsPage::Storage, SettingsPage::About];
 
     pub(crate) fn title(self) -> &'static str {
         match self {
@@ -58,6 +60,7 @@ impl SettingsPage {
             SettingsPage::Ai => "AI",
             SettingsPage::Customize => t("自定义"),
             SettingsPage::Network => t("网络"),
+            SettingsPage::Storage => t("存储空间"),
             SettingsPage::About => t("关于"),
         }
     }
@@ -70,6 +73,7 @@ impl SettingsPage {
             SettingsPage::Ai => "sparkle",
             SettingsPage::Customize => "plug",
             SettingsPage::Network => "link",
+            SettingsPage::Storage => "hard-drive",
             SettingsPage::About => "info",
         }
     }
@@ -128,6 +132,12 @@ pub struct SettingsView {
     shortcut_error: Option<(String, String)>,
     /// What the account of the provider on show holds, by the provider's id: asked of a service that says (DeepSeek's `/user/balance`).
     balance: Option<(String, Held)>,
+    /// What 存储空间 last measured, and of which data folder.
+    storage: Option<(PathBuf, storage::Space)>,
+    /// 存储空间 is measuring the data folder.
+    measuring: bool,
+    /// The library whose parts 存储空间 shows, by id.
+    storage_open: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -456,10 +466,12 @@ impl Workspace {
                         cx.notify();
                     }));
                 }
-                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, search_keys, ocr_keys, author, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, recording: None, shortcut_error: None, balance: None, _subscriptions: subscriptions });
+                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, search_keys, ocr_keys, author, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, recording: None, shortcut_error: None, balance: None, storage: None, measuring: false, storage_open: None, _subscriptions: subscriptions });
                 self.read_balance_shown(cx);
             }
         }
+        // 存储空间 is measured anew each time it is opened: files come and go while it is closed.
+        if page == SettingsPage::Storage { self.measure_storage(cx) }
         window.focus(&self.focus);
         cx.notify();
     }
@@ -469,6 +481,41 @@ impl Workspace {
         self.stop_recording(cx);
         self.settings_view = None;
         window.focus(&self.focus);
+        cx.notify();
+    }
+
+    // ---- 存储空间
+
+    /// Measure the data folder on a background thread; what was measured before stays on show meanwhile.
+    pub fn measure_storage(&mut self, cx: &mut Context<Self>) {
+        let Some(view) = self.settings_view.as_mut() else { return };
+        if view.measuring { return }
+        view.measuring = true;
+        let root = self.root.clone();
+        let measured = cx.background_executor().spawn({
+            let root = root.clone();
+            async move { storage::measure(&root) }
+        });
+        cx.spawn(async move |this, cx| {
+            let space = measured.await;
+            this.update(cx, |this, cx| {
+                let current = this.root.clone();
+                let Some(view) = this.settings_view.as_mut() else { return };
+                view.measuring = false;
+                // The data folder was changed meanwhile: this measure is of another folder.
+                if current == root { view.storage = Some((root, space)) }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Show or fold the parts of one library on 存储空间.
+    pub fn toggle_storage_library(&mut self, id: String, cx: &mut Context<Self>) {
+        let Some(view) = self.settings_view.as_mut() else { return };
+        view.storage_open = if view.storage_open.as_deref() == Some(id.as_str()) { None } else { Some(id) };
         cx.notify();
     }
 
@@ -1056,6 +1103,7 @@ impl Workspace {
             SettingsPage::Ai => self.ai_page(window, cx),
             SettingsPage::Customize => self.customize_page(window, cx),
             SettingsPage::Network => self.network_page(window, cx),
+            SettingsPage::Storage => self.storage_page(cx),
             SettingsPage::About => self.about_page(cx),
         };
         let changed = page == SettingsPage::Shortcuts && !self.settings.shortcuts.is_empty();
@@ -1796,6 +1844,105 @@ impl Workspace {
         group(Some(t("网页搜索")), rows).child(note(t("助手和 wisp 命令的 web_search 工具用它搜索互联网，查文献数据库之外的信息（软件文档、指南、机构页面、新闻）。搜索词会发给所选的服务，按它的价格计费。Key 以明文保存在本机的 settings.json 里。")))
     }
 
+    fn storage_page(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(view) = &self.settings_view else { return div().into_any_element() };
+        let reveal_label = if cfg!(target_os = "macos") { t("在访达中显示") } else if cfg!(target_os = "windows") { t("在资源管理器中显示") } else { t("在文件管理器中显示") };
+        let refresh = button("storage-refresh", t("重新计算"))
+            .when(view.measuring, |d| d.opacity(0.5).cursor_default())
+            .when(!view.measuring, |d| d.on_click(self.on(Cmd::MeasureStorage, cx)));
+        let Some((_, space)) = view.storage.as_ref().filter(|(root, _)| *root == self.root) else {
+            let waiting = div().flex().items_center().gap(px(8.)).text_color(Theme::text_secondary()).child(ui::spinner("storage-spinner", 14., Theme::text_secondary())).child(t("正在计算…"));
+            return group(None, vec![row(t("数据目录"), Some(self.root.display().to_string().into()), waiting).into_any_element()]).into_any_element();
+        };
+        let total = space.total();
+        let share = |bytes: u64| if total == 0 { 0. } else { bytes as f32 / total as f32 };
+        let size = |bytes: u64| div().flex_none().min_w(px(72.)).text_right().text_color(Theme::text_secondary()).child(storage::human(bytes));
+        let (shelved, drafts): (Vec<&storage::LibrarySpace>, Vec<&storage::LibrarySpace>) = space.libraries.iter().partition(|lib| !lib.draft);
+
+        // The whole folder as one bar: each library in its colour, the largest first, what is not a library in grey at the end.
+        let mut segments: Vec<(f32, Hsla)> = shelved.iter().map(|lib| (share(lib.total()), theme::accent_of(&lib.color).strong())).collect();
+        let rest = drafts.iter().map(|lib| lib.total()).sum::<u64>() + space.removed + space.other;
+        segments.push((share(rest), Theme::line_strong()));
+        let bar = div().flex().w_full().h(px(8.)).rounded_full().overflow_hidden().bg(Theme::groove())
+            .children(segments.into_iter().filter(|(part, _)| *part > 0.).map(|(part, color)| div().h_full().flex_none().w(relative(part)).bg(color)));
+        let (count, papers_in_all) = (shelved.len(), shelved.iter().map(|lib| lib.paper_count).sum::<usize>());
+        let counted = if crate::i18n::is_english() { format!("{count} {}, {} in all", if count == 1 { "library" } else { "libraries" }, crate::i18n::count(papers_in_all, "paper")) } else { format!("{count} 个文献库，共 {papers_in_all} 篇文献") };
+        let summary = div().flex().flex_col().w_full().gap(px(12.)).px(px(16.)).py(px(14.))
+            .child(div().flex().items_center().justify_between().gap(px(16.))
+                .child(div().flex().flex_col().gap(px(2.)).min_w_0()
+                    .child(div().text_size(text_px(22.)).line_height(text_px(28.)).font_weight(FontWeight::SEMIBOLD).child(storage::human(total)))
+                    .child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(counted)))
+                .child(div().flex().flex_none().items_center().gap(px(8.))
+                    .when(view.measuring, |d| d.child(ui::spinner("storage-spinner", 14., Theme::text_secondary())))
+                    .child(refresh)
+                    .child(button("storage-reveal-root", reveal_label).on_click(self.on(Cmd::RevealDataDir, cx)))))
+            .child(bar);
+
+        // One library: its colour, name and paper count, its size and share; pressed, its parts under it.
+        let open = view.storage_open.clone();
+        let library_row = |key: String, color: Hsla, name: String, detail: String, parts: [u64; 6], dir: Option<PathBuf>, this: &Self, cx: &mut Context<Self>| -> AnyElement {
+            let bytes: u64 = parts.iter().sum();
+            let expanded = open.as_deref() == Some(key.as_str());
+            let head = div()
+                .id(SharedString::from(format!("storage-{key}")))
+                .flex()
+                .items_center()
+                .gap(px(12.))
+                .w_full()
+                .min_h(px(48.))
+                .px(px(16.))
+                .py(px(8.))
+                .cursor_pointer()
+                .hover(|s| s.bg(Theme::hover()))
+                .on_click(this.on(Cmd::StorageLibrary(key.clone()), cx))
+                .child(ui::icon(if expanded { "chevron-down" } else { "chevron-right" }, 14., Theme::text_tertiary()))
+                .child(div().flex_none().size(px(10.)).rounded_full().bg(color))
+                .child(div().flex().flex_col().flex_1().min_w_0().gap(px(2.))
+                    .child(div().truncate().child(ui::one_line(&name)))
+                    .child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(detail)))
+                .child(div().flex_none().w(px(96.)).h(px(4.)).rounded_full().bg(Theme::groove()).overflow_hidden().child(div().h_full().w(relative(share(bytes))).bg(color)))
+                .child(div().flex_none().w(px(40.)).text_right().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(format!("{:.0}%", share(bytes) * 100.)))
+                .child(size(bytes));
+            let body = expanded.then(|| {
+                let lines = storage::Part::ALL.iter().zip(parts).filter(|(_, bytes)| *bytes > 0).map(|(part, bytes)| {
+                    div().flex().items_center().gap(px(12.)).w_full()
+                        .child(div().flex_1().min_w_0().text_color(Theme::text_secondary()).child(t(part.label())))
+                        .child(div().flex_none().w(px(96.)).h(px(4.)).rounded_full().bg(Theme::groove()).overflow_hidden().child(div().h_full().w(relative(if bytes == 0 { 0. } else { parts_share(bytes, &parts) })).bg(color.opacity(0.6))))
+                        .child(div().flex_none().w(px(40.)))
+                        .child(size(bytes))
+                });
+                div().flex().flex_col().w_full().gap(px(8.)).pl(px(64.)).pr(px(16.)).pb(px(12.))
+                    .children(lines)
+                    .children(dir.map(|dir| div().flex().pt(px(4.)).child(button(SharedString::from(format!("storage-reveal-{key}")), reveal_label).on_click(this.on(Cmd::RevealDir(dir), cx)))))
+            });
+            div().flex().flex_col().w_full().child(head).children(body).into_any_element()
+        };
+        let papers = |count: usize| tn!("{n} 篇文献", "{n}", count, "paper");
+        let mut rows: Vec<AnyElement> = shelved.iter().map(|lib| library_row(lib.id.clone(), theme::accent_of(&lib.color).strong(), lib.name.clone(), papers(lib.paper_count), lib.parts, Some(lib.dir.clone()), self, cx)).collect();
+        if !drafts.is_empty() {
+            let mut parts = [0u64; 6];
+            for lib in &drafts { for (sum, bytes) in parts.iter_mut().zip(lib.parts) { *sum += bytes } }
+            rows.push(library_row("drafts".into(), Theme::text_tertiary(), t("最近对话").to_string(), tn!("{n} 个首页对话，还没有存为文献库", "{n} from the home page, not made libraries yet", drafts.len(), "conversation"), parts, None, self, cx));
+        }
+        let mut aside: Vec<AnyElement> = Vec::new();
+        if space.removed > 0 {
+            aside.push(row(t("已移除的文献库"), Some(t("移除的文献库连同文件移到数据目录下的 removed 文件夹，不会被删除。").into()), div().flex().items_center().gap(px(12.)).child(size(space.removed)).child(button("storage-reveal-removed", reveal_label).on_click(self.on(Cmd::RevealDir(self.root.join("removed")), cx)))).into_any_element());
+        }
+        if space.other > 0 {
+            aside.push(row(t("其他"), Some(t("数据目录里不属于任何文献库的文件，例如引文样式。").into()), size(space.other)).into_any_element());
+        }
+        div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .gap(px(24.))
+            .child(group(None, vec![summary.into_any_element()]))
+            .when(!rows.is_empty(), |d| d.child(group(Some(crate::i18n::tc("storage.libraries", "文献库")), rows)))
+            .when(!aside.is_empty(), |d| d.child(group(Some(t("文献库之外")), aside)))
+            .child(note(t("点开一个文献库，看文献文件、数据库、图片库和稿件各占多少；回收站里的文献仍算在文献文件里。移除文献库或附件时，文件移到 removed 文件夹而不删除，只有清空回收站会删掉文献的文件；要腾出空间，可以在文件夹里清理 removed 中不再需要的内容。")))
+            .into_any_element()
+    }
+
     fn about_page(&self, cx: &mut Context<Self>) -> AnyElement {
         let open = |id: &'static str, label: &'static str, url: String, this: &Self, cx: &mut Context<Self>| button(id, label).on_click(this.on(Cmd::OpenUrl(url), cx));
         div()
@@ -1825,6 +1972,12 @@ impl Workspace {
             ))
             .into_any_element()
     }
+}
+
+/// One part's share of its library, for the bar beside it.
+fn parts_share(bytes: u64, parts: &[u64; 6]) -> f32 {
+    let total: u64 = parts.iter().sum();
+    if total == 0 { 0. } else { bytes as f32 / total as f32 }
 }
 
 /// A provider's mark: white on a tile of the service's colour.

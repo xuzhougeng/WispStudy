@@ -1956,5 +1956,17 @@
   "没有可朗读的文字。": "There is no text to read aloud.",
   "模型写的稿子里没有「女：」「男：」开头的对话。": "The script the model wrote has no lines of dialogue marked for the two hosts.",
   "这篇文献没有可以讲的文字：没有摘要，也读不出全文。": "This paper has no text to talk about: no abstract, and no readable full text.",
-  "Wisp Study 助手": "Wisp Study Assistant"
+  "Wisp Study 助手": "Wisp Study Assistant",
+  "存储空间": "Storage",
+  "重新计算": "Recalculate",
+  "正在计算…": "Calculating…",
+  "已移除的文献库": "Removed libraries",
+  "移除的文献库连同文件移到数据目录下的 removed 文件夹，不会被删除。": "A removed library is moved with its files to the removed folder in the data folder; nothing is deleted.",
+  "数据目录里不属于任何文献库的文件，例如引文样式。": "Files in the data folder that belong to no library, such as citation styles.",
+  "文献库之外": "Outside the libraries",
+  "点开一个文献库，看文献文件、数据库、图片库和稿件各占多少；回收站里的文献仍算在文献文件里。移除文献库或附件时，文件移到 removed 文件夹而不删除，只有清空回收站会删掉文献的文件；要腾出空间，可以在文件夹里清理 removed 中不再需要的内容。": "Open a library to see what its paper files, database, figures and manuscripts take; papers in the trash still count among the paper files. Removing a library or an attachment moves its files to the removed folder rather than deleting them; only emptying the trash deletes papers' files. To free space, clear what you no longer need from removed in the folder.",
+  "文献文件": "Paper files",
+  "数据库": "Database",
+  "已移除的附件": "Removed attachments",
+  "storage.libraries": "Libraries"
 }
