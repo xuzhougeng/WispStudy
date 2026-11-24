@@ -220,15 +220,7 @@ impl Theme {
 
 /// Hue (degrees), saturation and lightness of each highlight colour.
 fn highlight_hue(key: &str) -> (f32, f32, f32) {
-    match key {
-        "green" => (135., 0.55, 0.5),
-        "blue" => (205., 0.85, 0.55),
-        "pink" => (335., 0.85, 0.62),
-        "purple" => (270., 0.6, 0.62),
-        "red" => (2., 0.8, 0.55),
-        "orange" => (26., 0.95, 0.55),
-        _ => (48., 1., 0.5),
-    }
+    wisp_core::annotation::hue(key)
 }
 
 /// The tile a model provider's mark is drawn on (设置 › AI): the service's

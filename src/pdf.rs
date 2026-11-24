@@ -59,6 +59,8 @@ pub enum PdfEvent {
     /// A highlight or a box takes another colour, a key of `annotation::COLORS`; its range stays.
     RecolorAnnotation { resource: String, id: String, color: &'static str },
     RemoveAnnotation { resource: String, id: String },
+    /// Save a copy of the file with its marks written in, for other readers (标注's 导出带标注的 PDF…).
+    ExportMarked,
     /// A box drawn on a page, or a sticky note placed there (`rect` its spot twice) with its text.
     AddShape { paper: String, resource: String, page: usize, kind: Kind, rect: [f32; 4], note: String },
     /// A text box written on a page: its edges (grown to what it says), its words and colours.
@@ -2413,6 +2415,11 @@ impl PdfView {
         self.go_to_place(page, rect[1], cx);
     }
 
+    /// Whether the file has marks a copy of it would carry (导出带标注的 PDF…).
+    pub fn has_exported_marks(&self) -> bool {
+        self.annotations.iter().any(|a| wisp_core::annotpdf::exported(a.kind))
+    }
+
     /// Go to a place on a 1-based page: what stands `top` points below the page's top comes a little under the top of the view.
     pub fn go_to_place(&mut self, page: usize, top: f32, cx: &mut Context<Self>) {
         self.citation.clear();
@@ -4187,6 +4194,8 @@ impl PdfView {
             div().id("pdf-annotations-list").w_full().max_h(px((self.height - 70.).max(0.))).overflow_y_scroll().bg(Theme::bg_body()).border_1().border_color(Theme::line_strong()).rounded(px(8.))
                 .when(self.annotations.is_empty(), |d| d.child(div().p(px(12.)).text_color(Theme::text_secondary()).child(t("选中 PDF 文字后，可添加下划线或高亮；「方框」「便签」「文本框」三个工具可以框出区域、在任意位置记笔记，或直接把字写在页面上。"))))
                 .children(rows)
+                // The marks go with a copy of the file, for other readers and other people; pieces marked to be cut out stay here.
+                .when(self.has_exported_marks(), |d| d.child(div().p(px(6.)).flex().child(button("annotation-export", t("导出带标注的 PDF…")).text_color(Theme::accent()).on_click(cx.listener(|_, _, _, cx| cx.emit(PdfEvent::ExportMarked))))))
         });
         // In from the right edge by the width of the bar down the pages, which stands beside it.
         div().absolute().top(px(8.)).right(px(crate::scrollbar::STRIP + 4.)).max_w(px(width)).flex().flex_col().items_end().gap(px(6.)).text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text()).occlude()

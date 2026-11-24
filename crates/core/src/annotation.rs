@@ -105,6 +105,20 @@ pub const COLORS: &[&str] = &["yellow", "green", "blue", "pink", "purple", "red"
 /// What a new box is drawn in: it stands out from the highlights round it.
 pub const BOX_COLOR: &str = "red";
 
+/// The hue, saturation and lightness of a colour of `COLORS` (anything else as the first): what the window
+/// draws a mark in (`theme.rs`) and what a PDF exported with its marks gives it (`annotpdf`).
+pub fn hue(key: &str) -> (f32, f32, f32) {
+    match key {
+        "green" => (135., 0.55, 0.5),
+        "blue" => (205., 0.85, 0.55),
+        "pink" => (335., 0.85, 0.62),
+        "purple" => (270., 0.6, 0.62),
+        "red" => (2., 0.8, 0.55),
+        "orange" => (26., 0.95, 0.55),
+        _ => (48., 1., 0.5),
+    }
+}
+
 /// The colours a text box's fill, border and words can have, by key; `none` leaves the fill or the border out.
 /// The page is white under them whatever the window's theme, so a light fill and dark words read on it.
 pub const TEXT_FILLS: &[&str] = &["none", "white", "yellow", "green", "blue", "pink", "purple", "orange"];
