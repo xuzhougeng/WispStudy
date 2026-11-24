@@ -151,8 +151,12 @@ impl Workspace {
 
     /// Show the translation beside the pages and begin translating, or put it away. Put away, nothing more is asked for.
     pub(crate) fn toggle_facing(&mut self, cx: &mut Context<Self>) {
-        // The translation takes the other half: a file shown there is put away.
-        if self.lib.as_ref().is_some_and(|lib| !lib.facing) { self.close_beside(cx) }
+        // The translation is a column more beside the pages. A file split on itself in two viewers (分屏 自由) is one
+        // viewer showing it twice again, so its second half stays as the third column, as it does under 固定; another
+        // file of the paper in the other half is put away (two viewers have no third column yet).
+        if self.lib.as_ref().is_some_and(|lib| !lib.facing) {
+            if self.lib.as_ref().is_some_and(|lib| lib.beside_itself(cx)) { self.join_itself(cx) } else { self.close_beside(cx) }
+        }
         let Some(lib) = self.lib.as_mut() else { return };
         lib.facing = !lib.facing;
         // The click is the request: this paper is translated as soon as its paragraphs are read.
@@ -161,6 +165,8 @@ impl Workspace {
         let ready = lib.facing && lib.facing_text.as_ref().is_some_and(|facing| facing.standing == Standing::Ready);
         self.ensure_pdf(cx);
         if ready { self.run_facing(cx) }
+        // Put away under 分屏 自由: the two halves left are two viewers again, each zoomed on its own.
+        if self.settings.pdf_split_free && self.lib.as_ref().is_some_and(|lib| !lib.facing) { self.part_itself(cx) }
         cx.notify();
     }
 

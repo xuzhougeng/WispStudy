@@ -2693,9 +2693,21 @@ impl Workspace {
         if lib.facing_shown() {
             let in_place = self.settings.facing_in_place;
             for (label, split) in [("译文在右边：左右对照", Split::Side), ("译文在下面：上下对照", Split::Stacked)] {
-                items.push(MenuItem { label: t(label).into(), checked: !in_place && current == split, note: None, cmd: Cmd::PdfSplit(split) });
+                // Three columns have no way to stand one over the other: under the pages would take the third column
+                // away unasked, so it is not offered until that column is put away.
+                if split == Split::Stacked && current == Split::Triple { continue }
+                // With the third column the translation is at the right as well: chosen again, it changes nothing.
+                let here = current == split || (split == Split::Side && current == Split::Triple);
+                items.push(MenuItem { label: t(label).into(), checked: !in_place && here, note: None, cmd: Cmd::PdfSplit(if here && !in_place { current } else { split }) });
             }
             items.push(MenuItem { label: t("译文替换原文：原地替换").into(), checked: in_place, note: None, cmd: Cmd::FacingPlace(true) });
+            // A column more, scrolled on its own: a figure or the methods kept in sight beside the pages and their
+            // translation. Papers kept beside have the width, each with its translation.
+            if lib.pins.is_empty() {
+                let third = !in_place && current == Split::Triple;
+                breaks.push(items.len());
+                items.push(MenuItem { label: t("再开一栏原文：单独滚动").into(), checked: third, note: None, cmd: Cmd::PdfSplit(if third { Split::Side } else { Split::Triple }) });
+            }
             return;
         }
         for (label, split) in [("不分屏", Split::Off), ("左右分屏", Split::Side), ("上下分屏", Split::Stacked)] {
@@ -5674,19 +5686,27 @@ impl Workspace {
     fn set_split_free(&mut self, free: bool, cx: &mut Context<Self>) {
         self.settings.pdf_split_free = free;
         self.save_settings(cx);
+        if free { self.part_itself(cx) } else { self.join_itself(cx) }
+        cx.notify();
+    }
+
+    /// One viewer showing its file twice, each half scrolled on its own, becomes two viewers of the file (分屏 自由):
+    /// not while another viewer stands beside it, nor while 译文 is on show.
+    pub(crate) fn part_itself(&mut self, cx: &mut Context<Self>) {
+        let Some(pdf) = self.lib.as_ref().filter(|lib| lib.beside.is_none() && !lib.facing_shown()).and_then(|lib| lib.pdf.clone()) else { return };
+        if let Some((split, place, first)) = pdf.update(cx, |pdf, cx| pdf.part(cx)) { self.split_itself(split, Some(place), first, cx); }
+    }
+
+    /// Two viewers of one file become one viewer showing it twice, its halves even: the other half stays where it
+    /// is read, and the zoom is the one of the half worked in.
+    pub(crate) fn join_itself(&mut self, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
         let Some(pdf) = lib.pdf.clone() else { return };
-        if free {
-            if lib.beside.is_some() || lib.facing_shown() { return cx.notify() }
-            if let Some((split, place, first)) = pdf.update(cx, |pdf, cx| pdf.part(cx)) { self.split_itself(split, Some(place), first, cx); }
-        } else {
-            lib.split_share = 0.5;
-            if !lib.beside_itself(cx) { return cx.notify() }
-            let Some(beside) = lib.beside.take() else { return };
-            let place = beside.view.read(cx).place();
-            pdf.update(cx, |pdf, cx| pdf.join(beside.split, place, beside.first, cx));
-        }
-        cx.notify();
+        lib.split_share = 0.5;
+        if !lib.beside_itself(cx) { return }
+        let Some(beside) = lib.beside.take() else { return };
+        let place = beside.view.read(cx).place();
+        pdf.update(cx, |pdf, cx| pdf.join(beside.split, place, beside.first, cx));
     }
 
     /// The pointer went to work in a viewer. Beside another file it becomes the one worked in (`Library::pdf`):
@@ -5753,6 +5773,8 @@ impl Workspace {
     fn pdf_event(&mut self, view: Entity<PdfView>, event: &PdfEvent, cx: &mut Context<Self>) {
         match event {
             PdfEvent::Worked => self.work_in(&view, cx),
+            // A view's label asked for a translation, or gave up the last one: what the 译文 switch does.
+            PdfEvent::Facing(on) => if self.lib.as_ref().is_some_and(|lib| lib.facing != *on) { self.toggle_facing(cx) },
             // A press in the pane of a paper kept beside: that paper is the one worked in from here on.
             PdfEvent::Pressed => {
                 if let Some(paper) = self.lib.as_ref().and_then(|lib| lib.pins.iter().find(|pin| pin.view == view).map(|pin| pin.paper.clone())) { self.work_in_pane(&paper, cx) }
@@ -9203,6 +9225,23 @@ impl Workspace {
                     }
                     return;
                 }
+                // `pdfview:<n>;pages|theirs|before|after|close|menu`: the label of the n-th view (from 0) of the PDF on show:
+                // it shows the pages / their translation, changes places with the view before / after it, is closed, or opens its menu.
+                "pdfview" => {
+                    let (view, what) = arg.split_once(';').unwrap_or((arg, "menu"));
+                    let view = view.parse::<usize>().unwrap_or(0);
+                    if let Some(pdf) = self.lib.as_ref().and_then(|l| l.pdf.clone()) {
+                        pdf.update(cx, |pdf, cx| match what {
+                            "pages" => pdf.show_in_view(view, false, cx),
+                            "theirs" => pdf.show_in_view(view, true, cx),
+                            "before" => pdf.move_view(view, view.saturating_sub(1), cx),
+                            "after" => pdf.move_view(view, view + 1, cx),
+                            "close" => pdf.close_view(view, cx),
+                            _ => pdf.open_view_menu(view, cx),
+                        })
+                    }
+                    return;
+                }
                 // `pdfquote` hands the PDF's selection to the paper's conversation, as 添加到对话 does; `pdfquote:library` to the library's.
                 "pdfquote" => {
                     if let Some(pdf) = self.lib.as_ref().and_then(|l| l.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.quote(arg == "library", cx)) }
@@ -9322,6 +9361,7 @@ impl Workspace {
                 "pdfsplit" => Some(Cmd::PdfSplit(match arg {
                     "side" => Split::Side,
                     "stacked" => Split::Stacked,
+                    "triple" => Split::Triple,
                     _ => Split::Off,
                 })),
                 // `zoom:150`, `zoom:page`, `zoom:width`, `zoom:in`, `zoom:out`

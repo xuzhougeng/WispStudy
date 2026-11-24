@@ -21,6 +21,9 @@ actions!(pdf, [CopySelection, FindInPdf, RemoveChosen]);
 
 /// What the viewer tells whoever shows it.
 pub enum PdfEvent {
+    /// A view's label asks for 译文 (the first view to show a translation) or gives it up (the last one):
+    /// the owner turns it on or off, as its switch does.
+    Facing(bool),
     /// The pointer went down or turned the wheel in the viewer: beside a viewer of another file of the paper, this is the one worked in from now on.
     Worked,
     /// The pointer went down in the viewer: among the panes of several papers, this paper is the one worked in from now on.
@@ -469,8 +472,8 @@ impl Zoom {
     }
 }
 
-/// Whether the file is shown twice, each half scrolled on its own: a figure
-/// in one, the page that speaks of it in the other.
+/// How the views of the file stand: once, twice (each half scrolled on its own: a figure in one, the page
+/// that speaks of it in the other) or in three columns. What each view shows is its own (`PdfView::kinds`).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Split {
     #[default]
@@ -479,6 +482,65 @@ pub enum Split {
     Side,
     /// One half over the other.
     Stacked,
+    /// Three columns: the pages, their translation, and the pages again.
+    Triple,
+}
+
+impl Split {
+    /// How many views of the pages it shows.
+    fn views(self) -> usize {
+        match self {
+            Split::Off => 1,
+            Split::Side | Split::Stacked => 2,
+            Split::Triple => 3,
+        }
+    }
+}
+
+/// A view of the pages: what it draws, and whom it scrolls with. Views of one `group` are read as one, the
+/// pages and their translation: the one last scrolled leads the others. A view of another group is scrolled
+/// on its own: a figure, a method or the references kept in sight while the text is read on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct View {
+    translated: bool,
+    group: u8,
+}
+
+/// The views on show, at most three, in the order they stand in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Shown {
+    views: [View; 3],
+    len: usize,
+}
+
+impl std::ops::Deref for Shown {
+    type Target = [View];
+    fn deref(&self) -> &[View] {
+        &self.views[..self.len]
+    }
+}
+
+/// The views of a viewer from what each draws (`true`: the translation), in the order they stand in. This is
+/// the one rule of what scrolls together, and nobody sets it: a translation is read as one with the pages
+/// next to it (those before it, else those after it) and scrolls in their group; pages scroll on their own,
+/// and so does a translation with no pages beside it. A group is named by the place of its pages.
+fn views(translated: &[bool]) -> Shown {
+    let len = translated.len().min(3);
+    let mut views = [View { translated: false, group: 0 }; 3];
+    for at in 0..len {
+        let pages = |n: usize| n < len && !translated[n];
+        let group = if !translated[at] { at } else if at > 0 && pages(at - 1) { at - 1 } else if pages(at + 1) { at + 1 } else { at };
+        views[at] = View { translated: translated[at], group: group as u8 };
+    }
+    Shown { views, len }
+}
+
+/// The view that goes when `shown` views are one too many: pages scrolled on their own, then a translation
+/// scrolled on its own, before the pages and their translation are parted; of two alike, the one not worked in.
+fn spare(shown: &[View], active: usize) -> usize {
+    let alone = |at: usize| shown.iter().filter(|view| view.group == shown[at].group).count() == 1;
+    let last = |translated: bool, but: Option<usize>| (0..shown.len()).rev().find(|&at| Some(at) != but && shown[at].translated == translated && alone(at));
+    last(false, Some(active)).or_else(|| last(false, None)).or_else(|| last(true, Some(active))).or_else(|| last(true, None)).unwrap_or(shown.len().saturating_sub(1))
 }
 
 /// The band between the two halves, in logical pixels: wide enough to tell a page that both halves show from one page.
@@ -491,6 +553,17 @@ fn pane_size(split: Split, view: (f32, f32)) -> (f32, f32) {
         Split::Off => view,
         Split::Side => (((view.0 - DIVIDER) / 2.).max(0.), view.1),
         Split::Stacked => (view.0, ((view.1 - DIVIDER) / 2.).max(0.)),
+        Split::Triple => (((view.0 - 2. * DIVIDER) / 3.).max(0.), view.1),
+    }
+}
+
+/// Where a view of a split viewer starts, from the viewer's top left corner.
+fn pane_origin(split: Split, view: (f32, f32), pane: usize) -> (f32, f32) {
+    let half = pane_size(split, view);
+    match split {
+        Split::Off => (0., 0.),
+        Split::Side | Split::Triple => (pane as f32 * (half.0 + DIVIDER), 0.),
+        Split::Stacked => (0., pane as f32 * (half.1 + DIVIDER)),
     }
 }
 
@@ -500,6 +573,7 @@ pub fn beside_split(two_files: Option<Split>, one_file: Split, width: f32) -> Sp
     match (two_files, one_file) {
         (Some(split), _) if split != Split::Off => split,
         (_, Split::Off) => if width >= crate::facing::FACING_MIN { Split::Side } else { Split::Stacked },
+        (_, Split::Triple) => Split::Side,
         (_, split) => split,
     }
 }
@@ -522,6 +596,7 @@ fn pane_at(split: Split, view: (f32, f32), at: (f32, f32)) -> usize {
         Split::Off => 0,
         Split::Side => (at.0 >= half.0 + DIVIDER) as usize,
         Split::Stacked => (at.1 >= half.1 + DIVIDER) as usize,
+        Split::Triple => (at.0 >= half.0 + DIVIDER) as usize + (at.0 >= 2. * (half.0 + DIVIDER)) as usize,
     }
 }
 
@@ -969,8 +1044,8 @@ pub struct PdfView {
     /// Most recently shown last.
     recent: VecDeque<usize>,
     pending: HashSet<usize>,
-    /// The views of the pages: the second is on show only while the viewer is split.
-    panes: [Pane; 2],
+    /// The views of the pages: as many as `views` says are on show, the others kept for when they are.
+    panes: [Pane; 3],
     split: Split,
     /// 译文: the second half shows the pages with their paragraphs translated in place, and the two halves
     /// scroll as one. By page (0-based), what stands in place of what (`Workspace::sync_facing`).
@@ -978,13 +1053,30 @@ pub struct PdfView {
     /// The translation stands on the pages themselves, each paragraph in its own place (原地替换), instead of on
     /// a second copy of them in the other half: the viewer is not split for it.
     in_place: bool,
-    /// How the viewer was split before the translation took its second half.
-    facing_was: Split,
+    /// What each view draws: `true` the pages with their paragraphs translated (`views` makes the views on
+    /// show of the first of these, as many as the split has).
+    kinds: [bool; 3],
+    /// How two views stand once a third is put away: as they stood before it came.
+    stood: Split,
+    /// The view asked to show the translation while there was none (显示译文 of its label): it shows it when
+    /// the translation comes, instead of a view more.
+    wish: Option<usize>,
+    /// The view whose label's menu is open.
+    view_menu: Option<usize>,
+    /// The view whose label is held, and whether it has changed places since: dragged over the view beside
+    /// it, the two change places (`carry`).
+    carrying: Option<(usize, bool)>,
+    /// The label held was carried to another place and let go: the click that may follow is not one on it.
+    carried: bool,
+    /// Whether the owner can turn 译文 on for this viewer (the library's window; not a paper's own window).
+    pub translates: bool,
     /// The translation's half was placed by the viewer's width, not chosen in 分屏: it goes beside the pages or
     /// under them as the width changes (`fit_facing`).
     facing_auto: bool,
     /// The half the pointer last worked in: the one the page number, the keys and a citation speak of.
     active: usize,
+    /// By group of views (`View::group`), the view of it last worked in: the one the others of its group follow.
+    led: [usize; 3],
     /// The half the selection, the piece cut out or the highlight clicked was made in: what is offered for it stands there.
     held: usize,
     requests: mpsc::Sender<Request>,
@@ -1155,13 +1247,20 @@ impl PdfView {
             broken: HashSet::new(),
             recent: VecDeque::new(),
             pending: HashSet::new(),
-            panes: [Pane::new(), Pane::new()],
+            panes: [Pane::new(), Pane::new(), Pane::new()],
             split: Split::Off,
             facing: None,
             in_place: false,
-            facing_was: Split::Off,
+            kinds: [false; 3],
+            stood: Split::Side,
+            wish: None,
+            view_menu: None,
+            carrying: None,
+            carried: false,
+            translates: false,
             facing_auto: false,
             active: 0,
+            led: [0, 1, 2],
             held: 0,
             requests,
             error: None,
@@ -1685,29 +1784,146 @@ impl PdfView {
         self.split
     }
 
+    /// The views on show, in their order: what each draws and whom it scrolls with.
+    fn shown(&self) -> Shown {
+        views(&self.kinds[..self.split.views()])
+    }
+
+    /// The view scrolled apart from the one worked in, where there is one: where something is kept in sight
+    /// (固定对照) while the reading goes on.
+    fn apart(&self) -> Option<usize> {
+        let shown = self.shown();
+        (0..shown.len()).find(|pane| shown[*pane].group != shown[self.active.min(shown.len() - 1)].group)
+    }
+
+    /// Whether 固定对照 has a view to keep something in: beside a translation only a view scrolled on its own
+    /// is one, and that shows this file.
+    fn can_keep(&self, other_file: bool) -> bool {
+        !self.facing_beside() || (self.apart().is_some() && !other_file)
+    }
+
     /// The size of one view of the pages: the viewer's, or a half of it.
     fn pane_size(&self) -> (f32, f32) {
         pane_size(self.split, (self.width, self.height))
     }
 
-    /// Show the file once, or twice side by side or one over the other. The
-    /// second half starts where the first is; put away, the half last worked
-    /// in is the one that stays.
+    /// Show the file once, twice (side by side or one over the other) or in three columns. A view that comes
+    /// starts where the first is; of those that go, pages scrolled on their own go before a translation or
+    /// its pages, and of two alike the one last worked in stays.
     pub fn set_split(&mut self, split: Split, cx: &mut Context<Self>) {
-        // The translation keeps its half: side by side or one over the other, as chosen.
+        // The pages and their translation stay together: side by side or one over the other, as chosen.
         if self.facing_beside() && split == Split::Off { return }
+        // The third column stands beside a translation only.
+        if split == Split::Triple && !self.facing_beside() { return }
+        self.stand(split, cx);
+    }
+
+    /// `set_split` without asking whether a translation is there: the views that go are taken out, the size
+    /// of a view changes, and those that come start where the first is, showing the pages (the translation
+    /// where every view shows it: 原地替换).
+    fn stand(&mut self, split: Split, cx: &mut Context<Self>) {
         if split == self.split { return }
-        let was = self.split;
-        if split == Split::Off && self.active == 1 { self.panes.swap(0, 1) }
-        if split == Split::Off { (self.active, self.held) = (0, 0) }
-        self.resize((0., 0.), |this| this.split = split);
-        if was == Split::Off {
-            let top = self.panes[0].list.logical_scroll_top();
-            self.panes[1].list.reset(self.sizes.len());
-            self.panes[1].list.scroll_to(top);
-            self.panes[1].scroll_x = self.panes[0].scroll_x;
+        let (was, now) = (self.split.views(), split.views());
+        let theirs = self.kinds[..was].iter().all(|translated| *translated);
+        for n in (now..was).rev() {
+            let view = spare(&views(&self.kinds[..n + 1]), self.active);
+            self.take_out(view, n + 1);
         }
+        self.resize((0., 0.), |this| this.split = split);
+        for pane in was..now {
+            let top = self.panes[0].list.logical_scroll_top();
+            self.panes[pane].list.reset(self.sizes.len());
+            self.panes[pane].list.scroll_to(top);
+            self.panes[pane].scroll_x = self.panes[0].scroll_x;
+            self.kinds[pane] = theirs;
+        }
+        self.settle();
         cx.notify();
+    }
+
+    /// Of `count` views, one leaves the row: those after it close up, each with its place and what it shows.
+    /// The size of a view is the caller's to change (`resize`).
+    fn take_out(&mut self, view: usize, count: usize) {
+        self.panes[view..count].rotate_left(1);
+        self.kinds[view..count].rotate_left(1);
+        self.kinds[count - 1] = false;
+        let at = |pane: usize| if pane > view { pane - 1 } else if pane == view { view.min(count.saturating_sub(2)) } else { pane };
+        (self.active, self.held) = (at(self.active), at(self.held));
+    }
+
+    /// After the views changed: what is said of a view speaks of one on show, and each group is led by its pages.
+    fn settle(&mut self) {
+        let count = self.split.views();
+        if self.active >= count { self.active = 0 }
+        if self.held >= count { self.held = 0 }
+        (self.led, self.view_menu) = ([0, 1, 2], None);
+        if self.carrying.is_some_and(|(view, _)| view >= count) { self.carrying = None }
+    }
+
+    /// A view's label: its view is closed (关闭这一栏), as its words say; a translation closed is 译文 put
+    /// away, when it was the only one.
+    pub fn close_view(&mut self, view: usize, cx: &mut Context<Self>) {
+        let count = self.split.views();
+        if count < 2 || view >= count { return }
+        self.take_out(view, count);
+        let split = if count == 3 { self.stood } else { Split::Off };
+        self.resize((0., 0.), |this| this.split = split);
+        self.settle();
+        self.say_facing(cx);
+        cx.notify();
+    }
+
+    /// A view's label: the view changes places with the one beside it (移到左边 / 移到右边). A translation
+    /// goes with the pages it then stands next to.
+    pub fn move_view(&mut self, view: usize, to: usize, cx: &mut Context<Self>) {
+        let count = self.split.views();
+        if view >= count || to >= count || view == to { return }
+        self.panes.swap(view, to);
+        self.kinds.swap(view, to);
+        let at = |pane: usize| if pane == view { to } else if pane == to { view } else { pane };
+        (self.active, self.held) = (at(self.active), at(self.held));
+        self.settle();
+        cx.notify();
+    }
+
+    /// A view's label held and the pointer moved: over another view, the view carried takes a place toward
+    /// it, one at a time, so the row under the pointer is always what letting go leaves.
+    fn carry(&mut self, position: Point<Pixels>, bounds: Bounds<Pixels>, cx: &mut Context<Self>) {
+        let Some((view, _)) = self.carrying else { return };
+        let at = (f32::from(position.x - bounds.origin.x), f32::from(position.y - bounds.origin.y));
+        let over = pane_at(self.split, (f32::from(bounds.size.width), f32::from(bounds.size.height)), at).min(self.split.views() - 1);
+        if over == view || view >= self.split.views() { return }
+        let to = if over > view { view + 1 } else { view - 1 };
+        self.move_view(view, to, cx);
+        self.carrying = Some((to, true));
+    }
+
+    /// A view's label: the view shows the pages, or their translation (显示原文 / 显示译文). The first view
+    /// asked for a translation turns 译文 on (the owner hears `PdfEvent::Facing` and starts it), and the last
+    /// one to give it up turns it off.
+    pub fn show_in_view(&mut self, view: usize, translated: bool, cx: &mut Context<Self>) {
+        if view >= self.split.views() { return }
+        self.view_menu = None;
+        if translated && self.facing.is_none() {
+            self.wish = Some(view);
+            cx.emit(PdfEvent::Facing(true));
+            return cx.notify();
+        }
+        self.kinds[view] = translated;
+        self.settle();
+        self.say_facing(cx);
+        cx.notify();
+    }
+
+    /// The menu of a view's label, as a click on the label opens it.
+    pub fn open_view_menu(&mut self, view: usize, cx: &mut Context<Self>) {
+        self.view_menu = (view < self.split.views()).then_some(view);
+        cx.notify();
+    }
+
+    /// No view shows the translation any more: 译文 is put away.
+    fn say_facing(&mut self, cx: &mut Context<Self>) {
+        if self.facing.is_some() && !self.shown().iter().any(|view| view.translated) { cx.emit(PdfEvent::Facing(false)) }
     }
 
     pub fn zoom(&self) -> Zoom {
@@ -1716,10 +1932,11 @@ impl PdfView {
 
     /// The file split on itself put back together for two viewers of it (分屏 自由, #245): how the halves stood, where the
     /// half not worked in is read at (as `place` gives it) and whether it is the first, at the left or the top. The half
-    /// worked in stays here, whole. `None` while the viewer is whole or its other half is the translation's.
+    /// worked in stays here, whole. `None` unless the viewer shows two views each scrolled on its own: not while it
+    /// is whole, nor while the pages stand with their translation.
     pub fn part(&mut self, cx: &mut Context<Self>) -> Option<(Split, (usize, f32), bool)> {
-        if self.split == Split::Off || self.facing_beside() || self.sizes.is_empty() { return None }
-        let (split, other) = (self.split, 1 - self.active);
+        if self.split.views() != 2 || self.facing_beside() || self.sizes.is_empty() { return None }
+        let (split, other) = (self.split, 1 - self.active.min(1));
         let place = self.pane_place(other);
         self.set_split(Split::Off, cx);
         Some((split, place, other == 0))
@@ -1728,12 +1945,13 @@ impl PdfView {
     /// The file split on itself again from two viewers of it (分屏 固定): the other half at `place`, first (at the
     /// left or the top) when `first` says so; the half here is the one worked in.
     pub fn join(&mut self, split: Split, place: (usize, f32), first: bool, cx: &mut Context<Self>) {
-        if split == Split::Off || self.facing_beside() || self.sizes.is_empty() { return }
+        if split.views() != 2 || self.split != Split::Off || self.facing_beside() || self.sizes.is_empty() { return }
         self.set_split(split, cx);
         let index = place.0.min(self.sizes.len() - 1);
         self.panes[1].list.scroll_to(ListOffset { item_ix: index, offset_in_item: px(place.1 * self.scale_of(index)) });
         if first {
             self.panes.swap(0, 1);
+            self.kinds.swap(0, 1);
             (self.active, self.held) = (1, 1);
         }
         cx.notify();
@@ -1745,25 +1963,17 @@ impl PdfView {
         (top.item_ix, f32::from(top.offset_in_item) / self.scale_of(top.item_ix).max(0.01))
     }
 
-
-    /// Show the pages' translation in the second half (`Some`: the paragraphs of each page, 0-based), or
-    /// put it away. The viewer is split for it, side by side where it is wide enough for two pages, and
-    /// goes back to how it was split before.
+    /// Show the pages' translation (`Some`: the paragraphs of each page, 0-based), or put it away:
+    /// `add_translation`, `drop_translation`.
     pub fn set_facing(&mut self, pieces: Option<HashMap<usize, Vec<FacingPiece>>>, cx: &mut Context<Self>) {
         match (self.facing.is_some(), pieces.is_some()) {
-            // In place, the pages stay as they are split: only what stands on them changes.
-            _ if self.in_place => self.facing = pieces,
             (false, true) => {
-                self.facing_was = self.split;
-                self.facing_auto = self.split == Split::Off;
-                if self.split == Split::Off { self.set_split(if self.width >= crate::facing::FACING_MIN { Split::Side } else { Split::Stacked }, cx) }
                 self.facing = pieces;
+                self.add_translation(cx);
             }
             (true, false) => {
                 self.facing = None;
-                // The original is the half that stays.
-                self.active = 0;
-                self.set_split(self.facing_was, cx);
+                self.drop_translation(cx);
             }
             _ => self.facing = pieces,
         }
@@ -1774,30 +1984,69 @@ impl PdfView {
         self.facing.is_some()
     }
 
-    /// Whether the translation is shown as a second copy of the pages, beside them or under them.
+    /// Whether the translation is shown as a second copy of the pages, next to them: a view of it in the
+    /// group of its pages.
     pub fn facing_beside(&self) -> bool {
-        self.facing.is_some() && !self.in_place
+        self.facing.is_some() && self.shown().iter().enumerate().any(|(at, view)| view.translated && view.group as usize != at)
     }
 
-    /// The translation on the pages themselves (原地替换), or on a second copy of them (对照). While it is on
-    /// show, the viewer goes back to how it was split before the translation, or is split for it.
+    /// The translation on the pages themselves (原地替换), or on a second copy of them (对照): the reader's
+    /// habit, which says how a translation comes. One on show changes over to it.
     pub fn set_in_place(&mut self, in_place: bool, cx: &mut Context<Self>) {
         if in_place == self.in_place { return }
-        if self.facing.is_none() {
-            self.in_place = in_place;
-            return;
+        self.in_place = in_place;
+        if self.facing.is_none() { return }
+        self.drop_translation(cx);
+        self.add_translation(cx);
+        cx.notify();
+    }
+
+    /// The translation comes: what that gives depends on the views it meets, and each row is what a person
+    /// expects there before clicking (docs/dev/design.md, 操作直觉 35), not one rule applied to all of them.
+    /// - A view asked for it (显示译文 of its label): that view shows it. The person said which.
+    /// - 原地替换 is the reader's habit: every view shows it, and none is added.
+    /// - The pages once: the pages and their translation, side by side where there is room for two pages.
+    /// - Split in two already: three columns, the translation next to the first half's pages. The second
+    ///   half was put where it is on purpose (a figure kept in sight), so it stays, scrolled on its own.
+    fn add_translation(&mut self, cx: &mut Context<Self>) {
+        let count = self.split.views();
+        if let Some(view) = self.wish.take().filter(|view| *view < count) {
+            self.kinds[view] = true;
+            return self.settle();
         }
-        if in_place {
-            self.in_place = true;
-            // The original is the half that stays.
-            self.active = 0;
-            self.set_split(self.facing_was, cx);
-        } else {
-            self.in_place = false;
-            self.facing_was = self.split;
-            self.facing_auto = self.split == Split::Off;
-            if self.split == Split::Off { self.set_split(if self.width >= crate::facing::FACING_MIN { Split::Side } else { Split::Stacked }, cx) }
+        if self.in_place { return self.kinds[..count].fill(true) }
+        self.facing_auto = count == 1;
+        match count {
+            1 => self.stand(if self.width >= crate::facing::FACING_MIN { Split::Side } else { Split::Stacked }, cx),
+            2 => {
+                self.stood = self.split;
+                self.stand(Split::Triple, cx);
+                // The half that was the second is the third now; the translation starts where its pages are.
+                self.panes.swap(1, 2);
+                let at = |pane: usize| if pane == 1 { 2 } else { pane };
+                (self.active, self.held) = (at(self.active), at(self.held));
+            }
+            _ => {}
         }
+        self.kinds[1] = true;
+        self.settle();
+    }
+
+    /// The translation goes: again by what is there, each as a person expects it (`add_translation`).
+    /// - A translation next to its pages: its view is taken out. Of three columns the two of pages are left,
+    ///   the one scrolled on its own as the second half again, standing as the halves did before.
+    /// - A translation standing alone (原地替换, or its pages were closed): the view shows the pages again.
+    fn drop_translation(&mut self, cx: &mut Context<Self>) {
+        self.wish = None;
+        loop {
+            let shown = self.shown();
+            let Some(view) = (0..shown.len()).rev().find(|&at| shown[at].translated && shown[at].group as usize != at) else { break };
+            self.take_out(view, shown.len());
+            let split = if shown.len() == 3 { self.stood } else { Split::Off };
+            self.resize((0., 0.), |this| this.split = split);
+        }
+        self.kinds = [false; 3];
+        self.settle();
         cx.notify();
     }
 
@@ -1866,7 +2115,7 @@ impl PdfView {
     /// pixels from the top left corner of the half last worked in stays
     /// under it, and the other half keeps its top.
     fn resize(&mut self, anchor: (f32, f32), change: impl FnOnce(&mut Self)) {
-        let before = [0, 1].map(|pane| {
+        let before = [0, 1, 2].map(|pane| {
             let top = self.panes[pane].list.logical_scroll_top();
             let scale = self.scale_of(top.item_ix);
             (top, scale, self.sheet_left(pane, self.sizes.get(top.item_ix).map_or(595., |size| size.0) * scale))
@@ -1937,12 +2186,8 @@ impl PdfView {
         }
         if event.modifiers.secondary() || event.modifiers.control {
             if dy != 0. {
-                let half = pane_size(self.split, view);
-                let anchor = match (self.split, pane) {
-                    (Split::Side, 1) => (at.0 - half.0 - DIVIDER, at.1),
-                    (Split::Stacked, 1) => (at.0, at.1 - half.1 - DIVIDER),
-                    _ => at,
-                };
+                let origin = pane_origin(self.split, view, pane);
+                let anchor = (at.0 - origin.0, at.1 - origin.1);
                 self.set_zoom(Zoom::Percent(self.percent() * (dy / 240.).exp()), Some(anchor), cx);
             }
             return true;
@@ -2126,8 +2371,9 @@ impl PdfView {
                         // A page rendered again at another size takes the place of the one it had.
                         if let Some((old, ..)) = self.images.insert(index, (Arc::new(RenderImage::new(vec![image::Frame::new(buffer)])), scale, size)) { cx.drop_image(old, None) }
                         self.touch(index);
-                        // Two halves show twice the pages.
-                        let keep = if self.split == Split::Off { KEEP_PAGES } else { KEEP_PAGES + 6 };
+                        // Views scrolled apart show other pages: each group of them more to keep.
+                        let shown = self.shown();
+                        let keep = KEEP_PAGES + 6 * (0..shown.len()).filter(|&at| at > 0 && shown[at].group as usize == at).count();
                         while self.recent.len() > keep || (self.recent.len() > 2 && self.images.values().map(|(.., size)| size).sum::<usize>() > KEEP_BYTES) {
                             if let Some(old) = self.recent.pop_front() && let Some((image, ..)) = self.images.remove(&old) {
                                 cx.drop_image(image, None);
@@ -2286,7 +2532,7 @@ impl PdfView {
         // The facing copy of the page: each paragraph translated stands in the paragraph's own box, on the
         // page's white, set no larger than the paragraph and as small as it takes to stand in it
         // (`translation::fit`). One being asked for is tinted; the rest of the page is as it was.
-        if (pane == 1 || self.in_place) && let Some(facing) = &self.facing {
+        if self.shown().get(pane).is_some_and(|view| view.translated) && let Some(facing) = &self.facing {
             let picture = image.as_ref().map(|(image, _)| image.clone());
             let pieces = facing.get(&index).map(Vec::as_slice).unwrap_or_default().iter().filter_map(|piece| {
                 let [x0, y0, x1, y1] = piece.rect;
@@ -2325,8 +2571,7 @@ impl PdfView {
 
     /// The view a point of the window is in.
     fn pane_under(&self, position: Point<Pixels>) -> Option<usize> {
-        let shown = if self.split == Split::Off { 1 } else { 2 };
-        (0..shown).find(|pane| self.panes[*pane].list.viewport_bounds().contains(&position))
+        (0..self.shown().len()).find(|pane| self.panes[*pane].list.viewport_bounds().contains(&position))
     }
 
     /// Where a page's sheet stands in the viewer, in the half its selection, cut or highlight was made in: its top left corner.
@@ -2745,13 +2990,17 @@ impl PdfView {
         cx.notify();
     }
 
-    /// Show what stands `top` points down a 0-based page in the half not worked in, splitting the viewer for
-    /// it (as `split` says) when it shows its pages once. The half worked in stays where it is.
+    /// Show what stands `top` points down a 0-based page in the view scrolled apart from the one worked in
+    /// (`apart`), splitting the viewer for it (as `split` says) when it shows its pages once. The view worked
+    /// in stays where it is.
     pub fn keep_beside(&mut self, split: Split, page: usize, top: f32, mark: Vec<[f32; 4]>, cx: &mut Context<Self>) {
-        // The translation has the other half while it is on.
-        if self.facing_beside() || self.sizes.is_empty() { return }
+        // Beside a translation, the third column is where it is kept; without that column the translation has the other half.
+        if !self.can_keep(false) || self.sizes.is_empty() { return }
         if self.split == Split::Off { self.set_split(if split == Split::Off { Split::Side } else { split }, cx) }
-        let (other, index) = (1 - self.active, page.min(self.sizes.len() - 1));
+        let Some(other) = self.apart() else { return };
+        // It is the one its group follows now: the pages and their translation go there together.
+        self.led[self.shown()[other].group as usize] = other;
+        let index = page.min(self.sizes.len() - 1);
         if !mark.is_empty() { self.mark_lines(index, mark) }
         self.panes[other].list.scroll_to(ListOffset { item_ix: index, offset_in_item: px((top * self.scale_of(index) - PAGE_GAP).max(0.)) });
         cx.notify();
@@ -2840,7 +3089,7 @@ impl PdfView {
             return cx.notify();
         }
         if back.zoom != self.zoom { self.set_zoom(back.zoom, None, cx) }
-        let pane = if self.split == Split::Off { 0 } else { back.pane };
+        let pane = back.pane.min(self.shown().len() - 1);
         self.active = pane;
         let index = back.place.0.min(self.sizes.len() - 1);
         let scale = self.scale_of(index);
@@ -2978,11 +3227,10 @@ impl PdfView {
                 .child(div().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(t("图注")))
                 .child(div().line_clamp(4).text_ellipsis().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_secondary()).child(shown.legend.clone())));
             let count = if said.is_empty() { t("没有在文中找到提到这张图的段落。").to_string() } else { tf!("文中提到它的 {} 处", "{} places in the text speak of it", said.len()) };
-            let can_pin = !self.facing_beside();
             let rows: Vec<Stateful<Div>> = said.iter().enumerate().map(|(n, said)| {
                 let part = wisp_core::structure::SECTIONS.iter().find(|(key, _)| *key == said.spoken.section).map(|(_, label)| t(label).to_string());
                 let whereabouts = part.into_iter().chain(self.file_label(said.file)).chain([tf!("第 {} 页", "Page {}", said.spoken.page + 1)]).collect::<Vec<_>>().join(" · ");
-                let pin = can_pin.then(|| div().id(("pdf-said-pin", n)).flex().flex_none().items_center().justify_center().size(px(22.)).rounded(px(5.)).cursor_pointer().hover(|s| s.bg(Theme::pressed())).tooltip(ui::tip(t("固定对照"))).child(ui::icon("columns-2", 13., Theme::text_tertiary()))
+                let pin = self.can_keep(said.file.is_some()).then(|| div().id(("pdf-said-pin", n)).flex().flex_none().items_center().justify_center().size(px(22.)).rounded(px(5.)).cursor_pointer().hover(|s| s.bg(Theme::pressed())).tooltip(ui::tip(t("固定对照"))).child(ui::icon("columns-2", 13., Theme::text_tertiary()))
                     // A press on the pin is not a press on its row.
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.pin_said(n, cx) })));
@@ -3036,8 +3284,8 @@ impl PdfView {
             div().w_full().flex().justify_center().bg(gpui::white()).when(n < last, |d| d.border_b_1().border_color(Theme::line())).child(piece)
         }).collect();
         let button = |id: &'static str, label: &'static str| div().id(id).flex().flex_none().items_center().h(text_px(26.)).px(px(9.)).rounded(px(6.)).cursor_pointer().text_color(Theme::accent()).hover(|s| s.bg(Theme::hover())).child(label);
-        // The translation has the other half while it stands beside the pages.
-        let pin = (!self.facing_beside()).then(|| button("pdf-figure-pin", t("固定对照")).on_click(cx.listener(|this, _, _, cx| this.pin_figure(cx))));
+        // The translation has the other half while it stands beside the pages: the third column is then where a figure is kept.
+        let pin = self.can_keep(file.is_some()).then(|| button("pdf-figure-pin", t("固定对照")).on_click(cx.listener(|this, _, _, cx| this.pin_figure(cx))));
         let go = button("pdf-figure-go", t("前往原位置")).on_click(cx.listener(|this, _, _, cx| this.go_to_figure(cx)));
         // The other way: from the figure to the text that speaks of it. Apart from the two that move the pages.
         let said = button("pdf-figure-said-open", t("相关文字")).text_color(Theme::text_secondary()).on_click(cx.listener(|this, _, _, cx| this.show_said(cx)));
@@ -3056,13 +3304,9 @@ impl PdfView {
         let back = self.returns.last()?;
         // Not laid out yet (a viewer just made for another file): its foot is not known.
         if self.height <= 0. { return None }
-        let pane = if self.split == Split::Off || back.from.is_some() { self.active } else { back.pane };
-        let (half_w, half_h) = self.pane_size();
-        let (left, top) = match (self.split, pane) {
-            (Split::Side, 1) => (half_w + DIVIDER, 0.),
-            (Split::Stacked, 1) => (0., half_h + DIVIDER),
-            _ => (0., 0.),
-        };
+        let pane = if back.from.is_some() { self.active } else { back.pane.min(self.shown().len() - 1) };
+        let half_h = self.pane_size().1;
+        let (left, top) = pane_origin(self.split, (self.width, self.height), pane);
         let page = tf!("第 {} 页", "Page {}", back.place.0 + 1);
         let whence = match &back.from {
             Some((_, file)) if !file.is_empty() => format!("{file} · {page}"),
@@ -3542,6 +3786,89 @@ impl PdfView {
     /// What can be done with a highlight clicked, under the line clicked (over it at the viewer's foot):
     /// its colours, the one it has ringed, and 删除高亮. The same small bar as the selection's. A piece marked
     /// to be cut out has what a piece just cut has instead of colours: the figure library, a question.
+    /// What a view shows, at its top left corner while there is more than one view: 原文 or 译文. It is also
+    /// where the view is changed: its menu (`view_menu`).
+    fn view_label(&self, view: usize, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        let shown = self.shown();
+        if shown.len() < 2 { return None }
+        let translated = shown.get(view)?.translated;
+        let open = self.view_menu == Some(view);
+        Some(
+            div()
+                .id(("pdf-view-label", view))
+                .absolute()
+                .top(px(6.))
+                .left(px(6.))
+                .flex()
+                .items_center()
+                .gap(px(2.))
+                .h(text_px(20.))
+                .pl(px(7.))
+                .pr(px(4.))
+                .rounded(px(5.))
+                .bg(if open { Theme::pressed() } else { Theme::bg_body() })
+                .border_1()
+                .border_color(if self.carrying.is_some_and(|(held, moved)| held == view && moved) { Theme::accent() } else { Theme::line() })
+                .text_size(text_px(11.))
+                .text_color(if translated { Theme::accent() } else { Theme::text_secondary() })
+                .cursor_pointer()
+                .hover(|s| s.bg(Theme::hover()))
+                .occlude()
+                .child(t(if translated { "译文" } else { "原文" }))
+                .child(ui::icon("chevron-down", 10., Theme::text_tertiary()))
+                .tooltip(ui::tip(t("点击更改，拖动换位")))
+                // A press on the label is not a press on the page under it: it takes hold of the view.
+                .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    (this.carrying, this.carried) = (Some((view, false)), false);
+                }))
+                // Let go where it was pressed, it opens its menu; carried to another place, it has done its work.
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.carrying = None;
+                    if std::mem::take(&mut this.carried) { return cx.notify() }
+                    this.view_menu = if this.view_menu == Some(view) { None } else { Some(view) };
+                    cx.notify();
+                })),
+        )
+    }
+
+    /// The menu of a view's label, under it: what the view shows, its place among the views, and its close.
+    fn view_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let view = self.view_menu?;
+        let shown = self.shown();
+        let here = *shown.get(view)?;
+        let (left, top) = pane_origin(self.split, (self.width, self.height), view);
+        let stacked = self.split == Split::Stacked;
+        let line = || div().flex_none().h(px(1.)).mx(px(6.)).my(px(4.)).bg(Theme::line());
+        let pages = ui::menu_row("pdf-view-pages", t("显示原文"), !here.translated, None).on_click(cx.listener(move |this, _, _, cx| this.show_in_view(view, false, cx)));
+        // A translation is offered where the owner can start one, or one is on show already.
+        let theirs = (self.translates || self.facing.is_some()).then(|| ui::menu_row("pdf-view-theirs", t("显示译文"), here.translated, None).on_click(cx.listener(move |this, _, _, cx| this.show_in_view(view, true, cx))));
+        let before = (view > 0).then(|| ui::menu_row("pdf-view-before", t(if stacked { "移到上面" } else { "移到左边" }), false, None).on_click(cx.listener(move |this, _, _, cx| this.move_view(view, view - 1, cx))));
+        let after = (view + 1 < shown.len()).then(|| ui::menu_row("pdf-view-after", t(if stacked { "移到下面" } else { "移到右边" }), false, None).on_click(cx.listener(move |this, _, _, cx| this.move_view(view, view + 1, cx))));
+        let close = ui::menu_row("pdf-view-close", t(if stacked { "关闭这一半" } else { "关闭这一栏" }), false, None).on_click(cx.listener(move |this, _, _, cx| this.close_view(view, cx)));
+        const WIDTH: f32 = 168.;
+        Some(
+            ui::popover()
+                .id("pdf-view-menu")
+                .absolute()
+                .left(px((left + 6.).min((self.width - WIDTH - 8.).max(8.))))
+                .top(px(top + 6. + 20. + 6.))
+                .w(px(WIDTH))
+                .p(px(5.))
+                // A press on the menu is not a press on the page; one anywhere else puts it away.
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_down_out(cx.listener(|this, _, _, cx| if this.view_menu.take().is_some() { cx.notify() }))
+                .child(pages)
+                .children(theirs)
+                .child(line())
+                .children(before)
+                .children(after)
+                .child(line())
+                .child(close)
+                .into_any_element(),
+        )
+    }
+
     fn mark_menu(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         // A chosen mark's menu stands under it where it is now, clear of its handles, and steps aside while it is dragged.
         let (menu, gap) = match (&self.mark_menu, self.chosen_mark()) {
@@ -3729,6 +4056,12 @@ impl PdfView {
     /// How the person split the viewer in 分屏: theirs from now on, the translation's half too.
     pub fn choose_split(&mut self, split: Split, cx: &mut Context<Self>) {
         self.facing_auto = false;
+        // A translation left alone by its label (its pages closed) gets its pages back to stand beside.
+        if split != Split::Off && self.facing.is_some() && !self.in_place && !self.facing_beside() {
+            self.drop_translation(cx);
+            self.add_translation(cx);
+            self.facing_auto = false;
+        }
         self.set_split(split, cx);
     }
 
@@ -3781,30 +4114,44 @@ impl Render for PdfView {
             return ui::empty_state("file-text", t("正在打开 PDF…"), "").size_full().into_any_element();
         }
         self.device_scale = window.scale_factor();
-        // The page and its translation are read as one: the half last scrolled leads the other.
-        if self.facing_beside() && self.split != Split::Off {
-            let (lead, other) = (self.active, 1 - self.active);
-            let (top, theirs) = (self.panes[lead].list.logical_scroll_top(), self.panes[other].list.logical_scroll_top());
-            if top.item_ix != theirs.item_ix || top.offset_in_item != theirs.offset_in_item { self.panes[other].list.scroll_to(top) }
-            self.panes[other].scroll_x = self.panes[lead].scroll_x;
+        // Views of one group are read as one (the page and its translation): the one last scrolled leads the
+        // others. While a view of another group is worked in, they stay as they were left.
+        let shown = self.shown();
+        if self.active < shown.len() {
+            self.led[shown[self.active].group as usize] = self.active;
         }
-        let (measured, wheel, slid) = (cx.entity(), cx.entity(), cx.entity());
-        let bars = [0, 1].map(|pane| self.sideways_bar(pane, cx));
+        for (pane, view) in shown.iter().enumerate() {
+            // A lead that is no longer of this group (the views changed): its pages lead.
+            let lead = Some(self.led[view.group as usize]).filter(|lead| shown.get(*lead).is_some_and(|lead| lead.group == view.group)).unwrap_or(view.group as usize);
+            if lead == pane { continue }
+            let (top, theirs) = (self.panes[lead].list.logical_scroll_top(), self.panes[pane].list.logical_scroll_top());
+            if top.item_ix != theirs.item_ix || top.offset_in_item != theirs.offset_in_item { self.panes[pane].list.scroll_to(top) }
+            self.panes[pane].scroll_x = self.panes[lead].scroll_x;
+        }
+        let (measured, wheel, slid, let_go) = (cx.entity(), cx.entity(), cx.entity(), cx.entity());
+        let bars = [0, 1, 2].map(|pane| self.sideways_bar(pane, cx));
         let mut bars = bars.into_iter();
+        let labels = [0, 1, 2].map(|pane| self.view_label(pane, cx));
+        let mut labels = labels.into_iter();
+        let view_menu = self.view_menu(cx);
         // A view's pages, with its sideways bar over their foot.
         let mut pane = |pane: usize| {
             let entity = cx.entity();
             let pages = list(self.panes[pane].list.clone(), move |index, _, cx| entity.update(cx, |this, cx| this.page(pane, index, cx))).size_full().pt(px(PAGE_GAP));
-            div().size_full().relative().child(pages).children(bars.next().flatten())
+            div().size_full().relative().child(pages).children(bars.next().flatten()).children(labels.next().flatten())
         };
         // The pages once, or twice with a line between: each half scrolls on its own.
         let pages = match self.split {
             Split::Off => pane(0).into_any_element(),
             split => {
                 let half = |pane: Div| div().flex_1().min_w_0().min_h_0().overflow_hidden().child(pane);
-                let line = div().flex_none().bg(Theme::line_strong());
-                let line = if split == Split::Side { line.w(px(DIVIDER)).h_full() } else { line.h(px(DIVIDER)).w_full() };
-                div().size_full().flex().when(split == Split::Stacked, |d| d.flex_col()).child(half(pane(0))).child(line).child(half(pane(1))).into_any_element()
+                let line = || {
+                    let line = div().flex_none().bg(Theme::line_strong());
+                    if split == Split::Stacked { line.h(px(DIVIDER)).w_full() } else { line.w(px(DIVIDER)).h_full() }
+                };
+                let mut row = div().size_full().flex().when(split == Split::Stacked, |d| d.flex_col()).child(half(pane(0)));
+                for next in 1..shown.len() { row = row.child(line()).child(half(pane(next))) }
+                row.into_any_element()
             }
         };
         // A card for a selection that has since gone goes with it.
@@ -3847,7 +4194,7 @@ impl Render for PdfView {
             .on_action(cx.listener(|this, _: &crate::shortcuts::Dismiss, window, cx| {
                 if this.text_edit.is_some() {
                     this.finish_text(true, cx);
-                } else if this.figure_card.take().is_some() || this.mark_menu.take().is_some() || this.text_palette.take().is_some() || this.chosen.take().is_some() {
+                } else if this.figure_card.take().is_some() || this.view_menu.take().is_some() || this.mark_menu.take().is_some() || this.text_palette.take().is_some() || this.chosen.take().is_some() {
                 } else if this.note_open.is_some() || this.note_draft.is_some() {
                     this.close_note();
                 } else if this.finder.is_some() {
@@ -3869,10 +4216,23 @@ impl Render for PdfView {
                         window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
                             if phase == DispatchPhase::Capture && hitbox.is_hovered(window) && wheel.update(cx, |this, cx| this.wheel(event, bounds, cx)) { cx.stop_propagation() }
                         });
+                        // A label carried to another place is let go wherever the button comes up; one let go where it
+                        // was pressed is still held when its click is heard, and opens its menu.
+                        window.on_mouse_event(move |_: &MouseUpEvent, phase, _, cx| {
+                            if phase != DispatchPhase::Capture { return }
+                            let_go.update(cx, |this, cx| if this.carrying.is_some_and(|(_, moved)| moved) {
+                                (this.carrying, this.carried) = (None, true);
+                                cx.notify();
+                            });
+                        });
                         // A sideways bar held is heard wherever the pointer goes, until the button comes up.
                         window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
                             if phase != DispatchPhase::Capture { return }
                             slid.update(cx, |this, cx| {
+                                // A view's label held is carried the same way.
+                                if this.carrying.is_some() {
+                                    if event.pressed_button == Some(MouseButton::Left) { this.carry(event.position, bounds, cx) } else { this.carrying = None; cx.notify() }
+                                }
                                 if this.sliding.is_none() { return }
                                 if event.pressed_button == Some(MouseButton::Left) { this.slide(event.position.x, cx) } else { this.sliding = None; cx.notify() }
                             });
@@ -3888,6 +4248,7 @@ impl Render for PdfView {
             .children(card)
             .children(return_chip)
             .children(mark_menu)
+            .children(view_menu)
             .children(note_card)
             .children(notice.map(|notice| {
                 let search = ui::ghost_button("pdf-cite-search", Some("search"), Some(t("自己搜索").into())).h(text_px(22.)).px(px(6.)).text_size(text_px(12.)).text_color(Theme::accent()).on_click(cx.listener(|this, _, window, cx| {
@@ -3913,7 +4274,7 @@ fn same_place(a: [f32; 4], b: [f32; 4]) -> bool {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: that would bring in gpui's own `test` attribute.
-    use super::{BAR_INSET, BAR_THUMB_MIN, CARD_EDGE, CardPlace, CitationFocus, CitationStatus, DIVIDER, MARGIN, PAGE_GAP, POINT_PX, Split, Zoom, bar_thumb, beside_split, card_place, dragged_share, HALF_MIN, page_scale, pane_at, pane_size, picture_serves, render_scale, search_words, zoom_step};
+    use super::{BAR_INSET, BAR_THUMB_MIN, CARD_EDGE, CardPlace, CitationFocus, CitationStatus, DIVIDER, MARGIN, PAGE_GAP, POINT_PX, Split, Zoom, bar_thumb, beside_split, card_place, dragged_share, HALF_MIN, page_scale, pane_at, pane_origin, pane_size, spare, views, picture_serves, render_scale, search_words, zoom_step};
 
     #[test]
     fn a_sentence_not_found_is_looked_for_by_its_words() {
@@ -3969,6 +4330,52 @@ mod tests {
         }
         // One over the other, the height decides, and the page fills it.
         assert!((page_scale(Zoom::FitPage, a4, pane_size(Split::Stacked, view)) * 842. + 2. * PAGE_GAP - 300.).abs() < 0.01);
+    }
+
+    #[test]
+    fn three_columns_are_equal_and_a_point_is_in_one() {
+        let view = (900. + 2. * DIVIDER, 600.);
+        assert_eq!(pane_size(Split::Triple, view), (300., 600.));
+        assert_eq!([0, 1, 2].map(|pane| pane_origin(Split::Triple, view, pane)), [(0., 0.), (300. + DIVIDER, 0.), (600. + 2. * DIVIDER, 0.)]);
+        assert_eq!([299., 300. + DIVIDER, 599. + DIVIDER, 600. + 2. * DIVIDER, 899.].map(|x| pane_at(Split::Triple, view, (x, 10.))), [0, 1, 1, 2, 2]);
+        // The second view of the other ways starts past the line between the two.
+        let two = (800. + DIVIDER, 600. + DIVIDER);
+        assert_eq!((pane_origin(Split::Off, two, 0), pane_origin(Split::Side, two, 1), pane_origin(Split::Stacked, two, 1)), ((0., 0.), (400. + DIVIDER, 0.), (0., 300. + DIVIDER)));
+        // Too narrow for anything: not less than nothing.
+        assert_eq!(pane_size(Split::Triple, (4., 600.)).0, 0.);
+    }
+
+    #[test]
+    fn views_say_what_is_translated_and_what_scrolls_together() {
+        let groups = |translated: &[bool]| views(translated).iter().map(|view| (view.translated, view.group)).collect::<Vec<_>>();
+        let (p, t) = (false, true);
+        // Once, and split on itself: each half at its own place.
+        assert_eq!((groups(&[p]), groups(&[p, p])), (vec![(p, 0)], vec![(p, 0), (p, 1)]));
+        // 对照: a translation scrolls with the pages next to it, whichever side they stand on.
+        assert_eq!((groups(&[p, t]), groups(&[t, p])), (vec![(p, 0), (t, 0)], vec![(t, 1), (p, 1)]));
+        // Three columns: the pair, and the pages again scrolled on their own, before or after the pair.
+        assert_eq!(groups(&[p, t, p]), vec![(p, 0), (t, 0), (p, 2)]);
+        assert_eq!(groups(&[p, p, t]), vec![(p, 0), (p, 1), (t, 1)]);
+        assert_eq!(groups(&[t, p, p]), vec![(t, 1), (p, 1), (p, 2)]);
+        // Between two, a translation goes with the pages before it.
+        assert_eq!(groups(&[p, t, t]), vec![(p, 0), (t, 0), (t, 2)]);
+        // 原地替换: every view reads the translation, each at its own place.
+        assert_eq!((groups(&[t]), groups(&[t, t])), (vec![(t, 0)], vec![(t, 0), (t, 1)]));
+        // Never more views than a viewer has, and a group is the place of a view on show.
+        assert_eq!(views(&[p, t, p, t]).len(), 3);
+        assert_eq!((Split::Off.views(), Split::Side.views(), Split::Stacked.views(), Split::Triple.views()), (1, 2, 2, 3));
+    }
+
+    #[test]
+    fn the_view_that_goes_is_the_one_scrolled_on_its_own() {
+        let (p, t) = (false, true);
+        // Beside a pair, the pages scrolled apart go, wherever they stand, and though they were worked in last.
+        assert_eq!((spare(&views(&[p, t, p]), 0), spare(&views(&[p, p, t]), 2), spare(&views(&[t, p, p]), 0)), (2, 0, 2));
+        assert_eq!((spare(&views(&[p, t, p]), 2), spare(&views(&[p, p, t]), 0)), (2, 0));
+        // Two halves alike: the one not worked in.
+        assert_eq!((spare(&views(&[p, p]), 0), spare(&views(&[p, p]), 1), spare(&views(&[t, t]), 1)), (1, 0, 0));
+        // A translation with no pages of its own goes before a pair is parted; a pair alone loses its translation.
+        assert_eq!((spare(&views(&[p, t, t]), 0), spare(&views(&[p, t]), 1)), (2, 1));
     }
 
     #[test]
