@@ -6,7 +6,7 @@
 <link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/slides.html">
 <link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/slides.html">
 <title>Turn a paper into lab-meeting slides · Wisp Study tutorials</title>
-<meta name="description" content="Cut the figures you want to present from the PDF, save them to the figure library, then use /slides to have the assistant read the full text and write a .pptx with figures and speaker notes, ready to keep editing in PowerPoint, Keynote or WPS.">
+<meta name="description" content="Cut the figures you want to present from the PDF, save them to the figure library, then use /slides to have the assistant read the full text and write a .pptx with figures and speaker notes, ready to keep editing in PowerPoint, Keynote or WPS; or give it an earlier deck of your group as the reference, and the new file takes its master and layouts.">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
@@ -36,12 +36,12 @@
   <nav class="crumbs" aria-label="Location"><a href="index.html">Tutorials</a><span>›</span>Read</nav>
 
   <header class="doc-head">
-    <p class="kicker">Tutorial 08 · Read</p>
+    <p class="kicker">Tutorial 09 · Read</p>
     <h1>Turn a paper into lab-meeting slides</h1>
-    <p class="lead">You have read the paper, and next week you present it at the lab meeting. This tutorial first cuts the figures you want to show from the PDF and saves them to the figure library, then has the assistant read the full text and write a PowerPoint file: a title slide, a few points per slide, figures with captions, the source page number in the footer, and the speaker notes in the notes. The layout is a starting point, not a finished deck; take it to PowerPoint, Keynote or WPS and keep editing.</p>
+    <p class="lead">You have read the paper, and next week you present it at the lab meeting. This tutorial first cuts the figures you want to show from the PDF and saves them to the figure library, then has the assistant read the full text and write a PowerPoint file: a title slide, a few points per slide, figures with captions, the source page number in the footer, and the speaker notes in the notes. The layout is a starting point, not a finished deck; take it to PowerPoint, Keynote or WPS and keep editing. The last section gives the assistant an earlier deck of your group as the reference, so the new one takes its master, layouts and colours.</p>
     <dl class="facts">
       <div><dt>Scenario</dt><dd>Turn a paper on single-nucleus RNA-seq of rapeseed flower buds at high and low temperature into a lab-meeting talk.</dd></div>
-      <div><dt>Needs</dt><dd>A paper with a PDF, and a model provider set up in “Settings › AI”.</dd></div>
+      <div><dt>Needs</dt><dd>A paper with a PDF, and a model provider set up in “Settings › AI”; to make slides after your own deck, a .pptx as well.</dd></div>
       <div><dt>Time</dt><dd>About 10 minutes; how long the assistant takes to write the slides depends on the model.</dd></div>
     </dl>
   </header>
@@ -54,6 +54,7 @@
         <li><a href="#s2">Save them to the figure library</a></li>
         <li><a href="#s3">Have the assistant write slides with /slides</a></li>
         <li><a href="#s4">Open the file and keep editing</a></li>
+        <li><a href="#s5">Make slides after your own deck</a></li>
         <li class="plain"><a href="#recap">Recap</a></li>
       </ol>
     </nav>
@@ -124,9 +125,47 @@
         </figure>
 
         <p>The speaker notes are in the notes of each slide, and slides with a figure also carry its full caption. For example, the notes of the Fig. 1 slide begin with a sentence to say (here the stand-in model wrote it), “Show panels D and E of the figure first (the UMAP of 17 clusters and the marker genes); panel A is the phenotype under HT”, followed by the full caption of Fig. 1. You see it at a glance in presenter view.</p>
-        <p>The layout is arranged by the program: white background, one accent color, no animation and no template. Switching to your group's template, adjusting the wording and splitting one slide into two are all done in the presentation software. For a bigger change in structure, keep talking in the same conversation (“squeeze the methods into one slide and merge results 3 and 4”) and the assistant writes a new file and leaves the old one alone.</p>
+        <p>Without a reference, the layout is arranged by the program: white background, one accent color, no animation. To use your group's template, see the next section; adjusting the wording and splitting one slide into two are done in the presentation software. For a bigger change in structure, keep talking in the same conversation (“squeeze the methods into one slide and merge results 3 and 4”) and the assistant writes a new file and leaves the old one alone.</p>
 
         <aside class="note warn"><b>Note</b>The points are a summary the model wrote after reading the full text, so go through the numbers and conclusions against the original; the page numbers in the footers are there for that. When slides are generated, the full text of this paper and the label, caption and tags of each figure in the figure library are sent to the model provider you set up. The images themselves are placed in the file from this machine by the program and do not go through the model. A figure is sent out only if you clicked the AI icon when filling in its tags or caption.</aside>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>Make slides after your own deck</h2>
+        <p>A group's talks usually look alike: one master, a layout each for the cover, the section slides and the content slides, the group's name in the footer. Give the assistant a .pptx you presented before as the reference, and the new slides are built on its master and layouts. The reference here is a lab-meeting talk on a single-cell atlas of the Arabidopsis root tip, <code>lab-template-root-atlas.pptx</code>, seven slides: a cover, two section slides (“1. Background”, “2. Results”) and four content slides, with a green band along the bottom, dark green titles, and “Plant Development Group · Lab meeting” and the slide number in the footer.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/slides-07-template.jpg" width="1372" height="792" loading="lazy" alt="Four slides of the reference deck in two rows: the cover “A single-cell atlas of the root tip: journal club” with “Zhang San · 10 November 2026” below; the section slide “1. Background”; the content slides “Questions” and “Main findings” with a few points each. Each slide has a light green band at the bottom with trees, birds or rabbits drawn on it, and on the band “Plant Development Group · Lab meeting” and the slide number.">
+          <figcaption><b>Figure 7.</b> Slides 1, 2, 3 and 6 of the reference deck. The cover, the section slides and the content slides each use a layout of their own; the band and the drawings are on the layouts.</figcaption>
+        </figure>
+
+        <p>This time the paper is another one: the single-nucleus atlas of the maize ligular region published in Nature Communications in 2026, A single-nucleus atlas of ligular region uncovers brassinosteroid-driven cell fate transitions controlling leaf angle in maize. Its Fig. 1 and Fig. 2 were already saved to the figure library as in sections 1 and 2.</p>
+        <p>Go to “Assistant” in the library's sidebar and drop the reference .pptx on the input box. The last line of the “Write” column on the start page says just this: “Make slides after a deck of your own: pick a .pptx file, or drop it here.” The file sits above the input box as a small chip, and the × on the chip takes it off again. Then write what you want:</p>
+        <blockquote><cite>Assistant</cite><p>Use this deck as the reference and turn the maize ligular-region single-nucleus atlas paper into a lab-meeting talk. Please answer in English.</p></blockquote>
+
+        <figure class="shot">
+          <img src="../../img/en/t/slides-08-reference.jpg" width="1372" height="867" loading="lazy" alt="The start page of “Assistant”: four columns of suggestions; the last line of the “Write” column is “Make slides after a deck of your own: pick a .pptx file, or drop it here.” Above the input box at the bottom sits a chip “lab-template-root-atlas.pptx” with a ×, and the box holds the request.">
+          <figcaption><b>Figure 8.</b> The reference file sits above the input box and goes out with the request.</figcaption>
+        </figure>
+
+        <p>The last sentence of the request is there because the first try, without it, got its answer in Chinese (the slides themselves were in English). From sending to the finished file took under a minute; the file is <code>A single-nucleus atlas of the maize ligular region- brassinosteroid-driven cell .pptx</code>, its name taken from the title of the deck, and it is saved as in section 3.</p>
+        <p>The answer says what it took from the reference: “It uses your reference deck's master, layouts and structure: cover, "1. Background", "2. Results", then a closing discussion slide. Each slide has 3–5 bullets, as in the template.” A list of the 11 slides follows. It also says what it did not copy, and what to check: the captions of Fig. 1 and Fig. 2 were too long, so only their first three lines are on the slides and the full text is in the notes; the last bullet of the discussion slide is its own placeholder, “loosely modelled on your template's "Next: pilot batch" line”; and the “about 64% of 261 BR-induced genes” on slide 9 should be checked against page 7 of the paper. Only Fig. 1 and Fig. 2 are in the figure library, so the other results slides have no figure.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/slides-09-answer.jpg" width="1372" height="829" loading="lazy" alt="The assistant's answer: “It uses your reference deck's master, layouts and structure: cover, "1. Background", "2. Results", then a closing discussion slide. Each slide has 3–5 bullets, as in the template.” Below it a numbered list of 11 slides, then notes in bold on the figure captions, the discussion slide, a caveats bullet, slide 9 and the speaker notes, and a closing offer to make a different length or add figures.">
+          <figcaption><b>Figure 9.</b> The second half of the answer: what it took from the reference, and what it did not copy.</figcaption>
+        </figure>
+
+        <p>Opened in LibreOffice, here are six of the 11 slides; compare them with Figure 7. The green band, the trees and the rabbits are drawn on the reference's layouts and are all there. The cover uses the reference's cover layout, the two section slides “1. Background” and “2. Results” its section layout, and the rest its content layout, with the same dark green titles. The source in the footer (such as “Wang et al., 2026 · Fig. 1 · p. 3”) and the slide number stand where the reference has its footer and its number. On a slide with a figure, the program still places the figure and its caption beside the points, as in section 4.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/slides-10-result.jpg" width="1372" height="539" loading="lazy" alt="Six slides of the new deck in two rows of three, all with the reference's green band and drawings: the cover “A single-nucleus atlas of the maize ligular region: brassinosteroid-driven cell fate transitions control leaf angle”; the section slide “1. Background”; “Materials and methods”; “A developmental atlas from primordium to mature ligular region” with Fig. 1 and a shortened caption on the right; “BR has stage-specific effects” with Fig. 2; “Discussion: what it means for us”. The footers read “Wang et al., 2026” with the figure and page.">
+          <figcaption><b>Figure 10.</b> Six of the 11 slides made after the reference (slides 1, 2, 4, 6, 7 and 11). The layouts, the colours and where the footer stands come from the reference; the cover's subtitle is left-aligned where the reference centres it, a detail to fix in the presentation software.</figcaption>
+        </figure>
+
+        <p>Two things are not carried over. None of the reference's own seven slides goes into the new file, and so neither does text written on those slides (the footer “Plant Development Group · Lab meeting”, for one); the new footers give the source. The reference file itself is not changed. Ask for slides again in the same conversation and the same reference is used.</p>
+
+        <aside class="note"><b>Tip</b>A reference works best when it is built on layouts: titles and points in the layout's title and body places, a section slide holding only a title. An earlier try here used a reference whose section slides had a line of small text under the title; the assistant wrote such a line on its section slides too, and in the new file those two slides fell on the content layout. If most slides of the reference are text boxes drawn on blank slides, the new slides can only take its background and theme, the slides will not be laid out like it, and the assistant says so in its answer (the reference here uses layouts, so this did not come up). An old .ppt cannot be read; save it as .pptx first.</aside>
       </section>
 
       <section id="recap" class="recap">
@@ -136,6 +175,7 @@
           <li>The figure label and caption are read from the page, the model can fill in tags from the figure, and you look them over before saving.</li>
           <li><code>/slides</code> has the assistant read the full text and look up the figure library, and write a .pptx with figures, source footers and speaker notes in the notes; you choose where to save it.</li>
           <li>A figure missing from the slides is one you have not saved: save it to the figure library and run it again. Check numbers and conclusions against the original.</li>
+          <li>Drop an earlier .pptx of your group on “Assistant” with the request, and the new slides are built on its master and layouts, the footer and number in its places; its own slides are not carried over and the file is not changed.</li>
           <li>Next: widen the question to the whole library; see <a href="ask.html">Ask the whole library, and check the answers</a>.</li>
         </ul>
       </section>
@@ -143,8 +183,8 @@
   </div>
 
   <nav class="pager" aria-label="Previous and next">
-    <a class="prev" href="listen.html"><small>Previous · 07</small><strong>Listen to a paper</strong></a>
-    <a class="next" href="ask.html"><small>Next · 09</small><strong>Ask the whole library, and check the answers</strong></a>
+    <a class="prev" href="listen.html"><small>Previous · 08</small><strong>Listen to a paper</strong></a>
+    <a class="next" href="ask.html"><small>Next · 10</small><strong>Ask the whole library, and check the answers</strong></a>
   </nav>
 </main>
 
@@ -160,7 +200,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> The model answers differently each time, so the wording and numbers will differ when you follow along, but the steps are the same. The thumbnails of the slides were made by rendering the .pptx one slide at a time with macOS Quick Look. The screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface and a stand-in model that answers by fixed rules, so the numbers in this tutorial are those of that run.</p>
+      <p><b>About this tutorial.</b> The model answers differently each time, so the wording and numbers will differ when you follow along, but the steps are the same. The thumbnails of the slides were made by rendering the .pptx one slide at a time with macOS Quick Look. The screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface and a stand-in model that answers by fixed rules, so the numbers in this tutorial are those of that run. Section 5 (Figures 7 to 10) comes from another run with v0.18.0, on the maize ligular region paper, with a real model, claude-sonnet-5-5 through a local gateway; the reference deck is a demo file made from LibreOffice's own template Forestbird, and its thumbnails were made by opening the .pptx in LibreOffice.</p>
       <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation; check key numbers and conclusions against the original.</p>
     </div>
   </div>

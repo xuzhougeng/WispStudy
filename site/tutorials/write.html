@@ -6,7 +6,7 @@
 <link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/write.html">
 <link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/write.html">
 <title>写论文 · Wisp Study 教程</title>
-<meta name="description" content="在写作页写一篇论文的引言：看别人在这一部分怎么写，给自己的段落配引用，核对每条引用依据的原句，或者交代一句让助手写进稿件；从资料库把图放进稿件，最后导出。">
+<meta name="description" content="在写作页写一篇论文的引言：看别人在这一部分怎么写，给自己的段落配引用，核对每条引用依据的原句，或者交代一句让助手写进稿件；从资料库把图放进稿件，写一张表，在预览里按读者看到的样子检查，最后导出成 Word。">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
@@ -36,9 +36,9 @@
   <nav class="crumbs" aria-label="位置"><a href="index.html">教程</a><span>›</span>写作</nav>
 
   <header class="doc-head">
-    <p class="kicker">教程 13　·　写作</p>
+    <p class="kicker">教程 14　·　写作</p>
     <h1>写论文：候选句、配引用与出处</h1>
-    <p class="lead">数据分析做完了，要动笔写自己论文的引言。这一篇在写作页上走一遍：先用中文把意思写下来，看文献库里的论文在引言里怎么写，给段落配上引用，再逐条核对每条引用依据的是原文哪一句；也可以交代一句话，让助手直接写进稿件。</p>
+    <p class="lead">数据分析做完了，要动笔写自己论文的引言。这一篇在写作页上走一遍：先用中文把意思写下来，看文献库里的论文在引言里怎么写，给段落配上引用，再逐条核对每条引用依据的是原文哪一句；也可以交代一句话，让助手直接写进稿件。最后写一张表，在「预览」里按读者看到的样子检查，导出成 Word。</p>
     <dl class="facts">
       <div><dt>场景</dt><dd>为一篇水稻叶枕单细胞核图谱的论文写引言，文献库「植物单细胞转录组」就在旁边。</dd></div>
       <div><dt>需要</dt><dd>文献库里有几篇带全文的文献；在「设置 › AI」里配好的模型服务。</dd></div>
@@ -57,7 +57,8 @@
         <li><a href="#s5">参考文献与出处</a></li>
         <li><a href="#s6">换成助手写</a></li>
         <li><a href="#s7">资料库：把图放进稿件</a></li>
-        <li><a href="#s8">导出</a></li>
+        <li><a href="#s8">写表格，按导出的样子预览</a></li>
+        <li><a href="#s9">导出</a></li>
         <li class="plain"><a href="#recap">回顾</a></li>
       </ol>
     </nav>
@@ -179,7 +180,49 @@
       </section>
 
       <section id="s8">
-        <h2><i>8</i>导出</h2>
+        <h2><i>8</i>写表格，按导出的样子预览</h2>
+        <p>方法部分要交代分期取样，列成一张表最清楚。这一节换了一份 v0.18.0 上新建的演示稿件，题目和第 1 节一样，在同一个文献库「植物单细胞转录组」里，Methods 一节写的是本研究的分期参照了哪篇文献。</p>
+        <p>表格就在正文里用竖线写：几行连在一起，每格用 <code>|</code> 隔开，第一行是表头，第二行用短横线把表头和内容分开。短横线两边的冒号定这一列怎么对齐：<code>|:--|</code> 靠左，<code>|:-:|</code> 居中，<code>|--:|</code> 靠右。节里还可以用 <code>###</code> 写一个小标题。本例这一节是这样写的（引用照第 2 节那样插入）：</p>
+        <figure class="code">
+          <figcaption>Methods 一节的原文</figcaption>
+<pre><code>### 与玉米叶舌区图谱的取样对照
+
+本研究的分期参照了玉米叶舌区单细胞核图谱 [@Wang2026]：从茎尖分生组织到叶舌区成形，共分四个阶段（表 1）。
+
+**表 1**　玉米叶舌区图谱各阶段的取样
+
+| 阶段 | 取样部位 | 细胞或细胞核数 |
+|:--|:-:|--:|
+| S0 | 茎尖分生组织（P0–P6） | 18955 |
+| S1 | 前叶舌带 | 13522 |
+| S2 | 叶舌区 | 12598 |
+| S3 | 叶舌区（L2） | 20616 |</code></pre>
+        </figure>
+        <p>四个阶段和各自的细胞或细胞核数，取自那篇文献图 1b 上标的数字。编辑时，表格就是这几行字；小标题已经按标题显示，引用显示成 <code>(Wang et al., 2026)</code>。</p>
+
+        <figure class="shot">
+          <img src="../img/t/write-13-table.jpg" width="1372" height="867" loading="lazy" alt="写作页，Methods 一节：小标题「与玉米叶舌区图谱的取样对照」加粗；一段中文，句中引用显示为绿色的 (Wang et al., 2026)；「表 1　玉米叶舌区图谱各阶段的取样」；下面是六行带竖线的文字，第二行是 |:--|:-:|--:|。右边是候选句面板，稿件下方是一排按钮和「让助手改这一节」的输入框。">
+          <figcaption><b>图 13</b>　编辑时，表格是几行带竖线的字。</figcaption>
+        </figure>
+
+        <p>点稿件上方的眼睛图标「预览」（悬停时写着「预览：看排好版的全文，Markdown 照它写的样子画出来」），整份稿件按读者读到的样子排出来，再点一下回到编辑：</p>
+        <ul>
+          <li>竖线写的表格画成了表格，表头一行有底色，各列按内容分宽度；</li>
+          <li>引用按「导出」菜单里选的格式显示，这里是作者-年份；</li>
+          <li>文末「参考文献」那一条，就是导出文件里的那一条；</li>
+          <li>节里的 <code>###</code> 小标题比节名 Methods 小一级；没写的节写着「这一节还没有写。」，导出时不出现。</li>
+        </ul>
+
+        <figure class="shot">
+          <img src="../img/t/write-14-preview.jpg" width="1372" height="867" loading="lazy" alt="写作页的预览：Methods 一节下是加粗的小标题、带 (Wang et al., 2026) 的段落、表 1 的标题和一张四列五行的表格（阶段、取样部位、细胞或细胞核数）；下面是没写的 Results 和 Discussion，各写着这一节还没有写；最后是「参考文献 1 篇」，一条完整的 APA 式条目：Wang, Q., Yang, H., … Li, G. (2026). A single-nucleus atlas of ligular region uncovers brassinosteroid-driven cell fate transitions controlling leaf angle in maize. Nature Communications, 17(1), 10762. 和 DOI。">
+          <figcaption><b>图 14</b>　「预览」：表格画成表格，引用和文末的参考文献按导出的格式排。</figcaption>
+        </figure>
+
+        <p>预览里三列都是靠左的：冒号写的对齐，要到导出的 Word 里才用上。表的编号「表 1」是写在表上方的一段普通文字，加粗是 <code>**</code> 写的。</p>
+      </section>
+
+      <section id="s9">
+        <h2><i>9</i>导出</h2>
         <p>点稿件上方的「导出」，菜单里是「Markdown（.md）」「Word（.docx）」和「复制全文」；稿件有批注时 Word 一项写作「Word（.docx），带批注」。没写内容的节不导出。</p>
         <p>菜单下半部分是 Word 里引用的格式：「Word 里的引用：作者-年份」「Word 里的引用：编号 [1]」，以及 APA、Nature、Cell、NLM/Vancouver、IEEE、两种 GB/T 7714—2015、Chicago 这些期刊样式，最后一项「添加引用样式文件（Zotero 的 .csl）…」。选中的那项打勾，稿件里的引用也跟着按它显示。</p>
 
@@ -189,6 +232,13 @@
         </figure>
 
         <p>导出的 Word 文件按选中的格式写引用，文末列出参考文献：第 7 节那份演示稿件导出后，正文里是 <code>(Zhang et al., 2023)</code>，图注里的引用也一样，文末是 References 下的一条完整条目。正文里的引用是 Word 的域，链到文末对应的那一条。放进稿件的图嵌在 Word 文件里，图在上、图注在下。</p>
+        <p>稿件里写的表格，在 Word 里是一张真正的表格，不是一行行带竖线的字。上一节那份稿件导出成 Word 后用 LibreOffice 打开：细线格子，表头一行加粗，第二列居中、第三列靠右，正是 <code>|:--|:-:|--:|</code> 写的；各列宽度按内容分，和预览里一样。文末 References 下的条目和预览里的那一条相同。表头那一行在文件里设成了跨页时每页重复，这张表短，一页放得下，看不出来。</p>
+
+        <figure class="shot">
+          <img src="../img/t/write-15-word.jpg" width="932" height="1017" loading="lazy" alt="导出的 Word 文件第一页（用 LibreOffice 打开）：题目「水稻叶枕发育的单细胞核转录组图谱」，Methods，斜体的小标题，带 (Wang et al., 2026) 的段落，「表 1　玉米叶舌区图谱各阶段的取样」，下面是一张细线表格：表头阶段、取样部位、细胞或细胞核数加粗，取样部位一列居中，数字一列靠右；最后是 References 和一条完整条目。">
+          <figcaption><b>图 15</b>　导出的 Word 文件：表格是 Word 的表格，对齐照第二行的冒号。没写的节没有导出。</figcaption>
+        </figure>
+
         <p>Markdown 里引用仍是 <code>[@Zhang2023]</code> 这样的原样文字，图片复制到 .md 文件旁边的 <code>figures</code> 文件夹；要排成正式的引文格式，在参考文献页切到「全文」点「导出 BibTeX」，把 .md、.bib 和 <code>figures</code> 一起交给 Pandoc。</p>
         <aside class="note"><b>提示</b>导师在 Word 里批注之后，怎样导入、逐条处理并导出成带修订的文件，见下一篇。</aside>
       </section>
@@ -201,7 +251,8 @@
           <li>参考文献页的星形按钮为没有出处的引用补上依据，找不到依据的用提醒色标出。</li>
           <li>「助手写」把查文献和成段的活交出去，每处改动可撤销，每节留有版本。</li>
           <li>「资料库」里上传自己的图、找图片库里收藏的图，点一下放进稿件；Word 里图嵌在文件中，Markdown 的图在旁边的 <code>figures</code> 文件夹。</li>
-          <li>稿件里的引用按「导出」菜单选的格式显示，导出的 Word 文件按它写引用并列出参考文献。</li>
+          <li>表格用竖线写在正文里，第二行的冒号定各列对齐；「预览」把表格、引用和文末参考文献按导出的样子排出来。</li>
+          <li>稿件里的引用按「导出」菜单选的格式显示，导出的 Word 文件按它写引用并列出参考文献，表格是 Word 里真正的表格。</li>
           <li>和合作者来回改稿，接着读<a href="revise.html">和合作者改稿</a>；只想先搭一篇综述的框架，回到<a href="review.html">分阶段写一篇综述</a>。</li>
         </ul>
       </section>
@@ -209,8 +260,8 @@
   </div>
 
   <nav class="pager" aria-label="上一篇和下一篇">
-    <a class="prev" href="review.html"><small>上一篇 · 12</small><strong>分阶段写一篇综述</strong></a>
-    <a class="next" href="revise.html"><small>下一篇 · 14</small><strong>和合作者改稿</strong></a>
+    <a class="prev" href="review.html"><small>上一篇 · 13</small><strong>分阶段写一篇综述</strong></a>
+    <a class="next" href="revise.html"><small>下一篇 · 15</small><strong>和合作者改稿</strong></a>
   </nav>
 </main>
 
@@ -226,7 +277,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>关于这篇教程</b>　截图和数字来自 2026 年 11 月在 macOS 上用 v0.10.0 的一次实际操作；图 4、第 7 节和图 12 是 v0.17.0 上一份演示稿件的操作。模型每次的回答不一样，你照做时措辞和数字会有出入，步骤是一样的。</p>
+      <p><b>关于这篇教程</b>　截图和数字来自 2026 年 11 月在 macOS 上用 v0.10.0 的一次实际操作；图 4、第 7 节和图 12 是 v0.17.0 上一份演示稿件的操作；第 8 节和图 15 是 2026 年 11 月 23 日在 v0.18.0 上新建的一份演示稿件，没有用到模型，图 15 是用 LibreOffice 打开导出的 Word 文件截的。模型每次的回答不一样，你照做时措辞和数字会有出入，步骤是一样的。</p>
       <p><b>助手可能出错</b>　它的建议和回答都要你确认；关键的数字和结论请对照原文。</p>
     </div>
   </div>

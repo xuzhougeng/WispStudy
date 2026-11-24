@@ -6,7 +6,7 @@
 <link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/migrate.html">
 <link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/migrate.html">
 <title>Bring in the papers you already have · Wisp Study tutorials</title>
-<meta name="description" content="Move the records in Zotero, a folder of PDFs collected over the years, a .bib from your advisor and a few DOIs into one library, then complete the records that were not recognized and find the missing full texts. No model is needed.">
+<meta name="description" content="Move the records in Zotero, a folder of PDFs collected over the years, a .bib from your advisor and a few DOIs into one library, then complete the records that were not recognized, find the missing full texts, shrink a PDF that is too big and get the text out of a scan. Apart from text recognition, no model is needed.">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
@@ -38,11 +38,11 @@
   <header class="doc-head">
     <p class="kicker">Tutorial 03 · Collect</p>
     <h1>Bring in the papers you already have: Zotero, PDFs and records</h1>
-    <p class="lead">The worst part of switching tools is that everything is scattered. Some of it is in Zotero, some is PDFs you saved over the years, and some is a .bib from your advisor and a few DOIs noted in a report. This tutorial moves all of it into one library, keeps one copy of each duplicate, completes the records that were not recognized and finds the missing full texts.</p>
+    <p class="lead">The worst part of switching tools is that everything is scattered. Some of it is in Zotero, some is PDFs you saved over the years, and some is a .bib from your advisor and a few DOIs noted in a report. This tutorial moves all of it into one library, keeps one copy of each duplicate, completes the records that were not recognized and finds the missing full texts. Last, it shrinks a 90 MB PDF and gets the text out of a scan.</p>
     <dl class="facts">
       <div><dt>Scenario</dt><dd>The project has been running for a while. The papers are spread over Zotero, a PDF folder with subfolders by species, a .bib and a few DOIs.</dd></div>
-      <div><dt>Needs</dt><dd>A library (it can be empty) and a computer that is online. No model is needed: no step here goes through a model provider.</dd></div>
-      <div><dt>Time</dt><dd>About 10 minutes, of which a few minutes are waiting for database lookups and full-text downloads.</dd></div>
+      <div><dt>Needs</dt><dd>A library (it can be empty) and a computer that is online. No model is needed: apart from the text recognition in step 8 (DeepSeek OCR or a vision model), no step here goes through a model provider.</dd></div>
+      <div><dt>Time</dt><dd>About 15 minutes, of which a few minutes are waiting for database lookups and full-text downloads.</dd></div>
     </dl>
   </header>
 
@@ -56,6 +56,8 @@
         <li><a href="#s4">The advisor's .bib and the DOIs in a report</a></li>
         <li><a href="#s5">Complete a PDF that was not recognized, by title</a></li>
         <li><a href="#s6">Find the missing full texts</a></li>
+        <li><a href="#s7">A PDF that is too big: compress it</a></li>
+        <li><a href="#s8">A scan with no text: text recognition</a></li>
         <li class="plain"><a href="#recap">Recap</a></li>
       </ol>
     </nav>
@@ -103,7 +105,22 @@
 
         <p>This time the result was “6 added · 0 existing · 0 in trash · 0 failed · 4 PDFs added · 1 pending”, and one web snapshot was not moved. Look at the tags on the left. Zotero's tags came over as they were (“<span lang="zh-CN">精读</span>” (close reading) and “<span lang="zh-CN">数据库</span>” (database)). Collections became tags with a path, such as <code>Zotero/<span lang="zh-CN">方法/注释</span></code> (Zotero/Methods/Annotation), and one click filters that collection. Notes attached to a paper were merged into the paper's note, and the PMID in Extra was recognized too.</p>
         <p>The pending item is the Multiome paper: Zotero has an attachment record for it, but the file was never downloaded. The record came in anyway, and its full text is left for step 6.</p>
-        <p>For what is moved, common errors (such as “the database is in use”) and how to move only part of it, see <a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/ZOTERO.md">Importing papers from Zotero (in Chinese)</a>.</p>
+        <p>Not everything in Zotero has to move. Since v0.18.0, when your Zotero has collections, the dialog shown once you have picked <code>zotero.sqlite</code> lists its “Collections”, in the order of Zotero's left pane, with subcollections indented under their parent and the number of items beside each. Only the ticked collections are imported, and ticking one takes its subcollections along. With none ticked, the whole library is imported. The button says how many items the ticks add up to.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/migrate-10-zotero-collections.jpg" width="1372" height="867" loading="lazy" alt="The “Collections” of the “Import from Zotero” dialog: 拟南芥 (Arabidopsis) 4 items with 根 (root) 1 item under it, 方法 (methods) 4 items with 整合 (integration) 1 item and 注释 (annotation) 3 items under it, 水稻 (rice) 3 items, 玉米 (maize) 3 items. Methods, rice and maize are ticked, and integration and annotation under methods show a lighter tick. Arabidopsis and root are not ticked. The buttons are Cancel and Import 10 items. Behind it is a library of 40 papers.">
+          <figcaption><b>Figure 4.</b> Methods, rice and maize ticked: the two subcollections of methods are ticked along with it (lighter), and the button went from “Import 14 items” to “Import 10 items”.</figcaption>
+        </figure>
+
+        <p>The Zotero library of this demo holds 14 items, sorted into collections by species and by method. Here only rice, maize and methods are wanted, so “<span lang="zh-CN">拟南芥</span>” (Arabidopsis) stays unticked along with the “<span lang="zh-CN">根</span>” (root) under it. Click “Import 10 items”, and a few seconds later:</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/migrate-11-zotero-collections-report.jpg" width="1372" height="867" loading="lazy" alt="The “Zotero import” results window: 10 / 10 items processed, import complete. 9 added, 1 existing, 0 in trash, 0 failed, 1 PDFs added, 1 pending. Under the first row, A single-cell multi-omics atlas of rice, yellow text, still in Chinese, says that the PDF cannot be found and should be downloaded in Zotero first or its path repaired. Single-cell transcriptomics reveal how root tissues adapt to soil stress has 1 PDFs added. In the Tags column on the left: Zotero/方法/注释, Zotero/水稻, 数据库, Zotero/玉米, Zotero/方法/整合, 精读.">
+          <figcaption><b>Figure 5.</b> Only the three ticked collections moved. The Tags column has their <code>Zotero/…</code> tags and none for Arabidopsis.</figcaption>
+        </figure>
+
+        <p>The result was “9 added · 1 existing · 0 in trash · 0 failed · 1 PDFs added · 1 pending”. The library went from 40 papers to 49, and the 4 papers in the unticked Arabidopsis collection did not come in. The existing one is the maize ligular region paper (Nature Communications, 2026): the library already had it, so its record was left as it was and its PDF was not stored a second time. That is why <code>Zotero/<span lang="zh-CN">玉米</span></code> (maize) shows 2 papers, not 3. The pending one is the rice multi-omics atlas: Zotero only has an attachment record for it, and the file was never downloaded. The one PDF that came along is the Nature paper on rice roots in soil, which step 7 comes back to.</p>
+        <p>For what is moved and common errors (such as “the database is in use”), see <a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/ZOTERO.md">Importing papers from Zotero (in Chinese)</a>.</p>
         <aside class="note"><b>Tip</b>One paper in Zotero, about dorsal root ganglia, was saved by mistake long ago and has nothing to do with plants. Click “Move to trash” in its details. The folder in the next step also holds its PDF, so you will see what happens to it.</aside>
       </section>
 
@@ -114,7 +131,7 @@
 
         <figure class="shot">
           <img src="../../img/en/t/migrate-03-pdf-report.jpg" width="1372" height="870" loading="lazy" alt="The “PDF import” details window: 6 / 6 items processed, Import complete. Imported 4, Needs attention 1, Skipped 1, Import failed 0, Processing 0, Waiting 0. Below it says 6 PDFs, Added 5 · In trash, not imported 1. The result of each file is listed: arabidopsis-root-hairs.pdf was added but the DOI was not detected, so use title lookup in the paper details; the paper of myrosin-cells.pdf is in the trash and was not imported; further rows show papers that were added. At the bottom left, the sidebar shows “PDF import complete 6/6” and the tags arabidopsis 2, methods 2 and rice 1.">
-          <figcaption><b>Figure 4.</b> The import details. Yellow text is what you should look at again: one file had no DOI detected, and one matches a paper in the trash. Click a row to open that paper.</figcaption>
+          <figcaption><b>Figure 6.</b> The import details. Yellow text is what you should look at again: one file had no DOI detected, and one matches a paper in the trash. Click a row to open that paper.</figcaption>
         </figure>
 
         <ul>
@@ -132,7 +149,7 @@
 
         <figure class="shot">
           <img src="../../img/en/t/migrate-04-doi.jpg" width="1372" height="870" loading="lazy" alt="The “Add by DOI / PMID / web address” dialog with 10.3389/fpls.2025.1666531 in the input box. Below it says that several can be pasted at once, that title, authors, journal, year and abstract are retrieved from Crossref and Europe PMC, that the identifiers are sent to both services, and that the web address of an article page or a PDF can be pasted too.">
-          <figcaption><b>Figure 5.</b> One paper at a time. The dialog says that the identifier is sent to Crossref and Europe PMC.</figcaption>
+          <figcaption><b>Figure 7.</b> One paper at a time. The dialog says that the identifier is sent to Crossref and Europe PMC.</figcaption>
         </figure>
 
         <p>Click “Look up and add”. A few seconds later the maize root paper comes in, with title, authors, journal and abstract filled in. Open the dialog again and enter the PMID <code>42021342</code>. The paper that arrives is the reed invasion one (Genome Biology, 2026). You can also paste a doi.org link. Papers that came in as records only, like these, are listed in the “Missing PDF” view.</p>
@@ -150,14 +167,14 @@
 
         <figure class="shot">
           <img src="../../img/en/t/migrate-05-complete-candidates.jpg" width="1372" height="870" loading="lazy" alt="The “Look up by title” dialog. The title box holds Evolutionary diversity of cell-type-specific expression and stress response in Brassicaceae roots, with a note that you can edit the search title without changing the paper's saved title. Below it says Crossref: 5 results, Europe PMC: 2 results, arXiv: no results. There are two candidates with the same title: a 2024 preprint (openRxiv, DOI 10.1101/2024.06.21.599952) and the 2026 published version in Nature Communications (DOI 10.1038/s41467-026-73270-2, PMID 42161986), each with a green label for a title match. The buttons are Cancel and Search again.">
-          <figcaption><b>Figure 6.</b> The number of results from each source is written above. A preprint and the published version of the same title are two candidates, and you decide which to take.</figcaption>
+          <figcaption><b>Figure 8.</b> The number of results from each source is written above. A preprint and the published version of the same title are two candidates, and you decide which to take.</figcaption>
         </figure>
 
         <p>Here Crossref returned 5 results, Europe PMC 2 and arXiv none. They merged into two candidates: the 2024 preprint and the 2026 published version in Nature Communications, both marked as a title match. Being listed first only means the title is closer. For arabidopsis-root-hairs.pdf the same lookup found a single record, the 2013 article in Genome Biology. This example takes the published version. Click it to check it field by field:</p>
 
         <figure class="shot">
           <img src="../../img/en/t/migrate-06-complete-fields.jpg" width="1372" height="870" loading="lazy" alt="“Title lookup · Review record”: the candidate at the top is the Nature Communications article of 2026 (Published, with its DOI and PMID 42161986, from Crossref and Europe PMC) and has an Open web page button. Below, each field has a ticked checkbox and the proposed content, with “Currently empty” under it: Authors, Year, Journal, Volume, Issue, Pages, Publication status and DOI are visible. The button at the bottom right is “Save 10 fields”, and the other button at the bottom left is “Back to candidates”.">
-          <figcaption><b>Figure 7.</b> Under each field it says what is there now. By default only empty fields and a title that is just a file name are ticked. Content that already exists is replaced only if you tick it.</figcaption>
+          <figcaption><b>Figure 9.</b> Under each field it says what is there now. By default only empty fields and a title that is just a file name are ticked. Content that already exists is replaced only if you tick it.</figcaption>
         </figure>
 
         <p>All the fields of this paper are empty, so all are ticked by default. Click “Save 10 fields”. A message says “Completed” with the title, and the row now has authors, a year and the journal.</p>
@@ -170,7 +187,7 @@
 
         <figure class="shot">
           <img src="../../img/en/t/migrate-07-nopdf.jpg" width="1372" height="870" loading="lazy" alt="The “Missing PDF” view lists 12 papers whose full text is “Linked”. Above the list, a green note says that open access full text is looked for on arXiv, journals and author repositories and attached to each paper, that paid or login-only files are skipped, and that the DOI or PMID is sent to OpenAlex, Europe PMC and publishers. The button on the right is “Find open full text for 12 papers”.">
-          <figcaption><b>Figure 8.</b> The note at the top of the “Missing PDF” view says what is sent and to whom.</figcaption>
+          <figcaption><b>Figure 10.</b> The note at the top of the “Missing PDF” view says what is sent and to whom.</figcaption>
         </figure>
 
         <p>It looks only for versions that can be had free and legally: arXiv, the open access files listed by OpenAlex and Europe PMC, and the PDFs at the publisher for Springer / BMC, Nature and Frontiers articles that they mark as open access. It does not sign in and does not get around paywalls. A paper with no DOI, PMID or arXiv ID cannot be looked up.</p>
@@ -178,12 +195,63 @@
 
         <figure class="shot">
           <img src="../../img/en/t/migrate-08-fetch-report.jpg" width="1372" height="870" loading="lazy" alt="The “Full text search” window: 12 / 12 papers processed, Search complete. Saved 8, No URL found 2, Download failed 2, Searching 0, Waiting 0. A line explains that No URL found means no downloadable file was located, and Download failed means a URL was found but the PDF could not be saved. The result of each paper is listed with its reason: Plant bZIPs in Root Environmental Adaptation failed because OpenAlex gave www.mdpi.com, which returned HTTP 403; Alternative Splicing in Plant Development failed because the address returned something that is not a PDF, most likely a sign-in or verification page; two papers (alfalfa heat stress and guard cell biology) show No download URL found. Behind it, “Missing PDF” now holds 4 papers.">
-          <figcaption><b>Figure 9.</b> Of the 12 papers, 8 were saved. For 2 an address was found but the file could not be saved, and for 2 no address was found. The reason is written under each paper.</figcaption>
+          <figcaption><b>Figure 11.</b> Of the 12 papers, 8 were saved. For 2 an address was found but the file could not be saved, and for 2 no address was found. The reason is written under each paper.</figcaption>
         </figure>
 
         <p>The 8 saved are the three Frontiers in Plant Science papers, the Nature Communications paper, the two BMC Plant Biology papers, the Genome Biology paper and the Plant Cell paper. Their PDFs were attached to the existing entries. Of the other 4, two are open access articles whose addresses were found but not served to a program: one from MDPI returned HTTP 403, and the other returned a sign-in or verification page, which was not stored as a PDF. For the last two, the New Phytologist and Plant Physiology papers, no download address was found. “Missing PDF” still holds 4 papers.</p>
         <p>For the rest, click “Open web page” in the details, download the PDF in your browser, then drag the file into the Wisp Study window. It reads the DOI, recognizes that the library already has this paper and attaches the PDF to the existing entry. The details say “Paper already in library; PDF attached to existing record”, and no extra record appears. The “PDF” tab of a single paper also has two buttons, “Find open full text” and “Add PDF”.</p>
         <aside class="note"><b>Tip</b>A failed download does not mean the paper has no open full text. It only means it could not be fetched for you this time. Try again later in “Missing PDF”: the button only looks for papers that still have no PDF.</aside>
+      </section>
+
+      <section id="s7">
+        <h2><i>7</i>A PDF that is too big: compress it</h2>
+        <p>The Nature paper that came over from Zotero in step 2, when only some collections were ticked (how rice roots adapt to soil, 2025), has a PDF of 90.9 MB, most likely because its figures were stored at their original resolution. It slows down paging, backups and copying the library to another computer. When the main-text PDF is over 10 MB, its row under the paper's details has one more button, “Compress”:</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/migrate-12-compress.jpg" width="1372" height="867" loading="lazy" alt="The details of Single-cell transcriptomics reveal how root tissues adapt to soil stress, scrolled down to “Main text PDF”: s41586-025-08941-z.pdf, Body · 90.9 MB · 39 pages available for chat, with the buttons Compress and Reading and two icon buttons on the right. The note holds the PMID that came from Zotero's Extra field, and the last line gives the source as the Zotero import.">
+          <figcaption><b>Figure 12.</b> A main-text PDF of 90.9 MB, and a “Compress” button in its row.</figcaption>
+        </figure>
+
+        <p>Click “Compress”. It runs on this computer and uploads nothing. This one took two or three seconds, and the top of the window said “Compressed: 90.9 MB → 12.6 MB. The original moved to the removed folder.”</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/migrate-13-compressed.jpg" width="1372" height="867" loading="lazy" alt="The message at the top of the window: Compressed: 90.9 MB → 12.6 MB. The original moved to the removed folder. In the details the file row now reads Body · 12.6 MB · 39 pages available for chat, and the Compress button is gone.">
+          <figcaption><b>Figure 13.</b> 12.6 MB after compressing, and all 39 pages can still be used to ask questions.</figcaption>
+        </figure>
+
+        <p>Compressing changes only the pictures: those whose long side is over 2400 pixels (about 200 dpi on an A4 page) are scaled down to 2400 pixels, while text, fonts, pages and links stay the same, and so do your annotations and the text that was read. After compressing, it checks that every page still has the same text as before and does not save the result otherwise. We compared the two files ourselves: the text of all 39 pages is identical. The original was not deleted; it is in the <code>removed/</code> folder of the library's folder.</p>
+        <aside class="note"><b>Tip</b>On the command line the same thing is <code>wisp compress_pdf</code>. The assistant in the window can do it too, and asks you first.</aside>
+      </section>
+
+      <section id="s8">
+        <h2><i>8</i>A scan with no text: text recognition</h2>
+        <p>Last comes a preprint you only have as a scan. In this example <code>Qin_2026_scan.pdf</code> is a 35-page bioRxiv preprint drawn page by page into pictures and put back together as a PDF (8.2 MB), just like what a copier produces: the pages hold only images and not a single word can be selected. Drag it into the window and it joins the library, but its Full text is “PDF without text”, its title is the file name and it says “Authors and year missing”. The file's row in the details says why:</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/migrate-14-textless.jpg" width="1372" height="867" loading="lazy" alt="The details of Qin_2026_scan: Authors missing, status PDF without text. Under “Main text PDF” the row of Qin_2026_scan.pdf reads Body · 8.2 MB · No text extracted: pages have no text layer. Below it a sentence, its first half still in Chinese, says the pages have no text layer and are most likely a scan or images, that text recognition (OCR) can read the text on the pages, and that until text is extracted, questions use only this paper's record and abstract. Two buttons: Read again and Recognise page text.">
+          <figcaption><b>Figure 14.</b> “No text extracted: pages have no text layer”, with two buttons below: “Read again” and “Recognise page text”.</figcaption>
+        </figure>
+
+        <p>“Recognise page text” is text recognition (OCR): it reads the words off the pages. Which engine does it is chosen under Settings › Network › “Text recognition (OCR)”:</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/migrate-15-ocr-settings.jpg" width="1372" height="867" loading="lazy" alt="Settings › Network, lower half, “Text recognition (OCR)”: Engine with the choices Auto, DeepSeek OCR, Vision model and Off. Auto is chosen, and green text beside it says Using DeepSeek OCR. Below is the DeepSeek OCR API key box, which uses the DeepSeek service's key when left blank. A paragraph at the bottom says that DeepSeek OCR uploads the whole file to DeepSeek, at most 1000 pages and 100 MB a file, billed by the page, and that the vision model is the one the AI page gives the Structure full text task.">
+          <figcaption><b>Figure 15.</b> “Engine”: “Auto”, “DeepSeek OCR”, “Vision model” and “Off”. With “Auto”, the label beside it says which one is actually used.</figcaption>
+        </figure>
+
+        <ul>
+          <li><strong>DeepSeek OCR</strong> uploads the whole file to DeepSeek, at most 1000 pages and 100 MB a file, billed by the page. With the key left blank it uses the key of the DeepSeek service on the AI page, or <code>DEEPSEEK_API_KEY</code>.</li>
+          <li><strong>Vision model</strong> is the model the AI page gives the “Structure full text” task. It draws the pages as pictures and reads them one at a time.</li>
+        </ul>
+        <p>This example has a DeepSeek key, so “Auto” says “Using DeepSeek OCR”. Back at the paper, click “Recognise page text”. The file's row shows a spinner and “Recognising page text…”, and about half a minute later the 35 pages were done:</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/migrate-16-ocr-done.jpg" width="1372" height="867" loading="lazy" alt="The same paper's details, its status now PDF saved. Under “Main text PDF” the row of Qin_2026_scan.pdf reads Body · 8.2 MB · 27 of 35 pages contain text for chat (read by DeepSeek OCR). In the list the row's title is still Qin_2026_scan, with authors and year missing.">
+          <figcaption><b>Figure 16.</b> “27 of 35 pages contain text for chat (read by DeepSeek OCR)”: it also records who read the text.</figcaption>
+        </figure>
+
+        <p>The recognised text is stored page by page, and from now on asking questions, searching the full text and writing can use it. This time DeepSeek OCR returned no text for 8 pages, the first page among them. In the run for the Chinese version of this page, on the same file, only one page came back empty, a page that is all table: the service does not answer the same way every time. The title is still the file name; now that the file has text, you can “Look up by title” as in step 5.</p>
+        <aside class="note warn"><b>Note</b>DeepSeek OCR sends the file out and charges by the page. On the command line the same thing is <code>wisp ocr_pdf</code>, and the assistant in the window can do it too, asking you first. The vision model works only in the window and reads at most 40 pages at a time; click again to go on with the rest.</aside>
       </section>
 
       <section id="recap" class="recap">
@@ -193,7 +261,9 @@
           <li>A folder of 6 PDFs was imported and its subfolders became tags. 5 were added, one of them with no DOI detected, and the paper in the trash did not come back.</li>
           <li>The .bib brought in 5 papers and skipped 1 existing one. One paper each was added by DOI and by PMID.</li>
           <li>A record with only a title was completed by title into the published version in Nature Communications, not the preprint. Of 12 papers missing full text, 8 were found, and the reasons for the others are in the details.</li>
-          <li>No model was used anywhere. Next you can <a href="read.html">read one of these papers closely</a>, or go back to <a href="start.html">start from a topic</a> and fill out the library with a search.</li>
+          <li>Ticking three collections moved 10 items from Zotero. The 90.9 MB Nature PDF that came with them was compressed to 12.6 MB, and the original is in <code>removed/</code>.</li>
+          <li>DeepSeek OCR read the text of 27 of the 35 pages of a scan, which can now be used to ask questions.</li>
+          <li>Apart from text recognition, no model was used anywhere. Next you can <a href="read.html">read one of these papers closely</a>, or go back to <a href="start.html">start from a topic</a> and fill out the library with a search.</li>
         </ul>
       </section>
     </article>
@@ -217,7 +287,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> Most screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface; Figures 2 and 3 still show the Chinese interface and the earlier run (Figure 2 comes from a small database made for the demo). The numbers in the text come from those runs and will differ with your own papers, but the steps are the same. The text uses the labels of the English interface (Settings › General › Interface language).</p>
+      <p><b>About this tutorial.</b> Most screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface; Figures 2 and 3 still show the Chinese interface and the earlier run (Figure 2 comes from a small database made for the demo). Figures 4, 5 and 12–16 come from another run with v0.18.0, also with the English interface, on a library of 40 papers: the Zotero database was made for the demo (its items are real papers), the scan was made by drawing a preprint page by page into pictures, and text recognition used DeepSeek OCR (straight to DeepSeek, not through a model provider). The numbers in the text come from those runs and will differ with your own papers, but the steps are the same. The text uses the labels of the English interface (Settings › General › Interface language).</p>
       <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation. Check key numbers and conclusions against the original text.</p>
     </div>
   </div>

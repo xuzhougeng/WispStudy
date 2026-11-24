@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/mindmap.html">
+<link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/mindmap.html">
+<title>把一篇文献理成思维导图 · Wisp Study 教程</title>
+<meta name="description" content="在 PDF 旁边开一栏思维导图：让模型读全文起草，点节点上的页码回到原文那一句，从 PDF 里选一段加成节点，自己加分支、收起、改，和译文并排成三栏，最后把大纲复制成 Markdown。">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../app-icon.png">
+<link rel="stylesheet" href="../style.css">
+<link rel="stylesheet" href="../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">跳到正文</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="站点">
+      <a href="index.html" aria-current="page">教程</a>
+      <a href="../index.html#ideas">理念</a>
+      <a href="../index.html#tools">工具</a>
+      <a href="../index.html#download">下载</a>
+    </nav>
+    <a class="lang" href="../en/tutorials/mindmap.html" lang="en" hreflang="en">English</a>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="位置"><a href="index.html">教程</a><span>›</span>阅读</nav>
+
+  <header class="doc-head">
+    <p class="kicker">教程 06　·　阅读</p>
+    <h1>把一篇文献理成思维导图</h1>
+    <p class="lead">一篇 17 页的文章读完，脑子里的结构还是散的：先问了什么，用了什么办法，早期和后期各是哪几个基因，最后留下了什么问题。本篇在 PDF 旁边开一栏思维导图，先让模型读全文起草，再一边读一边改：点节点上的页码回到原文那一句，把读到的句子加成节点，写下自己要问的，最后把整张图复制成大纲带走。</p>
+    <dl class="facts">
+      <div><dt>场景</dt><dd>还是<a href="read.html">精读一篇文献</a>里那篇玉米叶舌区单细胞核图谱，组会前把它理成一张导图。</dd></div>
+      <div><dt>需要</dt><dd>一篇带 PDF 的文献。让模型起草时要在「设置 › AI」里配置一个模型；自己做不需要。</dd></div>
+      <div><dt>用时</dt><dd>约 10 分钟，起草要等一两分钟。</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="本篇的小节">
+      <h2>本篇</h2>
+      <ol>
+        <li><a href="#s1">在 PDF 旁边开一栏导图</a></li>
+        <li><a href="#s2">让模型读全文起草</a></li>
+        <li><a href="#s3">收起分支，看清一支</a></li>
+        <li><a href="#s4">点页码，回到原文那一句</a></li>
+        <li><a href="#s5">从原文加一句，写下自己的</a></li>
+        <li><a href="#s6">原文 · 译文 · 导图</a></li>
+        <li><a href="#s7">把导图带走：复制大纲</a></li>
+        <li class="plain"><a href="#recap">回顾</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>在 PDF 旁边开一栏导图</h2>
+        <p>打开这篇的「PDF」页（本例在阅读模式里，整个窗口留给这一篇），点工具栏「译文」旁边的「导图」。PDF 让出右半边，那里是这篇的思维导图：一开始只有一个根节点，就是文献的题目，下面三行小字说怎么用。</p>
+
+        <figure class="shot">
+          <img src="../img/t/mindmap-01-empty.jpg" width="1372" height="867" loading="lazy" alt="阅读模式：左边是玉米叶舌区论文的第 1 页，右边一栏左上角是「导图」标签和一个 ✦ 图标；栏里只有一个绿色的根节点，写着论文题目，下面三行灰字：Tab 加一个分支，Enter 加同级，空格改字，Delete 删除；在 PDF 里选一段，点「加到导图」，它就挂在选中的节点下面，点页码回到原文；也可以点上面的 ✦ 让模型先起草，再自己改。工具栏上「导图」和「左右分屏」是绿色的。">
+          <figcaption><b>图 1</b>　「导图」在 PDF 旁边开一栏，根节点是文献的题目。</figcaption>
+        </figure>
+
+        <p>导图和原文、译文一样是阅读区里的一栏，左上角的「导图」标签和其他栏的标签一样可以换位置、关闭（见<a href="read.html#s9">精读一篇文献</a>第 9 节）。它跟着文献存在文献库里，换一篇再回来、关掉窗口再打开，都还在。</p>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>让模型读全文起草</h2>
+        <p>自己从头搭当然可以，但一篇长文先有个骨架更快。点「导图」标签旁边的 ✦，标签右边出现「正在起草…」。模型读这篇的全文，写出一份分层的大纲，画成导图。本例用的是「设置 › AI › 任务」里「提问」的模型，经本机的网关调用 Claude Sonnet 5.5，一分钟内画好了。</p>
+
+        <figure class="shot">
+          <img src="../img/t/mindmap-02-draft.jpg" width="1372" height="867" loading="lazy" alt="右边一栏是起草好的导图：根节点在左下方，改成了中文「玉米叶枕区单核图谱：BR 驱动的细胞命运转变与叶角」；向右展开「图谱构建」「BR 的阶段特异作用」「早期：LG1-GELP2/3/6 控制叶枕起始」等分支，每个分支下是几条要点，如「4 个组织、9 个文库共 65,691 个细胞/核」「鉴定出 32 个细胞簇（C0-C31）」，部分要点右边有绿色的 p.2、p.4 页码；导图比这一栏宽，右边被截住。">
+          <figcaption><b>图 2</b>　模型起草的导图：7 个分支、35 条要点，其中 14 条带着页码。</figcaption>
+        </figure>
+
+        <p>本例的草稿有 7 个分支：问题与背景、图谱构建、BR 的阶段特异作用、早期、后期、自交系差异、意义与局限，下面一共 35 条要点。根节点也被换成了一句中文的概括。</p>
+        <p>要点右边的绿色页码是它的出处：模型给出一句原文，应用在全文里逐字找到它，才标上页码。找不到的就不标，所以 35 条里只有 14 条带页码，没有页码的要点是模型的概括，要自己对照原文。</p>
+        <aside class="note"><b>提示</b>导图按原大小排，比这一栏宽、比窗口高时，在导图上滚动查看。选中一个节点，导图会滚到它在的位置。</aside>
+        <aside class="note warn"><b>注意</b>起草时这篇的全文会发给你配置的模型服务。读不出全文的文献，只凭摘要起草。</aside>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>收起分支，看清一支</h2>
+        <p>35 条要点一起摊开，一栏放不下。每个分支节点右边有一个小圆点，点一下把它下面的要点收起，圆点里写着收起了几条，再点一下展开。本例收起了问题与背景、图谱构建、BR 的阶段特异作用、早期和自交系差异，只留「后期」和「意义与局限」两支展开。</p>
+
+        <figure class="shot">
+          <img src="../img/t/mindmap-03-fold.jpg" width="1372" height="867" loading="lazy" alt="导图一栏：上面四个分支「问题与背景」「图谱构建」「BR 的阶段特异作用」「早期：LG1-GELP2/3/6 控制叶枕起始」都已收起，右边小圆点里写着 4、5、6、5；「后期：HP1-ad 细胞伸长与 LG1/BZR1 模块」展开着七条要点，第一条「近轴下表皮伸长细胞 HP1-ad 是 BR 响应的关键细胞类型」被选中、带绿色边框，「LG1 与 BZR1 直接激活 bHLH30 和 bHLH155」右边有页码 p.8；下面「自交系差异：伸长与木质化」收起着，写着 4，「意义与局限」展开着。">
+          <figcaption><b>图 3</b>　收起的分支旁边写着收起了几条。选中的节点带一圈绿色边框。</figcaption>
+        </figure>
+
+        <p>用键盘更快。点导图里的空白处，导图就接住了键盘：方向键在节点之间走，<kbd>Tab</kbd> 在选中的节点下面加一个分支，<kbd>Enter</kbd> 在它旁边加一个同级节点，空格或双击改字（<kbd>Enter</kbd> 保存，<kbd>Esc</kbd> 放弃），<kbd>Delete</kbd> 删掉它和它下面的全部。<kbd>Shift</kbd>+<kbd>Tab</kbd> 提一级，<kbd>Alt</kbd> 加方向键调整层级和同级里的顺序。改错了，<kbd>⌘</kbd>+<kbd>Z</kbd> 撤销，加 <kbd>Shift</kbd> 重做。</p>
+        <aside class="note warn"><b>注意</b>在阅读模式里改节点的字时，按 <kbd>Esc</kbd> 放弃，窗口也会一起退出阅读模式（v0.18.0 如此）。导图还在，改的字按放弃处理，再进阅读模式接着做就是。</aside>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>点页码，回到原文那一句</h2>
+        <p>「LG1 与 BZR1 直接激活 bHLH30 和 bHLH155」这条是全篇的关键结论之一，想看原文怎么说的。指针停在它右边的「p.8」上，出来的提示就是那句原文：“LG1 and BZR1 directly bind to the promoters of bHLH30 and bHLH155”。点一下，左边的原文跳到第 8 页，这句用黄色标出来。</p>
+
+        <figure class="shot">
+          <img src="../img/t/mindmap-04-goto.jpg" width="1372" height="867" loading="lazy" alt="左边原文跳到第 8 页，页码显示 8 / 17 页，「LG1 and BZR1 directly bind to the promoters of bHLH30 and bHLH155」一句用黄色标出，这一页带绿色边框；右边导图里「LG1 与 BZR1 直接激活 bHLH30 和 bHLH155」节点被选中，右边是 p.8。">
+          <figcaption><b>图 4</b>　点节点上的「p.8」，原文跳到第 8 页并标出那一句。</figcaption>
+        </figure>
+
+        <p>这样核对一条要点只要一下：页码是逐字找到的，标出来的就是模型引的那一句；读完上下文，觉得这条概括得不对，直接在导图上改。</p>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>从原文加一句，写下自己的</h2>
+        <p>读摘要时觉得有一句应该挂在「后期」这一支下面。先点一下「后期」节点选中它，再在左边原文里选中这一句：By integrating cellular and transcriptomic analyses, we reveal that brassinosteroid (BR) inhibits cell division in the adaxial division zone while promoting elongation in adaxial hypodermal cells。选区下面出现一排按钮，最后两个是「加到导图」和「朗读」。</p>
+
+        <figure class="shot">
+          <img src="../img/t/mindmap-05-pick.jpg" width="1372" height="867" loading="lazy" alt="左边原文第 1 页摘要里，By integrating cellular and transcriptomic analyses 到 adaxial hypodermal cells 一句被选中，底色是淡绿色；选区下面一排按钮：复制、下划线、高亮、添加到对话、翻译、加到导图、朗读。右边导图里「后期：HP1-ad 细胞伸长与 LG1/BZR1 模块」被选中。">
+          <figcaption><b>图 5</b>　选中一句，选区下面有「加到导图」。</figcaption>
+        </figure>
+
+        <p>点「加到导图」，这句成了「后期」下面的最后一个节点，后面带着「p.1」。节点上只显示开头一段，原句整句记在出处里，点「p.1」同样回到这一句。节点上的字可以改短（空格改字），出处不变。</p>
+
+        <figure class="shot">
+          <img src="../img/t/mindmap-06-added.jpg" width="1372" height="867" loading="lazy" alt="右边导图里「后期」下面多了最后一个节点「By integrating cellular and transcriptomic analyses, we reve…」，右边是 p.1，带绿色边框表示选中；左边原文停在第 1 页。">
+          <figcaption><b>图 6</b>　加进来的节点挂在选中的节点下面，带着页码。</figcaption>
+        </figure>
+
+        <p>读到这里想到组会上要问的事，也写进导图：在根节点下加一个分支「组会上要问：外源 BR 的浓度梯度和处理时机」。自己写的节点没有页码，和模型写的一样可以移动、收起、删除。</p>
+        <p>这时如果再点 ✦，应用不会直接换掉：标签旁边先问「用模型的草稿换掉现在的导图？」，点「换掉」才重新起草，点「不换」什么都不变。换掉之后 <kbd>⌘</kbd>+<kbd>Z</kbd> 还能回到原来的导图。</p>
+
+        <figure class="shot">
+          <img src="../img/t/mindmap-07-own.jpg" width="1372" height="867" loading="lazy" alt="导图往下滚了一些：根节点左边，「后期」「自交系差异」「意义与局限」几个分支，最下面一个自己加的分支「组会上要问：外源 BR 的浓度梯度和处理时机」；导图标签右边一行字「用模型的草稿换掉现在的导图？」，后面是绿色的「换掉」和「不换」。">
+          <figcaption><b>图 7</b>　自己写的分支在最下面。导图里已经有自己的节点时，✦ 先问要不要换掉。</figcaption>
+        </figure>
+      </section>
+
+      <section id="s6">
+        <h2><i>6</i>原文 · 译文 · 导图</h2>
+        <p>导图开着的时候也可以看译文。点工具栏的「译文」，原文旁边多出一栏同一页的译文，两栏一起滚动；导图留在最右边，成了三栏，工具栏上写着「三栏对照」。译文由「设置 › AI」里给翻译指定的模型生成，本例是 GPT-6 Luna，经同一个网关。</p>
+
+        <figure class="shot">
+          <img src="../img/t/mindmap-08-columns.jpg" width="1372" height="867" loading="lazy" alt="三栏：左边「原文」栏是论文第 1 页；中间「译文」栏是同一页，题目和摘要换成了中文；右边「导图」栏是导图的左半边，根节点和几个分支。工具栏上「译文」「导图」是绿色，旁边写着 104 / 104 段和「三栏对照」；右上角的版面写着「对照译文」。">
+          <figcaption><b>图 8</b>　原文 · 译文 · 导图三栏。每一栏左上角都有自己的标签。</figcaption>
+        </figure>
+
+        <p>阅读区最多三栏。已经有三栏时再点「导图」，应用会提示先关掉一栏，或者在某一栏的标签里选「显示导图」，把那一栏换成导图。原文至少留一栏，最后一栏原文不能关，也不能换成导图。</p>
+      </section>
+
+      <section id="s7">
+        <h2><i>7</i>把导图带走：复制大纲</h2>
+        <p>组会的讲稿、自己的笔记里要用到这份结构，点 ✦ 右边的「复制大纲」。整张导图复制成 Markdown 的嵌套列表，题目是一级标题，每个节点一行，出处写在后面的方括号里。下面是本例复制出来的一部分：</p>
+
+        <figure class="code">
+          <figcaption>「复制大纲」得到的 Markdown（节选）</figcaption>
+<pre><code># 玉米叶枕区单核图谱：BR 驱动的细胞命运转变与叶角
+
+- 问题与背景
+…
+- 后期：HP1-ad 细胞伸长与 LG1/BZR1 模块
+  - 近轴下表皮伸长细胞 HP1-ad 是 BR 响应的关键细胞类型
+  - BR 使 Z58、B73、W22 的 LA 分别增加约 6.1°、9.3°、13°
+  - 约 64% 的 BR 共诱导基因主要在 HP1-ad 表达
+  - LG1 与 BZR1 直接激活 bHLH30 和 bHLH155 [p.8 "LG1 and BZR1 directly bind to the promoters of bHLH30 and bHLH155"]
+  - bHLH30/155 下游激活 EXPA5 促进细胞伸长
+  …
+- 组会上要问：外源 BR 的浓度梯度和处理时机</code></pre>
+        </figure>
+
+        <p>命令行和 MCP 读到的也是这份大纲：<code>wisp mind_map --id &lt;文献 ID&gt;</code> 返回节点数和同样的 Markdown，外部的 AI 客户端可以拿它接着写，见<a href="follow.html#s6">跟进新文献</a>里 MCP 的一节。</p>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>回顾</h2>
+        <ul>
+          <li>PDF 工具栏的「导图」在旁边开一栏，根节点是文献题目；导图跟着文献存在文献库里。</li>
+          <li>✦ 让模型读全文起草；原句在文献里逐字找得到的要点才带页码，没有页码的要自己核对。</li>
+          <li>小圆点收起和展开分支；点导图空白处后用键盘加、改、删、移动节点，<kbd>⌘</kbd>+<kbd>Z</kbd> 撤销。</li>
+          <li>点页码回到原文那一句；在 PDF 里选一段点「加到导图」，它挂在选中的节点下面，带着页码。</li>
+          <li>导图和译文可以并排成三栏；「复制大纲」把整张图复制成 Markdown。</li>
+          <li>下一步：把几篇放在一起读，见<a href="compare.html">对照着读几篇文献</a>。</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="上一篇和下一篇">
+    <a class="prev" href="read.html"><small>上一篇 · 05</small><strong>精读一篇文献</strong></a>
+    <a class="next" href="compare.html"><small>下一篇 · 07</small><strong>对照着读几篇文献</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>参考</h2>
+      <ol>
+        <li><a href="index.html">全部教程</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">功能详解：每个页面能做什么</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">数据与隐私：文件放在哪里，哪些数据会离开本机</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">问题与想法：Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>关于这篇教程</b>　截图来自 2026 年 11 月在 macOS 上用 v0.18.0 的一次实际操作。起草用的是 Claude Sonnet 5.5，翻译用的是 GPT-6 Luna，都经本机的网关调用。模型每次起草的导图不一样，你照做时分支、措辞和带页码的条数会有出入，步骤是一样的。</p>
+      <p><b>助手可能出错</b>　它起草的要点都要你核对；关键的数字和结论请对照原文。</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
