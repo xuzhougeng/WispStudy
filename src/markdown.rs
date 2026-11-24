@@ -1,13 +1,15 @@
 //! Draws an answer of the assistant: the blocks `wisp_core::markdown` reads
-//! from its Markdown, one under the other. Lists are set tight, tables as a
-//! grid of equal columns, links open in the browser. Where the answer
-//! cites (`[P3 p.5 "…"]`), a click is handed to whoever asked for it.
+//! from its Markdown, one under the other. Lists are set tight, tables as
+//! rows whose columns are as wide as their words need, links open in the browser. Where the answer
+//! cites (`[P3 p.5 "…"]`), a click is handed to whoever asked for it. A
+//! closed block of Mermaid is drawn as the diagram it describes (`diagram`).
 
 use crate::theme::{self, Theme, text_px};
 use gpui::{prelude::FluentBuilder, *};
 use std::rc::Rc;
 use wisp_core::ai::{self, Citation};
 use wisp_core::markdown::{Align, Block, Marker, Rich, parse};
+use wisp_core::mermaid;
 
 /// What a click on a citation does.
 pub type OnCite = Rc<dyn Fn(&Citation, &mut Window, &mut App)>;
@@ -49,18 +51,36 @@ pub struct Selecting {
 
 /// What is drawn with: an id that keeps the links of this text apart from
 /// those of another, a count of the links so far, what a citation does,
-/// and the layouts of the pieces drawn so far, for finding the pointer in them.
+/// and the layouts of the pieces drawn so far, for finding the pointer in them:
+/// none for a piece drawn as something other than its text (a diagram).
 struct Draw<'a> {
     id: &'a str,
     links: usize,
+    /// The diagrams so far: what keeps the buttons of one apart from those of the next.
+    diagrams: usize,
     cite: Option<OnCite>,
     selected: Option<(Place, Place)>,
-    layouts: Vec<TextLayout>,
+    layouts: Vec<Option<TextLayout>>,
+    /// How much larger than an answer's the text around is set, in pixels: the headings are larger by as much, and stand further from what is over them.
+    lift: f32,
 }
+
+/// The size an answer's text is set in, which the sizes of its headings are chosen for.
+const ANSWER_SIZE: f32 = 14.;
 
 /// `text` as elements.
 pub fn render(id: &str, text: &str, cite: Option<OnCite>, selecting: Option<Selecting>) -> Div {
-    let mut draw = Draw { id, links: 0, cite, selected: selecting.as_ref().and_then(|selecting| selecting.selected), layouts: vec![] };
+    render_lifted(id, text, cite, selecting, 0.)
+}
+
+/// `text` as a page to read through, its words set in `size`: a heading keeps its distance from the words, so
+/// the lowest one is never smaller than they are, and has more room over it than under it.
+pub fn render_page(id: &str, text: &str, size: f32) -> Div {
+    render_lifted(id, text, None, None, size - ANSWER_SIZE).text_size(text_px(size))
+}
+
+fn render_lifted(id: &str, text: &str, cite: Option<OnCite>, selecting: Option<Selecting>, lift: f32) -> Div {
+    let mut draw = Draw { id, links: 0, diagrams: 0, cite, selected: selecting.as_ref().and_then(|selecting| selecting.selected), layouts: vec![], lift };
     let drawn = div().flex().flex_col().gap(theme::paragraph_gap(10.)).children(blocks(&parse(text), &mut draw));
     let Some(selecting) = selecting else { return drawn };
     // Where the pointer is among the pieces: in the one it is over, else at the near end of the one nearest above or below.
@@ -70,6 +90,7 @@ pub fn render(id: &str, text: &str, cite: Option<OnCite>, selecting: Option<Sele
     let place = move |position: Point<Pixels>| -> Option<Place> {
         let mut nearest: Option<((Pixels, Pixels), Place)> = None;
         for (at, layout) in layouts.iter().enumerate() {
+            let Some(layout) = layout else { continue };
             // A piece not laid out in this frame has no place to be found in.
             let Ok(bounds) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| layout.bounds())) else { continue };
             let (down, index) = if position.y < bounds.top() {
@@ -94,7 +115,7 @@ pub fn render(id: &str, text: &str, cite: Option<OnCite>, selecting: Option<Sele
         canvas(
             move |bounds, window, cx| {
                 let at = |(piece, byte): Place| -> Option<(Point<Pixels>, Pixels)> {
-                    let layout = layouts.get(piece)?;
+                    let layout = layouts.get(piece)?.as_ref()?;
                     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| layout.position_for_index(byte.min(layout.len())).map(|point| (point, layout.line_height())))).ok().flatten()
                 };
                 if let (Some((start, _)), Some((end, line))) = (at(from), at(to)) { told(Drawn { start, end, line, origin: bounds.origin }, window, cx) }
@@ -241,7 +262,8 @@ fn block(block: &Block, links: &mut Draw) -> AnyElement {
                 3 => (15., 24.),
                 _ => (14., 22.),
             };
-            div().pt(px(4.)).text_size(text_px(size)).line_height(theme::body_line(line)).font_weight(FontWeight::SEMIBOLD).child(rich(text, links)).into_any_element()
+            let lift = links.lift.max(0.);
+            div().pt(px(4. + 8. * lift)).text_size(text_px(size + lift)).line_height(theme::body_line(line + 1.5 * lift)).font_weight(FontWeight::SEMIBOLD).child(rich(text, links)).into_any_element()
         }
         Block::Item { marker, text, children } => {
             let mark = match marker {
@@ -259,36 +281,63 @@ fn block(block: &Block, links: &mut Draw) -> AnyElement {
                 .child(div().flex().flex_col().flex_1().min_w_0().gap(px(4.)).child(rich(text, links)).children(blocks(children, links)))
                 .into_any_element()
         }
-        Block::Code { text, .. } => {
+        Block::Code { lang, text, closed } => {
+            // A block of Mermaid that is written to its end is a diagram: drawn as one, unless the person asked for
+            // its source or it cannot be drawn. One still being written stays code: half a diagram is not shown.
+            let diagram = (*closed && mermaid::is_mermaid(lang)).then(|| {
+                links.diagrams += 1;
+                (format!("{}-diagram-{}", links.id, links.diagrams), crate::diagram::drawn(text))
+            });
+            if let Some((id, Ok(drawn))) = &diagram && !crate::diagram::as_source(text) {
+                // Still a piece of the answer, so the places after it count as they do in `texts`; there is no text of it to select.
+                links.layouts.push(None);
+                return crate::diagram::picture(id, text, drawn);
+            }
             let code = StyledText::new(text.clone()).with_highlights(with_selection(vec![], selected_in(links, text)));
-            links.layouts.push(code.layout().clone());
-            div().px(px(12.)).py(px(10.)).rounded(px(6.)).border_1().border_color(Theme::line()).bg(Theme::bg_sunken()).font_family(theme::MONO_FONT).text_size(text_px(12.5)).line_height(theme::body_line(19.)).child(code).into_any_element()
+            links.layouts.push(Some(code.layout().clone()));
+            let code = div().px(px(12.)).py(px(10.)).rounded(px(6.)).border_1().border_color(Theme::line()).bg(Theme::bg_sunken()).font_family(theme::MONO_FONT).text_size(text_px(12.5)).line_height(theme::body_line(19.)).child(code).into_any_element();
+            match diagram {
+                Some((id, drawn)) => crate::diagram::source(&id, text, code, drawn.err().as_deref()),
+                None => code,
+            }
         }
         Block::Quote(inner) => div().flex().flex_col().gap(theme::paragraph_gap(8.)).pl(px(12.)).border_l_2().border_color(Theme::line_strong()).text_color(Theme::text_secondary()).children(blocks(inner, links)).into_any_element(),
         Block::Rule => div().h(px(1.)).bg(Theme::line()).into_any_element(),
         Block::Table { aligns, rows } => {
-            let cells = rows.iter().enumerate().flat_map(|(r, row)| row.iter().enumerate().map(move |(c, cell)| (r, c, cell))).map(|(r, c, cell)| {
-                div()
-                    .min_w_0()
-                    .px(px(10.))
-                    .py(px(6.))
-                    .text_size(text_px(13.))
-                    .line_height(theme::body_line(20.))
-                    .border_color(Theme::line())
-                    .when(c > 0, |d| d.border_l_1())
-                    .when(r > 0, |d| d.border_t_1())
-                    .when(r == 0, |d| d.bg(Theme::bg_sunken()).font_weight(FontWeight::MEDIUM))
-                    .map(|d| match aligns.get(c) {
-                        Some(Align::Center) => d.text_center(),
-                        Some(Align::Right) => d.text_right(),
-                        _ => d,
-                    })
-                    .child(rich(cell, links))
-            });
-            let cells: Vec<Div> = cells.collect();
-            div().grid().grid_cols(aligns.len() as u16).rounded(px(8.)).border_1().border_color(Theme::line()).overflow_hidden().children(cells).into_any_element()
+            // Rows of cells, each column a share of the width: a cell's words wrap inside it. (As a grid, a cell
+            // was measured for two lines and then drawn on one, over the cell beside it.)
+            let shares = column_shares(rows);
+            let mut lines: Vec<Div> = vec![];
+            for (r, row) in rows.iter().enumerate() {
+                let mut cells: Vec<Div> = vec![];
+                for (c, cell) in row.iter().enumerate() {
+                    cells.push(
+                        div()
+                            .w(relative(shares.get(c).copied().unwrap_or(0.)))
+                            .min_w_0()
+                            .px(px(10.))
+                            .py(px(6.))
+                            .border_color(Theme::line())
+                            .when(c > 0, |d| d.border_l_1())
+                            .map(|d| match aligns.get(c) {
+                                Some(Align::Center) => d.text_center(),
+                                Some(Align::Right) => d.text_right(),
+                                _ => d,
+                            })
+                            .child(rich(cell, links)),
+                    );
+                }
+                lines.push(div().flex().w_full().border_color(Theme::line()).when(r > 0, |d| d.border_t_1()).when(r == 0, |d| d.bg(Theme::bg_sunken()).font_weight(FontWeight::MEDIUM)).children(cells));
+            }
+            div().flex().flex_col().rounded(px(8.)).border_1().border_color(Theme::line()).overflow_hidden().text_size(text_px(13.)).line_height(theme::body_line(20.)).children(lines).into_any_element()
         }
     }
+}
+
+/// The share of a table's width each of its columns gets (`markdown::column_shares`, which a Word file follows too).
+fn column_shares(rows: &[Vec<Rich>]) -> Vec<f32> {
+    let widths: Vec<Vec<usize>> = rows.iter().map(|row| row.iter().map(|cell| wisp_core::markdown::width(&cell.text)).collect()).collect();
+    wisp_core::markdown::column_shares(&widths)
 }
 
 /// What a click in a text leads to.
@@ -329,7 +378,7 @@ fn rich(rich: &Rich, draw: &mut Draw) -> AnyElement {
     }
     highlights.sort_by_key(|(range, _)| range.start);
     let text = StyledText::new(rich.text.clone()).with_highlights(with_selection(highlights, selected_in(draw, &rich.text)));
-    draw.layouts.push(text.layout().clone());
+    draw.layouts.push(Some(text.layout().clone()));
     if targets.is_empty() { return text.into_any_element() }
     draw.links += 1;
     let cite = draw.cite.clone();
@@ -346,7 +395,7 @@ fn rich(rich: &Rich, draw: &mut Draw) -> AnyElement {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: that would bring in gpui's own `test` attribute.
-    use super::{cited_ranges, laid_over, text_between, texts, with_selection};
+    use super::{cited_ranges, column_shares, laid_over, text_between, texts, with_selection};
     use gpui::{FontWeight, HighlightStyle};
     use wisp_core::ai;
     use wisp_core::markdown::{Block, parse};
@@ -360,6 +409,24 @@ mod tests {
         assert_eq!(text_between(answer, (1, 13), (3, 6)), "10x 平台。\n第一条\n里面");
         assert_eq!(text_between(answer, (1, 1), (1, 6)), "根尖");
         assert_eq!(text_between(answer, (9, 0), (40, 0)), "let x = 1;");
+        // A diagram is drawn as a picture and still counted as the piece its source is: what follows it keeps its place.
+        assert_eq!(texts("前文\n\n```mermaid\ngraph LR\n  A --> B\n```\n\n后文"), ["前文", "graph LR\n  A --> B", "后文"]);
+    }
+
+    #[test]
+    fn a_table_gives_its_columns_the_room_their_words_need() {
+        let table = |text: &str| match parse(text).remove(0) {
+            Block::Table { rows, .. } => rows,
+            other => panic!("a table: {other:?}"),
+        };
+        // A column of labels beside two of sentences: narrow, and the two alike.
+        let shares = column_shares(&table("| 维度 | 顶刊那几批，自造数据并做了功能验证的研究 | 子刊那批，多用已发布数据做二次挖掘的研究 |\n|---|---|---|\n| 数据来源 | 自造 | 二次挖掘 |"));
+        assert!((shares.iter().sum::<f32>() - 1.).abs() < 1e-4 && shares[0] < 0.2 && shares[1] == shares[2], "{shares:?}");
+        // Columns alike in what they hold share the width evenly, however short.
+        assert_eq!(column_shares(&table("| a | b |\n|---|---|\n| 1 | 2 |")), [0.5, 0.5]);
+        // One very long cell does not take the table: the short column keeps room for a word.
+        let shares = column_shares(&table(&format!("| P1 | {} |\n|---|---|\n| P2 | x |", "long ".repeat(60))));
+        assert!(shares[0] > 0.15, "{shares:?}");
     }
 
     #[test]

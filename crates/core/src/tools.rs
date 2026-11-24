@@ -14,11 +14,12 @@ use crate::extract::{self, Proposal};
 use crate::filter::{self, Filters, filter_papers};
 use crate::fulltext::{self, terms};
 use crate::libraries::{self, LibraryInfo};
-use crate::model::{FULLTEXTS, Paper, READINGS, SCREENINGS, one_of};
+use crate::model::{FULLTEXTS, Paper, PaperFile, READINGS, SCREENINGS, one_of};
 use crate::openaccess;
 use crate::organise;
 use crate::pdftext;
 use crate::sources::{self, Download, Fetch};
+use crate::websearch;
 use crate::store::{SavedSearch, Store, Suggestion};
 use anyhow::{Result, anyhow, bail};
 use serde_json::{Map, Value, json};
@@ -40,7 +41,7 @@ pub struct ToolDef {
 }
 
 /// The tools that change the library.
-const WRITING: [&str; 27] = ["create_library", "import_library", "export_library", "import_pdf", "import_references", "import_zotero", "save_search", "remove_search", "run_search", "undo_import", "suggest_screening", "suggest_field", "sync_searches", "find_pdf", "import_url", "organise_papers", "edit_section", "set_outline", "comment_manuscript", "export_note", "save_note_to_notion", "resolve_note_save", "save_cite_style", "restyle_docx", "import_docx_references", "import_manuscript", "make_slides"];
+const WRITING: [&str; 28] = ["compress_pdf", "create_library", "import_library", "export_library", "import_pdf", "import_references", "import_zotero", "save_search", "remove_search", "run_search", "undo_import", "suggest_screening", "suggest_field", "sync_searches", "find_pdf", "import_url", "organise_papers", "edit_section", "set_outline", "comment_manuscript", "export_note", "save_note_to_notion", "resolve_note_save", "save_cite_style", "restyle_docx", "import_docx_references", "import_manuscript", "make_slides"];
 /// Of those, the ones the window's assistant runs only with the person's
 /// consent. Saving a search, suggesting a screening decision or proposing
 /// a field's value changes nothing a person has not yet to act on, so they
@@ -48,7 +49,7 @@ const WRITING: [&str; 27] = ["create_library", "import_library", "export_library
 /// about everywhere but in the conversation that writes that manuscript,
 /// where the person has handed the pen over. `comment_manuscript` is not among them: a comment changes no
 /// word of the manuscript, it waits for the person like a screening suggestion.
-const CONFIRMING: [&str; 20] = ["import_library", "export_library", "import_pdf", "import_references", "import_zotero", "run_search", "undo_import", "remove_search", "find_pdf", "import_url", "organise_papers", "edit_section", "set_outline", "export_note", "save_note_to_notion", "resolve_note_save", "restyle_docx", "import_docx_references", "import_manuscript", "make_slides"];
+const CONFIRMING: [&str; 21] = ["compress_pdf", "import_library", "export_library", "import_pdf", "import_references", "import_zotero", "run_search", "undo_import", "remove_search", "find_pdf", "import_url", "organise_papers", "edit_section", "set_outline", "export_note", "save_note_to_notion", "resolve_note_save", "restyle_docx", "import_docx_references", "import_manuscript", "make_slides"];
 /// The tools that write a manuscript (`compose`).
 pub const MANUSCRIPT: [&str; 2] = ["edit_section", "set_outline"];
 
@@ -75,6 +76,19 @@ pub fn catalog() -> Vec<ToolDef> {
             title: "列出文献库",
             description: "列出所有文献库：ID、名称、主题和文献数量。其他工具用 library 参数指定其中一个。首页上还没有建成文献库的对话不在其中。",
             input_schema: json!({"type": "object", "properties": {}, "additionalProperties": false}),
+            writes: false,
+            confirm: false,
+        },
+        ToolDef {
+            name: "web_search",
+            title: "搜索网页",
+            description: "用网页搜索引擎（DeepSeek、Jina 或 You.com，在「设置 › 网络 › 网页搜索」选择并填写 Key）搜索互联网，返回每条结果的标题、网址、摘要、站点和发布时间。用于文献数据库之外的信息：软件和数据库的文档、指南与政策、机构和项目的页面、新闻。找学术文献先用 search_online；网页结果不是文献库里的文献，引用时写出网址，只读到摘要时不要当作读过全文。想把一篇文献的页面收进文献库，用 import_url。不改动文献库。",
+            input_schema: json!({"type": "object", "properties": {
+                "query": {"type": "string", "description": "搜索词。可以用 site:域名 限定站点、\"短语\" 精确匹配、-词 排除；DeepSeek 还支持 lang:zh、after:2025、before:2026-06-01；You.com 还支持 filetype:pdf、AND、OR、NOT。DeepSeek 的搜索词最多 128 个字符。"},
+                "count": {"type": "integer", "description": "返回多少条，默认 8；DeepSeek 和 You.com 最多 50，Jina 最多 20。"},
+                "content": {"type": "boolean", "description": "为 true 时每条结果附上网页正文（每条最多 6000 个字符，更慢）；默认 false，只给摘要。"},
+                "engine": {"type": "string", "enum": websearch::ENGINES.iter().map(|engine| engine.key).collect::<Vec<_>>(), "description": "指定搜索引擎；省略时按设置选择。"},
+            }, "required": ["query"], "additionalProperties": false}),
             writes: false,
             confirm: false,
         },
@@ -111,14 +125,15 @@ pub fn catalog() -> Vec<ToolDef> {
         scoped("import_references", "导入 BibTeX / RIS", "读取本地 BibTeX 或 RIS 文件，按内容自动识别格式并导入参考文献记录。按 DOI、PMID、题目去重，回收站条目也会跳过；不自动导入 PDF，不联网。返回新增和跳过的数量及文献 ID。", json!({
             "path": {"type": "string", "description": "本机 BibTeX / RIS 文件路径，建议使用绝对路径。"},
         }), &["path"]),
-        scoped("import_zotero", "导入 Zotero", "从本机 Zotero 6 / 7 的 zotero.sqlite 导入文献、标签、笔记及可访问的本地 PDF：默认是个人库（我的文库）和所有群组库，zoteroLibrary 只导入其中一个（先用 list_zotero_libraries 看有哪些）。只读源数据库、复制附件；已有文献保留原记录并补 PDF，回收站条目跳过。不联网。建议先退出 Zotero；返回逐项结果，必须检查 failed 和 results 中的 problems。", json!({
+        scoped("import_zotero", "导入 Zotero", "从本机 Zotero 6 / 7 的 zotero.sqlite 导入文献、标签、笔记及可访问的本地 PDF：默认是个人库（我的文库）和所有群组库，zoteroLibrary 只导入其中一个，zoteroCollections 只导入其中几个分类（先用 list_zotero_libraries 看有哪些）。只读源数据库、复制附件；已有文献保留原记录并补 PDF，回收站条目跳过。不联网。建议先退出 Zotero；返回逐项结果，必须检查 failed 和 results 中的 problems。", json!({
             "path": {"type": "string", "description": "本机 Zotero 数据目录中的 zotero.sqlite 路径；storage 目录应在它旁边。"},
             "zoteroLibrary": {"type": "string", "description": "只导入这一个 Zotero 文献库：「我的文库」，群组的名称，或 list_zotero_libraries 给出的 id；省略或「全部」时导入全部。"},
+            "zoteroCollections": {"type": "array", "items": {"type": "string"}, "description": "只导入这几个 Zotero 分类里的条目，每个分类含其子分类：分类路径（如「植物/根」）、只有一个分类叫它时的名称，或 list_zotero_libraries 给出的分类 id。同时给了 zoteroLibrary 时只能是那个文献库的分类。省略时导入整个文献库。"},
         }), &["path"]),
         ToolDef {
             name: "list_zotero_libraries",
             title: "列出 Zotero 文献库",
-            description: "列出本机 zotero.sqlite 里可以导入的文献库：个人库（我的文库）和每个群组库，各有 id、名称和 import_zotero 会导入的条目数（不含笔记、附件和 Zotero 回收站里的）。只读，不联网；建议先退出 Zotero。",
+            description: "列出本机 zotero.sqlite 里可以导入的文献库：个人库（我的文库）和每个群组库，各有 id、名称和 import_zotero 会导入的条目数（不含笔记、附件和 Zotero 回收站里的）；以及每个文献库的分类（collections，按 Zotero 里的顺序，子分类跟在父分类后），各有 id、所属文献库的 id（library）、路径（path）、层级（depth）和含子分类的条目数。只读，不联网；建议先退出 Zotero。",
             input_schema: json!({"type": "object", "properties": {
                 "path": {"type": "string", "description": "本机 Zotero 数据目录中的 zotero.sqlite 路径。"},
             }, "required": ["path"], "additionalProperties": false}),
@@ -315,6 +330,16 @@ pub fn catalog() -> Vec<ToolDef> {
                 "paperId": {"type": "string", "description": "只为这一篇文献查找；省略时处理文献库里没有 PDF 的文献。"},
                 "limit": {"type": "integer", "description": "省略 paperId 时一次最多处理几篇，默认 10，最多 50。"},
                 "lookOnly": {"type": "boolean", "description": "只查找、不下载：返回每篇文献的候选地址。"},
+            }),
+            &[],
+        ),
+        scoped(
+            "compress_pdf",
+            "压缩 PDF",
+            "把文献库里过大的 PDF 变小：长边超过 2400 像素（约 A4 页面上 200 dpi）的图片缩到 2400 像素，照片存为 JPEG，线条图、图表和截图保持无损；文字、字体、页面和用户的标注都不变，压缩后会核对每页文字与原来一致。至少小一成才替换，附件 ID 不变；原文件移到文献库文件夹的 removed/（结果里的 original），以后再导入原文件仍认得这篇文献。带密码或权限保护的 PDF 不处理。给 resourceId 只压缩这个附件，给 paperId 压缩这篇文献的所有 PDF。",
+            json!({
+                "resourceId": {"type": "string", "description": "要压缩的 PDF 附件 ID，见 get_paper 的 files。"},
+                "paperId": {"type": "string", "description": "压缩这篇文献的所有 PDF 附件。"},
             }),
             &[],
         ),
@@ -643,6 +668,8 @@ pub fn describe_result(result: &Result<Value, String>) -> String {
         Ok(value) => {
             if let Some(total) = value["total"].as_u64() {
                 format!("{total} 条结果")
+            } else if let (Some(engine), Some(results)) = (value["engine"].as_str(), value["results"].as_array()) {
+                format!("{engine}：{} 个网页", results.len())
             } else if let (Some(changed), Some(unchanged)) = (value["changed"].as_u64(), value["unchanged"].as_u64()) {
                 if unchanged > 0 { format!("改了 {changed} 篇，{unchanged} 篇不用改") } else { format!("改了 {changed} 篇") }
             } else if let Some(commented) = value["commented"].as_u64() {
@@ -678,38 +705,61 @@ pub fn describe_result(result: &Result<Value, String>) -> String {
     }
 }
 
+/// What a front end lends the tools beyond plain requests (`Fetch`, `Download`): the ways out that need the
+/// person's own connections or keys. `Reach::default()` lends nothing, and a tool that needs what was not lent says so.
+#[derive(Clone, Copy, Default)]
+pub struct Reach<'a> {
+    /// Saving a note to Notion through the connector set up in the window.
+    pub publish: Option<crate::notes::Publish<'a>>,
+    /// Searching the web with the engine chosen in settings (`websearch`).
+    pub search: Option<websearch::Search<'a>>,
+}
+
 /// Run a tool against the data folder `root`. The error is a sentence for
 /// whoever called: a person at a terminal or a model.
 pub fn call(root: &Path, name: &str, args: &Value, fetch: Fetch, download: Download) -> Result<Value, String> {
-    call_with(root, name, args, fetch, download, None)
+    call_with(root, name, args, fetch, download, Reach::default())
 }
 
-pub fn call_with(root: &Path, name: &str, args: &Value, fetch: Fetch, download: Download, publish: Option<crate::notes::Publish>) -> Result<Value, String> {
+pub fn call_with(root: &Path, name: &str, args: &Value, fetch: Fetch, download: Download, reach: Reach) -> Result<Value, String> {
     checked(name, args)?;
     if name == "create_library" { return local::create_library(root, args).map_err(|e| format!("{e:#}")) }
     if name == "import_library" { return local::import_library(root, args).map_err(|e| format!("{e:#}")) }
     if name == "list_zotero_libraries" { return local::zotero_libraries(args).map_err(|e| format!("{e:#}")) }
     if name == "sync_searches" { return sync_searches(root, args, fetch, crate::time::now_millis()).map_err(|e| format!("{e:#}")) }
+    if name == "web_search" { return web_search(args, reach) }
     if name == "list_libraries" {
         let all: Vec<Value> = libraries::shelved(root).iter().map(|l| json!({"id": l.id, "name": l.name, "topic": l.topic, "papers": l.paper_count, "autoSyncHours": l.auto_sync_hours})).collect();
         return Ok(json!({"libraries": all}));
     }
     let info = find_library(root, args["library"].as_str().unwrap_or(""))?;
     let mut store = Store::open(&info.dir).map_err(|e| format!("{e:#}"))?;
-    call_in_with(&mut store, &info, name, args, fetch, download, publish)
+    call_in_with(&mut store, &info, name, args, fetch, download, reach)
 }
 
 /// Run a library tool on a library that is already open.
 pub fn call_in(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fetch: Fetch, download: Download) -> Result<Value, String> {
-    call_in_with(store, info, name, args, fetch, download, None)
+    call_in_with(store, info, name, args, fetch, download, Reach::default())
 }
 
-pub fn call_in_with(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fetch: Fetch, download: Download, publish: Option<crate::notes::Publish>) -> Result<Value, String> {
+pub fn call_in_with(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fetch: Fetch, download: Download, reach: Reach) -> Result<Value, String> {
     checked(name, args)?;
     if name == "save_note_to_notion" {
-        return publish.ok_or("此运行环境没有提供 Notion MCP；请使用桌面应用或 wisp 命令。")?(store, info, args);
+        return reach.publish.ok_or("此运行环境没有提供 Notion MCP；请使用桌面应用或 wisp 命令。")?(store, info, args);
     }
+    if name == "web_search" { return web_search(args, reach) }
     dispatch(store, info, name, args, fetch, download).map_err(|e| format!("{e:#}"))
+}
+
+/// `web_search`: the web searched with the engine asked for or the one settings choose. No library is read or written.
+fn web_search(args: &Value, reach: Reach) -> Result<Value, String> {
+    let search = reach.search.ok_or("此运行环境没有提供网页搜索；请使用桌面应用或 wisp 命令。")?;
+    let words = |e: anyhow::Error| format!("{e:#}");
+    let query = websearch::Query { query: text(args, "query").map_err(words)?.to_string(), count: number(args, "count", websearch::DEFAULT_COUNT, 50).map_err(words)?.max(1), content: args["content"].as_bool().unwrap_or(false) };
+    let found = search(text(args, "engine").map_err(words)?, &query)?;
+    let mut value = json!({"engine": found.engine.name, "query": query.query, "results": found.hits});
+    if found.hits.is_empty() { value["note"] = json!("没有找到结果：换个说法，或去掉 site:、引号等限制再试。") }
+    Ok(value)
 }
 
 fn dispatch(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fetch: Fetch, download: Download) -> Result<Value> {
@@ -729,6 +779,7 @@ fn dispatch(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fet
         "import_zotero" => local::import_zotero(store, args),
         "list_zotero_libraries" => local::zotero_libraries(args),
         "find_pdf" => find_pdf(store, args, fetch, download),
+        "compress_pdf" => compress_pdf(store, args),
         "import_url" => web::import_url(store, args, fetch, download),
         "find_citations" => find_citations(store, args),
         "find_passages" => find_passages(store, args),
@@ -1308,6 +1359,34 @@ fn try_candidate(store: &mut Store, paper: &Paper, candidate: &openaccess::Candi
             Ok(false)
         }
     }
+}
+
+/// Make the PDFs of a paper, or one of them, smaller (`shrink`), keeping each only when it is worth it.
+fn compress_pdf(store: &mut Store, args: &Value) -> Result<Value> {
+    let (resource, paper) = (text(args, "resourceId")?, text(args, "paperId")?);
+    let files: Vec<PaperFile> = match (resource.is_empty(), paper.is_empty()) {
+        (false, _) => store.list_files()?.into_iter().filter(|f| f.id == resource).collect(),
+        (true, false) => store.paper_files(store.get_paper(paper)?.id.as_str())?,
+        (true, true) => bail!("需要 resourceId 或 paperId。"),
+    };
+    if files.is_empty() { bail!("附件不存在：{resource}") }
+    let files: Vec<PaperFile> = files.into_iter().filter(|f| f.format == "pdf").collect();
+    if files.is_empty() { bail!("这里没有 PDF 附件。") }
+    let mut rows = vec![];
+    for file in files {
+        let path = store.file_path(&file);
+        let shrunk = std::fs::read(&path).map_err(|e| anyhow!("无法读取文件：{e}")).and_then(|data| crate::shrink::shrink(&data));
+        let row = match shrunk {
+            Ok(shrunk) if shrunk.worth() => {
+                let (_, original) = store.replace_file(&file.id, &shrunk.bytes)?;
+                json!({"resourceId": file.id, "title": file.title, "outcome": "compressed", "before": shrunk.before, "after": shrunk.bytes.len(), "images": shrunk.images, "original": original.to_string_lossy()})
+            }
+            Ok(shrunk) => json!({"resourceId": file.id, "title": file.title, "outcome": "not_worth", "before": shrunk.before, "after": shrunk.bytes.len(), "note": "压缩后小不到一成，原文件保持不变。"}),
+            Err(err) => json!({"resourceId": file.id, "title": file.title, "outcome": "failed", "error": format!("{err:#}")}),
+        };
+        rows.push(row);
+    }
+    Ok(json!({"files": rows}))
 }
 
 fn find_pdf(store: &mut Store, args: &Value, fetch: Fetch, download: Download) -> Result<Value> {
@@ -1992,6 +2071,33 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_heavy_pdf_is_compressed_in_place_and_a_light_one_left_alone() {
+        let (root, paper) = sample();
+        let info = find_library(&root, "").unwrap();
+        let mut store = Store::open(&info.dir).unwrap();
+        let (heavy, light) = (root.join("heavy.pdf"), root.join("light.pdf"));
+        std::fs::write(&heavy, crate::shrink::tests::paper(4800, 3600, true, false)).unwrap();
+        // A file already as small as it gets.
+        std::fs::write(&light, crate::shrink::shrink(&crate::shrink::tests::paper(300, 200, false, false)).unwrap().bytes).unwrap();
+        let (heavy_file, light_file) = (store.import_file(&paper, &heavy, "fulltext").unwrap(), store.import_file(&paper, &light, "supplement").unwrap());
+        let done = call(&root, "compress_pdf", &json!({"paperId": paper})).unwrap();
+        let row = |id: &str| done["files"].as_array().unwrap().iter().find(|r| r["resourceId"] == id).unwrap().clone();
+        let (compressed, left) = (row(&heavy_file.id), row(&light_file.id));
+        assert_eq!((compressed["outcome"].as_str(), left["outcome"].as_str()), (Some("compressed"), Some("not_worth")));
+        assert!(compressed["after"].as_u64().unwrap() * 2 < compressed["before"].as_u64().unwrap());
+        // The same attachment, smaller; the original is set aside and still known.
+        let now = store.paper_files(&paper).unwrap().into_iter().find(|f| f.id == heavy_file.id).unwrap();
+        assert_eq!(now.size_bytes, compressed["after"].as_u64().unwrap());
+        assert!(Path::new(compressed["original"].as_str().unwrap()).is_file());
+        assert_eq!(store.paper_holding(&heavy).unwrap(), Some(paper.clone()));
+        // The text file of the sample is not a PDF; a missing id is said.
+        assert!(call(&root, "compress_pdf", &json!({"resourceId": "R-missing"})).unwrap_err().contains("附件不存在"));
+        assert!(call(&root, "compress_pdf", &json!({})).is_err());
+        assert!(super::CONFIRMING.contains(&"compress_pdf") && super::WRITING.contains(&"compress_pdf"));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
     fn pdf_annotations_are_readable_searchable_and_scoped_through_tools_and_mcp() {
         use crate::annotation::Kind;
         let (root, paper) = sample();
@@ -2030,7 +2136,7 @@ pub(crate) mod tests {
         assert!(call(&root, "list_pdf_annotations", &json!({"kind": "wrong"})).is_err());
         // The same tool is available to the built-in assistant and a read-only MCP client.
         assert!(library_catalog().iter().any(|t| t.name == "list_pdf_annotations" && !t.writes));
-        let server = crate::mcp::Server { fetch: &offline, download: &no_download, publish: None, read_only: true };
+        let server = crate::mcp::Server { fetch: &offline, download: &no_download, reach: Reach::default(), read_only: true };
         let response = crate::mcp::handle(&root, &json!({"id": 1, "method": "tools/call", "params": {"name": "list_pdf_annotations", "arguments": {"paperId": paper}}}), &server).unwrap();
         assert_eq!(response["result"]["isError"], false);
         assert_eq!(response["result"]["structuredContent"]["total"], 2);
@@ -2858,9 +2964,37 @@ pub(crate) mod tests {
             // Only a tool that changes the library has anything to ask the person about.
             assert!(tool.writes || !tool.confirm, "{}", tool.name);
         }
-        assert_eq!(library_catalog().iter().filter(|tool| tool.confirm).map(|tool| tool.name).collect::<Vec<_>>().len(), 19);
+        assert_eq!(library_catalog().iter().filter(|tool| tool.confirm).map(|tool| tool.name).collect::<Vec<_>>().len(), 20);
         // The tools that write a manuscript are asked about outside the conversation that writes it.
         assert!(MANUSCRIPT.iter().all(|name| catalog().iter().any(|tool| tool.name == *name && tool.writes && tool.confirm)));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn the_web_searched_through_what_the_front_end_lends() {
+        let (root, _) = sample();
+        // Without a way to search lent, the tool says so instead of failing somewhere deeper.
+        assert!(call(&root, "web_search", &json!({"query": "CRISPR"})).unwrap_err().contains("没有提供网页搜索"));
+        let asked = std::cell::RefCell::new(vec![]);
+        let search = |engine: &str, query: &websearch::Query| -> Result<websearch::Found, String> {
+            asked.borrow_mut().push((engine.to_string(), query.clone()));
+            let hits = if query.query == "nothing" { vec![] } else { vec![websearch::Hit { title: "Cas9".into(), url: "https://example.org/cas9".into(), summary: "A nuclease.".into(), ..Default::default() }] };
+            Ok(websearch::Found { engine: websearch::engine(if engine.is_empty() { "deepseek" } else { engine }).unwrap(), hits })
+        };
+        let reach = Reach { search: Some(&search), ..Default::default() };
+        let found = call_with(&root, "web_search", &json!({"query": " Cas9 ", "count": 3}), &offline, &no_download, reach).unwrap();
+        assert_eq!(found, json!({"engine": "DeepSeek", "query": "Cas9", "results": [{"title": "Cas9", "url": "https://example.org/cas9", "summary": "A nuclease."}]}));
+        assert_eq!(asked.borrow()[0], (String::new(), websearch::Query { query: "Cas9".into(), count: 3, content: false }));
+        // Inside an open library it is the same tool; an engine named and a count out of range are passed on as asked, at least one.
+        let info = find_library(&root, "").unwrap();
+        let mut store = Store::open(&info.dir).unwrap();
+        let empty = call_in_with(&mut store, &info, "web_search", &json!({"query": "nothing", "engine": "jina", "content": true, "count": 0}), &offline, &no_download, reach).unwrap();
+        assert!(empty["results"].as_array().unwrap().is_empty() && empty["note"].as_str().unwrap().contains("没有找到结果"));
+        assert_eq!(asked.borrow()[1], ("jina".into(), websearch::Query { query: "nothing".into(), count: 1, content: true }));
+        assert!(library_catalog().iter().any(|t| t.name == "web_search" && !t.writes && !t.confirm));
+        assert_eq!((describe_call("web_search", &json!({"query": "Cas9  off-target", "engine": "jina"})), describe_result(&Ok(found))), ("搜索网页：jina · Cas9 off-target".to_string(), "DeepSeek：1 个网页".to_string()));
+        assert!(call_with(&root, "web_search", &json!({}), &offline, &no_download, reach).unwrap_err().contains("需要参数 query"));
+        drop(store);
         std::fs::remove_dir_all(root).ok();
     }
 

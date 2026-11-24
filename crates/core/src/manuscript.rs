@@ -306,16 +306,39 @@ fn bare_picture(body: &str, line: &markdown::Line) -> bool {
     line.picture.is_some() && markdown::picture_line(&body[line.range.clone()]).is_some_and(|(caption, _)| body[line.range.start + caption.start..line.range.start + caption.end].trim().is_empty())
 }
 
+/// How many lines of a section a table that starts at line `at` takes (`markdown::table_lines`); 0 when none
+/// does. `written` are the lines as written. A line of fenced code, an item of a list, a heading and a quotation
+/// open no table.
+fn table_rows(lines: &[markdown::Line], written: &[&str], at: usize) -> usize {
+    let line = &lines[at];
+    if line.code || line.item.is_some() || line.heading > 0 || line.quote > 0 { 0 } else { markdown::table_lines(&written[at..]) }
+}
+
 /// A section's text as Markdown to stand under a heading of level
 /// `under`: each line a paragraph of its own, as the editor has them, the
-/// items of a list and the lines of fenced code kept together, and a
-/// heading written in the section set that many levels deeper.
+/// items of a list, the lines of fenced code and the rows of a table kept
+/// together, and a heading written in the section set that many levels deeper.
 pub fn section_markdown(body: &str, under: u8) -> String {
     let mut blocks: Vec<String> = vec![];
     // What the block being made is: a list, code, or neither.
     let (mut list, mut code) = (false, false);
-    for line in markdown::lines(body) {
-        let text = &body[line.range.clone()];
+    let lines = markdown::lines(body);
+    let written: Vec<&str> = lines.iter().map(|line| &body[line.range.clone()]).collect();
+    // The lines still to pass over: the rows of a table already taken whole.
+    let mut taken = 0;
+    for (at, line) in lines.iter().enumerate() {
+        if taken > 0 {
+            taken -= 1;
+            continue;
+        }
+        let text = written[at];
+        // A table is its lines one under the other: a blank line between two rows and it is no table to any reader.
+        let rows = table_rows(&lines, &written, at);
+        if rows > 0 {
+            blocks.push(written[at..at + rows].iter().map(|row| row.trim()).collect::<Vec<_>>().join("\n"));
+            (list, code, taken) = (false, false, rows - 1);
+            continue;
+        }
         if line.code {
             match blocks.last_mut().filter(|_| code) {
                 Some(block) => {
@@ -393,7 +416,7 @@ fn word_paragraph(body: &str, line: &markdown::Line) -> String {
         };
         let marks = &piece.marks;
         let mut look = String::new();
-        if marks.code { look.push_str(&format!("<w:rFonts w:ascii=\"{MONO}\" w:hAnsi=\"{MONO}\"/>")) }
+        if marks.code { look.push_str(&format!("<w:rFonts w:ascii=\"{0}\" w:hAnsi=\"{0}\"/>", docx::MONO)) }
         if marks.bold { look.push_str("<w:b/>") }
         if marks.italic { look.push_str("<w:i/>") }
         if marks.strike { look.push_str("<w:strike/>") }
@@ -414,8 +437,50 @@ fn word_paragraph(body: &str, line: &markdown::Line) -> String {
     format!("<w:p>{style}{runs}</w:p>")
 }
 
-/// The font code is set in, in a Word file.
-const MONO: &str = "Consolas";
+/// A text as a Word file sets it, as one of the paragraphs `docx::rewrite` is asked for.
+fn set(rich: cite::Rich) -> docx::Wanted {
+    docx::Wanted { text: rich.text, looks: rich.looks, links: rich.links.into_iter().map(|(range, to)| docx::Link { range, to }).collect(), ..Default::default() }
+}
+
+/// The lines of a table written in a section (`table_rows`) as the table of a Word file: a cell's bold, italics,
+/// strike-through and code are its looks (a link is underlined, as in a paragraph), `<br>` starts a new paragraph
+/// in it, and with `cites` its citations are written for a reader as a paragraph's are, each leading to its
+/// paper's entry in the reference list.
+fn word_table(written: &[&str], cites: Option<&Cites>) -> Option<docx::Table> {
+    let (markdown::Block::Table { aligns, rows }, _) = markdown::pipe_table(written)? else { return None };
+    let cell = |rich: &markdown::Rich| -> Vec<docx::Wanted> {
+        let mut paras: Vec<cite::Rich> = vec![];
+        for (range, marks) in rich.spans() {
+            for (n, words) in rich.text[range].split('\n').enumerate() {
+                if n > 0 || paras.is_empty() { paras.push(cite::Rich::default()) }
+                let Some(para) = paras.last_mut() else { continue };
+                let start = para.text.len();
+                match cites {
+                    Some(cites) => para.append(&cites.format.rich(words, cites.index)),
+                    None => para.push(words),
+                }
+                let look = docx::Look { bold: marks.bold, italic: marks.italic, strike: marks.strike, mono: marks.code, underline: marks.link.is_some(), ..Default::default() };
+                if look != docx::Look::default() && para.text.len() > start { para.looks.push((start..para.text.len(), look)) }
+            }
+        }
+        paras.into_iter().map(|para| set(para.trimmed())).filter(|para| !para.text.is_empty()).collect()
+    };
+    Some(docx::Table { aligns, rows: rows.iter().map(|row| row.iter().map(cell).collect()).collect() })
+}
+
+/// The paragraph among these that says `words`, one in a cell of a table too, and where in it.
+fn saying<'a>(paragraphs: &'a mut [docx::Wanted], words: &str) -> Option<(&'a mut docx::Wanted, Range<usize>)> {
+    if words.is_empty() { return None }
+    for one in paragraphs {
+        if one.table.is_none() {
+            if let Some(at) = one.text.find(words) { return Some((one, at..at + words.len())) }
+            continue;
+        }
+        let found = one.table.as_mut().and_then(|table| table.paragraphs_mut().find_map(|cell| cell.text.find(words).map(|at| (cell, at))));
+        if let Some((cell, at)) = found { return Some((cell, at..at + words.len())) }
+    }
+    None
+}
 
 /// A Word file's paragraphs say what is written in words alone: a line
 /// that `markdown::plain` reads otherwise (`* p < 0.05`, `#3`) gets the
@@ -464,9 +529,17 @@ pub(crate) fn xml_escape(text: &str) -> String {
 }
 
 /// The manuscript as a Word document (.docx): a title, a Heading 1 for
-/// each section, a paragraph for each line. Written by hand, with the zip
-/// entries stored: Word reads a docx without compression.
+/// each section, a paragraph for each line, a table for the lines of one
+/// (`word_table`). Written by hand, with the zip entries stored: Word reads
+/// a docx without compression.
 pub fn docx(manuscript: &Manuscript) -> Vec<u8> {
+    document(manuscript, true)
+}
+
+/// `docx`, with its tables or without them: `Store::manuscript_word` leaves
+/// them to `docx::rewrite`, which puts each in with its citations and its
+/// comments (`wanted`).
+fn document(manuscript: &Manuscript, tables: bool) -> Vec<u8> {
     let paragraph = |style: &str, text: &str| {
         let style = if style.is_empty() { String::new() } else { format!("<w:pPr><w:pStyle w:val=\"{style}\"/></w:pPr>") };
         format!("<w:p>{style}<w:r><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p>", xml_escape(text))
@@ -474,9 +547,25 @@ pub fn docx(manuscript: &Manuscript) -> Vec<u8> {
     let mut body = paragraph("Title", manuscript.shown_title());
     for (name, text) in sections_with_text(manuscript) {
         body.push_str(&paragraph("Heading1", name));
-        // A picture's line is its caption: the picture itself is put over it when the file is written (`wanted`).
-        for line in markdown::lines(text).iter().filter(|line| !bare_picture(text, line)) { body.push_str(&word_paragraph(text, line)) }
+        let lines = markdown::lines(text);
+        let written: Vec<&str> = lines.iter().map(|line| &text[line.range.clone()]).collect();
+        let mut at = 0;
+        while at < lines.len() {
+            let rows = table_rows(&lines, &written, at);
+            if let Some(table) = word_table(&written[at..at + rows], None) {
+                // Two tables that touch are one table to Word.
+                if tables && body.ends_with("</w:tbl>") { body.push_str("<w:p/>") }
+                if tables { body.push_str(&table.plain()) }
+                at += rows;
+                continue;
+            }
+            // A picture's line is its caption: the picture itself is put over it when the file is written (`wanted`).
+            if !bare_picture(text, &lines[at]) { body.push_str(&word_paragraph(text, &lines[at])) }
+            at += 1;
+        }
     }
+    // A document does not end in a table.
+    if body.ends_with("</w:tbl>") { body.push_str("<w:p/>") }
     let document = format!(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body>{body}<w:sectPr><w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\" w:header=\"708\" w:footer=\"708\" w:gutter=\"0\"/></w:sectPr></w:body></w:document>"
     );
@@ -802,6 +891,10 @@ pub struct Cites<'a> {
 /// `pictures` reads at its address over it; one without a caption stands
 /// under the paragraph before it. A picture that cannot be read leaves its
 /// caption alone.
+///
+/// The lines of a table (`table_rows`) are no paragraphs but one table
+/// (`docx::Wanted::table`, `word_table`), which neither file has yet: it
+/// is put in after the paragraph before it.
 pub fn wanted(manuscript: &Manuscript, source: Option<&Source>, comments: &[Comment], cites: Option<&Cites>, pictures: &dyn Fn(&str) -> Option<docx::Picture>) -> Vec<docx::Wanted> {
     let mut out: Vec<docx::Wanted> = vec![];
     // Where each section's paragraphs are in `out`: its heading, and its lines.
@@ -809,7 +902,6 @@ pub fn wanted(manuscript: &Manuscript, source: Option<&Source>, comments: &[Comm
     // Pictures without a caption met before any paragraph: they go over the first one.
     let mut waiting: Vec<docx::Picture> = vec![];
     let paragraph = |text: &str, role: docx::Role| docx::Wanted { text: text.to_string(), role, ..Default::default() };
-    let set = |rich: cite::Rich| docx::Wanted { text: rich.text, looks: rich.looks, links: rich.links.into_iter().map(|(range, to)| docx::Link { range, to }).collect(), ..Default::default() };
     match source {
         Some(source) => {
             if source.titled && !manuscript.title.trim().is_empty() { out.push(paragraph(manuscript.title.trim(), docx::Role::Title)) }
@@ -826,7 +918,21 @@ pub fn wanted(manuscript: &Manuscript, source: Option<&Source>, comments: &[Comm
         let start = out.len();
         // What a paragraph says, as the editor draws it: a Word file has its own bold and headings.
         let body = section.body.as_str();
-        for line in &markdown::lines(body) {
+        let lines = markdown::lines(body);
+        let written: Vec<&str> = lines.iter().map(|line| &body[line.range.clone()]).collect();
+        // The lines still to pass over: the rows of a table already taken whole.
+        let mut taken = 0;
+        for (at, line) in lines.iter().enumerate() {
+            if taken > 0 {
+                taken -= 1;
+                continue;
+            }
+            let rows = table_rows(&lines, &written, at);
+            if let Some(table) = word_table(&written[at..at + rows], cites) {
+                out.push(docx::Wanted { table: Some(table), above: std::mem::take(&mut waiting), ..Default::default() });
+                taken = rows - 1;
+                continue;
+            }
             let said = markdown::plain_line(body, line);
             let said = said.trim();
             let picture = line.picture.as_ref().and_then(|address| pictures(&body[address.clone()]));
@@ -859,16 +965,23 @@ pub fn wanted(manuscript: &Manuscript, source: Option<&Source>, comments: &[Comm
         let quote = markdown::plain(&comment.quote);
         let quote = cites.map_or(quote.clone(), |cites| cites.format.apply(&quote, cites.index));
         let first = quote.lines().next().unwrap_or("").trim();
-        let found = lines.clone().find_map(|n| out[n].text.find(first).filter(|_| !first.is_empty()).map(|at| (n, at..at + first.len())));
-        let named = heading.filter(|n| !first.is_empty() && out[*n].text.contains(first)).map(|n| (n, 0..0));
-        let (at, range, body) = match found.or(named) {
-            Some((n, range)) => (n, range, said),
-            None => {
-                let Some(n) = heading.or(lines.clone().next()) else { continue };
-                (n, 0..0, if first.is_empty() { said } else { format!("「{first}」\n{said}") })
-            }
-        };
-        out[at].notes.push(docx::Note { range, author: comment.author.clone(), date: word_date(&comment.created_at), body });
+        let note = |range: Range<usize>, body: String| docx::Note { range, author: comment.author.clone(), date: word_date(&comment.created_at), body };
+        // In a cell of a table as in a paragraph.
+        if let Some((para, range)) = saying(&mut out[lines.clone()], first) {
+            para.notes.push(note(range, said));
+            continue;
+        }
+        if let Some(n) = heading.filter(|n| !first.is_empty() && out[*n].text.contains(first)) {
+            out[n].notes.push(note(0..0, said));
+            continue;
+        }
+        // A section that opens with a table and has no heading in the file: on the table's first words.
+        let Some(n) = heading.or(lines.clone().next()) else { continue };
+        let Some(para) = (match &mut out[n].table {
+            Some(table) => table.paragraphs_mut().next(),
+            None => Some(&mut out[n]),
+        }) else { continue };
+        para.notes.push(note(0..0, if first.is_empty() { said } else { format!("「{first}」\n{said}") }));
     }
     if let Some(cites) = cites.filter(|cites| !cites.format.references().is_empty()) {
         out.push(paragraph(cites.format.heading(), docx::Role::Heading));
@@ -959,7 +1072,8 @@ impl Store {
             let body = format.references().iter().map(|(_, entry)| escape_markdown(&entry.text)).collect::<Vec<_>>().join("\n\n");
             said.sections.push(Section { name: format.heading().to_string(), kind: "other".into(), body, ..Default::default() });
         }
-        Ok((docx::Rewritten { left_out, ..docx::rewrite(&docx(&said), &wanted(manuscript, None, comments, Some(&cites), &pictures), &docx::Options::default())? }, false))
+        // Its tables are put in as it is written again: there they get their citations and comments as the paragraphs do.
+        Ok((docx::Rewritten { left_out, ..docx::rewrite(&document(&said, false), &wanted(manuscript, None, comments, Some(&cites), &pictures), &docx::Options::default())? }, false))
     }
 }
 
@@ -1758,6 +1872,25 @@ mod tests {
     }
 
     #[test]
+    fn a_table_written_in_a_section_keeps_its_rows_together() {
+        // What an assistant writes into a section: a line, a table, a line. Every other line is a paragraph of its own.
+        let body = "对照如下：\n| 维度 | 顶刊 | 子刊 |\n|---|---|:-:|\n| 数据 | 自造 | 二次挖掘 |\n| 验证 | **有** | 无 |\n一句话：数据决定。\n另一段。";
+        let written = section_markdown(body, 2);
+        assert_eq!(written, "对照如下：\n\n| 维度 | 顶刊 | 子刊 |\n|---|---|:-:|\n| 数据 | 自造 | 二次挖掘 |\n| 验证 | **有** | 无 |\n\n一句话：数据决定。\n\n另一段。");
+        // Read back, it is a table: before, each row was a paragraph of pipes.
+        let blocks = markdown::parse(&written);
+        assert!(matches!(&blocks[1], markdown::Block::Table { rows, aligns } if rows.len() == 3 && aligns.len() == 3 && rows[2][1].text == "有"), "{blocks:?}");
+        assert_eq!(blocks.len(), 4);
+        // A line with a pipe and no line of dashes under it is a paragraph; so is a table's line inside fenced code, and a list's item.
+        assert_eq!(section_markdown("a | b\nc | d", 2), "a | b\n\nc | d");
+        assert_eq!(section_markdown("```\n| a | b |\n|---|---|\n```", 2), "```\n| a | b |\n|---|---|\n```");
+        assert_eq!(section_markdown("- a | b\n- --- | ---", 2), "- a | b\n- --- | ---");
+        // The exported file has it the same way.
+        let manuscript = Manuscript { title: "T".into(), sections: vec![Section { name: "讨论".into(), kind: "discussion".into(), body: body.into(), ..Default::default() }], ..Default::default() };
+        assert!(markdown(&manuscript).contains("\n\n| 维度 | 顶刊 | 子刊 |\n|---|---|:-:|\n| 数据 | 自造 | 二次挖掘 |\n| 验证 | **有** | 无 |\n\n"));
+    }
+
+    #[test]
     fn a_word_file_cites_for_a_reader_and_lists_the_references() {
         let mut store = Store::in_memory(Path::new(".")).unwrap();
         let paper = store.add_paper(crate::model::Paper { title: "Single-cell atlas of roots".into(), authors: "Zhang, Wei; Li, Qiang; Wang, Fang".into(), year: Some(2024), journal: "Nature Plants".into(), ..Default::default() }).unwrap();
@@ -1783,6 +1916,103 @@ mod tests {
         assert!(set.contains(r#"<w:r><w:rPr><w:i/></w:rPr><w:t xml:space="preserve">Nature Plants</w:t></w:r>"#), "{set}");
         // The manuscript itself keeps its keys.
         assert!(store.manuscript(&made.id).unwrap().unwrap().sections[1].body.contains("[@Zhang2024 p.2"));
+    }
+
+    #[test]
+    fn a_table_written_in_a_section_is_a_table_of_the_word_file() {
+        let mut store = Store::in_memory(Path::new(".")).unwrap();
+        let paper = store.add_paper(crate::model::Paper { title: "Single-cell atlas of roots".into(), authors: "Zhang, Wei; Li, Qiang; Wang, Fang".into(), year: Some(2024), journal: "Nature Plants".into(), ..Default::default() }).unwrap();
+        let made = store.create_manuscript("Roots", "en").unwrap();
+        let body = "Compared:\n| Tissue | Finding | n |\n|:--|:-:|--:|\n| **Root** | *deep* [@Zhang2024] | 12 |\n| Shoot | light<br>`fast` | |\nAfter the table.";
+        store.save_section_body(&made.sections[1].id, body).unwrap();
+        store.keep_cite_key(&paper.id, "Zhang2024").unwrap();
+        store.add_comment(&made.id, &made.sections[1].id, "light", "How much?", "Xu", comment::PERSON).unwrap();
+        let now = store.manuscript(&made.id).unwrap().unwrap();
+        let notes = store.comments(&made.id).unwrap();
+        let (out, _) = store.manuscript_word(&now, &notes, false, "Xu", cite::Style::AuthorYear).unwrap();
+        // No paragraph of pipes: the lines are one table between the paragraphs around them, and the paper a cell cites is listed.
+        let read = docx::read(&out.bytes).unwrap();
+        assert_eq!(read.paragraphs.iter().map(|p| p.text.as_str()).collect::<Vec<_>>(), ["Roots", "Introduction", "Compared:", "After the table.", "References", "Zhang, W., Li, Q., & Wang, F. (2024). Single-cell atlas of roots. Nature Plants."]);
+        assert_eq!((read.tables, out.tables, out.comments), (1, 1, 1));
+        let xml = docx::Zip::read(&out.bytes).unwrap().text("word/document.xml").unwrap();
+        let (start, end) = (xml.find("<w:tbl>").unwrap(), xml.find("</w:tbl>").unwrap());
+        assert!(xml.find("Compared:").unwrap() < start && end < xml.find("After the table.").unwrap() && !xml.contains('|'), "{xml}");
+        let table = &xml[start..end];
+        assert_eq!((table.matches("<w:tr>").count(), table.matches("<w:tc>").count(), table.matches("<w:gridCol ").count()), (3, 9, 3));
+        // The header is set apart and said again on every page; a column is set to the side its line of dashes names.
+        let cell = |side: &str, look: &str, text: &str| format!("<w:jc w:val=\"{side}\"/></w:pPr><w:r>{look}<w:t xml:space=\"preserve\">{text}</w:t></w:r>");
+        assert!(table.starts_with("<w:tbl><w:tblPr><w:tblW w:w=\"9026\" w:type=\"dxa\"/><w:tblBorders><w:top w:val=\"single\""), "{table}");
+        assert_eq!(table.matches("<w:tr><w:trPr><w:tblHeader/></w:trPr>").count(), 1);
+        for (side, text) in [("left", "Tissue"), ("center", "Finding"), ("right", "n")] { assert!(table.contains(&cell(side, "<w:rPr><w:b/></w:rPr>", text)), "{text}: {table}") }
+        assert!(table.contains(&cell("left", "<w:rPr><w:b/></w:rPr>", "Root")) && table.contains(&cell("center", "<w:rPr><w:i/></w:rPr>", "deep")) && table.contains(&cell("right", "", "12")), "{table}");
+        // A citation in a cell is written as one in a paragraph is: for a reader, and leading to its entry.
+        assert!(table.contains(r#"<w:instrText xml:space="preserve"> HYPERLINK \l "_WPREF_1" </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t xml:space="preserve">Zhang et al., 2024</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r><w:r><w:t xml:space="preserve">)</w:t></w:r></w:p></w:tc>"#), "{table}");
+        // `<br>` is a paragraph of its own in the cell, code is set as code, and a comment stands on a cell's words.
+        assert!(table.contains("<w:commentRangeStart w:id=\"1\"/><w:r><w:t xml:space=\"preserve\">light</w:t></w:r><w:commentRangeEnd w:id=\"1\"/><w:r><w:commentReference w:id=\"1\"/></w:r></w:p><w:p>") && table.contains(&cell("center", &format!("<w:rPr><w:rFonts w:ascii=\"{0}\" w:hAnsi=\"{0}\"/></w:rPr>", docx::MONO), "fast")), "{table}");
+        // A cell without words still holds a paragraph, and the columns are as wide as the page's text.
+        assert!(table.ends_with("<w:jc w:val=\"right\"/></w:pPr></w:p></w:tc></w:tr>"), "{table}");
+        let wide: u32 = table.match_indices("<w:gridCol w:w=\"").map(|(at, _)| table[at + 16..].split('"').next().unwrap().parse::<u32>().unwrap()).sum();
+        assert_eq!(wide, 9026);
+        // A journal's style raises its number in a cell too.
+        let nature = cite::Style::Csl(std::sync::Arc::new(crate::csl::load("csl:nature", std::path::Path::new("/nowhere")).unwrap()));
+        let raised = docx::Zip::read(&store.manuscript_word(&now, &[], false, "Xu", nature).unwrap().0.bytes).unwrap().text("word/document.xml").unwrap();
+        assert!(raised[raised.find("<w:tbl>").unwrap()..raised.find("</w:tbl>").unwrap()].contains(r#"<w:r><w:rPr><w:vertAlign w:val="superscript"/></w:rPr><w:t xml:space="preserve">1</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>"#), "{raised}");
+        // The document made without a library says the table too, its citations as written; two tables stay two, and none ends the document.
+        let alone = String::from_utf8_lossy(&docx(&Manuscript { title: "T".into(), sections: vec![Section { name: "Results".into(), body: format!("{body}\n| a | b |\n|---|---|\n\n| c | d |\n|---|---|"), ..Default::default() }], ..Default::default() })).to_string();
+        assert!(alone.matches("<w:tbl>").count() == 3 && alone.contains("[@Zhang2024]") && alone.contains("</w:tbl><w:p/><w:tbl>") && alone.contains("</w:tbl><w:p/><w:sectPr>") && !alone.contains("| a"), "{alone}");
+    }
+
+    #[test]
+    fn a_table_written_into_a_manuscript_from_word_goes_into_its_file() {
+        let dir = std::env::temp_dir().join(format!("wisp-manuscript-{}", new_id("T")));
+        let mut store = Store::open(&dir).unwrap();
+        // A file with a table of its own between two paragraphs, its text in a font of its own.
+        let font = "<w:rPr><w:rFonts w:ascii=\"Georgia\"/></w:rPr>";
+        let theirs = "<w:tbl><w:tr><w:tc><w:p><w:r><w:t>theirs</w:t></w:r></w:p></w:tc></w:tr></w:tbl>";
+        let paras = [
+            "<w:p><w:pPr><w:pStyle w:val=\"a3\"/></w:pPr><w:r><w:t>Roots</w:t></w:r></w:p>".to_string(),
+            "<w:p><w:pPr><w:pStyle w:val=\"1\"/></w:pPr><w:r><w:t>Introduction</w:t></w:r></w:p>".to_string(),
+            format!("<w:p><w:pPr><w:ind w:firstLine=\"420\"/></w:pPr><w:r>{font}<w:t xml:space=\"preserve\">Roots grow </w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t>down</w:t></w:r><w:r>{font}<w:t>.</w:t></w:r></w:p>"),
+            format!("<w:p><w:r>{font}<w:t>They take up water.</w:t></w:r></w:p>"),
+            "<w:p><w:pPr><w:pStyle w:val=\"1\"/></w:pPr><w:r><w:t>Methods</w:t></w:r></w:p>".to_string(),
+            format!("<w:p><w:r>{font}<w:t>We grew plants.</w:t></w:r></w:p>"),
+        ];
+        let bytes = docx::tests::file(&format!("{}{}{}{theirs}{}{}{}", paras[0], paras[1], paras[2], paras[3], paras[4], paras[5]), "");
+        let made = store.import_manuscript(&from_word(&docx::read(&bytes).unwrap(), "Roots.docx"), "docx", "Roots.docx", Some(&bytes)).unwrap();
+        assert_eq!(made.sections.iter().map(|s| s.body.as_str()).collect::<Vec<_>>(), ["Roots grow down.\n\nThey take up water.", "We grew plants."]);
+        // A table written after the first paragraph, another at the end of the last section, and a comment on a cell's words.
+        store.save_section_body(&made.sections[0].id, "Roots grow down.\n\n| Depth | Share |\n|---|--:|\n| *deep* soil | 12 |\n\nThey take up water.").unwrap();
+        store.save_section_body(&made.sections[1].id, "We grew plants.\n| Pot | Plants |\n|---|---|\n| 1 | 4 |").unwrap();
+        store.add_comment(&made.id, &made.sections[0].id, "soil", "Which soil?", "Xu", comment::PERSON).unwrap();
+        let now = store.manuscript(&made.id).unwrap().unwrap();
+        let (out, from_file) = store.manuscript_word(&now, &store.comments(&made.id).unwrap(), false, "Xu", cite::Style::AuthorYear).unwrap();
+        assert!(from_file);
+        // Every paragraph of the file is as it was, to the byte, and so is its table.
+        assert_eq!((out.kept, out.changed, out.added, out.removed, out.tables, out.comments), (6, 0, 0, 0, 2, 1));
+        let body = docx::tests::body_of(&out.bytes);
+        let mut at = 0;
+        for piece in [paras[0].as_str(), &paras[1], &paras[2], "<w:tbl><w:tblPr>", "</w:tbl><w:p/>", theirs, &paras[3], &paras[4], &paras[5], "<w:tbl><w:tblPr>"] {
+            at += body[at..].find(piece).unwrap_or_else(|| panic!("{piece} after {at}: {body}")) + piece.len();
+        }
+        // The table at the document's end has a paragraph after it; a table of the file and one made here that touch are kept apart.
+        assert!(body.ends_with("</w:tbl><w:p/>") && body.matches("<w:p/>").count() == 2, "{body}");
+        let read = docx::read(&out.bytes).unwrap();
+        assert_eq!((read.tables, read.paragraphs.iter().map(|p| p.text.as_str()).collect::<Vec<_>>()), (3, vec!["Roots", "Introduction", "Roots grow down.", "They take up water.", "Methods", "We grew plants."]));
+        // A cell's words are set like the text around the table, without that text's first-line indent, and the comment is on them.
+        let table = &body[body.find("<w:tbl><w:tblPr>").unwrap()..body.find("</w:tbl>").unwrap()];
+        assert!(table.contains("<w:r><w:rPr><w:rFonts w:ascii=\"Georgia\"/><w:b/></w:rPr><w:t xml:space=\"preserve\">Depth</w:t></w:r>") && table.contains("<w:r><w:rPr><w:rFonts w:ascii=\"Georgia\"/><w:i/></w:rPr><w:t xml:space=\"preserve\">deep</w:t></w:r>"), "{table}");
+        assert!(table.contains("w:firstLine=\"0\"") && table.contains("<w:commentRangeStart w:id=\"1\"/><w:r><w:rPr><w:rFonts w:ascii=\"Georgia\"/></w:rPr><w:t xml:space=\"preserve\">soil</w:t></w:r><w:commentRangeEnd w:id=\"1\"/>"), "{table}");
+        assert_eq!(read.comments.iter().map(|c| (c.author.as_str(), c.body.as_str())).collect::<Vec<_>>(), [("Xu", "Which soil?")]);
+
+        // As tracked changes, each row is one put in, and so are the words in its cells.
+        let (tracked, _) = store.manuscript_word(&now, &[], true, "Xu", cite::Style::AuthorYear).unwrap();
+        let body = docx::tests::body_of(&tracked.bytes);
+        assert_eq!((body.matches("<w:tr><w:trPr>").count(), body.matches("<w:trPr><w:tblHeader/><w:ins w:id=").count(), body.matches("<w:trPr><w:ins w:id=").count()), (4, 2, 2), "{body}");
+        assert!(body.contains("<w:ins w:id=\"7\" w:author=\"Xu\"") && body.contains(&paras[2]) && body.contains(theirs) && docx::read(&tracked.bytes).unwrap().tracked, "{body}");
+        // The manuscript taken in again from the file written has its tables in the file, not in its text.
+        let again = from_word(&docx::read(&out.bytes).unwrap(), "Roots.docx");
+        assert_eq!(again.sections.iter().map(|s| s.paragraphs.join("\n\n")).collect::<Vec<_>>(), ["Roots grow down.\n\nThey take up water.", "We grew plants."]);
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

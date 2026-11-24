@@ -22,15 +22,15 @@ cargo clippy --all-targets              # expected to be warning-free
 - CI runs clippy with `-D warnings` and the tests on Windows and macOS, and the three windowless crates on Linux. A release is a pushed tag `v<version>` matching `Cargo.toml`, always signed. A pull request touching `scripts/` or the workflow rehearses the packaging unsigned, so keep `site/` out of `scripts/`. Details: `docs/dev/release-and-site.md`.
 - Once a release's tag is pushed, look at what the release brought (`git log --first-parent v<previous>..v<version>`, the diff of `docs/FEATURES.md`) and tell the owner whether tutorials are called for: which new features a person would use that no tutorial on the project page (`site/tutorials/`) shows, and for each whether it wants a tutorial of its own or a section in an existing one. It is a suggestion made after the tag, not a step the release waits for; the tutorials are written when the owner says so. Steps: "A release, step by step" in `docs/dev/release-and-site.md`.
 - `WISP_STUDY_HOME` moves both the data folder and `settings.json` to one directory; use it for any manual run so the real library in `Documents/WispStudy` is not touched.
-- Debugging without the real library, an API key or a screen (demo data with the `seed` example, the `structure` and `docx` examples for files that come out wrong, `mock_model` as a fake model endpoint, `WISP_STUDY_DEV` steps that script a debug window and take `shot:` screenshots): `docs/dev/debugging.md`. A new debug step is added in `dev_start` at the end of `src/app.rs` and listed there.
+- Debugging without the real library, an API key or a screen (demo data with the `seed` example, the `structure`, `docx` and `mermaid` examples for files and diagrams that come out wrong, `mock_model` as a fake model endpoint, `WISP_STUDY_DEV` steps that script a debug window and take `shot:` screenshots): `docs/dev/debugging.md`. A new debug step is added in `dev_start` at the end of `src/app.rs` and listed there.
 - In a `#[cfg(test)]` module of a file that has `use gpui::*`, do not write `use super::*`: it brings in gpui's `test` attribute, and `#[test]` then fails with "recursion limit reached". Import the names you need.
 
 ## Where the detail is
 
 | Before working on | Read |
 |---|---|
-| A module of the engine: journal metrics (分区 / 影响因子), docx, slides (pptx), 批注, 配引用, 出处, 改稿, 助手写, 图片库, 图号看图 (`figref`), screening, 提取, providers / 生图 / 判断, translation, full text and structure, candidates, open full texts, search sources, note saving | `docs/dev/core.md` |
-| A feature of the window: the conversations, 写作 and its modes, citations, 综述, 图片库, 提取, 筛选, 自定义 (connectors, skills, OAuth), settings, layout, keyboard and selection, the PDF view, the text input | `docs/dev/app.md` |
+| A module of the engine: journal metrics (分区 / 影响因子), docx, slides (pptx), diagrams (`mermaid`), 批注, 配引用, 出处, 改稿, 助手写, 图片库, 图号看图 (`figref`), screening, 提取, providers / 生图 / 判断, translation, full text and structure, candidates, open full texts, search sources, web search (`websearch`, `tools::Reach`), note saving | `docs/dev/core.md` |
+| A feature of the window: the conversations and the diagrams in an answer, 写作 and its modes, citations, 综述, 图片库, 提取, 筛选, 自定义 (connectors, skills, OAuth), settings, layout, keyboard and selection, the PDF view, the text input | `docs/dev/app.md` |
 | Anything the person sees: layout, a new panel, header, bar or label (the design principles, 安静的版面) | `docs/dev/design.md` |
 | Running, scripting and looking at the app | `docs/dev/debugging.md` |
 | CI, signing, releases, `site/` | `docs/dev/release-and-site.md` |

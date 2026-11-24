@@ -285,6 +285,7 @@ fn look(formatting: &Formatting) -> Look {
         sub: matches!(formatting.vertical_align, VerticalAlign::Sub),
         small_caps: matches!(formatting.font_variant, FontVariant::SmallCaps),
         underline: matches!(formatting.text_decoration, TextDecoration::Underline),
+        ..Default::default()
     }
 }
 

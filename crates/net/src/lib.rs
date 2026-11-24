@@ -14,6 +14,7 @@ use wisp_core::imagegen;
 use wisp_core::lookup::{self, Identifier};
 use wisp_core::model::Paper;
 use wisp_core::update::{self, Release};
+use wisp_core::websearch;
 
 const USER_AGENT: &str = concat!("WispStudy/", env!("CARGO_PKG_VERSION"));
 
@@ -379,6 +380,54 @@ fn post_retrying(request: &HttpRequest, answer: Duration) -> Result<ureq::http::
     Ok(response)
 }
 
+/// What the tools are lent here beyond plain requests: Notion through its connector, and web search.
+pub fn reach() -> wisp_core::tools::Reach<'static> {
+    wisp_core::tools::Reach { publish: Some(&notes::publish), search: Some(&web_search) }
+}
+
+/// Search the web with the engine `asked` (empty: as settings say). Settings are read anew each time, so a
+/// key typed into the window holds for the next search, the command line's included.
+pub fn web_search(asked: &str, query: &websearch::Query) -> Result<websearch::Found, String> {
+    let settings = wisp_core::settings::Settings::load(&wisp_core::settings::settings_file()).map_err(|e| format!("{e:#}"))?;
+    let ready = websearch::ready(&settings, asked)?;
+    let hits = send_search(&websearch::request(&ready, query)?, ready.engine, query.content)?;
+    Ok(websearch::Found { engine: ready.engine, hits })
+}
+
+/// Send one search (a GET when the request has no body) and read its answer. A search only reads, so one
+/// the service is too busy for is asked again, as DeepSeek's documentation says to (408, 429, 5xx).
+fn send_search(request: &HttpRequest, engine: &'static websearch::Engine, content: bool) -> Result<Vec<websearch::Hit>, String> {
+    // Pages read for their text take a while longer to come.
+    let answer = Duration::from_secs(if content { 90 } else { 30 });
+    let agent = patient_agent(Some(answer + Duration::from_secs(30)), &request.proxy, answer)?;
+    let body = request.body.to_string();
+    let mut tries = 0;
+    loop {
+        let sent = if request.body.is_null() {
+            let mut call = agent.get(&request.url);
+            for (name, value) in &request.headers { call = call.header(name, value) }
+            call.call()
+        } else {
+            let mut call = agent.post(&request.url);
+            for (name, value) in &request.headers { call = call.header(name, value) }
+            call.send(body.as_str())
+        };
+        let last = tries >= RETRY_WAITS.len();
+        match sent {
+            Ok(mut response) if last || !retryable(response.status().as_u16()) => {
+                let status = response.status().as_u16();
+                let text = response.body_mut().with_config().limit(16 << 20).read_to_string().map_err(|e| format!("{} 网页搜索的返回内容没有读完：{e}", engine.name))?;
+                return websearch::read(engine, status, &text);
+            }
+            Ok(_) => {}
+            Err(err) if last || matches!(err, ureq::Error::Timeout(_)) => return Err(format!("{} 网页搜索：{}", engine.name, network_error(err))),
+            Err(_) => {}
+        }
+        std::thread::sleep(Duration::from_millis(RETRY_WAITS[tries]));
+        tries += 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,6 +447,28 @@ mod tests {
         let refused = balance(&wisp_core::usage::balance_request(&Profile { base_url: base, ..profile }).unwrap()).unwrap_err();
         server.join().unwrap();
         assert!(refused.contains("401") && refused.contains("Authentication Fails"), "{refused}");
+    }
+
+    #[test]
+    fn a_web_search_sent_and_read() {
+        let deepseek = websearch::engine("deepseek").unwrap();
+        let (base, server) = serve("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{\"results\": [{\"title\": \"T\", \"url\": \"https://example.com\", \"snippet\": \"s\", \"summary\": \"long\", \"content\": \"\", \"site_name\": null, \"date\": null}]}");
+        let ready = websearch::Ready { engine: deepseek, key: "k".into(), proxy: "direct".into() };
+        let mut request = websearch::request(&ready, &websearch::Query { query: "q".into(), count: 3, content: false }).unwrap();
+        request.url = format!("{base}/v1/tools/search");
+        let hits = send_search(&request, deepseek, false).unwrap();
+        assert_eq!((hits[0].title.as_str(), hits[0].summary.as_str()), ("T", "long"));
+        let asked = server.join().unwrap().to_lowercase();
+        assert!(asked.starts_with("post /v1/tools/search ") && asked.contains("authorization: bearer k") && asked.contains("\"count\":3"), "{asked}");
+        // Jina's is a GET; its refusal is said in its words.
+        let jina = websearch::engine("jina").unwrap();
+        let (base, server) = serve("HTTP/1.1 401 Unauthorized\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{\"data\": null, \"code\": 401, \"message\": \"Authentication is required\"}");
+        let mut request = websearch::request(&websearch::Ready { engine: jina, ..ready }, &websearch::Query { query: "q w".into(), count: 3, content: false }).unwrap();
+        request.url = request.url.replace("https://s.jina.ai", &base);
+        let refused = send_search(&request, jina, false).unwrap_err();
+        let asked = server.join().unwrap().to_lowercase();
+        assert!(asked.starts_with("get /?q=q%20w&num=3 ") && asked.contains("x-respond-with: no-content"), "{asked}");
+        assert!(refused.contains("Jina") && refused.contains("401") && refused.contains("Authentication is required"), "{refused}");
     }
 
     /// Serve one canned HTTP response on a local port; returns the base URL and the request it received.

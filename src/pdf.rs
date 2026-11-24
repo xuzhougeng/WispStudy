@@ -578,6 +578,17 @@ pub fn beside_split(two_files: Option<Split>, one_file: Split, width: f32) -> Sp
     }
 }
 
+/// The least a half is given of the viewer while the band between two halves is dragged (分屏 自由), in logical pixels.
+pub const HALF_MIN: f32 = 160.;
+
+/// The first half's share of the room two halves have (the viewer less `DIVIDER`) once the band between them,
+/// taken at `share`, has moved `moved` pixels: each half keeps `HALF_MIN`, or half the room when there is less.
+pub fn dragged_share(share: f32, moved: f32, room: f32) -> f32 {
+    if room <= 0. { return 0.5 }
+    let least = (HALF_MIN / room).min(0.5);
+    (share + moved / room).clamp(least, 1. - least)
+}
+
 /// The half of a split viewer a point of it is in, the point given from the viewer's top left corner.
 fn pane_at(split: Split, view: (f32, f32), at: (f32, f32)) -> usize {
     let half = pane_size(split, view);
@@ -1917,6 +1928,39 @@ impl PdfView {
 
     pub fn zoom(&self) -> Zoom {
         self.zoom
+    }
+
+    /// The file split on itself put back together for two viewers of it (分屏 自由, #245): how the halves stood, where the
+    /// half not worked in is read at (as `place` gives it) and whether it is the first, at the left or the top. The half
+    /// worked in stays here, whole. `None` unless the viewer shows two views each scrolled on its own: not while it
+    /// is whole, nor while the pages stand with their translation.
+    pub fn part(&mut self, cx: &mut Context<Self>) -> Option<(Split, (usize, f32), bool)> {
+        if self.split.views() != 2 || self.facing_beside() || self.sizes.is_empty() { return None }
+        let (split, other) = (self.split, 1 - self.active.min(1));
+        let place = self.pane_place(other);
+        self.set_split(Split::Off, cx);
+        Some((split, place, other == 0))
+    }
+
+    /// The file split on itself again from two viewers of it (分屏 固定): the other half at `place`, first (at the
+    /// left or the top) when `first` says so; the half here is the one worked in.
+    pub fn join(&mut self, split: Split, place: (usize, f32), first: bool, cx: &mut Context<Self>) {
+        if split.views() != 2 || self.split != Split::Off || self.facing_beside() || self.sizes.is_empty() { return }
+        self.set_split(split, cx);
+        let index = place.0.min(self.sizes.len() - 1);
+        self.panes[1].list.scroll_to(ListOffset { item_ix: index, offset_in_item: px(place.1 * self.scale_of(index)) });
+        if first {
+            self.panes.swap(0, 1);
+            self.kinds.swap(0, 1);
+            (self.active, self.held) = (1, 1);
+        }
+        cx.notify();
+    }
+
+    /// Where a half is read at, as `place` gives it.
+    fn pane_place(&self, pane: usize) -> (usize, f32) {
+        let top = self.panes[pane].list.logical_scroll_top();
+        (top.item_ix, f32::from(top.offset_in_item) / self.scale_of(top.item_ix).max(0.01))
     }
 
     /// Show the pages' translation (`Some`: the paragraphs of each page, 0-based), or put it away:
@@ -4230,7 +4274,7 @@ fn same_place(a: [f32; 4], b: [f32; 4]) -> bool {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: that would bring in gpui's own `test` attribute.
-    use super::{BAR_INSET, BAR_THUMB_MIN, CARD_EDGE, CardPlace, CitationFocus, CitationStatus, DIVIDER, MARGIN, PAGE_GAP, POINT_PX, Split, Zoom, bar_thumb, beside_split, card_place, page_scale, pane_at, pane_origin, pane_size, spare, views, picture_serves, render_scale, search_words, zoom_step};
+    use super::{BAR_INSET, BAR_THUMB_MIN, CARD_EDGE, CardPlace, CitationFocus, CitationStatus, DIVIDER, MARGIN, PAGE_GAP, POINT_PX, Split, Zoom, bar_thumb, beside_split, card_place, dragged_share, HALF_MIN, page_scale, pane_at, pane_origin, pane_size, spare, views, picture_serves, render_scale, search_words, zoom_step};
 
     #[test]
     fn a_sentence_not_found_is_looked_for_by_its_words() {
@@ -4251,6 +4295,17 @@ mod tests {
         assert_eq!((beside_split(None, Split::Side, narrow), beside_split(None, Split::Stacked, wide)), (Split::Side, Split::Stacked));
         // Whole: side by side where two pages have room, else one over the other.
         assert_eq!((beside_split(None, Split::Off, wide), beside_split(None, Split::Off, narrow)), (Split::Side, Split::Stacked));
+    }
+
+    #[test]
+    fn the_band_between_free_halves_follows_the_pointer_and_leaves_each_some_room() {
+        let room = 1000.;
+        assert_eq!(dragged_share(0.5, 100., room), 0.6);
+        assert_eq!(dragged_share(0.5, -250., room), 0.25);
+        // Never narrower than `HALF_MIN`, either way.
+        assert_eq!((dragged_share(0.5, -900., room), dragged_share(0.5, 900., room)), (HALF_MIN / room, 1. - HALF_MIN / room));
+        // A viewer too small for two such halves splits even; one not laid out yet too.
+        assert_eq!((dragged_share(0.5, 80., 2. * HALF_MIN - 1.), dragged_share(0.3, 10., 0.)), (0.5, 0.5));
     }
 
     #[test]

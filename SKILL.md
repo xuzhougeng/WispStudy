@@ -17,10 +17,11 @@ Wisp Study 是本地优先的文献管理软件。每个文献库是独立文件
 | 新建文献库 | 支持 | `create_library` |
 | 把文献库交给另一台电脑 | 支持 | `export_library`（可不带 PDF）→ 对方 `import_library` |
 | 从在线数据库批量导入书目信息和摘要 | 支持 | `search_online` → `save_search` → `run_search` |
+| 搜索网页（文献数据库之外的信息） | 支持；需要 DeepSeek、Jina 或 You.com 的 Key | `web_search` |
 | 按 DOI / PMID 直接添加条目 | 暂无专用命令 | 桌面「添加文献」 |
 | 导入本地 PDF、PDF 文件夹 | 支持 | `import_pdf`；可用 `--paper-id` 将单文件附到已有条目 |
 | 导入 BibTeX / RIS | 支持 | `import_references`，按内容自动识别格式 |
-| 从 Zotero 本地数据库迁移 | 支持 | `import_zotero`；`list_zotero_libraries` 列出个人库和群组库，`--zotero-library` 只导入其中一个 |
+| 从 Zotero 本地数据库迁移 | 支持 | `import_zotero`；`list_zotero_libraries` 列出个人库、群组库和分类，`--zotero-library` 只导入其中一个文献库，`--zotero-collections` 只导入几个分类 |
 | 为已有条目下载开放获取 PDF | 支持 | `find_pdf` |
 | 全文检索、按页阅读、候选引用与句子 | 支持 | `search_fulltext`、`read_fulltext`、`find_citations`、`find_sentences` |
 | 提出收录建议 | 支持；最终判断在桌面确认 | `suggest_screening` |

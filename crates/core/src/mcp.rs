@@ -11,7 +11,7 @@ use std::path::Path;
 const VERSIONS: [&str; 3] = ["2025-06-18", "2025-03-26", "2024-11-05"];
 
 const INSTRUCTIONS: &str = "Wisp Study 的本地文献库。先用 list_libraries 看有哪些文献库，再用 library 参数指定其中一个；需要建库时用 create_library，使用返回的 id。\
-import_pdf 导入本机 PDF 或文件夹，import_references 导入 BibTeX / RIS，import_zotero 读取本机 Zotero 数据库（zoteroLibrary 只导入其中一个文献库，list_zotero_libraries 列出有哪些）；这些操作不联网，PDF 和 Zotero 导入后必须检查 failed 及 results 中的 problems。\
+import_pdf 导入本机 PDF 或文件夹，import_references 导入 BibTeX / RIS，import_zotero 读取本机 Zotero 数据库（zoteroLibrary 只导入其中一个文献库，zoteroCollections 只导入其中几个分类，list_zotero_libraries 列出有哪些）；这些操作不联网，PDF 和 Zotero 导入后必须检查 failed 及 results 中的 problems。\
 查出处时先 search_fulltext，再用 read_fulltext 读命中的页面核对上下文；没有保存全文的文献只有书目信息和摘要。\
 用户提到划线、高亮、方框、便签、标注或阅读重点时用 list_pdf_annotations；quote 是选中原文，note 是用户笔记，不代表论文结论，页码属于 resourceId 指定的附件。\
 收录判断（screening）由用户本人决定；它的存储值不等于界面上的名称（excluded 显示为「相关」），名称见 library_status 的 labels。\nsearch_online 只是试检索，不写入；save_search、run_search、undo_import 会改动文献库，新导入的文献都是「待判断」。\n筛选文献时，逐篇读记录和全文后用 suggest_screening 提出建议（附理由和逐字引文）；建议不会改变收录判断，用户在窗口里确认。";
@@ -21,7 +21,8 @@ import_pdf 导入本机 PDF 或文件夹，import_references 导入 BibTeX / RIS
 pub struct Server<'a> {
     pub fetch: Fetch<'a>,
     pub download: Download<'a>,
-    pub publish: Option<crate::notes::Publish<'a>>,
+    /// Notion and web search, where the front end has them.
+    pub reach: tools::Reach<'a>,
     pub read_only: bool,
 }
 
@@ -50,7 +51,7 @@ pub fn handle(root: &Path, message: &Value, server: &Server) -> Option<Value> {
                 let args = if params["arguments"].is_null() { &empty } else { &params["arguments"] };
                 // A failed tool is a result the model reads and recovers from, not a protocol error.
                 let refused = server.read_only && tools::catalog().iter().any(|t| t.name == name && t.writes);
-                let outcome = if refused { Err(format!("这个 MCP 服务以只读方式启动，不能使用 {name}。")) } else { tools::call_with(root, name, args, server.fetch, server.download, server.publish) };
+                let outcome = if refused { Err(format!("这个 MCP 服务以只读方式启动，不能使用 {name}。")) } else { tools::call_with(root, name, args, server.fetch, server.download, server.reach) };
                 Ok(match outcome {
                     Ok(value) => json!({"content": [{"type": "text", "text": value.to_string()}], "structuredContent": value, "isError": false}),
                     Err(error) => json!({"content": [{"type": "text", "text": error}], "isError": true}),
@@ -77,7 +78,7 @@ mod tests {
     #[test]
     fn a_session() {
         let (root, id) = tools::tests::sample();
-        let server = Server { fetch: &tools::tests::offline, download: &tools::tests::no_download, publish: None, read_only: false };
+        let server = Server { fetch: &tools::tests::offline, download: &tools::tests::no_download, reach: tools::Reach::default(), read_only: false };
         let ask = |message: Value| handle(&root, &message, &server);
         let hello = ask(json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}}})).unwrap();
         assert_eq!((hello["id"].as_i64(), hello["result"]["protocolVersion"].as_str()), (Some(1), Some("2025-03-26")));
@@ -108,7 +109,7 @@ mod tests {
         // Read-only: the tools that change a library are neither listed nor callable.
         let annotated = listed["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "run_search").unwrap();
         assert_eq!(annotated["annotations"]["readOnlyHint"], false);
-        let reader = Server { fetch: &tools::tests::offline, download: &tools::tests::no_download, publish: None, read_only: true };
+        let reader = Server { fetch: &tools::tests::offline, download: &tools::tests::no_download, reach: tools::Reach::default(), read_only: true };
         let listed = handle(&root, &json!({"id": 9, "method": "tools/list"}), &reader).unwrap();
         let names: Vec<&str> = listed["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"search_online") && !names.contains(&"run_search") && !names.contains(&"save_search"));

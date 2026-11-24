@@ -124,6 +124,9 @@ fn pictures_beside(path: &std::path::Path, pictures: &[(String, std::path::PathB
     }
 }
 
+/// The size the words of a manuscript read through are set in.
+const READ_SIZE: f32 = 15.;
+
 impl Workspace {
     /// Save a finished chat answer in its own manuscript, never replacing an
     /// existing draft. Conversation-local citation labels travel with it.
@@ -575,7 +578,9 @@ impl Workspace {
             if done.changed > 0 { said.push(tf!("改动 {} 段", "{} paragraphs changed", done.changed)) }
             if done.added > 0 { said.push(tf!("新增 {} 段", "{} added", done.added)) }
             if done.removed > 0 { said.push(tf!("删去 {} 段", "{} removed", done.removed)) }
-            if track && done.changed + done.added + done.removed > 0 { said.push(t("都记为修订").to_string()) }
+            // A table written in the manuscript is put into the file: its text is not among the paragraphs counted.
+            if done.tables > 0 { said.push(tf!("新增表格 {} 张", "{} tables added", done.tables)) }
+            if track && done.changed + done.added + done.removed + done.tables > 0 { said.push(t("都记为修订").to_string()) }
         } else if lib.writing.comments.source.as_ref().is_some_and(|source| source.kind == "docx") {
             said.push(t("原来的 Word 文件不在了，按新文档导出").to_string());
         }
@@ -969,18 +974,24 @@ impl Workspace {
             .map(|(n, section)| {
                 // The section's Markdown drawn as it says, a heading in it under the section's name. A picture's line
                 // is the picture over its caption (write_figures.rs): the text is drawn in the pieces between them.
-                let written = manuscript::section_markdown(&section.body, 2);
+                // Its citations read as the exported file has them (design rule 32), a caption's too. The section's
+                // name is the page's first level of heading, so a heading written in the section is one level under it.
+                let written = manuscript::section_markdown(&section.body, 1);
                 let pictures = manuscript::picture_lines(&section.body);
+                let labels = lib.citing.read.whole.get(n).map(Vec::as_slice).unwrap_or(&[]);
+                let read = |within: std::ops::Range<usize>| wisp_core::cite::read_as(&section.body, labels, within);
                 let mut pieces: Vec<AnyElement> = vec![];
                 let mut from = 0;
                 for (at, picture) in pictures.iter().enumerate() {
-                    let before = manuscript::section_markdown(&section.body[from..picture.line.start], 2);
-                    if !before.is_empty() { pieces.push(crate::markdown::render(&format!("write-read-{n}-{at}"), &before, None, None).into_any_element()) }
-                    pieces.push(self.render_manuscript_picture(format!("write-read-picture-{n}-{at}"), picture, window));
+                    let before = manuscript::section_markdown(&read(from..picture.line.start), 1);
+                    if !before.is_empty() { pieces.push(crate::markdown::render_page(&format!("write-read-{n}-{at}"), &before, READ_SIZE).into_any_element()) }
+                    let caption = section.body[picture.line.clone()].find(picture.caption.as_str()).filter(|_| !picture.caption.is_empty()).map(|start| read(picture.line.start + start..picture.line.start + start + picture.caption.len()));
+                    let picture = manuscript::PictureLine { caption: caption.unwrap_or_else(|| picture.caption.clone()), ..picture.clone() };
+                    pieces.push(self.render_manuscript_picture(format!("write-read-picture-{n}-{at}"), &picture, window));
                     from = picture.line.end;
                 }
-                let rest = manuscript::section_markdown(&section.body[from..], 2);
-                if !rest.is_empty() { pieces.push(crate::markdown::render(&format!("write-read-{n}"), &rest, None, None).into_any_element()) }
+                let rest = manuscript::section_markdown(&read(from..section.body.len()), 1);
+                if !rest.is_empty() { pieces.push(crate::markdown::render_page(&format!("write-read-{n}"), &rest, READ_SIZE).into_any_element()) }
                 div()
                     .flex()
                     .flex_col()
@@ -993,11 +1004,11 @@ impl Workspace {
                             .gap(px(8.))
                             .cursor_pointer()
                             .on_click(self.on(Cmd::WriteSection(section.id.clone()), cx))
-                            .child(div().text_size(text_px(17.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text()).hover(|s| s.text_color(Theme::accent())).child(section.name.clone()))
+                            .child(div().text_size(text_px(20.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text()).hover(|s| s.text_color(Theme::accent())).child(section.name.clone()))
                             .when(section.kind != "other", |d| d.child(div().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(label(&SECTIONS, &section.kind).to_string()))),
                     )
                     .when(written.is_empty(), |d| d.child(div().text_size(text_px(13.)).text_color(Theme::text_tertiary()).child(t("这一节还没有写。"))))
-                    .when(!written.is_empty(), |d| d.child(div().flex().flex_col().gap(theme::paragraph_gap(10.)).text_size(text_px(15.)).text_color(Theme::text()).children(pieces)))
+                    .when(!written.is_empty(), |d| d.child(div().flex().flex_col().gap(theme::paragraph_gap(10.)).text_size(text_px(READ_SIZE)).text_color(Theme::text()).children(pieces)))
                     .into_any_element()
             })
             .collect();
@@ -1010,7 +1021,7 @@ impl Workspace {
             // No frame, like the section being written: one line under it, where the text scrolls away.
             .border_b_1()
             .border_color(Theme::line())
-            .child(div().flex().justify_center().px(px(28.)).py(px(24.)).child(div().flex().flex_col().gap(px(26.)).w_full().max_w(theme::manuscript_width()).child(div().text_size(text_px(22.)).font_weight(FontWeight::SEMIBOLD).line_height(text_px(30.)).child(crate::i18n::manuscript_title(manuscript).to_string())).children(sections).children(self.render_references_read(cx))))
+            .child(div().flex().justify_center().px(px(28.)).py(px(24.)).child(div().flex().flex_col().gap(px(30.)).w_full().max_w(theme::manuscript_width()).child(div().text_size(text_px(24.)).font_weight(FontWeight::SEMIBOLD).line_height(text_px(32.)).child(crate::i18n::manuscript_title(manuscript).to_string())).children(sections).children(self.render_references_read(cx))))
             .into_any_element()
     }
 

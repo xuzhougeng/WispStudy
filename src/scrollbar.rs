@@ -19,13 +19,13 @@ const THUMB_MIN: f32 = 28.;
 
 /// The thumb on a track `track` long, of a list `view` tall that scrolls `max` down and is `offset` down:
 /// its length, and how far down the track it stands.
-fn thumb(track: f32, view: f32, max: f32, offset: f32) -> (f32, f32) {
+pub(crate) fn thumb(track: f32, view: f32, max: f32, offset: f32) -> (f32, f32) {
     let len = (track * view / (view + max).max(1.)).max(THUMB_MIN).min(track);
     (len, (track - len) * (offset / max.max(1.)).clamp(0., 1.))
 }
 
 /// How far down the list is with the thumb's top `top` down the track: the inverse of `thumb`.
-fn offset_at(track: f32, len: f32, max: f32, top: f32) -> f32 {
+pub(crate) fn offset_at(track: f32, len: f32, max: f32, top: f32) -> f32 {
     (top / (track - len).max(1.) * max).clamp(0., max)
 }
 

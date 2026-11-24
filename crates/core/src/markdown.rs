@@ -70,7 +70,8 @@ pub enum Block {
     Paragraph(Rich),
     Heading(u8, Rich),
     Item { marker: Marker, text: Rich, children: Vec<Block> },
-    Code { lang: String, text: String },
+    /// `closed` is whether its closing fence was read: an answer still being written ends in one that is not.
+    Code { lang: String, text: String, closed: bool },
     Quote(Vec<Block>),
     Rule,
     /// The first row is the header; every row has one cell per column.
@@ -175,7 +176,7 @@ fn blocks(lines: &[&str]) -> Vec<Block> {
                 code.push(dedent(lines[j], ind));
                 j += 1;
             }
-            out.push(Block::Code { lang: info.split_whitespace().next().unwrap_or("").to_string(), text: code.join("\n") });
+            out.push(Block::Code { lang: info.split_whitespace().next().unwrap_or("").to_string(), text: code.join("\n"), closed: j < lines.len() });
             i = j + 1;
             continue;
         }
@@ -269,7 +270,7 @@ fn table_cells(line: &str) -> Vec<String> {
 }
 
 /// A pipe table at the start of `lines`: the table, and the lines it took.
-fn pipe_table(lines: &[&str]) -> Option<(Block, usize)> {
+pub fn pipe_table(lines: &[&str]) -> Option<(Block, usize)> {
     let (head, sep) = (lines.first()?, lines.get(1)?);
     if !head.contains('|') || !sep.contains('-') { return None }
     let seps = table_cells(sep);
@@ -291,6 +292,32 @@ fn pipe_table(lines: &[&str]) -> Option<(Block, usize)> {
     // `<br>` is how a cell holds two lines.
     let rows = rows.iter().map(|row| (0..columns).map(|c| inline(&row.get(c).map_or(String::new(), |cell| cell.replace("<br>", "\n").replace("<br/>", "\n")))).collect()).collect();
     Some((Block::Table { aligns: aligns.collect(), rows }, used))
+}
+
+/// How many of `lines` a pipe table at their start takes: its header, the line of dashes under it and its rows;
+/// 0 when they do not start with one. For whoever reads a text line by line and must keep a table's lines together.
+pub fn table_lines(lines: &[&str]) -> usize {
+    pipe_table(lines).map_or(0, |(_, used)| used)
+}
+
+/// How wide a text is at its longest line, in letters: a letter of Chinese counts as two of Latin.
+pub fn width(text: &str) -> usize {
+    text.lines().map(|line| line.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum::<usize>()).max().unwrap_or(0)
+}
+
+/// The share of a table's width each of its columns gets, adding up to 1: by the widest of its cells (`width`
+/// of each, row by row), so a column of labels is narrow and one of sentences wide. No column is counted
+/// shorter than `SHORT` or longer than `LONG`: a label stays on one line beside a long sentence, and one very
+/// long cell does not take the table. The window draws a table so, and a Word file has it so.
+pub fn column_shares(rows: &[Vec<usize>]) -> Vec<f32> {
+    const SHORT: usize = 4;
+    const LONG: usize = 30;
+    // The room a cell's padding takes, in letters: what keeps a narrow column from being all padding.
+    const PADDING: usize = 3;
+    let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+    let widths: Vec<usize> = (0..columns).map(|c| rows.iter().filter_map(|row| row.get(c)).copied().max().unwrap_or(0).clamp(SHORT, LONG) + PADDING).collect();
+    let all: usize = widths.iter().sum();
+    widths.iter().map(|width| *width as f32 / all as f32).collect()
 }
 
 fn is_boundary(c: Option<char>) -> bool {
@@ -763,9 +790,11 @@ mod tests {
         assert!(matches!(&parsed[5], Block::Item { marker: Marker::Number(2), .. }));
         assert_eq!(parsed[6], Block::Rule);
         assert_eq!(parsed[7], Block::Quote(vec![Block::Paragraph(Rich::plain("引文"))]));
-        assert_eq!(parsed[8], Block::Code { lang: "python".into(), text: "print(1)".into() });
+        assert_eq!(parsed[8], Block::Code { lang: "python".into(), text: "print(1)".into(), closed: true });
         assert!(matches!(&parsed[9], Block::Item { marker: Marker::Todo(true), .. }));
         assert_eq!(parsed.len(), 10);
+        // A fence an answer has not come to the end of yet.
+        assert_eq!(parse("```mermaid\ngraph LR\n  A --> B"), [Block::Code { lang: "mermaid".into(), text: "graph LR\n  A --> B".into(), closed: false }]);
     }
 
     #[test]
