@@ -345,6 +345,8 @@ impl TextLayout {
         window.request_measured_layout(Default::default(), {
             let element_state = self.clone();
 
+            let whole_len = text.len();
+
             move |known_dimensions, available_space, window, cx| {
                 let wrap_width = if text_style.white_space == WhiteSpace::Normal {
                     known_dimensions.width.or(match available_space.width {
@@ -383,9 +385,10 @@ impl TextLayout {
                 }
 
                 // quiet.md: cutting shortens the runs; each measure starts from the whole of them.
+                let whole_runs = runs.clone();
                 let mut runs = runs.clone();
                 let mut line_wrapper = cx.text_system().line_wrapper(text_style.font(), font_size);
-                let text = if let Some(truncate_width) = truncate_width {
+                let mut text = if let Some(truncate_width) = truncate_width {
                     line_wrapper.truncate_line(
                         text.clone(),
                         truncate_width,
@@ -395,19 +398,48 @@ impl TextLayout {
                 } else {
                     text.clone()
                 };
+                // quiet.md: `truncate_line` cuts by the widths of the characters one by one, which for a long line
+                // of mixed scripts come to less than the line shaped, so the line ran past its width and the
+                // element clipped it mid-glyph, ellipsis and all. A line on one row that is shaped wider than it
+                // may be loses a character more before the suffix, until it fits.
+                let mut cut = text.len() != whole_len;
+                let mut tries = 0;
+                let shaped = loop {
+                    let shaped = window
+                        .text_system()
+                        .shape_text(
+                            text.clone(),
+                            font_size,
+                            &runs,
+                            wrap_width,            // Wrap if we know the width.
+                            text_style.line_clamp, // Limit the number of lines if line_clamp is set.
+                        )
+                        .log_err();
+                    let too_wide = wrap_width.is_none()
+                        && truncate_width.is_some_and(|width| {
+                            shaped.as_ref().is_some_and(|lines| {
+                                lines.iter().any(|line| line.size(line_height).width > width)
+                            })
+                        });
+                    if !too_wide || tries >= 24 {
+                        break shaped;
+                    }
+                    let kept = if cut {
+                        text.strip_suffix(truncation_suffix.as_ref()).unwrap_or(&text)
+                    } else {
+                        &text
+                    };
+                    let Some((last, _)) = kept.char_indices().next_back() else {
+                        break shaped;
+                    };
+                    let shorter = SharedString::from(format!("{}{}", &kept[..last], truncation_suffix));
+                    runs = whole_runs.clone();
+                    crate::update_runs_after_truncation(&shorter, &truncation_suffix, &mut runs);
+                    (text, cut, tries) = (shorter, true, tries + 1);
+                };
                 let len = text.len();
 
-                let Some(lines) = window
-                    .text_system()
-                    .shape_text(
-                        text,
-                        font_size,
-                        &runs,
-                        wrap_width,            // Wrap if we know the width.
-                        text_style.line_clamp, // Limit the number of lines if line_clamp is set.
-                    )
-                    .log_err()
-                else {
+                let Some(lines) = shaped else {
                     element_state.0.borrow_mut().replace(TextLayoutInner {
                         lines: Default::default(),
                         len: 0,

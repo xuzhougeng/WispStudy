@@ -46,6 +46,7 @@ diff -ru $R/xattr-0.2.3/src vendor/xattr/src
 | 25 | `platform/mac/platform.rs` | 打开面板 `setCanResolveUbiquitousConflicts: NO`：不让面板处理所选文件的 iCloud 冲突版本 | 选中有未解决 iCloud 冲突的文件（如 iCloud 目录里的 `zotero.sqlite`）并确认时，面板进程 `openAndSavePanelService` 在 `_resolveUbiquitousConflictsForURLs:` 里无限递归、栈溢出崩溃，选择结果回不来（#177）。应用只读取文件的当前版本，不需要面板代为解决冲突 |
 | 26 | `elements/div.rs`、`elements/text.rs` | 悬停说明：按下鼠标时，还在等待出现（500 ms 内）的说明一并取消，原来只收起已经显示的；到时间要显示时，按元素最近一次绘制的状态来（`TooltipSource`：当时的 hitbox 和生成说明的闭包），hitbox 已不在指针下（被新开的菜单盖住、元素不在了）就不显示。原来用的是开始等待那一帧的闭包和元素的矩形 | 右键一行文献、点「版面」后，说明晚半秒冒出来盖住菜单的头一两项；点「留在旁边」后冒出来的还是点之前那句「留住这篇…」 |
 | 27 | `interactive.rs`、`elements/div.rs` | `MouseClickEvent` 增加 `bounds`（被点元素的矩形，键盘点击原来就有），`ClickEvent::bounds()` 两种点击都能取 | 按钮点开的菜单开在按钮下面（`Workspace::on_menu`、`app::menu_place`），不压在按钮和指针上 |
+| 28 | `elements/text.rs`、`text_system/line_wrapper.rs` | 单行截断的文字排完版后如果仍比给的宽度宽，就在省略号前再去掉一个字重排，直到放得下（最多 24 次）；`update_runs_after_truncation` 改为 crate 内可见 | `truncate_line` 按逐字宽度相加来估算截断位置，中英混排的长行估得偏短（一行 600 px 少算约 30 px），文字连同省略号伸出列外，被外层裁掉半个字 |
 
 
 ## taffy 0.9.0

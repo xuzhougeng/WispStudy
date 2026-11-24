@@ -77,13 +77,21 @@ pub struct Scrollbar {
     id: ElementId,
     handle: Scrolls,
     pressed: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
+    says: Option<Rc<dyn Fn() -> SharedString>>,
 }
 
 pub fn scrollbar(id: impl Into<ElementId>, handle: impl Into<Scrolls>) -> Scrollbar {
-    Scrollbar { id: id.into(), handle: handle.into(), pressed: None }
+    Scrollbar { id: id.into(), handle: handle.into(), pressed: None, says: None }
 }
 
 impl Scrollbar {
+    /// What the bar says beside its thumb while that is held: where it has come to (a PDF's page), for a list whose
+    /// items pass too fast to be read while it is dragged.
+    pub fn saying(mut self, says: impl Fn() -> SharedString + 'static) -> Self {
+        self.says = Some(Rc::new(says));
+        self
+    }
+
     /// Heard when the bar is pressed, before the list moves: an owner of several lists makes this one the one worked in.
     pub fn on_press(mut self, pressed: impl Fn(&mut Window, &mut App) + 'static) -> Self {
         self.pressed = Some(Rc::new(pressed));
@@ -135,7 +143,7 @@ impl Element for Scrollbar {
         Some(Bar { hitbox: window.insert_hitbox(bounds, HitboxBehavior::BlockMouseExceptScroll), track, len, top, max })
     }
 
-    fn paint(&mut self, id: Option<&GlobalElementId>, _: Option<&InspectorElementId>, bounds: Bounds<Pixels>, _: &mut (), bar: &mut Option<Bar>, window: &mut Window, _: &mut App) {
+    fn paint(&mut self, id: Option<&GlobalElementId>, _: Option<&InspectorElementId>, bounds: Bounds<Pixels>, _: &mut (), bar: &mut Option<Bar>, window: &mut Window, cx: &mut App) {
         let held = window.with_element_state(id.unwrap(), |state: Option<Rc<RefCell<Held>>>, _| {
             let state = state.unwrap_or_default();
             (state.clone(), state)
@@ -150,6 +158,18 @@ impl Element for Scrollbar {
         let thumb_bounds = Bounds::new(point(bounds.right() - px(INSET + width - 1.), bounds.top() + px(INSET + top)), size(px(width), px(len)));
         window.paint_quad(fill(thumb_bounds, Theme::text_tertiary().opacity(if over { 0.85 } else { 0.4 })).corner_radii(px(width / 2.)));
         window.set_cursor_style(CursorStyle::Arrow, &hitbox);
+        // Held, a bar that has something to say says it at the thumb's left, level with its middle.
+        if let Some(says) = self.says.as_ref().filter(|_| held.borrow().grab.is_some()) {
+            let (text, style) = (says(), window.text_style());
+            let (font_size, line_height) = (crate::theme::text_px(12.), crate::theme::text_px(16.));
+            let run = TextRun { len: text.len(), font: style.font(), color: Theme::text(), background_color: None, underline: None, strikethrough: None };
+            let line = window.text_system().shape_line(text, font_size, &[run], None);
+            let chip = size(line.width + px(16.), line_height + px(8.));
+            let top = (thumb_bounds.center().y - chip.height / 2.).max(bounds.top() + px(2.)).min(bounds.bottom() - chip.height - px(2.));
+            let chip = Bounds::new(point(bounds.left() - px(4.) - chip.width, top), chip);
+            window.paint_quad(fill(chip, Theme::bg_body()).corner_radii(px(6.)).border_widths(px(1.)).border_color(Theme::line_strong()));
+            line.paint(point(chip.left() + px(8.), chip.top() + px(4.)), line_height, window, cx).ok();
+        }
 
         let view = window.current_view();
         let handle = self.handle.clone();

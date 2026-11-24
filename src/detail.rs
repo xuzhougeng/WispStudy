@@ -851,7 +851,8 @@ impl Workspace {
         if has {
             let pages = tf!("{} / {} 页", "{} / {} pages", bar.page, bar.count);
             let width = wide(&pages);
-            put((div().id("pdf-pages").flex_none().child(pages), width));
+            // Where it is read, and the way to a page by its number.
+            put((div().id("pdf-pages").flex_none().rounded(px(5.)).cursor_pointer().hover(|s| s.text_color(Theme::text_secondary())).child(pages).tooltip(ui::tip(t("跳到第几页…"))).on_click(self.on(Cmd::AskPdfPage, cx)), width));
             // Smaller, the size in force (a menu of sizes), larger; the whole page in one click; zoomed by hand, the
             // way back to the fit the reader reads at. In a narrow bar the size alone: its menu and ⋯ have the rest.
             let fit_label = |zoom: Zoom| if zoom == Zoom::FitPage { t("适应整页") } else { t("适应宽度") };
