@@ -4,14 +4,19 @@
 //! a model and then the reader's to change. The view holds the map and what
 //! is chosen in it; whoever made it keeps the map (`MapEvent::Changed`),
 //! shows a node's passage in the paper (`Goto`) and asks the model (`Draft`).
+//!
+//! The map is a sheet the reader moves about and draws larger or smaller: the wheel moves it (with ⌘ / Ctrl,
+//! or a pinch, it zooms about the pointer), its ground is pulled with the pointer, and a node held and moved is
+//! dropped onto another, under it or, at its top or bottom edge, before or after it.
 
 use crate::i18n::t;
 use crate::input::{InputEvent, TextInput};
-use crate::shortcuts::{Dismiss, MoveDown, MoveLeft, MoveRight, MoveUp, OpenSelected, TickSuggestion, TrashSelected};
+use crate::shortcuts::{Dismiss, MoveDown, MoveLeft, MoveRight, MoveUp, OpenSelected, TickSuggestion, TrashSelected, ZoomFit, ZoomIn, ZoomOut};
 use crate::theme::{text_px, Theme};
 use crate::ui;
 use gpui::{prelude::FluentBuilder, *};
-use wisp_core::mindmap::{self, Anchor, Layout, MindMap, Node, Step};
+use std::{cell::Cell, collections::HashSet, rc::Rc};
+use wisp_core::mindmap::{self, Anchor, Layout, MindMap, Node, Place, Step};
 
 /// The widest a node's words run before they wrap, and the room around them in a node.
 const NODE_WIDE: f32 = 220.;
@@ -25,6 +30,28 @@ const HEAD: f32 = 34.;
 const PAGE_CHIP: f32 = 34.;
 /// How many earlier states of the map can be gone back to.
 const UNDO: usize = 50;
+/// How much smaller and larger the map is drawn, and the step of a click or a key.
+const ZOOM: (f32, f32) = (0.3, 2.5);
+const ZOOM_STEP: f32 = 1.2;
+/// How far the pointer goes with something held before it is a drag and not a click.
+const DRAG: f32 = 4.;
+/// How much of the map stays in view however far it is pulled away.
+const KEEP: f32 = 56.;
+
+/// What the pointer holds.
+#[derive(Clone, Copy)]
+enum Grab {
+    /// The map's ground (or its root), taken where it was pressed: the map follows the pointer.
+    Ground { from: Point<Pixels>, pan: (f32, f32), moving: bool },
+    /// A node; once the pointer has gone `DRAG` it is carried, and `drop` says where it would go if let go now.
+    Node { id: u64, from: Point<Pixels>, at: Point<Pixels>, moving: bool, drop: Option<(u64, Place)> },
+}
+
+impl Grab {
+    fn moving(&self) -> bool {
+        match self { Grab::Ground { moving, .. } | Grab::Node { moving, .. } => *moving }
+    }
+}
 
 pub enum MapEvent {
     /// The map was changed by the reader: it is to be kept.
@@ -42,7 +69,17 @@ pub struct MindMapView {
     editing: Option<u64>,
     input: Entity<TextInput>,
     focus: FocusHandle,
-    scroll: ScrollHandle,
+    /// How large the map is drawn, 1 being its own size.
+    zoom: f32,
+    /// Where the sheet's top left stands in the view: the map is moved by moving it.
+    pan: (f32, f32),
+    /// The view's bounds in the window, as last drawn.
+    view: Rc<Cell<Bounds<Pixels>>>,
+    /// The map as last drawn (at `zoom`), for what a drag is over.
+    drawn: Layout,
+    grab: Option<Grab>,
+    /// The whole map is to be fitted into the view when it is next drawn.
+    fit: bool,
     /// The node chosen is to be brought into view when the map is next drawn.
     reveal: bool,
     /// The map is to take the keyboard back when it is next drawn: the field that had it is gone.
@@ -76,7 +113,7 @@ impl MindMapView {
             _ => {}
         }).detach();
         let chosen = Some(map.root.id);
-        MindMapView { map, chosen, editing: None, input, focus: cx.focus_handle(), scroll: ScrollHandle::new(), reveal: false, refocus: false, drafting: false, failed: None, asking: false, undone: vec![], redone: vec![], blur: None }
+        MindMapView { map, chosen, editing: None, input, focus: cx.focus_handle(), zoom: 1., pan: (0., 0.), view: Rc::default(), drawn: Layout::default(), grab: None, fit: false, reveal: false, refocus: false, drafting: false, failed: None, asking: false, undone: vec![], redone: vec![], blur: None }
     }
 
     pub fn map(&self) -> &MindMap {
@@ -128,7 +165,9 @@ impl MindMapView {
 
     /// A step of the keyboard without the keyboard, for a scripted window (`pdfmap:` of `WISP_STUDY_DEV`):
     /// `child:<words>` / `sibling:<words>` of the node chosen, `remove`, `fold`, `indent`, `outdent`, `undo`,
-    /// `redo`, `up` / `down` / `in` / `out` to choose another, and `goto` for the passage of the one chosen.
+    /// `redo`, `up` / `down` / `in` / `out` to choose another, `goto` for the passage of the one chosen,
+    /// `zoom:in` / `zoom:out` / `zoom:fit` / `zoom:<percent>`, and `move:<id>;before|under|after` (the node chosen
+    /// dropped on another, as a drag does).
     pub fn script(&mut self, what: &str, cx: &mut Context<Self>) {
         let chosen = self.chosen.unwrap_or(self.map.root.id);
         let (what, words) = what.split_once(':').unwrap_or((what, ""));
@@ -145,6 +184,17 @@ impl MindMapView {
             "down" => self.step(Step::Down, cx),
             "in" => self.step(Step::In, cx),
             "out" => self.step(Step::Out, cx),
+            "zoom" => match words {
+                "in" => self.zoom_to(self.zoom * ZOOM_STEP, None, cx),
+                "out" => self.zoom_to(self.zoom / ZOOM_STEP, None, cx),
+                "fit" => { self.fit = true; cx.notify() }
+                percent => if let Ok(percent) = percent.parse::<f32>() { self.zoom_to(percent / 100., None, cx) },
+            },
+            "move" => {
+                let (target, place) = words.split_once(';').unwrap_or((words, "under"));
+                let place = match place { "before" => Place::Before, "after" => Place::After, _ => Place::Under };
+                if let Ok(target) = target.parse::<u64>() { self.change(cx, |this| this.map.move_node(chosen, target, place).then_some(chosen)); }
+            }
             "goto" => if let Some(anchor) = self.map.node(chosen).and_then(|node| node.anchor.clone()) { cx.emit(MapEvent::Goto(anchor)) },
             _ => {}
         }
@@ -268,28 +318,30 @@ impl MindMapView {
         if handled { cx.stop_propagation() }
     }
 
-    /// How large a node is drawn: its words wrapped at `NODE_WIDE`, with room for its page after them.
-    fn size(node: &Node, depth: usize, window: &Window) -> (f32, f32) {
-        let size = text_px(if depth == 0 { 14. } else { 13. });
-        let line = f32::from(text_px(if depth == 0 { 21. } else { 19. }));
+    /// How large a node is drawn at `zoom`: its words wrapped at `NODE_WIDE`, with room for its page after them.
+    /// Measured at the size it is drawn, so the words wrap where they are drawn.
+    fn size(node: &Node, depth: usize, zoom: f32, window: &Window) -> (f32, f32) {
+        let size = text_px(if depth == 0 { 14. } else { 13. }) * zoom;
+        let line = f32::from(text_px(if depth == 0 { 21. } else { 19. })) * zoom;
+        let wide_most = NODE_WIDE * zoom;
         let text: SharedString = if node.text.is_empty() { " ".into() } else { node.text.replace('\n', " ").into() };
         let mut font = window.text_style().font();
         if depth == 0 { font.weight = FontWeight::SEMIBOLD }
         let run = TextRun { len: text.len(), font, color: Theme::text(), background_color: None, underline: None, strikethrough: None };
         let (mut wide, mut lines) = (0f32, 0usize);
-        if let Ok(shaped) = window.text_system().shape_text(text, size, &[run], Some(px(NODE_WIDE)), None) {
+        if let Ok(shaped) = window.text_system().shape_text(text, size, &[run], Some(px(wide_most)), None) {
             for one in &shaped {
                 lines += one.wrap_boundaries().len() + 1;
-                wide = wide.max(if one.wrap_boundaries().is_empty() { f32::from(one.width()) } else { NODE_WIDE });
+                wide = wide.max(if one.wrap_boundaries().is_empty() { f32::from(one.width()) } else { wide_most });
             }
         }
-        let chip = if node.anchor.is_some() { PAGE_CHIP } else { 0. };
+        let chip = if node.anchor.is_some() { PAGE_CHIP * zoom } else { 0. };
         // The node's border is drawn inside its width: the words keep the width they were measured at.
-        ((wide.ceil() + 1.).max(24.) + 2. * NODE_PAD.0 + 2. + chip, lines.max(1) as f32 * line + 2. * NODE_PAD.1 + 2.)
+        ((wide.ceil() + 1.).max(24. * zoom) + 2. * NODE_PAD.0 * zoom + 2. + chip, lines.max(1) as f32 * line + 2. * NODE_PAD.1 * zoom + 2.)
     }
 
     /// The lines from each node to its children, drawn under the nodes.
-    fn links(drawn: &Layout) -> impl IntoElement {
+    fn links(drawn: &Layout, zoom: f32) -> impl IntoElement {
         let lines: Vec<(Point<Pixels>, Point<Pixels>)> = drawn.nodes.iter().filter_map(|node| {
             let parent = &drawn.nodes[node.parent?];
             Some((point(px(parent.x + parent.w), px(parent.y + parent.h / 2.)), point(px(node.x), px(node.y + node.h / 2.))))
@@ -299,12 +351,127 @@ impl MindMapView {
             for (from, to) in &lines {
                 let (from, to) = (bounds.origin + *from, bounds.origin + *to);
                 let middle = (from.x + to.x) / 2.;
-                let mut path = PathBuilder::stroke(px(1.25));
+                let mut path = PathBuilder::stroke(px(1.25 * zoom.max(0.6)));
                 path.move_to(from);
                 path.cubic_bezier_to(to, point(middle, from.y), point(middle, to.y));
                 if let Ok(path) = path.build() { window.paint_path(path, color) }
             }
         }).absolute().size_full()
+    }
+
+    /// Where the map's own top left stands in the view.
+    fn origin(&self) -> (f32, f32) {
+        (self.pan.0 + EDGE, self.pan.1 + HEAD)
+    }
+
+    /// A point of the window as a point of the view.
+    fn in_view(&self, at: Point<Pixels>) -> (f32, f32) {
+        let view = self.view.get();
+        (f32::from(at.x - view.origin.x), f32::from(at.y - view.origin.y))
+    }
+
+    /// Draw the map `to` times its own size, the point `about` of the view (its middle without one) staying put.
+    fn zoom_to(&mut self, to: f32, about: Option<(f32, f32)>, cx: &mut Context<Self>) {
+        let to = to.clamp(ZOOM.0, ZOOM.1);
+        if (to - self.zoom).abs() < 0.001 { return }
+        let size = self.view.get().size;
+        let about = about.unwrap_or((f32::from(size.width) / 2., f32::from(size.height) / 2.));
+        let ((x, y), k) = (self.origin(), to / self.zoom);
+        self.pan = (about.0 - (about.0 - x) * k - EDGE, about.1 - (about.1 - y) * k - HEAD);
+        self.zoom = to;
+        cx.notify();
+    }
+
+    /// The wheel moves the map; with ⌘ or Ctrl (a pinch comes as the wheel with Ctrl) it zooms about the pointer.
+    fn wheel(&mut self, event: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
+        let delta = event.delta.pixel_delta(px(20.));
+        let (dx, dy) = (f32::from(delta.x), f32::from(delta.y));
+        if event.modifiers.secondary() || event.modifiers.control {
+            if dy != 0. { self.zoom_to(self.zoom * (dy / 240.).exp(), Some(self.in_view(event.position)), cx) }
+            return;
+        }
+        // A wheel that only turns one way moves sideways with Shift held.
+        let (dx, dy) = if event.modifiers.shift && dx == 0. { (dy, 0.) } else { (dx, dy) };
+        self.pan = (self.pan.0 + dx, self.pan.1 + dy);
+        cx.notify();
+    }
+
+    /// A node and all that hangs on it: what a drag of it carries, and where it cannot be dropped.
+    fn carried(&self, id: u64) -> HashSet<u64> {
+        fn walk(node: &Node, out: &mut HashSet<u64>) {
+            out.insert(node.id);
+            for child in &node.children { walk(child, out) }
+        }
+        let mut out = HashSet::new();
+        if let Some(node) = self.map.node(id) { walk(node, &mut out) }
+        out
+    }
+
+    /// Where node `id` would go let go at `at`, a point of the view: onto the middle of a node, under it; at its
+    /// top or bottom edge, or the gap there, before or after it; to its right, under it. Never into what it
+    /// carries, and nowhere it would not move.
+    fn drop_at(&self, id: u64, at: (f32, f32)) -> Option<(u64, Place)> {
+        let carried = self.carried(id);
+        let (x, y) = self.origin();
+        let (at, gap) = ((at.0 - x, at.1 - y), (GAP.0 * self.zoom, GAP.1 * self.zoom));
+        let over = self.drawn.nodes.iter().find(|node| !carried.contains(&node.id) && at.0 >= node.x && at.0 <= node.x + node.w + gap.0 && at.1 >= node.y - gap.1 / 2. && at.1 <= node.y + node.h + gap.1 / 2.)?;
+        let share = (at.1 - over.y) / over.h;
+        let place = if over.depth == 0 || at.0 > over.x + over.w { Place::Under } else if share < 0.25 { Place::Before } else if share > 0.75 { Place::After } else { Place::Under };
+        let mut map = self.map.clone();
+        map.move_node(id, over.id, place).then_some((over.id, place))
+    }
+
+    /// A press on the map's ground, or on its root: the map is taken to be moved.
+    fn press_ground(&mut self, at: Point<Pixels>) {
+        self.grab = Some(Grab::Ground { from: at, pan: self.pan, moving: false });
+    }
+
+    /// The pointer moved with something held. A release that was not heard ends it.
+    fn drag(&mut self, at: Point<Pixels>, held: bool, cx: &mut Context<Self>) {
+        let Some(grab) = self.grab else { return };
+        if !held { return self.release(cx) }
+        let far = |from: Point<Pixels>| f32::from((at.x - from.x).abs()).max(f32::from((at.y - from.y).abs())) > DRAG;
+        match grab {
+            Grab::Ground { from, pan, moving } => {
+                self.grab = Some(Grab::Ground { from, pan, moving: moving || far(from) });
+                self.pan = (pan.0 + f32::from(at.x - from.x), pan.1 + f32::from(at.y - from.y));
+            }
+            Grab::Node { id, from, moving, .. } => {
+                let moving = moving || far(from);
+                let drop = if moving { self.drop_at(id, self.in_view(at)) } else { None };
+                self.grab = Some(Grab::Node { id, from, at, moving, drop });
+            }
+        }
+        cx.notify();
+    }
+
+    /// Let go: a node carried over a place is moved there, a step of Undo.
+    fn release(&mut self, cx: &mut Context<Self>) {
+        let Some(grab) = self.grab.take() else { return };
+        if let Grab::Node { id, moving: true, drop: Some((target, place)), .. } = grab {
+            self.change(cx, |this| this.map.move_node(id, target, place).then_some(id));
+        }
+        cx.notify();
+    }
+
+    /// The map's size: smaller, its own size, larger, and the whole of it in the view. At the view's foot, out of
+    /// the way of the nodes, which start at the top left.
+    fn zoom_bar(&self, cx: &mut Context<Self>) -> Div {
+        let button = |id: &'static str, icon: &'static str, tip: &'static str| {
+            div().id(id).flex().flex_none().items_center().justify_center().size(text_px(22.)).rounded(px(5.)).cursor_pointer().hover(|s| s.bg(Theme::hover())).tooltip(ui::tip(t(tip))).child(ui::icon(icon, 13., Theme::text_secondary()))
+        };
+        let percent = div().id("mind-map-zoom-reset").flex().flex_none().items_center().justify_center().w(text_px(42.)).h(text_px(22.)).rounded(px(5.)).text_size(text_px(11.)).text_color(Theme::text_secondary()).cursor_pointer().hover(|s| s.bg(Theme::hover()))
+            .tooltip(ui::tip(t("原始大小")))
+            .child(format!("{:.0}%", self.zoom * 100.))
+            .on_click(cx.listener(|this, _, _, cx| this.zoom_to(1., None, cx)));
+        div().absolute().right(px(10.)).bottom(px(10.)).flex().items_center().gap(px(1.)).p(px(2.)).rounded(px(7.)).bg(Theme::bg_body()).border_1().border_color(Theme::line())
+            // A press on the bar is not a press on the map's ground.
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(button("mind-map-zoom-out", "minus", "缩小").on_click(cx.listener(|this, _, _, cx| this.zoom_to(this.zoom / ZOOM_STEP, None, cx))))
+            .child(percent)
+            .child(button("mind-map-zoom-in", "plus", "放大").on_click(cx.listener(|this, _, _, cx| this.zoom_to(this.zoom * ZOOM_STEP, None, cx))))
+            .child(button("mind-map-fit", "scan", "整张导图放进这一栏").on_click(cx.listener(|this, _, _, cx| { this.fit = true; cx.notify() })))
     }
 
     /// The map's own tools, beside the column's label: a draft from the model, and the outline to the clipboard.
@@ -338,27 +505,53 @@ impl MindMapView {
 impl Render for MindMapView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if std::mem::take(&mut self.refocus) && self.editing.is_none() { window.focus(&self.focus) }
-        let drawn = mindmap::layout(&self.map, &|node, depth| Self::size(node, depth, window), GAP);
-        // The node chosen comes into view: after a key, a new node, a passage sent from the pages.
-        if std::mem::take(&mut self.reveal) && let Some(node) = self.chosen.and_then(|id| drawn.nodes.iter().find(|node| node.id == id)) {
-            let view = self.scroll.bounds().size;
-            let (mut at, room) = (self.scroll.offset(), 16.);
-            let (left, top) = (EDGE + node.x, HEAD + node.y);
-            if view.width > px(0.) {
-                if px(left - room) + at.x < px(0.) { at.x = -px(left - room) } else if px(left + node.w + room) + at.x > view.width { at.x = view.width - px(left + node.w + room) }
-                if px(top - room) + at.y < px(0.) { at.y = -px(top - room) } else if px(top + node.h + room) + at.y > view.height { at.y = view.height - px(top + node.h + room) }
-                self.scroll.set_offset(point(at.x.min(px(0.)), at.y.min(px(0.))));
+        let view = self.view.get().size;
+        let (wide, high) = (f32::from(view.width), f32::from(view.height));
+        // The whole map in the view, in its middle: measured at its own size, then drawn at the size that fits.
+        if wide > 0. && std::mem::take(&mut self.fit) {
+            let whole = mindmap::layout(&self.map, &|node, depth| Self::size(node, depth, 1., window), GAP);
+            let room = (wide - 2. * EDGE, high - HEAD - EDGE - 30.);
+            if whole.size.0 > 0. && whole.size.1 > 0. {
+                self.zoom = (room.0 / whole.size.0).min(room.1 / whole.size.1).clamp(ZOOM.0, 1.25);
+                self.pan = ((wide - whole.size.0 * self.zoom) / 2. - EDGE, ((room.1 - whole.size.1 * self.zoom) / 2.).max(0.));
             }
         }
+        let zoom = self.zoom;
+        let gap = (GAP.0 * zoom, GAP.1 * zoom);
+        let drawn = mindmap::layout(&self.map, &|node, depth| Self::size(node, depth, zoom, window), gap);
+        if wide > 0. {
+            // The node chosen comes into view: after a key, a new node, a passage sent from the pages.
+            if std::mem::take(&mut self.reveal) && let Some(node) = self.chosen.and_then(|id| drawn.nodes.iter().find(|node| node.id == id)) {
+                let ((x, y), room) = (self.origin(), 16.);
+                let (left, top) = (x + node.x, y + node.y);
+                if left - room < 0. || node.w + 2. * room > wide { self.pan.0 += room - left } else if left + node.w + room > wide { self.pan.0 -= left + node.w + room - wide }
+                if top < HEAD { self.pan.1 += HEAD - top } else if top + node.h + room > high { self.pan.1 -= (top + node.h + room - high).min(top - HEAD) }
+            }
+            // However far it is pulled, a piece of the map stays in view.
+            let keep = |pan: f32, edge: f32, size: f32, view: f32| {
+                let (least, most) = (KEEP.min(size) - edge - size, view - KEEP - edge);
+                if least <= most { pan.clamp(least, most) } else { pan }
+            };
+            self.pan = (keep(self.pan.0, EDGE, drawn.size.0, wide), keep(self.pan.1, HEAD, drawn.size.1, high));
+        }
+        let (x, y) = self.origin();
+        // What a drag carries is drawn faint where it was, and where it would go is marked.
+        let (carried, drop) = match self.grab {
+            Some(Grab::Node { id, moving: true, drop, .. }) => (self.carried(id), drop),
+            _ => (HashSet::new(), None),
+        };
+        let text_size = |root: bool| text_px(if root { 14. } else { 13. }) * zoom;
+        let line_height = |root: bool| text_px(if root { 21. } else { 19. }) * zoom;
         let nodes: Vec<AnyElement> = drawn.nodes.iter().map(|placed| {
             let Some(node) = self.map.node(placed.id) else { return div().into_any_element() };
             let (id, root, chosen) = (placed.id, placed.depth == 0, self.chosen == Some(placed.id));
             let editing = self.editing == Some(id);
+            let target = drop.is_some_and(|(target, place)| target == id && place == Place::Under);
             let ground = if root { Theme::accent() } else if placed.depth == 1 { Theme::accent_soft() } else { Theme::bg_body() };
             let ink = if root { Theme::on_accent() } else { Theme::text() };
             let page = node.anchor.clone().map(|anchor| {
                 let tip = if anchor.quote.is_empty() { t("在文献里看这一页").to_string() } else { format!("“{}”", anchor.quote) };
-                div().id(("mind-map-page", id as usize)).flex().flex_none().items_center().justify_center().w(px(PAGE_CHIP - 6.)).ml(px(6.)).h(text_px(16.)).rounded(px(4.)).text_size(text_px(10.)).cursor_pointer()
+                div().id(("mind-map-page", id as usize)).flex().flex_none().items_center().justify_center().w(px((PAGE_CHIP - 6.) * zoom)).ml(px(6. * zoom)).h(text_px(16.) * zoom).rounded(px(4. * zoom)).text_size(text_px(10.) * zoom).cursor_pointer()
                     .text_color(if root { Theme::on_accent() } else { Theme::accent() }).bg(if root { Theme::on_accent().opacity(0.18) } else { Theme::bg_body() }).hover(|s| s.bg(Theme::hover()))
                     .tooltip(ui::tip(tip))
                     .child(format!("p.{}", anchor.page))
@@ -368,18 +561,19 @@ impl Render for MindMapView {
                         cx.emit(MapEvent::Goto(anchor.clone()));
                     }))
             });
+            let least = (140. + 2. * NODE_PAD.0) * zoom;
             let words = if editing {
                 // A pixel width: a field under ancestors without one is measured at its own default.
-                div().w(px((placed.w - 2. * NODE_PAD.0).max(140.))).child(self.input.clone()).into_any_element()
+                div().w(px((placed.w - 2. * NODE_PAD.0 * zoom).max(140. * zoom))).child(self.input.clone()).into_any_element()
             } else {
                 div().flex_1().min_w_0().child(if node.text.is_empty() { SharedString::from(" ") } else { SharedString::from(node.text.clone()) }).into_any_element()
             };
             // Folded, a node says how many it holds; unfolded, the dot at its right folds them away.
             let fold = (placed.children > 0).then(|| {
-                div().id(("mind-map-fold", id as usize)).absolute().left(px(placed.x + placed.w + 3.)).top(px(placed.y + placed.h / 2. - 8.)).flex().items_center().justify_center().h(px(16.)).min_w(px(16.)).px(px(if placed.folded { 4. } else { 0. })).rounded_full()
-                    .bg(Theme::bg_body()).border_1().border_color(Theme::line_strong()).text_size(text_px(10.)).text_color(Theme::text_tertiary()).cursor_pointer().hover(|s| s.bg(Theme::hover()))
+                div().id(("mind-map-fold", id as usize)).absolute().left(px(placed.x + placed.w + 3. * zoom)).top(px(placed.y + placed.h / 2. - 8. * zoom)).flex().items_center().justify_center().h(px(16. * zoom)).min_w(px(16. * zoom)).px(px(if placed.folded { 4. * zoom } else { 0. })).rounded_full()
+                    .bg(Theme::bg_body()).border_1().border_color(Theme::line_strong()).text_size(text_px(10.) * zoom).text_color(Theme::text_tertiary()).cursor_pointer().hover(|s| s.bg(Theme::hover()))
                     .when(placed.folded, |d| d.child(format!("{}", placed.children)))
-                    .when(!placed.folded, |d| d.child(ui::icon("minus", 9., Theme::text_tertiary())))
+                    .when(!placed.folded, |d| d.child(ui::icon("minus", 9. * zoom, Theme::text_tertiary())))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, _, cx| { this.change(cx, |this| this.map.fold(id).then_some(id)); }))
             });
@@ -388,30 +582,44 @@ impl Render for MindMapView {
                 .absolute()
                 .left(px(placed.x))
                 .top(px(placed.y))
-                .w(px(if editing { placed.w.max(140. + 2. * NODE_PAD.0) } else { placed.w }))
+                .w(px(if editing { placed.w.max(least) } else { placed.w }))
                 .min_h(px(placed.h))
                 .flex()
                 .items_center()
-                .px(px(NODE_PAD.0))
-                .py(px(NODE_PAD.1))
-                .rounded(px(if root { 9. } else { 7. }))
+                .px(px(NODE_PAD.0 * zoom))
+                .py(px(NODE_PAD.1 * zoom))
+                .rounded(px(if root { 9. } else { 7. } * zoom))
                 .bg(ground)
                 .border_1()
-                .border_color(if chosen { Theme::accent() } else if placed.depth >= 2 { Theme::line() } else { ground })
-                .when(chosen, |d| d.shadow(vec![BoxShadow { color: Theme::accent().opacity(0.35), offset: point(px(0.), px(0.)), blur_radius: px(0.), spread_radius: px(1.5) }]))
-                .text_size(text_px(if root { 14. } else { 13. }))
-                .line_height(text_px(if root { 21. } else { 19. }))
+                .border_color(if chosen || target { Theme::accent() } else if placed.depth >= 2 { Theme::line() } else { ground })
+                .when(chosen && !target, |d| d.shadow(vec![BoxShadow { color: Theme::accent().opacity(0.35), offset: point(px(0.), px(0.)), blur_radius: px(0.), spread_radius: px(1.5) }]))
+                .when(target, |d| d.shadow(vec![BoxShadow { color: Theme::accent().opacity(0.5), offset: point(px(0.), px(0.)), blur_radius: px(0.), spread_radius: px(3.) }]))
+                .when(carried.contains(&id), |d| d.opacity(0.35))
+                .text_size(text_size(root))
+                .line_height(line_height(root))
                 .when(root, |d| d.font_weight(FontWeight::SEMIBOLD))
                 .text_color(ink)
                 .cursor_pointer()
                 .child(words)
                 .children(page.filter(|_| !editing))
-                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                // Held, the root moves the map and any other node is taken to be carried; a click is still a click.
+                .on_mouse_down(MouseButton::Left, cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    if this.editing == Some(id) { return }
+                    if root { return this.press_ground(event.position) }
+                    this.grab = Some(Grab::Node { id, from: event.position, at: event.position, moving: false, drop: None });
+                }))
                 .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                     if event.click_count() >= 2 { this.edit(id, window, cx) } else { this.choose(id, window, cx) }
                 }));
-            div().children(fold.filter(|_| !editing)).child(card).into_any_element()
+            div().children(fold.filter(|_| !editing && !carried.contains(&id))).child(card).into_any_element()
         }).collect();
+        // Before or after a node: a line in the gap on that side of it.
+        let line = drop.and_then(|(target, place)| {
+            let node = drawn.nodes.iter().find(|node| node.id == target).filter(|_| place != Place::Under)?;
+            let at = if place == Place::Before { node.y - gap.1 / 2. } else { node.y + node.h + gap.1 / 2. };
+            Some(div().absolute().left(px(node.x)).top(px(at - 1.5)).w(px(node.w)).h(px(3.)).rounded(px(1.5)).bg(Theme::accent()))
+        });
         // With nothing but its root, the map says how it is made.
         let hint = (self.map.count() <= 1 && !self.drafting).then(|| {
             let root = &drawn.nodes[0];
@@ -419,16 +627,33 @@ impl Render for MindMapView {
                 .child(t("Tab 加一个分支，Enter 加同级，空格改字，Delete 删除。"))
                 .child(t("在 PDF 里选一段，点「加到导图」，它就挂在选中的节点下面，点页码回到原文。"))
                 .child(t("也可以点上面的 ✦ 让模型先起草，再自己改。"))
+                .child(t("拖动空白处移动导图，⌘ 或 Ctrl 加滚轮缩放；把节点拖到另一个节点上，它就挂到那里。"))
         });
-        let (wide, tall) = (drawn.size.0 + 2. * EDGE + 40., drawn.size.1 + HEAD + EDGE + if hint.is_some() { 110. } else { 0. });
-        let sheet = div().relative().flex_none().w(px(wide.max(360.))).h(px(tall))
-            .child(div().absolute().left(px(EDGE)).top(px(HEAD)).w(px(drawn.size.0 + 40.)).h(px(drawn.size.1)).child(Self::links(&drawn)).children(nodes).children(hint));
+        let sheet = div().absolute().left(px(x)).top(px(y)).w(px(drawn.size.0 + 40. * zoom)).h(px(drawn.size.1)).child(Self::links(&drawn, zoom)).children(nodes).children(line).children(hint);
+        // The node carried, beside the pointer: the pointer itself says where it goes, and the mark there stays in sight.
+        let ghost = match self.grab {
+            Some(Grab::Node { id, at, moving: true, .. }) => drawn.nodes.iter().find(|node| node.id == id).zip(self.map.node(id)).map(|(placed, node)| {
+                let at = self.in_view(at);
+                div().absolute().left(px(at.0 + 14.)).top(px(at.1 + 10.)).w(px(placed.w)).min_h(px(placed.h)).flex().items_center().px(px(NODE_PAD.0 * zoom)).py(px(NODE_PAD.1 * zoom)).rounded(px(7. * zoom))
+                    .bg(Theme::bg_body()).border_1().border_color(Theme::accent()).opacity(0.8)
+                    .shadow(vec![BoxShadow { color: Theme::text().opacity(0.16), offset: point(px(0.), px(3.)), blur_radius: px(10.), spread_radius: px(0.) }])
+                    .text_size(text_size(false)).line_height(line_height(false)).text_color(Theme::text())
+                    .child(div().flex_1().min_w_0().child(SharedString::from(node.text.clone())))
+            }),
+            _ => None,
+        };
+        let moving = self.grab.is_some_and(|grab| grab.moving());
+        self.drawn = drawn;
+        let weak = cx.entity().downgrade();
+        let bounds = self.view.clone();
+        let held = self.grab.is_some();
         div()
             .id("mind-map")
             .key_context("MindMap")
             .track_focus(&self.focus)
             .size_full()
             .relative()
+            .overflow_hidden()
             .bg(Theme::bg_sunken())
             .on_action(cx.listener(|this, _: &MoveUp, _, cx| this.step(Step::Up, cx)))
             .on_action(cx.listener(|this, _: &MoveDown, _, cx| this.step(Step::Down, cx)))
@@ -439,15 +664,39 @@ impl Render for MindMapView {
             .on_action(cx.listener(|this, _: &TickSuggestion, window, cx| if let Some(chosen) = this.chosen.filter(|_| this.editing.is_none()) { this.edit(chosen, window, cx) }))
             .on_action(cx.listener(|this, _: &TrashSelected, _, cx| this.remove(cx)))
             .on_action(cx.listener(|this, _: &crate::pdf::RemoveChosen, _, cx| this.remove(cx)))
-            .on_action(cx.listener(|this, _: &Dismiss, _, cx| if std::mem::take(&mut this.asking) { cx.notify() } else { cx.propagate() }))
+            // The keys that size a PDF size the map while it has the keyboard; the fit is the whole map.
+            .on_action(cx.listener(|this, _: &ZoomIn, _, cx| this.zoom_to(this.zoom * ZOOM_STEP, None, cx)))
+            .on_action(cx.listener(|this, _: &ZoomOut, _, cx| this.zoom_to(this.zoom / ZOOM_STEP, None, cx)))
+            .on_action(cx.listener(|this, _: &ZoomFit, _, cx| { this.fit = true; cx.notify() }))
+            // Esc puts down a node being carried, then the question about a draft.
+            .on_action(cx.listener(|this, _: &Dismiss, _, cx| {
+                if this.grab.take().is_some() || std::mem::take(&mut this.asking) { cx.notify() } else { cx.propagate() }
+            }))
             .on_key_down(cx.listener(Self::key))
-            // A press on the ground of the map takes the keyboard for it, and is not a press on the pages.
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| {
+            .on_scroll_wheel(cx.listener(Self::wheel))
+            // A press on the ground of the map takes the keyboard for it and the map to be moved, and is not a press on the pages.
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, event: &MouseDownEvent, window, cx| {
                 cx.stop_propagation();
                 if this.editing.is_some() { this.finish(true, cx) }
                 window.focus(&this.focus);
+                this.press_ground(event.position);
             }))
-            .child(div().id("mind-map-scroll").size_full().overflow_scroll().track_scroll(&self.scroll).child(sheet))
+            // Where the view stands in the window, for the pointer; and while something is held, the pointer anywhere.
+            .child(canvas(move |bounds_now, _, _| bounds.set(bounds_now), move |_, _, window, _| {
+                if !held { return }
+                let up = weak.clone();
+                window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+                    if phase.bubble() { let _ = weak.update(cx, |this, cx| this.drag(event.position, event.pressed_button == Some(MouseButton::Left), cx)); }
+                });
+                window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                    if phase.bubble() && event.button == MouseButton::Left { let _ = up.update(cx, |this, cx| this.release(cx)); }
+                });
+            }).absolute().size_full())
+            .child(sheet)
+            .children(ghost)
+            // While the map or a node is moved, the pointer is a closed hand over everything, and nothing under it lights up.
+            .when(moving, |d| d.child(div().id("mind-map-held").absolute().size_full().occlude().cursor_grabbing()))
             .child(self.tools(cx))
+            .child(self.zoom_bar(cx))
     }
 }

@@ -131,6 +131,14 @@ pub enum Step {
     In,
 }
 
+/// Where a node dragged onto another goes: before it, under it as its last child, or after it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Place {
+    Before,
+    Under,
+    After,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct MindMap {
     pub root: Node,
@@ -240,6 +248,30 @@ impl MindMap {
         if to >= parent.children.len() { return false }
         parent.children.swap(at, to);
         true
+    }
+
+    /// Take a node with all that hangs on it to another place, as a drag drops it on `target`: its last child
+    /// (unfolded to show it), or right before or after it under the same parent. Never into itself or what hangs
+    /// on it, the root stays where it is, and nothing goes beside the root. Whether the map changed.
+    pub fn move_node(&mut self, id: u64, target: u64, place: Place) -> bool {
+        if id == self.root.id || self.root.find(target).is_none() || self.node(id).is_none_or(|node| node.find(target).is_some()) { return false }
+        if place != Place::Under && target == self.root.id { return false }
+        let before = self.clone();
+        let moved = (|| {
+            let (parent, at) = self.root.holder(id).map(|(parent, at)| (parent.id, at))?;
+            let node = self.root.find_mut(parent)?.children.remove(at);
+            if place == Place::Under {
+                let target = self.root.find_mut(target)?;
+                target.folded = false;
+                target.children.push(node);
+            } else {
+                let (parent, at) = self.root.holder(target).map(|(parent, at)| (parent.id, at))?;
+                self.root.find_mut(parent)?.children.insert(if place == Place::After { at + 1 } else { at }, node);
+            }
+            Some(())
+        })();
+        if moved.is_none() { *self = before; return false }
+        *self != before
     }
 
     /// The nodes drawn, from the top down as they stand (a node, then what hangs on it): those under a folded node are not.
@@ -476,6 +508,27 @@ mod tests {
         assert!(map.shift(a2, true) && !map.shift(a2, true) && map.shift(a, true));
         assert_eq!(map.root.children.iter().map(|n| n.id).collect::<Vec<_>>(), vec![b, a, a2]);
         assert!(map.set_text(b, " 发现 ") && !map.set_text(b, "发现") && !map.set_text(99, "x"));
+    }
+
+    #[test]
+    fn a_node_dragged_onto_another_takes_what_hangs_on_it_along() {
+        let (mut map, [a, b, a1, a2]) = sample();
+        let ids = |map: &MindMap, id: u64| map.node(id).unwrap().children.iter().map(|n| n.id).collect::<Vec<_>>();
+        // Under another: its last child, with its own children; a folded target opens to show it.
+        map.fold(b);
+        assert!(map.move_node(a, b, Place::Under));
+        assert_eq!((ids(&map, 1), ids(&map, b), ids(&map, a), map.node(b).unwrap().folded), (vec![b], vec![a], vec![a1, a2], false));
+        // Before and after a node of another parent.
+        assert!(map.move_node(a2, a, Place::Before) && map.move_node(a1, b, Place::After));
+        assert_eq!((ids(&map, 1), ids(&map, b)), (vec![b, a1], vec![a2, a]));
+        // Not into itself or what hangs on it, not the root, nothing beside the root, nothing unknown.
+        let before = map.clone();
+        assert!(!map.move_node(b, a, Place::Under) && !map.move_node(b, b, Place::Under) && !map.move_node(1, a, Place::Under));
+        assert!(!map.move_node(a, 1, Place::Before) && !map.move_node(a, 99, Place::Under) && !map.move_node(99, a, Place::Under));
+        // Dropped where it already is: nothing changed.
+        assert!(!map.move_node(a1, b, Place::After) && !map.move_node(a, a2, Place::After));
+        assert_eq!(map, before);
+        assert!(map.move_node(a, 1, Place::Under) && ids(&map, 1) == vec![b, a1, a]);
     }
 
     #[test]
