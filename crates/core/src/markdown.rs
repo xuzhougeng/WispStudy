@@ -294,6 +294,12 @@ fn pipe_table(lines: &[&str]) -> Option<(Block, usize)> {
     Some((Block::Table { aligns: aligns.collect(), rows }, used))
 }
 
+/// How many of `lines` a pipe table at their start takes: its header, the line of dashes under it and its rows;
+/// 0 when they do not start with one. For whoever reads a text line by line and must keep a table's lines together.
+pub fn table_lines(lines: &[&str]) -> usize {
+    pipe_table(lines).map_or(0, |(_, used)| used)
+}
+
 fn is_boundary(c: Option<char>) -> bool {
     c.is_none_or(|c| c.is_whitespace() || c.is_ascii_punctuation() || !c.is_ascii())
 }
