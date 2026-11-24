@@ -1986,5 +1986,15 @@
   "文献文件": "Paper files",
   "数据库": "Database",
   "已移除的附件": "Removed attachments",
-  "storage.libraries": "Libraries"
+  "storage.libraries": "Libraries",
+  "归入已有文献…": "File under another paper…",
+  "归入已有文献": "File under another paper",
+  "归入": "File here",
+  "选一篇文献。": "Choose a paper.",
+  "按题目、作者、年份查找": "Find by title, author or year",
+  "要归入的文献得有文件，库里还得有另一篇文献。": "A paper needs a file to be filed, and the library another paper to take it.",
+  "选它所属的文献。文件成为那篇文献的附件，标注、读到的位置和取出的图片都跟着；原来的这一条移到回收站，从回收站恢复时文件也回来。": "Choose the paper it belongs to. The file becomes that paper's attachment, with its annotations, its reading position and the figures taken from it; this record moves to the trash, and restoring it from there brings the file back.",
+  "已撤销：文件回到了原来的条目上。": "Undone: the file is back with its own record.",
+  "收起文件": "Hide files",
+  "不能把一篇文献归入它自己。": "A paper cannot be filed under itself."
 }

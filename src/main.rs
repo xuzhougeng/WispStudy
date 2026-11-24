@@ -19,6 +19,7 @@ mod diagram;
 mod extract;
 mod facing;
 mod figures;
+mod filing;
 mod floating;
 mod dialogs;
 mod draft;

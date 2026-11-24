@@ -2,7 +2,7 @@
 //! its search and filters, and the trash.
 
 use crate::i18n::{label, t};
-use crate::app::{Cmd, ColumnDrag, Edge, FilterKey, Library, MenuKind, Page, Tab, Translated, Workspace};
+use crate::app::{Cmd, ColumnDrag, Edge, FilterKey, Library, MenuKind, Page, Row, Tab, Translated, Workspace};
 use crate::settings::SettingsPage;
 use crate::theme::{self, Theme, text_px};
 use crate::ui;
@@ -470,7 +470,8 @@ impl Workspace {
         let asking = self.asking(window);
         if let Some(lib) = self.lib.as_mut().filter(|lib| lib.ask_drawn != asking) {
             lib.ask_drawn = asking;
-            if let Some(at) = lib.selected.as_ref().and_then(|id| lib.shown.iter().position(|&i| lib.papers[i].id == *id)) { lib.table_scroll.scroll_to_item(at, ScrollStrategy::Center) }
+            // The narrow list beside a paper asked about has a row for each paper; the table may have files under some.
+            if let Some(at) = lib.selected.as_ref().and_then(|id| lib.shown.iter().position(|&i| lib.papers[i].id == *id)) { lib.table_scroll.scroll_to_item(if asking { at } else { lib.row_of(at) }, ScrollStrategy::Center) }
         }
         // A paper asked about: the papers as a narrow list, then the conversation and the PDF.
         if asking {
@@ -1034,7 +1035,7 @@ impl Workspace {
         } else {
             // A bar at the right edge shows where in a long list the rows on show are, and is dragged to go elsewhere.
             div().relative().flex().flex_col().flex_1().min_h_0()
-                .child(uniform_list("papers", shown, cx.processor(move |this, range: Range<usize>, window, cx| this.render_rows(range, width, window, cx))).track_scroll(lib.table_scroll.clone()).flex_1())
+                .child(uniform_list("papers", lib.rows.len(), cx.processor(move |this, range: Range<usize>, window, cx| this.render_rows(range, width, window, cx))).track_scroll(lib.table_scroll.clone()).flex_1())
                 .child(crate::scrollbar::scrollbar("papers-bar", lib.table_scroll.clone()))
                 .into_any_element()
         };
@@ -1162,8 +1163,31 @@ impl Workspace {
         let muted = |text: &str| div().text_color(Theme::text_placeholder()).child(text.to_string());
         range
             .filter_map(|row| {
-                let p = lib.papers.get(*lib.shown.get(row)?)?;
+                let p = match *lib.rows.get(row)? {
+                    Row::Paper(at) => lib.papers.get(at)?,
+                    // Under a paper unfolded: one of its files.
+                    Row::File(at) => return Some(self.render_file_row(lib, lib.files.get(at)?, row, &columns, width, row_height, cx)),
+                };
                 let selected = lib.selected.as_deref() == Some(p.id.as_str()) || lib.marked.contains(&p.id);
+                // A paper with an attachment: an arrow in the row's margin shows its files under it.
+                let fold = lib.folding.contains(&p.id).then(|| {
+                    let open = lib.unfolded.contains(&p.id);
+                    let count = lib.files.iter().filter(|f| f.paper_id == p.id).count();
+                    div()
+                        .id(("fold", row))
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .h_full()
+                        .w(px(15.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .cursor_pointer()
+                        .child(ui::icon(if open { "chevron-down" } else { "chevron-right" }, 12., if open { Theme::text_secondary() } else { Theme::text_tertiary() }))
+                        .tooltip(ui::tip(if open { t("收起文件").to_string() } else { tn!("展开 {n} 个文件", "Show {n}", count, "file") }))
+                        .on_click(self.on_alone(Cmd::UnfoldFiles(p.id.clone()), cx))
+                });
                 // The paper a right-click menu is about.
                 let pointed = self.menu.as_ref().is_some_and(|menu| menu.paper.as_deref() == Some(p.id.as_str()));
                 let cells: Vec<AnyElement> = columns
@@ -1294,10 +1318,56 @@ impl Workspace {
                             move |this, ev: &ClickEvent, window, cx| this.row_clicked(&id, ev, window, cx)
                         }))
                         .children(cells)
+                        .when_some(fold, |d, fold| d.relative().child(fold))
                         .into_any_element(),
                 )
             })
             .collect()
+    }
+
+    /// A file of a paper unfolded, under the paper's row and as tall: its name where the titles are, then what
+    /// it is to the paper and how large. A click reads it (a PDF) or opens it; a right click is the file's menu.
+    #[allow(clippy::too_many_arguments)]
+    fn render_file_row(&self, lib: &Library, file: &wisp_core::model::PaperFile, row: usize, columns: &[Column], width: f32, row_height: f32, cx: &mut Context<Self>) -> AnyElement {
+        let pdf = file.format == "pdf";
+        // `S1`, `S2`, … as the detail panel and the answers count the PDF attachments.
+        let what = match lib.attachments(&file.paper_id).iter().position(|a| a.id == file.id) {
+            Some(n) => tf!("附件 S{}", "Attachment S{}", n + 1),
+            None if file.kind == "fulltext" => t("正文").to_string(),
+            None => t("附件").to_string(),
+        };
+        // The file on the pages of the detail panel right now.
+        let read = lib.selected.as_deref() == Some(file.paper_id.as_str()) && lib.pdf_file(&file.paper_id).is_some_and(|shown| shown.id == file.id);
+        let cells = columns.iter().map(|c| {
+            let cell = div().flex().items_center().h_full().overflow_hidden().px(px(8.)).map(|d| match c.width {
+                Some(w) => d.w(px(w)).flex_none(),
+                None => d.flex_1().min_w_0(),
+            });
+            if !matches!(c.kind, ColumnKind::Title) { return cell }
+            cell.gap(px(8.))
+                .child(div().flex_none().child(ui::icon("file-text", 15., if read { Theme::accent() } else { Theme::text_tertiary() })))
+                .child(
+                    div().flex().flex_col().min_w_0().flex_1()
+                        .child(div().text_color(Theme::text_secondary()).child(ui::one_line(&file.title)))
+                        .child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_tertiary()).child(format!("{what} · {}", wisp_core::model::file_size(file.size_bytes)))),
+                )
+        });
+        div()
+            .id(("file-row", row))
+            .flex()
+            .items_center()
+            .h(px(row_height))
+            .w(px(width))
+            .overflow_hidden()
+            .px(px(8.))
+            .border_b_1()
+            .border_color(Theme::line())
+            .cursor_pointer()
+            .hover(|s| s.bg(Theme::hover()))
+            .on_mouse_down(MouseButton::Right, self.on_context(MenuKind::File(file.id.clone()), cx))
+            .on_click(self.on(if pdf { Cmd::ReadFile(file.id.clone()) } else { Cmd::OpenFile(file.id.clone()) }, cx))
+            .children(cells)
+            .into_any_element()
     }
 
     /// A paper's title as the lists show it: translated while translations are on show and this one is there.
