@@ -42,6 +42,8 @@
   "PDF 标注已保存": "PDF annotations saved",
   "这个 PDF 的页面画不出来。": "Cannot render this PDF's pages.",
   "这个 PDF 没有页面。": "This PDF has no pages.",
+  "要读的页面不在这个 PDF 里。": "The pages to read are not in this PDF.",
+  "只把这些页再送去识别，读出的文字放回原处；只有图的页面多半还是读不出文字。": "Only these pages are sent again, and the text read goes back in its place; a page with nothing but figures will most likely still give no text.",
   "正在翻译…": "Translating…",
   "只这一次换用，不改设置": "Use once without changing settings",
   "还没有配置模型：在 设置 › AI 里添加。": "No model configured. Add one in Settings › AI.",
