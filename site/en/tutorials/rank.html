@@ -192,17 +192,17 @@
 
       <section id="s7">
         <h2><i>7</i>Ask the assistant, or use the command line</h2>
-        <p>The assistant can look up this table too: it has a tool called “Look up journal zones and impact factor”. Click “Assistant” in the sidebar and ask:</p>
-        <blockquote><cite>Ask</cite><p>Which papers in this library are published in CAS zone 1 journals? What is each about?</p></blockquote>
-        <p>The model used in this example is <code>claude/claude-sonnet-5-5</code>, and it answered within half a minute. It first looked up journals 13 times, then listed the papers by journal, one or two sentences for each:</p>
+        <p>The assistant can look up this table too: it has a tool for journal zones and impact factor. Click “Assistant” in the sidebar and ask:</p>
+        <blockquote><cite>Ask</cite><p>Which papers here are in CAS zone 1 journals and which should I read first by impact factor</p></blockquote>
+        <p>This question was put to a smaller copy of the library, with 90 papers instead of 515, and the model, shown as <code>claude-opus-5-5</code>, was a stand-in that answers by fixed rules, not a real model. It first asked for the papers with their journals, then looked up each of the 12 journals the papers appear in, and then listed the papers by journal with the impact factor and zones the tool returned:</p>
 
         <figure class="shot">
-          <img src="../../img/t/rank-08-ask.jpg" width="1372" height="867" loading="lazy" alt="The Assistant page: the question Which papers in this library are published in CAS zone 1 journals? What is each about?; above the answer a collapsed row of tool calls, Look up journal zones and impact factor ×13; then it says it looked them up in the CAS journal zone table upgraded edition 2025 and that 7 papers in the library are published in zone 1 journals, of 5 journals; next come the heading CAS zone 1 papers and summaries of the papers under Horticulture Research, Advanced Science, New Phytologist and Genome Biology.">
-          <figcaption><b>Figure 14.</b> The assistant's answer: the row above is its 13 tool calls to look up journals, and clicking it shows what each one looked up; below, the zone 1 papers are listed by journal. The “7 papers” and “5 journals” in the opening are wrong.</figcaption>
+          <img src="../../img/en/t/rank-08-ask.jpg" width="1372" height="870" loading="lazy" alt="The Assistant page: the question Which papers here are in CAS zone 1 journals and which should I read first by impact factor; above the answer a collapsed row of tool calls, drawn in Chinese, with ×12 at the end; then the answer says it looked up 12 journals and that 54 of the 90 papers are in journals of CAS zone 1, followed by the heading CAS zone 1 papers and, under each journal name with its impact factor and zones, three papers with their labels: Nature Communications (IF 18.1, CAS zone 1 Top, JCR Q1, XR zone 1) with 15 papers, Plant Communications (IF 13.7) with 12 and Horticulture Research (IF 9.5) with 12.">
+          <figcaption><b>Figure 14.</b> The assistant's answer: the row above is its 12 journal lookups, and clicking it shows what each one asked (the app draws the names of tool calls in Chinese even with the English interface); below, the zone 1 papers are listed by journal, highest impact factor first.</figcaption>
         </figure>
 
-        <p>What it lists below is 6 journals: Horticulture Research 2 papers, Advanced Science 1, New Phytologist 1, Genome Biology 4, Nature Communications 3 and Communications Biology 1, 12 papers in all, which agrees with what the list shows when sorted by zone. But its opening says “7 papers” and “5 journals”. After listing them it noticed this itself: it first changed it to “11 papers”, then wrote “I miscounted. Above, 12 papers are actually listed”. The last number is right, but the opening sentence stayed in the answer. Count such numbers yourself, or check them in the list sorted by zone.</p>
-        <p>The “Notes” at the end of the answer also list the zones of the remaining journals. It points out that IJMS and other journals are Q1 in JCR but not zone 1 in CAS, that the bioRxiv paper is a preprint and has no zone, and that the Natural Resources Forum article is unrelated to the topic and its journal is on the warning list, and suggests checking whether it should be included.</p>
+        <p>The listing goes on below the picture with Genome Biology (IF 9.2, 13 papers) and Communications Biology (IF 5.8, 2 papers): 54 papers in 5 journals, all as the tool returned them. Under each journal it shows the three newest papers and says how many more there are.</p>
+        <p>The “Notes” at the end name the journals that are not in CAS zone 1 in the table, so their papers are left out. The listing follows the table, not the quality of a paper; a journal's impact factor says little about a single paper, so use it to decide the order of reading, not what to believe. Check the counts yourself, or in the list sorted by zone.</p>
 
         <p>You can also look up without opening the window. <code>wisp journal_metrics</code> takes a journal name (full name, PubMed-style abbreviation or ISSN) or the ID of a paper, and returns JSON:</p>
 
@@ -282,7 +282,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> All but the last screenshot were retaken on November 24, 2026 on macOS with v0.17.0, with the English interface, on a library of 515 included papers; the last one still shows the Chinese interface and the earlier run. The model answers differently each time, so your wording and numbers will differ; the steps are the same. The text uses the labels of the English interface (Settings › General › Interface language).</p>
+      <p><b>About this tutorial.</b> The screenshots were retaken in November 2026 on macOS with the English interface, the first thirteen with v0.17.0 on a library of 515 included papers and the last with v0.18.0 on a copy of it with 90 papers. The assistant in the last one is a stand-in model that answers by fixed rules. The model answers differently each time, so your wording and numbers will differ; the steps are the same. The text uses the labels of the English interface (Settings › General › Interface language).</p>
       <p><b>The assistant can be wrong.</b> Confirm its suggestions and answers yourself; check key numbers and conclusions against the original.</p>
     </div>
   </div>

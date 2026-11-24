@@ -65,7 +65,7 @@
     <article class="prose">
       <section id="s1">
         <h2><i>1</i>Ways to add papers</h2>
-        <p>This example starts from an empty library, “<span lang="zh-CN">植物单细胞转录组</span>” (plant single-cell transcriptomics). Every way in is under “Add papers” at the top left:</p>
+        <p>This example starts from an empty library, “Plant single-cell transcriptomics”. Every way in is under “Add papers” at the top left:</p>
 
         <figure class="shot">
           <img src="../../img/en/t/migrate-01-add-menu.jpg" width="1372" height="870" loading="lazy" alt="The paper list of a library. The menu opened from “Add papers” at the top left has six items: Add by DOI / PMID / web address, Import PDF files, Import folder, Import BibTeX / RIS, Import from Zotero, Enter manually.">
@@ -126,20 +126,20 @@
 
       <section id="s3">
         <h2><i>3</i>Import a whole folder of PDFs</h2>
-        <p>The PDFs collected over the years sit in a folder called “<span lang="zh-CN">历年 PDF</span>” (PDFs over the years), split into three subfolders by species, “<span lang="zh-CN">水稻</span>” (rice), “<span lang="zh-CN">拟南芥</span>” (Arabidopsis) and “<span lang="zh-CN">方法</span>” (methods), 11 files in all. Some file names are an author plus a year. Others, like <code>scan_0032.pdf</code>, give no hint of what the file is.</p>
-        <p>Click “Add papers › Import folder…” and choose this folder, or drag it straight into the window. The import runs in the background. A progress block, “Import PDFs 2/11”, appears at the bottom of the sidebar with a segmented bar under it, and it stays when you switch to another page. Each file has its text read, its DOI looked for and its record looked up once more. The 11 files take under a minute, and the block turns into “PDF import complete 11/11”. Click it to open the details:</p>
+        <p>The PDFs collected over the years sit in one folder, split into subfolders: “rice”, “arabidopsis” and “methods”. This example has 6 files, 5 of them in subfolders and one, <code>myrosin-cells.pdf</code>, in none. File names can be anything.</p>
+        <p>Click “Add papers › Import folder…” and choose this folder, or drag it straight into the window. The import runs in the background. A progress block, “Import PDFs”, with a count and a segmented bar under it, appears at the bottom of the sidebar, and it stays when you switch to another page. Each file has its text read, its DOI looked for and its record looked up once more, which can take a while. When it ends, the block turns into “PDF import complete 6/6”. Click it to open the details:</p>
 
         <figure class="shot">
-          <img src="../../img/t/migrate-03-pdf-report.jpg" width="1372" height="867" loading="lazy" alt="The “PDF import” details window: 11 / 11 items processed, import complete. Imported 9, Needs attention 1, Skipped 1. Added 9, Attached to existing paper 1, In trash, not imported 1. The result of each file is listed: scan_0032.pdf was added but no DOI was recognized, the paper of DRG_scRNA.pdf is in the trash and was not imported, the rest were added. At the bottom left, the sidebar shows “PDF import complete 11/11”.">
-          <figcaption><b>Figure 6.</b> The import details. Yellow text is what you should look at again: one file had no DOI recognized, and one matches a paper in the trash. Click a row to open that paper.</figcaption>
+          <img src="../../img/en/t/migrate-03-pdf-report.jpg" width="1372" height="870" loading="lazy" alt="The “PDF import” details window: 6 / 6 items processed, Import complete. Imported 4, Needs attention 1, Skipped 1, Import failed 0, Processing 0, Waiting 0. Below it says 6 PDFs, Added 5 · In trash, not imported 1. The result of each file is listed: arabidopsis-root-hairs.pdf was added but the DOI was not detected, so use title lookup in the paper details; the paper of myrosin-cells.pdf is in the trash and was not imported; further rows show papers that were added. At the bottom left, the sidebar shows “PDF import complete 6/6” and the tags arabidopsis 2, methods 2 and rice 1.">
+          <figcaption><b>Figure 6.</b> The import details. Yellow text is what you should look at again: one file had no DOI detected, and one matches a paper in the trash. Click a row to open that paper.</figcaption>
         </figure>
 
         <ul>
-          <li><strong>Added 9</strong>: the 8 papers with a recognized DOI came in with complete records. <code>scan_0032.pdf</code> was not recognized, so its entry was made from the file name.</li>
-          <li><strong>Attached to existing paper 1</strong>: the rice leaf sheath paper was already there from Zotero, and the PDF is the same file, so it was not stored a second time. The original record gained a “<span lang="zh-CN">水稻</span>” (rice) tag.</li>
-          <li><strong>In trash, not imported 1</strong>: this is the paper you just moved to the trash, and it did not come back.</li>
+          <li><strong>Added 5</strong>: the 4 papers with a recognized DOI came in with complete records. <code>arabidopsis-root-hairs.pdf</code> had no DOI on its first pages, so its entry was made from the file name and is marked for a second look. Step 5 completes it.</li>
+          <li><strong>Attached to existing paper</strong>: this run had none. A PDF that is the same file as one already stored, or whose DOI matches a paper that has no file yet, is attached to that paper instead of becoming a second one.</li>
+          <li><strong>In trash, not imported 1</strong>: myrosin-cells.pdf is a paper that was moved to the trash before this import, and it did not come back.</li>
         </ul>
-        <p>The Tags column on the left now has “<span lang="zh-CN">拟南芥</span>”, “<span lang="zh-CN">方法</span>” and “<span lang="zh-CN">水稻</span>”, 3 papers each. A PDF that is in none of the subfolders gets no tag.</p>
+        <p>The Tags column on the left now has “arabidopsis” (2 papers), “methods” (2) and “rice” (1). A PDF that is in none of the subfolders gets no tag.</p>
       </section>
 
       <section id="s4">
@@ -152,53 +152,53 @@
           <figcaption><b>Figure 7.</b> One paper at a time. The dialog says that the identifier is sent to Crossref and Europe PMC.</figcaption>
         </figure>
 
-        <p>Click “Look up and add”. A few seconds later the maize root paper comes in, with title, authors, journal and abstract filled in. Open the dialog again and enter the PMID <code>42021342</code>. The paper that arrives is the reed invasion one (Genome Biology, 2026). You can also paste a doi.org link. The library now holds 21 papers, 9 of them in the “Missing PDF” view.</p>
+        <p>Click “Look up and add”. A few seconds later the maize root paper comes in, with title, authors, journal and abstract filled in. Open the dialog again and enter the PMID <code>42021342</code>. The paper that arrives is the reed invasion one (Genome Biology, 2026). You can also paste a doi.org link. Papers that came in as records only, like these, are listed in the “Missing PDF” view.</p>
       </section>
 
       <section id="s5">
         <h2><i>5</i>Complete a PDF that was not recognized, by title</h2>
         <p>The list's “Full text” column has four states: “No full text”, “Linked” (there is a DOI or a web address but no file), “PDF saved”, and “PDF without text” (a file is saved but no text could be read from it, so for now it cannot be used to ask questions). The “Full text” filter above the table header shows just one of them.</p>
-        <p>What needs work now is <code>scan_0032</code>. It is “PDF saved”, yet its title is still the file name, and the authors and year are missing. A look through the PDF tab shows why it was not recognized: the file is the supplement of some article. Its first page is “Supp. Figure 1”, with no title and no DOI. The figure legends reveal that it is the supplement of the single-cell study of drought responses in the Arabidopsis leaf mesophyll.</p>
+        <p>What needs work now is <code>arabidopsis-root-hairs.pdf</code> from step 3. It is “PDF saved”, yet its title is still the file name, and the authors and year are missing, because no DOI was found on its first pages. The same steps complete any record that has little more than a title, such as a paper you entered by hand with “Add papers › Enter manually…”. The figures below use such a paper: it was entered with only the title “Evolutionary diversity of cell-type-specific expression and stress response in Brassicaceae roots”.</p>
         <ol>
           <li>In the details, click “Look up by title”.</li>
-          <li>The title is still the file name and will not be used for a lookup, so the box is empty. Type the title (here: Dual and spatially resolved drought responses in the Arabidopsis leaf mesophyll revealed by single cell transcriptomics). Authors and year may stay empty.</li>
+          <li>The box holds the title to search for. When the paper's title is only a file name, the title is read from the PDF's first page and a note asks you to check it before searching. For arabidopsis-root-hairs.pdf it reads “Mapping gene activity of Arabidopsis root hairs”. If no title can be read, the box is empty and you type it. Authors and year may stay empty.</li>
           <li>Click “Search”.</li>
         </ol>
 
         <figure class="shot">
-          <img src="../../img/t/migrate-05-complete-candidates.jpg" width="1372" height="867" loading="lazy" alt="The “Look up by title” dialog. The title box holds the title that was typed. Below it says Crossref 5 results, Europe PMC 2 results, arXiv none found. There are two candidates: a 2024 preprint (DOI 10.1101/2024.08.30.610433) and the 2025 published version in New Phytologist (DOI 10.1111/nph.20446), both marked as title match.">
+          <img src="../../img/en/t/migrate-05-complete-candidates.jpg" width="1372" height="870" loading="lazy" alt="The “Look up by title” dialog. The title box holds Evolutionary diversity of cell-type-specific expression and stress response in Brassicaceae roots, with a note that you can edit the search title without changing the paper's saved title. Below it says Crossref: 5 results, Europe PMC: 2 results, arXiv: no results. There are two candidates with the same title: a 2024 preprint (openRxiv, DOI 10.1101/2024.06.21.599952) and the 2026 published version in Nature Communications (DOI 10.1038/s41467-026-73270-2, PMID 42161986), each with a green label for a title match. The buttons are Cancel and Search again.">
           <figcaption><b>Figure 8.</b> The number of results from each source is written above. A preprint and the published version of the same title are two candidates, and you decide which to take.</figcaption>
         </figure>
 
-        <p>This time Crossref returned 5 results, Europe PMC 2 and arXiv none. They merged into two candidates: the 2024 preprint and the 2025 published version in New Phytologist, both marked as title match. Being listed first only means the title is closer. This example takes the published version. Click it to check it field by field:</p>
+        <p>Here Crossref returned 5 results, Europe PMC 2 and arXiv none. They merged into two candidates: the 2024 preprint and the 2026 published version in Nature Communications, both marked as a title match. Being listed first only means the title is closer. For arabidopsis-root-hairs.pdf the same lookup found a single record, the 2013 article in Genome Biology. This example takes the published version. Click it to check it field by field:</p>
 
         <figure class="shot">
-          <img src="../../img/t/migrate-06-complete-fields.jpg" width="1372" height="867" loading="lazy" alt="“Title lookup · Review record”: the candidate's sources are Crossref and Europe PMC. Below, each field is listed: title, authors, year, journal, publication status, DOI, PMID, abstract. Each has a checkbox and its current content. The title is currently scan_0032 (file name), the others are currently empty, and all are ticked. The button at the bottom right is “Save 8 fields”.">
+          <img src="../../img/en/t/migrate-06-complete-fields.jpg" width="1372" height="870" loading="lazy" alt="“Title lookup · Review record”: the candidate at the top is the Nature Communications article of 2026 (Published, with its DOI and PMID 42161986, from Crossref and Europe PMC) and has an Open web page button. Below, each field has a ticked checkbox and the proposed content, with “Currently empty” under it: Authors, Year, Journal, Volume, Issue, Pages, Publication status and DOI are visible. The button at the bottom right is “Save 10 fields”, and the other button at the bottom left is “Back to candidates”.">
           <figcaption><b>Figure 9.</b> Under each field it says what is there now. By default only empty fields and a title that is just a file name are ticked. Content that already exists is replaced only if you tick it.</figcaption>
         </figure>
 
-        <p>All 8 fields are empty or just a file name, so all are ticked by default. Click “Save 8 fields”. A message says “Completed”, and the row now has a title, authors and a year.</p>
+        <p>All the fields of this paper are empty, so all are ticked by default. Click “Save 10 fields”. A message says “Completed” with the title, and the row now has authors, a year and the journal.</p>
         <aside class="note warn"><b>Note</b>Only the title, authors and year are sent in the lookup. The PDF is not uploaded, and no model is involved. A similar title does not mean the same paper: when unsure, click “Open web page” to compare. A candidate that is already another paper in the library cannot be written into this one. If nothing turns up, fill it in by hand with “Edit information and fields”. A paper may stay without a DOI forever.</aside>
       </section>
 
       <section id="s6">
         <h2><i>6</i>Find the missing full texts</h2>
-        <p>Of the records from the .bib, the DOIs and Zotero, 9 have no PDF. Click “Missing PDF” on the left to list them:</p>
+        <p>Records that came from a .bib, a DOI or Zotero without a file have no PDF. Click “Missing PDF” on the left to list them. The figure shows a library in which 12 papers are in that state:</p>
 
         <figure class="shot">
-          <img src="../../img/t/migrate-07-nopdf.jpg" width="1372" height="867" loading="lazy" alt="The “Missing PDF” view lists 9 papers whose full text is “Linked”. Above the list, a green note says that open access full texts can be found for you, that ones behind a paywall or a login are not fetched, and that the lookup sends the DOI or PMID to OpenAlex, Europe PMC and publishers. The button on the right is “Find open full text for 9 papers”.">
+          <img src="../../img/en/t/migrate-07-nopdf.jpg" width="1372" height="870" loading="lazy" alt="The “Missing PDF” view lists 12 papers whose full text is “Linked”. Above the list, a green note says that open access full text is looked for on arXiv, journals and author repositories and attached to each paper, that paid or login-only files are skipped, and that the DOI or PMID is sent to OpenAlex, Europe PMC and publishers. The button on the right is “Find open full text for 12 papers”.">
           <figcaption><b>Figure 10.</b> The note at the top of the “Missing PDF” view says what is sent and to whom.</figcaption>
         </figure>
 
         <p>It looks only for versions that can be had free and legally: arXiv, the open access files listed by OpenAlex and Europe PMC, and the PDFs at the publisher for Springer / BMC, Nature and Frontiers articles that they mark as open access. It does not sign in and does not get around paywalls. A paper with no DOI, PMID or arXiv ID cannot be looked up.</p>
-        <p>Click “Find open full text for 9 papers”. Another progress block, “Find full text”, appears at the bottom of the sidebar. Its bar is segmented by color: green is saved, yellow is no URL found, red is download failed, blue is being searched and gray is waiting. Click it to open “Full text search”, where you see which papers are being looked up and the result and reason for each. While it runs you can “Stop searching”, or “Collapse” it and do something else. This time it finished in under a minute:</p>
+        <p>Click “Find open full text for 12 papers”. Another progress block, “Find full text”, appears at the bottom of the sidebar. Its bar is segmented by color: green is saved, yellow is no URL found, red is download failed, blue is being searched and gray is waiting. Click it to open “Full text search”, where you see which papers are being looked up and the result and reason for each. While it runs you can “Stop searching”, or “Collapse” it and do something else. When it finishes, the block says “Search complete”:</p>
 
         <figure class="shot">
-          <img src="../../img/t/migrate-08-fetch-report.jpg" width="1372" height="867" loading="lazy" alt="The “Full text search” window: 9 / 9 papers processed, search complete. Saved 2, Download failed 7. The reason is listed for each paper. For example, for the GreenCells and Multiome papers the address given by OpenAlex returned something that is not a PDF, most likely a sign-in or verification page, and for the tea tree trichome paper academic.oup.com returned HTTP 403. Behind it, “Missing PDF” now holds only 7 papers.">
-          <figcaption><b>Figure 11.</b> Of the 9 papers, 2 were saved. For the other 7 an address was found, but the publisher does not let a program download it. The reason is written under each paper.</figcaption>
+          <img src="../../img/en/t/migrate-08-fetch-report.jpg" width="1372" height="870" loading="lazy" alt="The “Full text search” window: 12 / 12 papers processed, Search complete. Saved 8, No URL found 2, Download failed 2, Searching 0, Waiting 0. A line explains that No URL found means no downloadable file was located, and Download failed means a URL was found but the PDF could not be saved. The result of each paper is listed with its reason: Plant bZIPs in Root Environmental Adaptation failed because OpenAlex gave www.mdpi.com, which returned HTTP 403; Alternative Splicing in Plant Development failed because the address returned something that is not a PDF, most likely a sign-in or verification page; two papers (alfalfa heat stress and guard cell biology) show No download URL found. Behind it, “Missing PDF” now holds 4 papers.">
+          <figcaption><b>Figure 11.</b> Of the 12 papers, 8 were saved. For 2 an address was found but the file could not be saved, and for 2 no address was found. The reason is written under each paper.</figcaption>
         </figure>
 
-        <p>The ones saved are the reed paper (from Springer) and the maize root paper (from Frontiers). The PDFs were attached to the existing entries and their text was read. The other 7 are all open access articles and their addresses were found too, but MDPI and Oxford University Press returned HTTP 403, and the rest returned a sign-in or verification page, which was not stored as a PDF. “Missing PDF” still holds 7 papers.</p>
+        <p>The 8 saved are the three Frontiers in Plant Science papers, the Nature Communications paper, the two BMC Plant Biology papers, the Genome Biology paper and the Plant Cell paper. Their PDFs were attached to the existing entries. Of the other 4, two are open access articles whose addresses were found but not served to a program: one from MDPI returned HTTP 403, and the other returned a sign-in or verification page, which was not stored as a PDF. For the last two, the New Phytologist and Plant Physiology papers, no download address was found. “Missing PDF” still holds 4 papers.</p>
         <p>For the rest, click “Open web page” in the details, download the PDF in your browser, then drag the file into the Wisp Study window. It reads the DOI, recognizes that the library already has this paper and attaches the PDF to the existing entry. The details say “Paper already in library; PDF attached to existing record”, and no extra record appears. The “PDF” tab of a single paper also has two buttons, “Find open full text” and “Add PDF”.</p>
         <aside class="note"><b>Tip</b>A failed download does not mean the paper has no open full text. It only means it could not be fetched for you this time. Try again later in “Missing PDF”: the button only looks for papers that still have no PDF.</aside>
       </section>
@@ -258,9 +258,9 @@
         <h2>Recap</h2>
         <ul>
           <li>From Zotero came the records of 6 papers with their tags, collections, notes and 4 PDFs. Zotero itself was not changed.</li>
-          <li>A folder of 11 PDFs was imported and its subfolders became tags. Duplicates were attached to the original entries, and the paper in the trash did not come back.</li>
+          <li>A folder of 6 PDFs was imported and its subfolders became tags. 5 were added, one of them with no DOI detected, and the paper in the trash did not come back.</li>
           <li>The .bib brought in 5 papers and skipped 1 existing one. One paper each was added by DOI and by PMID.</li>
-          <li>The supplement with no recognized DOI was completed by title into the published version in New Phytologist. Of the 9 papers missing full text, 2 were found, and the reasons for the others are in the details.</li>
+          <li>A record with only a title was completed by title into the published version in Nature Communications, not the preprint. Of 12 papers missing full text, 8 were found, and the reasons for the others are in the details.</li>
           <li>Ticking three collections moved 10 items from Zotero. The 90.9 MB Nature PDF that came with them was compressed to 12.6 MB, and the original is in <code>removed/</code>.</li>
           <li>DeepSeek OCR read the text of 27 of the 35 pages of a scan, which can now be used to ask questions.</li>
           <li>Apart from text recognition, no model was used anywhere. Next you can <a href="read.html">read one of these papers closely</a>, or go back to <a href="start.html">start from a topic</a> and fill out the library with a search.</li>
@@ -287,7 +287,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> The screenshots and numbers come from one real run in November 2026 on macOS with v0.10.0. Figure 2 is from a run on v0.17.0. Figures 4, 5 and 12–16 come from another run on v0.18.0 on November 23, 2026, taken with the English interface: the library already held 40 papers, the Zotero database was made for the demo (its items are real papers), the scan was made by drawing a preprint page by page into pictures, and text recognition used DeepSeek OCR (straight to DeepSeek, not through a model provider). A model answers differently each time, so wording and numbers will differ when you follow along, but the steps are the same. Most screenshots show the Chinese interface. Those that show the English one were retaken on November 24, 2026 on another library and may show other numbers. The text uses the labels of the English interface (Settings › General › Interface language).</p>
+      <p><b>About this tutorial.</b> Most screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface; Figures 2 and 3 still show the Chinese interface and the earlier run (Figure 2 comes from a small database made for the demo). Figures 4, 5 and 12–16 come from another run with v0.18.0, also with the English interface, on a library of 40 papers: the Zotero database was made for the demo (its items are real papers), the scan was made by drawing a preprint page by page into pictures, and text recognition used DeepSeek OCR (straight to DeepSeek, not through a model provider). The numbers in the text come from those runs and will differ with your own papers, but the steps are the same. The text uses the labels of the English interface (Settings › General › Interface language).</p>
       <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation. Check key numbers and conclusions against the original text.</p>
     </div>
   </div>

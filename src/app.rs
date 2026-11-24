@@ -9403,7 +9403,8 @@ impl Workspace {
                 // it shows the pages / their translation, changes places with the view before / after it, is closed, or opens its menu.
                 // `pdfmap`: 导图 on the PDF's bar. `pdfmap:add` makes what is selected a node (after `pdfpick:`), `pdfmap:draft`
                 // asks the model for a draft, and anything else is a step in the map (`MindMapView::script`: `child:<words>`,
-                // `sibling:<words>`, `remove`, `fold`, `indent`, `outdent`, `undo`, `redo`, `up`, `down`, `in`, `out`).
+                // `sibling:<words>`, `remove`, `fold`, `indent`, `outdent`, `undo`, `redo`, `up`, `down`, `in`, `out`, `zoom:<in|out|fit|percent>`,
+                // `move:<id>;before|under|after`).
                 "pdfmap" => {
                     let Some(pdf) = self.lib.as_ref().and_then(|l| l.pdf.clone()) else { return };
                     match arg {
