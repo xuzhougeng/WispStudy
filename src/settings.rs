@@ -1216,7 +1216,7 @@ impl Workspace {
             .child(group(Some(t("阅读与写作")), vec![
                 row(t("正文行距"), Some(t("调整摘要、助手回答与稿件正文的行距。").into()), lines).into_any_element(),
                 row(t("段落间距"), Some(t("调整助手回答与稿件正文的段落间隔。").into()), paragraphs).into_any_element(),
-                row(t("正文宽度"), Some(t("稿件正文和助手回答一行最宽多少，「铺满」随窗口变宽；空间不足时自动适应窗口。").into()), widths).into_any_element(),
+                row(t("正文宽度"), Some(t("稿件正文一行最宽多少；助手的回答从这个宽度起，窗口宽时随之加宽，最多一倍半。「铺满」随窗口变宽；空间不足时自动适应窗口。").into()), widths).into_any_element(),
                 preview.into_any_element(),
             ]))
             .child(div().flex().justify_end().child(link_button("reading-reset", t("恢复默认阅读排版")).on_click(self.on(Cmd::ResetReadingAppearance, cx))))

@@ -1392,7 +1392,7 @@
   "阅读排版预览": "Reading layout preview",
   "调整摘要、助手回答与稿件正文的行距。": "Adjust line spacing in abstracts, assistant answers and manuscript text.",
   "调整助手回答与稿件正文的段落间隔。": "Adjust paragraph spacing in assistant answers and manuscripts.",
-  "稿件正文和助手回答一行最宽多少，「铺满」随窗口变宽；空间不足时自动适应窗口。": "The most a line of a manuscript or of the assistant's answers is wide; Fill follows the window. Fits the window when space is limited.",
+  "稿件正文一行最宽多少；助手的回答从这个宽度起，窗口宽时随之加宽，最多一倍半。「铺满」随窗口变宽；空间不足时自动适应窗口。": "The most a line of a manuscript is wide; the assistant's answers start from this width and grow with a wide window, up to one and a half times. Fill follows the window. Fits the window when space is limited.",
   "恢复默认阅读排版": "Reset reading layout",
   "恢复全部外观设置": "Reset all appearance settings",
   "恢复主题、字体、对比度、列表密度和阅读排版。": "Reset theme, fonts, contrast, list density and reading layout.",
