@@ -304,6 +304,14 @@ CREATE TABLE IF NOT EXISTS ocr_pages (
     pages TEXT NOT NULL,
     read_at TEXT NOT NULL
 );
+
+-- 归入已有文献 (`Store::file_into`): a file filed under another paper as its attachment, with the paper it came
+-- from (now in the trash) and the kind it had there. Restoring that paper takes its files back.
+CREATE TABLE IF NOT EXISTS filed_files (
+    resource_id TEXT PRIMARY KEY NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+    paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    resource_type TEXT NOT NULL
+);
 "#;
 
 /// The files known by the fingerprint `?1`: by the bytes they hold, or by those they held before they were made smaller.
@@ -560,6 +568,16 @@ fn check_schema_version(found: i32, supported: i32) -> Result<()> {
 
 /// What deleting a paper for good takes from the database: its row, with
 /// the rows that refer to it, and its conversations.
+/// A stored file becomes `paper`'s, as a file of `kind`; what was marked on its pages and cut out of them goes
+/// with it (those rows name the paper too, and would go with the other paper's record otherwise).
+fn hand_file(db: &Connection, file: &str, paper: &str, kind: &str) -> Result<()> {
+    db.execute("UPDATE resources SET paper_id = ?2, resource_type = ?3 WHERE id = ?1", params![file, paper, kind])?;
+    for table in ["pdf_annotations", "pdf_shapes", "pdf_cuts", "pdf_texts", "figures"] {
+        db.execute(&format!("UPDATE {table} SET paper_id = ?2 WHERE resource_id = ?1"), params![file, paper])?;
+    }
+    Ok(())
+}
+
 fn delete_rows(db: &Connection, id: &str) -> Result<()> {
     db.execute("DELETE FROM papers WHERE id = ?1", [id])?;
     db.execute("DELETE FROM conversations WHERE paper_id = ?1", [id])?;
@@ -768,9 +786,48 @@ impl Store {
         Ok(())
     }
 
+    /// Out of the trash. A paper whose files were filed under another (`file_into`) takes back
+    /// those still there, as what they were, with the marks made on them since.
     pub fn restore_paper(&mut self, id: &str) -> Result<()> {
-        self.db.execute("DELETE FROM trashed_papers WHERE paper_id = ?1", [id])?;
+        let tx = self.db.transaction()?;
+        let filed: Vec<(String, String)> = tx.prepare("SELECT resource_id, resource_type FROM filed_files WHERE paper_id = ?1")?.query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+        for (file, kind) in &filed { hand_file(&tx, file, id, kind)? }
+        tx.execute("DELETE FROM filed_files WHERE paper_id = ?1", [id])?;
+        tx.execute("DELETE FROM trashed_papers WHERE paper_id = ?1", [id])?;
+        tx.commit()?;
         Ok(())
+    }
+
+    /// The record a file was filed from (`file_into`), while that record is still there to take it back.
+    pub fn filed_from(&self, file: &str) -> Option<String> {
+        self.db.query_row("SELECT paper_id FROM filed_files WHERE resource_id = ?1", [file], |r| r.get(0)).optional().ok().flatten()
+    }
+
+    /// 归入已有文献: the files of `papers` (records taken in on their own: a supplement, a figure file) become
+    /// attachments of `target`, and the records they came with go to the trash. A file keeps its id, so its text,
+    /// its marks, the pictures cut from it and the place it was read at stay with it; what the record itself held
+    /// (title, notes, tags, conversations) stays with the record, and restoring it from the trash takes the files
+    /// back (`restore_paper`). All of it or nothing. How many files moved.
+    pub fn file_into(&mut self, papers: &[String], target: &str) -> Result<usize> {
+        let tx = self.db.transaction()?;
+        let title = |id: &str| -> Result<Option<String>> { Ok(tx.query_row("SELECT title FROM papers WHERE id = ?1 AND id NOT IN (SELECT paper_id FROM trashed_papers)", [id], |r| r.get(0)).optional()?) };
+        if title(target)?.is_none() { bail!("没有找到要归入的文献：{target}") }
+        let mut moved = 0;
+        for id in papers {
+            if id == target { bail!("不能把一篇文献归入它自己。") }
+            let Some(title) = title(id)? else { bail!("没有找到这篇文献：{id}") };
+            let files: Vec<(String, String)> = tx.prepare("SELECT id, resource_type FROM resources WHERE paper_id = ?1")?.query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+            if files.is_empty() { bail!("「{title}」没有文件可以归入。") }
+            for (file, kind) in &files {
+                // A file filed before and filed on keeps the paper it first came from.
+                tx.execute("INSERT OR IGNORE INTO filed_files(resource_id, paper_id, resource_type) VALUES (?1, ?2, ?3)", params![file, id, kind])?;
+                hand_file(&tx, file, target, if kind == "fulltext" { "supplement" } else { kind })?;
+            }
+            tx.execute("INSERT OR IGNORE INTO trashed_papers(paper_id, deleted_at) VALUES (?1, ?2)", params![id, now_iso()])?;
+            moved += files.len();
+        }
+        tx.commit()?;
+        Ok(moved)
     }
 
     pub fn list_trash(&self) -> Result<Vec<TrashEntry>> {
@@ -2278,6 +2335,65 @@ mod tests {
         assert!(!store.file_path(&file).exists());
         assert!(dir.join("removed").read_dir().unwrap().count() == 1);
         assert!(store.list_files().unwrap().is_empty());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_supplement_taken_in_alone_is_filed_under_its_paper_and_comes_back_with_its_record() {
+        use crate::annotation::Kind;
+        let dir = temp_dir("file-into");
+        let mut store = Store::open(&dir).unwrap();
+        let article = store.add_paper(paper("Root hairs", "10.1234/roots")).unwrap();
+        let figures = store.add_paper(paper("Supplementary Figures", "")).unwrap();
+        let methods = store.add_paper(paper("Supplementary Methods", "")).unwrap();
+        let write = |name: &str, bytes: &[u8]| { let path = dir.join(name); std::fs::write(&path, bytes).unwrap(); path };
+        let main = store.import_file(&article.id, &write("roots.pdf", b"%PDF-1.4 main"), "fulltext").unwrap();
+        let s1 = store.import_file(&figures.id, &write("Supplementary Figures.pdf", b"%PDF-1.4 figures"), "fulltext").unwrap();
+        let s2 = store.import_file(&methods.id, &write("Supplementary Methods.pdf", b"%PDF-1.4 methods"), "fulltext").unwrap();
+        store.save_fulltext_pages(&s1.id, &Ok(vec!["Figure S2".into()])).unwrap();
+        store.save_reading_places(&[(s1.id.clone(), (3, 40.))]).unwrap();
+        let mark = store.add_pdf_annotation(&figures.id, &s1.id, 1, Kind::Highlight, "Figure S2", &[[1., 2., 3., 4.]]).unwrap();
+        let note = store.add_pdf_shape(&figures.id, &s1.id, 1, Kind::Note, [5., 5., 5., 5.], "compare").unwrap();
+
+        // Nothing moves when one of them cannot: a paper into itself, a record without a file, a paper that is not there.
+        assert!(store.file_into(&[figures.id.clone(), article.id.clone()], &article.id).is_err());
+        let bare = store.add_paper(paper("No file", "")).unwrap();
+        assert!(store.file_into(&[figures.id.clone(), bare.id.clone()], &article.id).unwrap_err().to_string().contains("没有文件"));
+        assert!(store.file_into(std::slice::from_ref(&figures.id), "P-nowhere").is_err());
+        assert_eq!(store.paper_files(&figures.id).unwrap().len(), 1);
+        assert_eq!(store.list_papers().unwrap().len(), 4);
+
+        assert_eq!(store.file_into(&[figures.id.clone(), methods.id.clone()], &article.id).unwrap(), 2);
+        // The article holds the three files, its own still the main text; the two records are in the trash.
+        let files = store.paper_files(&article.id).unwrap();
+        assert_eq!(files.iter().map(|f| (f.id.as_str(), f.kind.as_str())).collect::<Vec<_>>(), vec![(main.id.as_str(), "fulltext"), (s1.id.as_str(), "supplement"), (s2.id.as_str(), "supplement")]);
+        assert_eq!(store.list_papers().unwrap().iter().filter(|p| p.title.starts_with("Supplementary")).count(), 0);
+        assert_eq!(store.list_trash().unwrap().len(), 2);
+        assert!(store.file_path(&s1).exists());
+        // What belongs to the file went with it: its text, where it was read, the marks on it.
+        assert_eq!(store.fulltext_pages(&s1.id).unwrap().unwrap().unwrap(), vec!["Figure S2".to_string()]);
+        assert_eq!(store.reading_places().unwrap()[&s1.id], (3, 40.));
+        let marks = store.pdf_annotations(&article.id, &s1.id).unwrap();
+        assert_eq!(marks.iter().map(|m| m.id.as_str()).collect::<std::collections::BTreeSet<_>>(), std::collections::BTreeSet::from([mark.id.as_str(), note.id.as_str()]));
+        // The file taken in again is the article's, not a new paper.
+        assert_eq!(store.paper_holding(&dir.join("Supplementary Figures.pdf")).unwrap().as_deref(), Some(article.id.as_str()));
+
+        // A record deleted for good leaves its file with the article.
+        store.purge_trashed(&methods.id).unwrap();
+        assert!(store.file_path(&s2).exists());
+        assert_eq!(store.paper_files(&article.id).unwrap().len(), 3);
+        // A record restored takes its file back as what it was, with the marks.
+        store.restore_paper(&figures.id).unwrap();
+        let back = store.paper_files(&figures.id).unwrap();
+        assert_eq!(back.iter().map(|f| (f.id.as_str(), f.kind.as_str())).collect::<Vec<_>>(), vec![(s1.id.as_str(), "fulltext")]);
+        assert_eq!(store.pdf_annotations(&figures.id, &s1.id).unwrap().len(), 2);
+        assert_eq!(store.paper_files(&article.id).unwrap().len(), 2);
+        assert_eq!(store.get_paper(&figures.id).unwrap().fulltext, "stored");
+        // Filed again and taken off the article by hand: the record comes back without it.
+        store.file_into(std::slice::from_ref(&figures.id), &article.id).unwrap();
+        store.remove_file(&s1.id).unwrap();
+        store.restore_paper(&figures.id).unwrap();
+        assert!(store.paper_files(&figures.id).unwrap().is_empty());
         std::fs::remove_dir_all(dir).ok();
     }
 
