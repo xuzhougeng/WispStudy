@@ -130,6 +130,14 @@ const PHRASES: &[(&str, &str)] = &[
     ("不支持的来源：{}", "Unsupported source: {0}"),
     ("每次取回的篇数应在 1 到 {n} 之间。", "The number of papers per run must be between 1 and {0}."),
     ("检索式不存在：{}", "No such saved search: {0}"),
+    // Why a Zotero attachment was not taken in (`zotero::attachment_path`).
+    ("找不到 PDF，请先在 Zotero 中下载或修复路径：{}", "PDF not found; download it in Zotero or fix its path first: {0}"),
+    ("附件没有可用的本地路径，请先在 Zotero 中下载：{}", "The attachment has no local file; download it in Zotero first: {0}"),
+    ("相对链接附件需要 Zotero 的链接附件基础目录，请在 Zotero 中改用绝对路径或在 Wisp Study 中手动添加：{}", "A relative linked attachment needs Zotero’s base directory for linked files; use an absolute path in Zotero, or add the file in Wisp Study: {0}"),
+    ("附件路径超出 Zotero storage 目录：{}", "The attachment path leads outside Zotero’s storage folder: {0}"),
+    ("附件路径无效：{}", "Invalid attachment path: {0}"),
+    // Where a paper came from (`Paper::source`), as an import of a file names it (`tools::import_references`).
+    ("导入 · {}", "Import · {0}"),
 ];
 
 /// The values `text` gives the holes of `pattern`, when it is that pattern filled in.
@@ -399,6 +407,9 @@ mod tests {
         // The hosts are drawn by the names a script kept under the English interface gives them.
         for (host, (_, name, _)) in podcast::HOSTS.iter().enumerate() { assert_eq!(translate(Language::En, name), podcast::HOSTS_EN[host]) }
         // What a record found by its title has in common with the paper.
+        // Why a Zotero attachment was not taken in, and where a paper came from.
+        assert_eq!(english_of("找不到 PDF，请先在 Zotero 中下载或修复路径：/z/storage/AB12/a.pdf").as_deref(), Some("PDF not found; download it in Zotero or fix its path first: /z/storage/AB12/a.pdf"));
+        for source in ["Zotero 本地导入", "PDF 导入", "网址导入", "导入 · refs.bib"] { assert!(english_of(source).is_some_and(|english| !chinese(&english)), "{source}") }
         for note in ["题目一致", "DOI 一致", "题目有 87% 的词相同", "年份 2019", "年份是 2019，不是 2020", "作者里有 Wang", "作者里没有 Wang"] { assert!(english_of(note).is_some_and(|english| !chinese(&english)), "{note}") }
     }
 }

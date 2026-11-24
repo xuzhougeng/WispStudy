@@ -1247,12 +1247,12 @@ pub struct ZoteroRun {
 impl ZoteroRun {
     pub fn summary(&self) -> String {
         if self.running { return tf!("正在导入 Zotero · {}/{} · {}", "Importing Zotero · {}/{} · {}", self.rows.len(), self.total, self.current) }
-        tf!("新增 {} 篇 · 已有 {} 篇 · 回收站 {} 篇 · 失败 {} 篇 · 新增 PDF {} 个 · 待处理 {} 项", "{} added · {} existing · {} in trash · {} failed · {} PDFs added · {} pending",
+        let pdfs = tn!("新增 PDF {n} 个", "{n} added", self.rows.iter().map(|r| r.files_added).sum::<usize>(), "PDF");
+        tf!("新增 {} 篇 · 已有 {} 篇 · 回收站 {} 篇 · 失败 {} 篇 · {pdfs} · 待处理 {} 项", "{} added · {} existing · {} in trash · {} failed · {pdfs} · {} pending",
             self.rows.iter().filter(|r| r.added).count(),
             self.rows.iter().filter(|r| !r.added && r.paper_id.is_some()).count(),
             self.rows.iter().filter(|r| r.in_trash).count(),
             self.rows.iter().filter(|r| r.paper_id.is_none() && !r.in_trash).count(),
-            self.rows.iter().map(|r| r.files_added).sum::<usize>(),
             self.rows.iter().map(|r| r.problems.len()).sum::<usize>())
     }
 }
@@ -3111,7 +3111,7 @@ impl Workspace {
                             let which = crate::library::zone_sort(&self.settings);
                             (f.zone.clone(), (1..=3).map(|last| filter::zone_value(which, last)).map(|value| (value.clone(), crate::library::zone_label(&value), kept(&|f| f.zone = value.clone()))).collect())
                         }
-                        FilterKey::Source => (f.source.clone(), counted(filter::source_counts(&lib.papers))),
+                        FilterKey::Source => (f.source.clone(), filter::source_counts(&lib.papers).into_iter().take(40).map(|(v, n)| (v.clone(), crate::i18n::phrase(&v), Some(n))).collect()),
                         FilterKey::Reading => (f.reading.clone(), fixed(&READINGS)),
                         FilterKey::Screening => (f.screening.clone(), fixed(&SCREENINGS)),
                         FilterKey::Fulltext => (f.fulltext.clone(), fixed(&FULLTEXTS)),
@@ -9588,7 +9588,7 @@ impl Workspace {
                     return;
                 }
                 "menu" => {
-                    let kind = match arg { "sort" => MenuKind::Sort, "columns" => MenuKind::Columns, "year" => MenuKind::Filter(FilterKey::Year), "impact" => MenuKind::Filter(FilterKey::Impact), "zones" => MenuKind::Filter(FilterKey::Zone), "zoom" => MenuKind::PdfZoom, "pdfsplit" => MenuKind::PdfSplit, "pdfmore" => MenuKind::PdfMore, "panes" => MenuKind::Panes, "layout" => MenuKind::Layout, "pdffiles" => MenuKind::PdfFiles, "fulltext" => MenuKind::Filter(FilterKey::Fulltext), "manuscripts" => MenuKind::Manuscripts, "export" => MenuKind::ManuscriptExport, "retry" => MenuKind::ExtractRetry, "podcasts" => MenuKind::Podcasts, "speed" => MenuKind::PlaySpeed, _ => MenuKind::Add };
+                    let kind = match arg { "sort" => MenuKind::Sort, "columns" => MenuKind::Columns, "year" => MenuKind::Filter(FilterKey::Year), "impact" => MenuKind::Filter(FilterKey::Impact), "zones" => MenuKind::Filter(FilterKey::Zone), "zoom" => MenuKind::PdfZoom, "pdfsplit" => MenuKind::PdfSplit, "pdfmore" => MenuKind::PdfMore, "panes" => MenuKind::Panes, "layout" => MenuKind::Layout, "pdffiles" => MenuKind::PdfFiles, "fulltext" => MenuKind::Filter(FilterKey::Fulltext), "source" => MenuKind::Filter(FilterKey::Source), "manuscripts" => MenuKind::Manuscripts, "export" => MenuKind::ManuscriptExport, "retry" => MenuKind::ExtractRetry, "podcasts" => MenuKind::Podcasts, "speed" => MenuKind::PlaySpeed, _ => MenuKind::Add };
                     self.open_menu(kind, point(px(if matches!(arg, "zoom" | "manuscripts" | "export" | "retry") { 900. } else { 20. }), px(120.)), cx);
                     return;
                 }

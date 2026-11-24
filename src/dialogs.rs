@@ -87,7 +87,7 @@ impl Workspace {
                         .when(picked, |d| d.bg(Theme::accent_soft()))
                         .when(!picked, |d| d.hover(|s| s.bg(Theme::hover())))
                         .child(div().flex_1().min_w_0().font_weight(if picked { FontWeight::SEMIBOLD } else { FontWeight::NORMAL }).child(ui::one_line(&name)))
-                        .child(div().flex_none().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tf!("{} 条", "{} items", items)))
+                        .child(div().flex_none().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tn!("{n} 条", "{n}", items, "item")))
                         .on_click(self.on(Cmd::ChooseZoteroLibrary(this), cx))
                 };
                 let library_name = |library: &zotero::Library| -> SharedString { if library.is_user() { t("我的文库").into() } else { library.name.clone().into() } };
@@ -112,7 +112,7 @@ impl Workspace {
                         .when_some(click, |d, click| d.cursor_pointer().hover(|s| s.bg(Theme::hover())).on_click(click))
                         .child(crate::extract::tick_box(ticked || within, !within))
                         .child(div().flex_1().min_w_0().when(within, |d| d.text_color(Theme::text_secondary())).child(ui::one_line(&c.name)))
-                        .child(div().flex_none().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tf!("{} 条", "{} items", c.items)))
+                        .child(div().flex_none().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tn!("{n} 条", "{n}", c.items, "item")))
                         .into_any_element());
                 }
                 let whole = chosen.map_or(all, |l| libraries.iter().find(|x| x.id == l).map_or(0, |x| x.items));
@@ -131,17 +131,20 @@ impl Workspace {
                                 .child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).line_height(text_px(19.)).child(t("只导入勾选的分类，每个分类含其子分类；都不勾选时导入整个文献库。"))))
                             .child(div().flex().flex_col().gap(px(1.)).children(tree)))
                         .child(error))
-                    .child(footer(&tf!("导入 {} 条", "Import {} items", taken), false, self, cx))
+                    .child(footer(&tn!("导入 {n} 条", "Import {n}", taken, "item"), false, self, cx))
             }
             Modal::ZoteroReport => {
                 let run = self.lib.as_ref()?.zotero.as_ref()?;
                 let rows = run.rows.iter().enumerate().map(|(i, row)| {
                     let status = if row.in_trash { t("在回收站中，未导入") } else if row.added { t("新增文献") } else if row.paper_id.is_some() { t("已有文献，保留原记录") } else { t("文献未导入") };
-                    let summary = tf!("{status} · 新增 PDF {} · 已有 PDF {}{}", "{status} · {} PDFs added · {} PDFs already present{}", row.files_added, row.files_existing, if row.problems.is_empty() { String::new() } else { tf!(" · {} 项待处理", " · {} issues to review", row.problems.len()) });
+                    let added = tn!("新增 PDF {n}", "{n} added", row.files_added, "PDF");
+                    let existing = tn!("已有 PDF {n}", "{n} already present", row.files_existing, "PDF");
+                    let issues = if row.problems.is_empty() { String::new() } else { tn!(" · {n} 项待处理", " · {n} to review", row.problems.len(), "issue") };
+                    let summary = format!("{status} · {added} · {existing}{issues}");
                     div().id(("zotero-row", i)).flex().flex_none().flex_col().gap(px(4.)).py(px(8.)).border_b_1().border_color(Theme::line())
                         .child(div().font_weight(FontWeight::SEMIBOLD).child(if row.title.is_empty() { t("（无题目）").into() } else { row.title.clone() }))
                         .child(div().text_size(text_px(12.)).text_color(Theme::text_secondary()).child(summary))
-                        .children(row.problems.iter().map(|problem| div().text_size(text_px(12.)).text_color(Theme::warning()).child(problem.clone())))
+                        .children(row.problems.iter().map(|problem| div().text_size(text_px(12.)).text_color(Theme::warning()).child(crate::i18n::phrase(problem))))
                         .when_some(row.paper_id.clone().filter(|_| !run.running), |d, id| d.cursor_pointer().hover(|s| s.bg(Theme::hover())).on_click(self.on(Cmd::OpenImported(id), cx)))
                 });
                 ui::dialog(720.).max_w(relative(0.92)).h(px(620.)).child(ui::dialog_title(t("Zotero 导入")))
@@ -151,7 +154,7 @@ impl Workspace {
                         .when(!run.running, |d| d.child(div().line_height(text_px(21.)).text_color(Theme::text_secondary()).child(run.summary())))
                         .when(!run.error.is_empty(), |d| d.child(ui::error_line(&run.error)))
                         .when(!run.running && run.total == 0 && run.error.is_empty(), |d| d.child(div().child(t("没有找到可导入的文献。回收站、订阅源、独立笔记和独立附件不导入。"))))
-                        .when(run.other_attachments > 0, |d| d.child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tf!("另有 {} 个非 PDF 附件未迁移。", "{} non-PDF attachments were not migrated.", run.other_attachments))))
+                        .when(run.other_attachments > 0, |d| d.child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(if run.other_attachments == 1 { t("另有 1 个非 PDF 附件未迁移。").to_string() } else { tf!("另有 {} 个非 PDF 附件未迁移。", "{} non-PDF attachments were not migrated.", run.other_attachments) })))
                         .when(run.running, |d| d.child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(t("可以收起此窗口。返回首页或切换文献库会停止后续条目，已导入的保留；重新导入会跳过重复项。"))))
                         .children(rows))
                     .child(div().flex().flex_none().items_center().gap(px(8.)).px(px(20.)).py(px(14.)).border_t_1().border_color(Theme::line()).child(div().flex_1().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(if run.running { t("收起后继续在后台导入") } else { t("点击结果可查看文献") })).child(ui::primary_button("zotero-close", if run.running { t("收起") } else { crate::i18n::tc("dialog.close", "关闭") }).on_click(self.on(Cmd::CloseModal, cx))))
@@ -202,7 +205,7 @@ impl Workspace {
                             .child(div().text_size(text_px(12.)).text_color(theme::accent_of("blue").strong()).child(if run.ids == 0 { t("正在读取") } else { t("正在处理") }))
                             .children(run.working.iter().map(|name| div().line_height(text_px(19.)).child(name.clone()))))))
                     .child(body().gap(px(4.)).border_t_1().border_color(Theme::line())
-                        .child(ui::caption(if run.ids == 0 { tf!("处理结果 · {} 个 PDF", "Results · {} PDFs", run.rows.len()) } else { tf!("处理结果 · {} 项", "Results · {} items", run.rows.len()) }))
+                        .child(ui::caption(if run.ids == 0 { tn!("处理结果 · {n} 个 PDF", "Results · {n}", run.rows.len(), "PDF") } else { tn!("处理结果 · {n} 项", "Results · {n}", run.rows.len(), "item") }))
                         .when(!run.rows.is_empty() || !run.unknown.is_empty(), |d| d.child(div().text_size(text_px(12.)).text_color(Theme::text_secondary()).child(run.summary())))
                         .when(!run.unknown.is_empty(), |d| d.child(div().text_size(text_px(12.)).line_height(text_px(17.)).text_color(Theme::text_tertiary()).child(tf!("没认出是 DOI、PMID 或网址，跳过了：{}", "Not a DOI, PMID or web address, skipped: {}", run.unknown.join("、")))))
                         .when(run.rows.is_empty(), |d| d.child(div().py(px(24.)).text_color(Theme::text_tertiary()).child(if run.ids == 0 { t("正在读取第一批文件，结果会实时出现在这里。") } else { t("正在查询第一批，结果会实时出现在这里。") })))
@@ -287,7 +290,7 @@ impl Workspace {
                             }))))
                         .child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_tertiary()).child(t("未找到地址：本次未检索到可下载地址；下载失败：找到了地址，但未能保存 PDF。"))))
                     .child(body().gap(px(4.)).border_t_1().border_color(Theme::line())
-                        .child(ui::caption(tf!("处理结果 · {} 篇", "Results · {} papers", run.rows.len())))
+                        .child(ui::caption(tn!("处理结果 · {n} 篇", "Results · {n}", run.rows.len(), "paper")))
                         .when(run.rows.is_empty(), |d| d.child(div().py(px(24.)).text_color(Theme::text_tertiary()).child(if run.running() { t("正在查找第一批文献，结果会实时出现在这里。") } else { t("本次没有已处理的文献。") })))
                         .children(listed))
                     .child(div().flex().flex_none().items_center().gap(px(8.)).px(px(20.)).py(px(14.)).border_t_1().border_color(Theme::line())
@@ -345,7 +348,7 @@ impl Workspace {
             }
 
             Modal::TagPapers { ids, name } => ui::dialog(420.)
-                .child(ui::dialog_title(tf!("为 {} 篇文献添加标签", "Add tags to {} papers", ids.len())))
+                .child(ui::dialog_title(tn!("为 {n} 篇文献添加标签", "Add tags to {n}", ids.len(), "paper")))
                 .child(body().child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_tertiary()).child(t("多个标签用逗号或分号隔开。已有的标签不动，只添加还没有的。"))).child(ui::field(name, window, cx)).child(error))
                 .child(footer(t("添加"), false, self, cx)),
 
