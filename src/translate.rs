@@ -2,7 +2,8 @@
 
 use crate::theme::text_px;
 use crate::i18n::t;
-use crate::app::{Cmd, Translated, Workspace};
+use crate::app::{Cmd, Workspace};
+use crate::pdf::PdfView;
 use crate::{theme::Theme, ui};
 use gpui::{prelude::FluentBuilder, *};
 use std::sync::Arc;
@@ -10,6 +11,14 @@ use wisp_core::ai::{self, Profile};
 use wisp_core::settings::Task;
 use wisp_core::store::translation_key;
 use wisp_core::translation::{Batch, Field};
+
+/// Where the translation of one text stands.
+#[derive(Clone)]
+pub enum Translated {
+    Busy,
+    Done(String),
+    Failed(String),
+}
 
 pub struct TranslationRun {
     pub batch: Batch,
@@ -189,5 +198,39 @@ impl Workspace {
             .child(div().text_size(text_px(12.)).text_color(Theme::text_secondary()).child(summary))
             .when(!batch.error.is_empty(), |d| d.child(ui::error_line(&tf!("最近一次失败：{}；可再次选择文献执行批量翻译。", "Latest failure: {}. Select papers again to retry batch translation.", batch.error))))
             .into_any_element())
+    }
+}
+
+impl Workspace {
+    /// Translate a passage selected in the PDF: with the model bound to
+    /// translation from what is kept, or, with `profile`, asked of that model
+    /// for this once (the settings stay as they are) and kept in place of
+    /// the earlier translation.
+    pub(crate) fn translate_passage(&mut self, text: String, profile: Option<String>, cx: &mut Context<Self>) {
+        let chosen = profile.as_deref().and_then(|id| self.settings.profile(id));
+        let again = chosen.is_some();
+        let profile = chosen.unwrap_or_else(|| self.settings.profile_for_or_default(Task::Translate));
+        // A click is a request: what failed before is asked again.
+        let prompt = self.settings.translation_prompt.clone();
+        self.translate_text(&text, &profile, &prompt, true, again, cx);
+        self.sync_pdf_translation(cx);
+    }
+
+    /// Tell the PDF viewer how the translation on its card stands, and which models it may be asked of.
+    pub(crate) fn sync_pdf_translation(&mut self, cx: &mut Context<Self>) {
+        let prompt = ai::translation_prompt(&self.settings.translation_prompt).to_string();
+        let models: Vec<(String, String)> = self.settings.profiles().into_iter().filter(|p| !p.model.trim().is_empty()).map(|p| (p.id.clone(), p.labelled())).collect();
+        let usual = self.settings.profile_for_or_default(Task::Translate);
+        let Some(lib) = self.lib.as_ref() else { return };
+        // Each viewer with a selection asked to be translated: the panel's, those beside it, those in windows of their own.
+        let views: Vec<Entity<PdfView>> = lib.pdf.iter().chain(lib.beside.as_ref().map(|beside| &beside.view)).chain(lib.pins.iter().map(|pin| &pin.view)).chain(lib.windows.iter().map(|w| &w.view)).cloned().collect();
+        let mut shown = vec![];
+        for pdf in views {
+            let Some((text, profile)) = pdf.read(cx).translation_asked() else { continue };
+            let state = lib.translations.get(&wisp_core::store::translation_key(&text, &prompt)).cloned().unwrap_or(Translated::Busy);
+            let model = profile.and_then(|id| self.settings.profile(&id)).unwrap_or_else(|| usual.clone());
+            shown.push((pdf, state, (model.id.clone(), model.labelled())));
+        }
+        for (pdf, state, model) in shown { pdf.update(cx, |pdf, cx| pdf.show_translation(state, model, models.clone(), cx)) }
     }
 }

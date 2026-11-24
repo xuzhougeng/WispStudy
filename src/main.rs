@@ -6,8 +6,23 @@
 
 #[macro_use]
 mod i18n;
+#[macro_use]
 mod app;
 mod assets;
+mod chat_run;
+mod chat_state;
+mod commands;
+mod fetch;
+mod importing;
+mod listening;
+mod menus;
+mod modal;
+mod paper_files;
+mod screen_run;
+mod sorting;
+mod viewers;
+#[cfg(debug_assertions)]
+mod dev;
 mod background;
 mod chat;
 mod cite;

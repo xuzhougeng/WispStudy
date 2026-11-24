@@ -27,7 +27,7 @@ WISP_STUDY_HOME=/tmp/wisp-demo cargo run
 | 变量 | 作用 |
 |---|---|
 | `WISP_STUDY_HOME` | 把数据目录和 `settings.json` 一起指到一个文件夹，手动试用时不碰真正的文献库 |
-| `WISP_STUDY_DEV` | 仅调试构建：让窗口启动后直接进入某个状态，如 `open:0,select:0,tab:pdf`、`settings:ai`、`theme:dark`（步骤见 `src/app.rs` 末尾的 `dev_start`） |
+| `WISP_STUDY_DEV` | 仅调试构建：让窗口启动后直接进入某个状态，如 `open:0,select:0,tab:pdf`、`settings:ai`、`theme:dark`（步骤见 `src/dev.rs` 的 `dev_step`） |
 | `WISP_STUDY_UPDATE_URL` | 把检查更新指向别的地址（测试用） |
 | `WISP_STUDY_UPDATE_FILES` | 把更新包和 `SHA256SUMS` 的下载目录指向别的地址（测试用） |
 

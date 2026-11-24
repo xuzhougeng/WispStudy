@@ -1,6 +1,6 @@
 //! The dialogs: library, add by identifier, paper form, custom fields
 //! and confirmations. Their state and what happens on submit are
-//! in app.rs; this file draws them.
+//! in modal.rs; this file draws them.
 
 use crate::i18n::{label, t};
 use crate::app::{Cmd, FilterKey, ImportRow, Imported, Modal, Workspace};
