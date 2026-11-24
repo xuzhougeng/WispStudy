@@ -431,7 +431,7 @@ impl Workspace {
             let wish = revise.run.as_ref().filter(|run| !run.told).map(|run| run.wish.clone()).unwrap_or_default();
             if !wish.is_empty() && revise.input.read(cx).text().trim().is_empty() { revise.input.update(cx, |input, cx| input.set_text(&wish, cx)) }
             revise.leave();
-            if back > 0 { self.say(tf!("已撤销助手的 {back} 处改动", "Took back the assistant's {back} changes"), cx) }
+            if back > 0 { self.say(tn!("已撤销助手的 {n} 处改动", "Took back the assistant's {n}", back, "change"), cx) }
         }
         cx.notify();
     }
@@ -525,9 +525,9 @@ impl Workspace {
         } else if count == 0 {
             if run.error.is_empty() { t("没有改动").to_string() } else { String::new() }
         } else if run.told {
-            tf!("助手在这一节改了 {count} 处", "The assistant made {count} changes in this section")
+            tn!("助手在这一节改了 {n} 处", "The assistant made {n} in this section", count, "change")
         } else {
-            tf!("改了 {count} 处", "{count} changes")
+            tn!("改了 {n} 处", "{n}", count, "change")
         };
         let place = run.at.filter(|at| run.made.get(*at).is_some_and(|made| made.range.is_some())).map(|at| at + 1);
         let rows: Vec<AnyElement> = run

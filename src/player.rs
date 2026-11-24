@@ -49,8 +49,8 @@ impl Workspace {
         };
         // Who says what is heard now; 朗读 marks its sentence on the page instead.
         let said = status.heard.as_ref().filter(|_| podcast).map(|heard| {
-            let host = wisp_core::podcast::HOSTS.iter().find(|(_, _, voice)| *voice == heard.voice).map_or("", |(_, name, _)| *name);
-            ui::one_line(&format!("{host}：{}", heard.sentence))
+            let host = wisp_core::podcast::HOSTS.iter().find(|(_, _, voice)| *voice == heard.voice).map_or("", |(_, name, _)| t(name));
+            ui::one_line(&tf!("{host}：{}", "{host}: {}", heard.sentence))
         });
         let small = |id: &'static str, icon: &'static str, tip: String| ui::ghost_button(id, None, None).size(px(28.)).child(ui::icon(icon, 15., Theme::text_secondary())).tooltip(ui::tip(tip));
         // The same place pauses and goes on; a spinner there while the next sound is on its way.

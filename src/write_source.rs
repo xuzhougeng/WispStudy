@@ -377,7 +377,7 @@ impl Workspace {
                         }
                         Event::Done { textless, missed, unanswered, worded } => {
                             lib.citing.sources.run = None;
-                            let mut said = vec![if found > 0 { tf!("找到 {found} 处引用的出处", "Found the source passage of {found} citations") } else { t("没有找到新的出处").to_string() }];
+                            let mut said = vec![if found > 0 { tn!("找到 {n} 处引用的出处", "Found the source passage of {n}", found, "citation") } else { t("没有找到新的出处").to_string() }];
                             if none > 0 { said.push(tf!("{none} 处在文献里没有找到依据，请核对", "{none} have no support in their paper: please check")) }
                             if missed > 0 { said.push(tf!("{missed} 处没有相近的原文", "{missed} have no similar sentence")) }
                             if textless > 0 { said.push(tf!("{textless} 处所引的文献没有摘要和全文可查", "{textless} cite papers without an abstract or full text")) }

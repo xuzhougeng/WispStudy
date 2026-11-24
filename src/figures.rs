@@ -60,6 +60,7 @@ const TOOLS_H: f32 = 52.;
 const DRAW_H: f32 = 172.;
 
 /// The tag a picture a model drew is given, so that such pictures can be told from those cut out of papers.
+/// A tag is the person's from then on: it is given in the interface's language.
 const DRAWN_TAG: &str = "AI 生成";
 
 /// The figures of the open library, and what the page and the dialog need to show them.
@@ -420,8 +421,8 @@ impl Workspace {
                         if before.is_empty() || before == draw.noted { form.notes.update(cx, |input, cx| input.replace_range(0..input.text().len(), &noted, cx)) }
                         draw.noted = noted;
                         let mut tags = split_list(form.tags.read(cx).text());
-                        if !tags.iter().any(|tag| tag == DRAWN_TAG) {
-                            tags.push(DRAWN_TAG.to_string());
+                        if !tags.iter().any(|tag| tag == DRAWN_TAG || tag == t(DRAWN_TAG)) {
+                            tags.push(t(DRAWN_TAG).to_string());
                             form.tags.update(cx, |input, cx| input.replace_range(0..input.text().len(), &tags.join(", "), cx));
                         }
                         let png = Arc::new(picture);

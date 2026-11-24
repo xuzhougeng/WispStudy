@@ -457,7 +457,7 @@ impl Workspace {
         // In a manuscript that came from a Word file, what was added is said on the spot, as a comment.
         self.sources_keep(rested, cx);
         self.comment_on_change(&before, &after, t("配引用"));
-        self.say(tf!("已加上 {count} 条引用", "Added {count} citations"), cx);
+        self.say(tn!("已加上 {n} 条引用", "Added {n}", count, "citation"), cx);
     }
 
     /// What the card shows while it works and when it has found something.
@@ -639,7 +639,7 @@ impl Workspace {
             .flex_wrap()
             .gap(px(4.))
             .child(
-                ui::primary_button("write-cite-insert", if ticked == 0 { t("插入引用").to_string() } else { tf!("插入 {ticked} 条引用", "Insert {ticked} citations") })
+                ui::primary_button("write-cite-insert", if ticked == 0 { t("插入引用").to_string() } else { tn!("插入 {n} 条引用", "Insert {n}", ticked, "citation") })
                     .h(text_px(26.))
                     .px(px(10.))
                     .text_size(text_px(12.))

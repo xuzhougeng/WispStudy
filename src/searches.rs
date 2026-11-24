@@ -14,10 +14,10 @@ use wisp_core::time;
 
 /// 「命中 90 篇，取回 5 篇，新增 5 篇，跳过 0 篇」, or why the run failed.
 fn run_summary(batch: &ImportBatch) -> (String, bool) {
-    if !batch.error.is_empty() && batch.fetched == 0 { return (tf!("失败：{}", "Failed: {}", batch.error), true) }
+    if !batch.error.is_empty() && batch.fetched == 0 { return (tf!("失败：{}", "Failed: {}", crate::i18n::reasons(&batch.error)), true) }
     let total = batch.remote_total.map(|n| tf!("命中 {n} 篇，", "{n} results, ")).unwrap_or_default();
     // Some pages came, then one did not: what came is in the library.
-    if !batch.error.is_empty() { return (tf!("{total}取回 {} 篇后中断，新增 {} 篇，跳过已有的 {} 篇。{}", "{total}stopped after retrieving {}, added {}, skipped {} existing. {}", batch.fetched, batch.added, batch.skipped, batch.error), true) }
+    if !batch.error.is_empty() { return (tf!("{total}取回 {} 篇后中断，新增 {} 篇，跳过已有的 {} 篇。{}", "{total}stopped after retrieving {}, added {}, skipped {} existing. {}", batch.fetched, batch.added, batch.skipped, crate::i18n::reasons(&batch.error)), true) }
     (tf!("{total}取回 {} 篇，新增 {} 篇，跳过已有的 {} 篇", "{total}retrieved {}, added {}, skipped {} existing", batch.fetched, batch.added, batch.skipped), false)
 }
 
@@ -83,7 +83,7 @@ impl Workspace {
                     .border_b_1()
                     .border_color(Theme::line())
                     .child(div().flex_none().w(px(84.)).text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(time::short_time(&batch.started_at)))
-                    .child(div().flex().flex_col().flex_1().min_w_0().child(div().truncate().text_size(text_px(13.)).child(batch.label.clone())).child(div().truncate().text_size(text_px(12.)).text_color(if failed { Theme::danger() } else { Theme::text_tertiary() }).child(summary)))
+                    .child(div().flex().flex_col().flex_1().min_w_0().child(div().truncate().text_size(text_px(13.)).child(crate::i18n::import_label(&batch.label))).child(div().truncate().text_size(text_px(12.)).text_color(if failed { Theme::danger() } else { Theme::text_tertiary() }).child(summary)))
                     .when(undone, |d| d.child(ui::chip(t("已撤销"), Theme::text_tertiary(), Theme::bg_sunken())))
                     .when(!undone && batch.added > 0, |d| d.child(ui::ghost_button(("undo-import", i), None, Some(t("撤销").into())).on_click(self.on(Cmd::AskUndoImport(batch.id.clone()), cx))))
                     .into_any_element()
@@ -162,14 +162,14 @@ impl Workspace {
         let panel = div().flex().flex_col().gap(px(6.)).p(px(10.)).rounded(px(8.)).border_1().border_color(Theme::line()).bg(Theme::bg_body());
         let found = match found {
             None => return panel.child(div().flex().items_center().child(div().flex_1().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(t("正在检索…"))).child(close)).into_any_element(),
-            Some(Err(error)) => return panel.child(div().flex().items_center().child(div().flex_1().child(ui::error_line(error))).child(close)).into_any_element(),
+            Some(Err(error)) => return panel.child(div().flex().items_center().child(div().flex_1().child(ui::error_line(&crate::i18n::reasons(error)))).child(close)).into_any_element(),
             Some(Ok(found)) => found,
         };
-        let total = found["total"].as_u64().map(|n| tf!("数据库中共命中 {n} 篇。", "{n} results in the database.")).unwrap_or_default();
+        let total = found["total"].as_u64().map(|n| tf!("数据库中共命中 {n} 篇。", "{n} results in the database. ")).unwrap_or_default();
         let head = tf!("{total}取回最新的 {} 篇：{} 篇是新的，{} 篇已在文献库中。", "{total}Retrieved the latest {} papers: {} new, {} already in this library.", found["fetched"], found["new"], found["inLibrary"]);
         let rows = found["results"].as_array().into_iter().flatten().map(|record| {
             let text = |key: &str| record[key].as_str().unwrap_or("").to_string();
-            let mut about: Vec<String> = vec![text("authors"), record["year"].as_i64().map(|y| y.to_string()).unwrap_or_default(), text("journal")];
+            let mut about: Vec<String> = vec![crate::i18n::short_names(&text("authors")), record["year"].as_i64().map(|y| y.to_string()).unwrap_or_default(), text("journal")];
             about.retain(|part| !part.is_empty());
             // Already in the library: say so, and what was decided about it.
             let known = record["inLibrary"].as_object().map(|held| if held["inTrash"] == true { t("在回收站").to_string() } else { tf!("已在库中 · {}", "In library · {}", label(&SCREENINGS, held["screening"].as_str().unwrap_or(""))) });

@@ -631,8 +631,10 @@ pub fn check_quote(quote: &str, page: Option<usize>, paper: &Paper, pages: Optio
 /// means something only in its conversation, so the paper's own goes
 /// (`[P1 p.5 "…"]` becomes `[p.5 "…"]`) and another paper's gives way to
 /// its title; pages and quotations stay. The last line says what this is:
-/// a model's reading, which nobody has checked against the paper.
-pub fn note_from_answer(question: &str, answer: &str, sources: &[Source], paper_id: &str, date: &str) -> String {
+/// a model's reading, which nobody has checked against the paper. The words
+/// around the answer are those of the interface's language (`english`):
+/// the note is the person's from here on, and nothing reads them back.
+pub fn note_from_answer(question: &str, answer: &str, sources: &[Source], paper_id: &str, date: &str, english: bool) -> String {
     let mut body = String::with_capacity(answer.len());
     let mut rest = answer.trim();
     while let Some(open) = rest.find('[') {
@@ -680,6 +682,10 @@ pub fn note_from_answer(question: &str, answer: &str, sources: &[Source], paper_
     }
     body.push_str(rest);
     let question = question.split_whitespace().collect::<Vec<_>>().join(" ");
+    if english {
+        let asked = if question.is_empty() { String::new() } else { format!("Q: {question}\n") };
+        return format!("{asked}{}\n({date}, from a question · the model's answer, not checked against the paper)", body.trim());
+    }
     let asked = if question.is_empty() { String::new() } else { format!("问：{question}\n") };
     format!("{asked}{}\n（{date} 提问所得 · 模型的回答，未核对原文）", body.trim())
 }
@@ -1959,10 +1965,12 @@ mod tests {
     #[test]
     fn an_answer_becomes_a_note() {
         let sources = [Source { label: "P1".into(), paper_id: "a".into(), title: "Root atlas".into() }, Source { label: "P2".into(), paper_id: "b".into(), title: "Leaf atlas".into() }];
-        let note = note_from_answer(" 方法 是什么？\n", "用了 10x 平台 [P1 p.2 \"Libraries were prepared [12] with Chromium.\"]，结论见 [P1]。\n\n与 [P2, P1 p.3] 一致，另见 [P1、P2] 和文献 [12]。", &sources, "a", "2026-11-11");
+        let note = note_from_answer(" 方法 是什么？\n", "用了 10x 平台 [P1 p.2 \"Libraries were prepared [12] with Chromium.\"]，结论见 [P1]。\n\n与 [P2, P1 p.3] 一致，另见 [P1、P2] 和文献 [12]。", &sources, "a", "2026-11-11", false);
         assert_eq!(note, "问：方法 是什么？\n用了 10x 平台 [p.2 \"Libraries were prepared [12] with Chromium.\"]，结论见。\n\n与 [《Leaf atlas》, p.3] 一致，另见 [《Leaf atlas》] 和文献 [12]。\n（2026-11-11 提问所得 · 模型的回答，未核对原文）");
         // Without a question, and with nothing to rewrite.
-        assert_eq!(note_from_answer("", "没有标签。", &sources, "a", "2026-11-11"), "没有标签。\n（2026-11-11 提问所得 · 模型的回答，未核对原文）");
+        assert_eq!(note_from_answer("", "没有标签。", &sources, "a", "2026-11-11", false), "没有标签。\n（2026-11-11 提问所得 · 模型的回答，未核对原文）");
+        // Under the English interface the words around the answer are English; the answer is the model's own.
+        assert_eq!(note_from_answer("What  method?", "10x [P1 p.2].", &sources, "a", "2026-11-11", true), "Q: What method?\n10x [p.2].\n(2026-11-11, from a question · the model's answer, not checked against the paper)");
     }
 
 

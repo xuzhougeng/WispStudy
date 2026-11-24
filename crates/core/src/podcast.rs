@@ -10,6 +10,9 @@ use crate::speech;
 /// The two hosts: what a line of the script begins with, the host's name, and the voice (`speech::VOICES`).
 pub const HOSTS: [(&str, &str, &str); 2] = [("女", "小星", "stella"), ("男", "阿潮", "tide")];
 
+/// The hosts' names where the interface is English: what a script kept there begins a turn with (`transcript`).
+pub const HOSTS_EN: [&str; 2] = ["Stella", "Tide"];
+
 /// How much of the paper the model is given, in characters: a long paper's body, short of its tail.
 const SOURCE: usize = 60_000;
 
@@ -61,11 +64,12 @@ pub struct Turn {
     pub text: String,
 }
 
-/// Which host a line is marked for, and the rest of the line: `女：`, `**男**:`, `小星：`, `- 阿潮:`.
+/// Which host a line is marked for, and the rest of the line: `女：`, `**男**:`, `小星：`, `- 阿潮:`, and
+/// `**Stella**:` as a script kept under the English interface has it.
 fn marked(line: &str) -> Option<(usize, &str)> {
     let line = line.trim().trim_start_matches(['-', '*', '•', '>', ' ']).trim_start();
     for (host, (mark, name, _)) in HOSTS.iter().enumerate() {
-        for label in [*mark, *name, &format!("{mark}主持"), &format!("{name}（{mark}）"), &format!("{mark}（{name}）")] {
+        for label in [*mark, *name, &format!("{mark}主持"), &format!("{name}（{mark}）"), &format!("{mark}（{name}）"), HOSTS_EN[host]] {
             let Some(rest) = line.strip_prefix(label) else { continue };
             let rest = rest.trim_start_matches(['*', ' ']);
             if let Some(said) = rest.strip_prefix('：').or_else(|| rest.strip_prefix(':')) { return Some((host, said.trim())) }
@@ -153,10 +157,11 @@ pub fn script(text: &str) -> Result<Vec<Turn>, String> {
     Ok(turns)
 }
 
-/// The script as it is kept beside the sound: one turn a line, under the host's name.
-pub fn transcript(title: &str, turns: &[Turn]) -> String {
-    let mut out = format!("# 播客：{}\n\n", title.trim());
-    for turn in turns { out.push_str(&format!("**{}**：{}\n\n", HOSTS[turn.host].1, turn.text)) }
+/// The script as it is kept beside the sound: one turn a line, under the host's name. The heading and the names
+/// are in the interface's language (`english`); `script` reads either back.
+pub fn transcript(title: &str, turns: &[Turn], english: bool) -> String {
+    let mut out = if english { format!("# Podcast: {}\n\n", title.trim()) } else { format!("# 播客：{}\n\n", title.trim()) };
+    for turn in turns { out.push_str(&if english { format!("**{}**: {}\n\n", HOSTS_EN[turn.host], turn.text) } else { format!("**{}**：{}\n\n", HOSTS[turn.host].1, turn.text) }) }
     out
 }
 
@@ -189,15 +194,19 @@ pub fn wav(pcm: &[u8]) -> Vec<u8> {
 /// How many characters of the title a kept file's name has at most.
 const NAME: usize = 60;
 
+/// What the name of a kept podcast's files begins with: in Chinese, and where the interface is English.
+const KEPT: [&str; 2] = ["播客", "Podcast"];
+
 /// A name for the kept files: the title, short (`NAME` characters, cut between two words where it has spaces)
-/// and without what a file system refuses.
-pub fn file_name(title: &str) -> String {
+/// and without what a file system refuses, after 播客 or, where the interface is English, Podcast.
+pub fn file_name(title: &str, english: bool) -> String {
+    let kept = KEPT[english as usize];
     let title: String = title.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { ' ' } else { c }).collect();
     let whole = title.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut title: String = whole.chars().take(NAME).collect();
     // Cut inside a word: back to the space before it, unless that leaves less than half (a title without spaces).
     if whole[title.len()..].starts_with(|c: char| !c.is_whitespace()) && let Some(space) = title.rfind(' ') && title[..space].chars().count() >= NAME / 2 { title.truncate(space) }
-    if title.is_empty() { "播客".into() } else { format!("播客 - {}", title.trim_end_matches(['.', ' '])) }
+    if title.is_empty() { kept.into() } else { format!("{kept} - {}", title.trim_end_matches(['.', ' '])) }
 }
 
 /// Where each turn of a kept podcast stands in its sound of `samples`, as the sample it begins and ends at:
@@ -227,7 +236,8 @@ pub fn pcm_of(wav: &[u8]) -> Option<&[u8]> {
 /// Whether an attachment is a kept podcast's (named by `file_name`), and which half: `Some(true)` the
 /// sound, `Some(false)` the script.
 pub fn kept(title: &str, format: &str) -> Option<bool> {
-    if !title.starts_with("播客") { return None }
+    // The English word alone begins many a file's name: only as `file_name` writes it, before the title or the ending.
+    if !title.starts_with(KEPT[0]) && ![" - ", "."].iter().any(|next| title.strip_prefix(KEPT[1]).is_some_and(|rest| rest.starts_with(next))) { return None }
     match format { "wav" => Some(true), "md" => Some(false), _ => None }
 }
 
@@ -263,7 +273,10 @@ mod tests {
         assert_eq!(pieces(&turns[0]), ("stella", vec!["你好。".to_string()]));
         let (voice, long) = pieces(&turns[1]);
         assert!(voice == "tide" && long.len() > 1 && long.iter().all(|piece| speech::billed(piece) <= speech::PIECE));
-        assert!(transcript("T", &turns).starts_with("# 播客：T\n\n**小星**：你好。\n\n**阿潮**：一句。"));
+        assert!(transcript("T", &turns, false).starts_with("# 播客：T\n\n**小星**：你好。\n\n**阿潮**：一句。"));
+        // Kept under the English interface, the script names the hosts in English, and is read back all the same.
+        let (short, english) = ([Turn { host: 0, text: "Hello.".into() }, Turn { host: 1, text: "Hi: welcome.".into() }], "# Podcast: T\n\n**Stella**: Hello.\n\n**Tide**: Hi: welcome.\n\n");
+        assert_eq!((transcript("T", &short, true).as_str(), script(english).unwrap().as_slice(), script(&transcript("T", &short, false)).unwrap().as_slice()), (english, &short[..], &short[..]));
     }
 
     #[test]
@@ -285,16 +298,19 @@ mod tests {
         assert_eq!(u32::from_le_bytes(file[4..8].try_into().unwrap()), 40);
         assert_eq!(u32::from_le_bytes(file[24..28].try_into().unwrap()), 24_000);
         assert_eq!(u32::from_le_bytes(file[40..44].try_into().unwrap()), 4);
-        assert_eq!(file_name("A/B: c?"), "播客 - A B c");
-        assert_eq!(file_name(" "), "播客");
+        assert_eq!(file_name("A/B: c?", false), "播客 - A B c");
+        assert_eq!(file_name(" ", false), "播客");
         // A long title is cut between two words, not inside one; one without spaces at the length.
-        assert_eq!(file_name("Transcriptional landscape of sweetpotato root tip development at the single-cell level"), "播客 - Transcriptional landscape of sweetpotato root tip");
-        assert_eq!(file_name("Transcriptional landscape of sweetpotato root tip developmen"), "播客 - Transcriptional landscape of sweetpotato root tip developmen");
-        assert_eq!(file_name(&"单细胞".repeat(30)).chars().count(), "播客 - ".chars().count() + 60);
+        assert_eq!(file_name("Transcriptional landscape of sweetpotato root tip development at the single-cell level", false), "播客 - Transcriptional landscape of sweetpotato root tip");
+        assert_eq!(file_name("Transcriptional landscape of sweetpotato root tip developmen", false), "播客 - Transcriptional landscape of sweetpotato root tip developmen");
+        assert_eq!(file_name(&"单细胞".repeat(30), false).chars().count(), "播客 - ".chars().count() + 60);
         assert_eq!(pcm_of(&wav(&[1, 0, 2, 0])), Some(&[1u8, 0, 2, 0][..]));
         // Played again, the turns share the sound by their length after the pauses between speakers.
         let turns = [Turn { host: 0, text: "ab".into() }, Turn { host: 0, text: "cd".into() }, Turn { host: 1, text: "efgh".into() }];
         assert_eq!(timings(&turns, 800 + PAUSE), [(0, 200), (200, 400), (400 + PAUSE, 800 + PAUSE)]);
         assert_eq!((kept("播客 - A.wav", "wav"), kept("播客 - A.md", "md"), kept("A.wav", "wav"), kept("播客.pdf", "pdf")), (Some(true), Some(false), None, None));
+        // Under the English interface the files are named in English; a file that merely begins with the word is not a kept podcast.
+        assert_eq!((file_name("A/B: c?", true), file_name(" ", true)), ("Podcast - A B c".to_string(), "Podcast".to_string()));
+        assert_eq!((kept("Podcast - A.wav", "wav"), kept("Podcast - A.md", "md"), kept("Podcast.wav", "wav"), kept("Podcasting today.wav", "wav"), kept("Podcast notes.md", "md")), (Some(true), Some(false), Some(true), None, None));
     }
 }

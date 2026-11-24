@@ -287,7 +287,7 @@ impl Workspace {
             Do::TakeAll => {
                 let waiting: Vec<String> = self.lib.as_ref().map(|lib| lib.writing.comments.list.iter().filter(|comment| comment.section_id == lib.writing.section_id && comment.proposes()).map(|comment| comment.id.clone()).collect()).unwrap_or_default();
                 let taken = waiting.iter().filter(|id| self.comment_take(id, cx)).count();
-                if taken > 0 { self.say(tf!("已采纳 {taken} 处修改；每一处都可以在批注上撤回。", "Applied {taken} changes; each can be undone from its comment."), cx) }
+                if taken > 0 { self.say(tn!("已采纳 {n} 处修改；每一处都可以在批注上撤回。", "Applied {n}; each can be undone from its comment.", taken, "change"), cx) }
             }
             Do::Back(id) => self.comment_back(&id, cx),
             Do::Drop(id) => {

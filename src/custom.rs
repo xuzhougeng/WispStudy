@@ -320,7 +320,8 @@ impl Workspace {
         let given = args.as_ref().unwrap_or(&empty);
         let Some(connector) = connector else {
             let wanted = given["name"].as_str().unwrap_or("");
-            return Some((Outside::Said(skill::read(&self.skills_on(), wanted)), false, tf!("使用技能：{wanted}", "Using skill: {wanted}"), vec![]));
+            // The line is kept with the conversation as a tool's is, in Chinese, and drawn in the interface's language (`i18n::tool_call`).
+            return Some((Outside::Said(skill::read(&self.skills_on(), wanted)), false, format!("使用技能：{wanted}"), vec![]));
         };
         let line = format!("{} · {}", connector.name.trim(), wisp_core::tools::describe_call(&tool.tool, given));
         // The arguments as they will be sent, for the card that asks.

@@ -1248,7 +1248,7 @@ impl Workspace {
                                 let said = journal.and_then(|j| if matches!(c.kind, ColumnKind::Impact) { j.impact_text() } else { zone_text(j, which) });
                                 // A journal a list warns against says so in the colour of a warning, and why under the pointer.
                                 let warned = journal.filter(|j| !j.warning.is_empty());
-                                let tip = journal.filter(|_| said.is_some()).map(|j| [j.name().to_string(), journal_line(j), j.warning.clone()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n"));
+                                let tip = journal.filter(|_| said.is_some()).map(|j| [j.name().to_string(), journal_line(j), t(&j.warning).to_string()].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n"));
                                 tipped(cell.child(match said {
                                     Some(said) => div().truncate().text_color(if warned.is_some() { Theme::warning() } else { Theme::text_secondary() }).child(said),
                                     None => muted("—"),

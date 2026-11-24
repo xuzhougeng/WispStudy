@@ -363,10 +363,11 @@ impl Workspace {
         let metrics = journal.map(|j| {
             let mut about = vec![];
             if wisp_core::journals::key(j.name()) != wisp_core::journals::key(&p.journal) { about.push(tf!("按「{}」查到", "Matched as \"{}\"", j.name())) }
-            if !j.quartile_category.is_empty() { about.push(format!("JCR {}：{}", j.quartile, j.quartile_category)) }
-            if !j.cas_category.is_empty() { about.push(format!("{}：{}", t("中科院大类"), j.cas_category)) }
-            if !j.xr_category.is_empty() { about.push(format!("{}：{}", t("新锐大类"), j.xr_category)) }
-            about.push(wisp_core::journals::EDITIONS.to_string());
+            if !j.quartile_category.is_empty() { about.push(tf!("JCR {}：{}", "JCR {}: {}", j.quartile, j.quartile_category)) }
+            // The categories and the lists' names are the table's own words: a label table, read in the interface's language.
+            if !j.cas_category.is_empty() { about.push(tf!("{}：{}", "{}: {}", t("中科院大类"), t(&j.cas_category))) }
+            if !j.xr_category.is_empty() { about.push(tf!("{}：{}", "{}: {}", t("新锐大类"), t(&j.xr_category))) }
+            about.push(t(wisp_core::journals::EDITIONS).to_string());
             div()
                 .id("detail-journal")
                 .flex()
@@ -375,7 +376,7 @@ impl Workspace {
                 .text_size(text_px(12.))
                 .text_color(Theme::text_tertiary())
                 .child(crate::library::journal_line(j))
-                .when(!j.warning.is_empty(), |d| d.child(div().text_color(Theme::warning()).child(j.warning.clone())))
+                .when(!j.warning.is_empty(), |d| d.child(div().text_color(Theme::warning()).child(t(&j.warning).to_string())))
                 .tooltip(ui::tip(about.join("\n")))
         });
         let identifiers: Vec<AnyElement> = [("DOI", &p.doi, format!("https://doi.org/{}", p.doi)), ("PMID", &p.pmid, format!("https://pubmed.ncbi.nlm.nih.gov/{}/", p.pmid))]
@@ -458,7 +459,7 @@ impl Workspace {
                     )
                     // A file without text: why, what it means for questions, and the two things to try.
                     .when_some(failure, |d, error| {
-                        d.child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_secondary()).child(tf!("{error}在读出文字之前，提问只能用到这篇文献的记录和摘要。", "{error}Until text is extracted, questions use only this paper's record and abstract.")))
+                        d.child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_secondary()).child(tf!("{}在读出文字之前，提问只能用到这篇文献的记录和摘要。", "{} Until text is extracted, questions use only this paper's record and abstract.", crate::i18n::text_failure(&error))))
                             .child(
                                 div()
                                     .flex()

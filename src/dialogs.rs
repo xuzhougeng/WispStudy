@@ -170,7 +170,7 @@ impl Workspace {
                     .into_iter()
                     .map(|(i, row)| {
                         let (state, color) = match &row.outcome {
-                            Imported::Failed(err) => (tf!("没有导入：{err}", "Not imported: {err}"), Theme::danger()),
+                            Imported::Failed(err) => (tf!("没有导入：{}", "Not imported: {}", crate::i18n::reasons(err)), Theme::danger()),
                             Imported::InTrash => (t("它的文献在回收站里，没有导入").to_string(), Theme::warning()),
                             Imported::Attached => (t("文献库里已有这篇，PDF 附到了原条目").to_string(), Theme::success()),
                             Imported::Held => (t("文献库里已有这篇，跳过了").to_string(), Theme::text_tertiary()),
@@ -190,8 +190,8 @@ impl Workspace {
                             .when_some(row.paper_id.clone(), |d, id| d.cursor_pointer().hover(|s| s.bg(Theme::hover())).on_click(self.on(Cmd::OpenImported(id), cx)))
                             .child(div().line_height(text_px(20.)).child(title.unwrap_or_else(|| row.name.clone())))
                             .child(div().text_size(text_px(12.)).line_height(text_px(17.)).text_color(color).child(state))
-                            .when(!row.textless.is_empty(), |d| d.child(div().text_size(text_px(12.)).line_height(text_px(17.)).text_color(Theme::warning()).child(tf!("没读出文字，全文暂时不能用于提问：{}", "No text extracted; full text unavailable for chat: {}", row.textless))))
-                            .when(!row.no_pdf.is_empty(), |d| d.child(div().text_size(text_px(12.)).line_height(text_px(17.)).text_color(Theme::warning()).child(tf!("没有取到 PDF：{}", "No PDF: {}", row.no_pdf))))
+                            .when(!row.textless.is_empty(), |d| d.child(div().text_size(text_px(12.)).line_height(text_px(17.)).text_color(Theme::warning()).child(tf!("没读出文字，全文暂时不能用于提问：{}", "No text extracted; full text unavailable for chat: {}", crate::i18n::text_failure(&row.textless)))))
+                            .when(!row.no_pdf.is_empty(), |d| d.child(div().text_size(text_px(12.)).line_height(text_px(17.)).text_color(Theme::warning()).child(tf!("没有取到 PDF：{}", "No PDF: {}", crate::i18n::reasons(&row.no_pdf)))))
                             .into_any_element()
                     })
                     .collect();
@@ -256,7 +256,7 @@ impl Workspace {
                             .child(div().line_height(text_px(20.)).child(row.title.clone()))
                             .child(div().flex().items_center().gap(px(5.)).text_size(text_px(12.)).line_height(text_px(17.)).text_color(color)
                                 .child(ui::icon(if row.outcome == "saved" { "check" } else { "info" }, 12., color)).child(state))
-                            .when(!row.detail.is_empty(), |d| d.child(div().text_size(text_px(12.)).line_height(text_px(17.)).text_color(Theme::text_tertiary()).child(row.detail.clone())))
+                            .when(!row.detail.is_empty(), |d| d.child(div().text_size(text_px(12.)).line_height(text_px(17.)).text_color(Theme::text_tertiary()).child(crate::i18n::reasons(&row.detail))))
                             .into_any_element()
                     })
                     .collect();
@@ -443,6 +443,10 @@ impl Workspace {
                 let lib = self.lib.as_ref()?;
                 let paper = lib.paper(&form.paper_id)?;
                 let small = |text: String, color: Hsla| div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(color).child(text);
+                // What a record has in common with the paper and what not, as core notes it (`complete`: 「题目一致」「年份 2019」), in the interface's language.
+                let notes = |notes: &[String]| notes.iter().map(|note| crate::i18n::phrase(note)).collect::<Vec<_>>().join(if crate::i18n::is_english() { ", " } else { "，" });
+                // A field's value as the dialog shows it: the publication status by its label.
+                let shown = |paper: &wisp_core::model::Paper, key: &str| if key == "status" { t(&complete::shown(paper, key)).to_string() } else { complete::shown(paper, key) };
                 // What a record is, in two lines.
                 let summary = |record: &wisp_core::model::Paper| {
                     let mut line = vec![];
@@ -466,7 +470,7 @@ impl Workspace {
                                 let name = complete::FIELDS.iter().find(|(field, _)| *field == key).map_or(key, |(_, name)| t(name));
                                 let taken = form.fields.contains(&key);
                                 let brief = |text: String| if text.chars().count() > 220 { format!("{}…", text.chars().take(220).collect::<String>()) } else { text };
-                                let now = complete::shown(paper, key);
+                                let now = shown(paper, key);
                                 let now_line = if now.is_empty() { t("现在：空着").to_string() } else if key == "title" && form.placeholder { tf!("现在：{now}（文件名）", "Current: {now} (file name)") } else { tf!("现在：{}", "Current: {}", brief(now)) };
                                 div()
                                     .id(SharedString::from(format!("complete-field-{key}")))
@@ -481,7 +485,7 @@ impl Workspace {
                                     .on_click(self.on(Cmd::CompleteField(key), cx))
                                     .child(div().flex().flex_none().items_center().justify_center().size(px(16.)).mt(px(2.)).rounded(px(4.)).border_1().when(taken, |d| d.bg(Theme::accent()).border_color(Theme::accent()).child(ui::icon("check", 12., Theme::on_accent()))).when(!taken, |d| d.border_color(Theme::line_strong())))
                                     .child(div().flex_none().w(px(64.)).text_color(Theme::text_secondary()).child(name))
-                                    .child(div().flex().flex_col().flex_1().min_w_0().gap(px(2.)).child(div().line_height(text_px(19.)).child(brief(complete::shown(record, key)))).child(small(now_line, Theme::text_tertiary())))
+                                    .child(div().flex().flex_col().flex_1().min_w_0().gap(px(2.)).child(div().line_height(text_px(19.)).child(brief(shown(record, key)))).child(small(now_line, Theme::text_tertiary())))
                                     .into_any_element()
                             })
                             .collect();
@@ -489,14 +493,14 @@ impl Workspace {
                         let (by, title) = (candidate.by, if form.by_id { tf!("按 {} 补全 · 核对这条记录", "Look up by {} · Review record", candidate.by) } else { t("按题目补全 · 核对这条记录").to_string() });
                         let unlike = if form.by_id { tf!("这条记录的题目和这篇文献的不一样：这个 {by} 可能不是它的（比如 PDF 首页印的是所引文献的 DOI），所以没有预先勾选任何字段。", "This record’s title differs from the paper’s: the {by} may belong to another paper (a PDF’s first page may print a cited paper’s DOI), so no fields are pre-selected.") } else { t("这条记录的题目和所查的不一样，很可能是另一篇文献，所以没有预先勾选任何字段。").to_string() };
                         let about = if form.by_id { t("默认只勾选现在空着的字段，以及只是文件名的题目；已有的内容，勾选后才会被替换。拿不准时打开网页对照。") } else { t("默认只勾选现在空着的字段，以及只是文件名的题目；已有的内容，勾选后才会被替换。题目相近不等于同一篇：拿不准时打开网页对照，或返回看别的候选。") };
-                        let same_line = if form.by_id { tf!("与这篇一致：{}", "Matches this paper: {}", candidate.same.join("，")) } else { tf!("与所查一致：{}", "Matches query: {}", candidate.same.join("，")) };
+                        let same_line = if form.by_id { tf!("与这篇一致：{}", "Matches this paper: {}", notes(&candidate.same)) } else { tf!("与所查一致：{}", "Matches query: {}", notes(&candidate.same)) };
                         ui::dialog(640.)
                             .child(ui::dialog_title(title))
                             .child(
                                 body()
-                                    .child(div().flex().items_start().gap(px(10.)).p(px(12.)).rounded(px(10.)).bg(Theme::bg_sunken()).child(div().flex().flex_col().flex_1().min_w_0().gap(px(4.)).child(summary(record)).child(small(tf!("来自 {}", "From {}", candidate.sources.join("、")), Theme::text_tertiary()))).when(!link.is_empty(), |d| d.child(ui::secondary_button("complete-open", t("打开网页")).h(text_px(28.)).on_click(self.on(Cmd::OpenUrl(link.clone()), cx)))))
+                                    .child(div().flex().items_start().gap(px(10.)).p(px(12.)).rounded(px(10.)).bg(Theme::bg_sunken()).child(div().flex().flex_col().flex_1().min_w_0().gap(px(4.)).child(summary(record)).child(small(tf!("来自 {}", "From {}", candidate.sources.join(if crate::i18n::is_english() { ", " } else { "、" })), Theme::text_tertiary()))).when(!link.is_empty(), |d| d.child(ui::secondary_button("complete-open", t("打开网页")).h(text_px(28.)).on_click(self.on(Cmd::OpenUrl(link.clone()), cx)))))
                                     .when(!candidate.same.is_empty(), |d| d.child(small(same_line, ok)))
-                                    .when(!candidate.differs.is_empty(), |d| d.child(small(tf!("不一致：{}", "Differs: {}", candidate.differs.join("，")), Theme::warning())))
+                                    .when(!candidate.differs.is_empty(), |d| d.child(small(tf!("不一致：{}", "Differs: {}", notes(&candidate.differs)), Theme::warning())))
                                     .when(candidate.similarity < complete::ALIKE_ENOUGH, |d| d.child(small(unlike, Theme::warning())))
                                     .when(candidate.partial_authors, |d| d.child(small(t("这个来源只给了部分作者，名单不完整：写入后请对照原文补齐。").into(), Theme::warning())))
                                     .children(held_line(form.held.get(at).unwrap_or(&None)))
@@ -522,7 +526,7 @@ impl Workspace {
                     // By the paper's number: asking, or why nothing came of it.
                     None if form.by_id => {
                         let by = if paper.doi.is_empty() { format!("PMID {}", paper.pmid) } else { format!("DOI {}", paper.doi) };
-                        let sources = if paper.doi.is_empty() { "Europe PMC" } else { "Crossref、Europe PMC" };
+                        let sources = if paper.doi.is_empty() { "Europe PMC" } else if crate::i18n::is_english() { "Crossref and Europe PMC" } else { "Crossref、Europe PMC" };
                         let failed = !form.busy && !self.modal_error.is_empty();
                         ui::dialog(560.)
                             .child(ui::dialog_title(if paper.doi.is_empty() { t("按 PMID 补全") } else { t("按 DOI 补全") }))
@@ -545,7 +549,7 @@ impl Workspace {
                             t("可以修改用来查找的题目；文献本身的题目不会因此改变。")
                         };
                         let asked: Vec<AnyElement> = form.found.iter().flat_map(|found| found.asked.iter()).map(|asked| {
-                            let (text, color) = if !asked.error.is_empty() { (tf!("{}：没有查成（{}）", "{}: search failed ({})", asked.source, asked.error), Theme::warning()) } else if asked.found == 0 { (tf!("{}：没有查到", "{}: no results", asked.source), Theme::text_tertiary()) } else { (tf!("{}：{} 条", "{}: {} results", asked.source, asked.found), Theme::text_tertiary()) };
+                            let (text, color) = if !asked.error.is_empty() { (tf!("{}：没有查成（{}）", "{}: search failed ({})", asked.source, crate::i18n::reasons(&asked.error)), Theme::warning()) } else if asked.found == 0 { (tf!("{}：没有查到", "{}: no results", asked.source), Theme::text_tertiary()) } else { (tf!("{}：{} 条", "{}: {} results", asked.source, asked.found), Theme::text_tertiary()) };
                             small(text, color).into_any_element()
                         }).collect();
                         let records: Vec<AnyElement> = form.found.iter().flat_map(|found| found.candidates.iter().enumerate()).map(|(i, candidate)| {
@@ -564,7 +568,7 @@ impl Workspace {
                                 .hover(|s| s.bg(Theme::hover()))
                                 .on_click(self.on(Cmd::CompleteChoose(Some(i)), cx))
                                 .child(summary(&candidate.paper))
-                                .child(div().flex().flex_wrap().items_center().gap(px(4.)).children(candidate.same.iter().map(|note| ui::chip(note.clone(), ok, ok_fill))).children(candidate.differs.iter().map(|note| ui::chip(note.clone(), warn, warn_fill))).child(div().pl(px(4.)).text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(candidate.sources.join("、"))))
+                                .child(div().flex().flex_wrap().items_center().gap(px(4.)).children(candidate.same.iter().map(|note| ui::chip(crate::i18n::phrase(note), ok, ok_fill))).children(candidate.differs.iter().map(|note| ui::chip(crate::i18n::phrase(note), warn, warn_fill))).child(div().pl(px(4.)).text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(candidate.sources.join(if crate::i18n::is_english() { ", " } else { "、" }))))
                                 .children(held_line(form.held.get(i).unwrap_or(&None)))
                                 .into_any_element()
                         }).collect();
