@@ -14,6 +14,7 @@ use wisp_core::imagegen;
 use wisp_core::lookup::{self, Identifier};
 use wisp_core::model::Paper;
 use wisp_core::ocr;
+use wisp_core::sources::{self, Contact};
 use wisp_core::update::{self, Release};
 use wisp_core::websearch;
 
@@ -26,6 +27,20 @@ static PROXY: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
 /// to the environment (`ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY`, `NO_PROXY`).
 pub fn set_proxy(address: &str) {
     *PROXY.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = address.trim().to_string();
+}
+
+/// Who the literature databases are told is asking, from the settings (`Settings::contact`).
+static CONTACT: std::sync::RwLock<Contact> = std::sync::RwLock::new(Contact { email: String::new(), ncbi_key: String::new() });
+
+/// Set who the literature databases are told is asking: from the next request on, `get_text` adds the
+/// address and the NCBI key to what goes to them (`sources::identified`), and PubMed is asked at the pace
+/// a key allows.
+pub fn set_contact(contact: Contact) {
+    *CONTACT.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = contact;
+}
+
+fn contact() -> Contact {
+    CONTACT.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
 }
 
 /// Which proxy a request takes. `own` is the setting of whoever asks (a
@@ -83,22 +98,36 @@ fn cut_short(host: &str, said: String) -> String {
 }
 
 /// GET a document as text: what `wisp_core::sources` asks the literature
-/// databases for (JSON from most, XML from PubMed and arXiv).
+/// databases for (JSON from most, XML from PubMed and arXiv). A database that
+/// wants to know who is asking is told (`set_contact`); the address `url` is
+/// what errors name, never the one sent.
 pub fn get_text(url: &str) -> Result<String, String> {
     let host = url.split('/').nth(2).unwrap_or(url);
+    let contact = contact();
+    let asked = sources::identified(url, &contact);
     // A service that says "too fast" is asked again, a little later each time.
     for wait in [Some(1500), Some(4000), None] {
-        take_turn(host);
-        let mut response = timed_agent(Duration::from_secs(60))?.get(url).call().map_err(|err| cut_short(host, network_error(err)))?;
+        take_turn(host, !contact.ncbi_key.trim().is_empty());
+        let mut response = timed_agent(Duration::from_secs(60))?.get(&asked).call().map_err(|err| cut_short(host, network_error(err)))?;
         let status = response.status().as_u16();
         match (status, wait) {
             (200..300, _) => return response.body_mut().with_config().limit(64 << 20).read_to_string().map_err(|e| cut_short(host, format!("无法读取 {host} 的返回内容：{e}"))),
             (429, Some(millis)) => std::thread::sleep(Duration::from_millis(millis)),
             (429, None) => break,
+            // NCBI answers a key it does not know with 400, whatever was asked.
+            (400, _) if sources::keyed(url, &contact) && response.body_mut().with_config().limit(1 << 16).read_to_string().is_ok_and(|body| body.to_lowercase().contains("api key") || body.contains("api-key")) => return Err(BAD_NCBI_KEY.into()),
             _ => return Err(format!("{host} 返回 HTTP {status}。")),
         }
     }
-    Err(format!("{host} 限制了请求频率，请稍后再试。"))
+    Err(held_back(host, sources::more_allowed(url, &contact)))
+}
+
+/// Said when NCBI turns down the key of the settings.
+const BAD_NCBI_KEY: &str = "NCBI 没有接受这个 API Key：请在「设置 › 网络 › 文献数据库」核对，或者清空它。";
+
+/// What is said of a host that kept answering "too fast", with what would have it take more when there is such a thing.
+fn held_back(host: &str, more: Option<&str>) -> String {
+    sources::reasons(&[format!("{host} 限制了请求频率，请稍后再试"), more.unwrap_or_default().to_string()])
 }
 
 /// The most a fetched file may be: a paper with its figures is a few megabytes, a book a few dozen.
@@ -115,13 +144,14 @@ pub fn download(url: &str) -> Result<Vec<u8>, String> {
     response.body_mut().with_config().limit(MAX_DOWNLOAD).read_to_vec().map_err(|e| cut_short(host, format!("无法读取 {host} 的返回内容：{e}")))
 }
 
-/// NCBI allows three requests a second without a key, counted across
-/// everything this process sends: searches running side by side take turns,
-/// one every 400 ms. arXiv asks for three seconds between two requests,
-/// which a search of several pages has to keep. Other hosts are not held back.
-fn take_turn(host: &str) {
+/// NCBI allows three requests a second without a key and ten with one,
+/// counted across everything this process sends: searches running side by
+/// side take turns, one every 400 ms, or every 110 ms when `keyed`. arXiv
+/// asks for three seconds between two requests, which a search of several
+/// pages has to keep. Other hosts are not held back.
+fn take_turn(host: &str, keyed: bool) {
     static NEXT: std::sync::Mutex<[Option<std::time::Instant>; 2]> = std::sync::Mutex::new([None; 2]);
-    let Some((slot, gap)) = [("ncbi.nlm.nih.gov", 400), ("arxiv.org", 3000)].iter().enumerate().find_map(|(slot, (name, gap))| host.ends_with(name).then_some((slot, *gap))) else { return };
+    let Some((slot, gap)) = [("ncbi.nlm.nih.gov", if keyed { 110 } else { 400 }), ("arxiv.org", 3000)].iter().enumerate().find_map(|(slot, (name, gap))| host.ends_with(name).then_some((slot, *gap))) else { return };
     let now = std::time::Instant::now();
     let at = {
         let mut next = NEXT.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -585,6 +615,14 @@ mod tests {
         assert!(began.elapsed() < Duration::from_secs(3), "{:?}", began.elapsed());
         assert!(cut.as_ref().is_err_and(|err| err.contains("迟迟没有答完")), "{cut:?}");
         assert_eq!(refused, Err(format!("{}。", wisp_core::sources::TIME_UP)));
+    }
+
+    /// A database that kept saying "too fast" is named, with what would have it take more from this caller.
+    #[test]
+    fn a_host_holding_back_says_what_would_help() {
+        let nobody = Contact::default();
+        assert_eq!(held_back("api.crossref.org", sources::more_allowed("https://api.crossref.org/works?rows=5", &nobody)), format!("api.crossref.org 限制了请求频率，请稍后再试；{}。", sources::GIVE_EMAIL));
+        assert_eq!(held_back("export.arxiv.org", sources::more_allowed("https://export.arxiv.org/api/query", &nobody)), "export.arxiv.org 限制了请求频率，请稍后再试。");
     }
 
     /// Send the conversation `wire` to the server at `base` and collect what comes back.

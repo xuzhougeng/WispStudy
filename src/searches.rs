@@ -22,6 +22,24 @@ fn run_summary(batch: &ImportBatch) -> (String, bool) {
 }
 
 impl Workspace {
+    /// One line where a search starts, for someone who has given the databases no address: what giving one
+    /// buys, the way to the field, and a way to never be told again. Gone once an address is set.
+    pub fn contact_hint(&self, cx: &mut Context<Self>) -> Option<Div> {
+        if self.settings.contact_hint_dismissed || !self.settings.contact_email.trim().is_empty() { return None }
+        Some(
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(px(6.))
+                .child(ui::icon("info", 13., Theme::text_tertiary()))
+                .child(div().min_w_0().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(t("填上联系邮箱，PubMed 和 Crossref 允许更大量的访问。")))
+                .child(ui::ghost_button("contact-hint-go", None, Some(t("去填写").into())).on_click(self.on(Cmd::OpenSettings(crate::settings::SettingsPage::Network), cx)))
+                .child(div().flex_1())
+                .child(ui::icon_action("contact-hint-close", "x", Theme::text_tertiary(), t("不再提示")).on_click(self.on(Cmd::DismissContactHint, cx))),
+        )
+    }
+
     pub fn render_searches(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let lib = self.lib.as_ref().unwrap();
         let mut cards: Vec<AnyElement> = vec![];
@@ -134,6 +152,7 @@ impl Workspace {
                     .child(ui::secondary_button("open-guide", t("让助手拟检索式")).on_click(self.on(Cmd::OpenGuide(false), cx)))
                     .child(ui::primary_button("new-search", t("新建检索式")).on_click(self.on(Cmd::NewSearch, cx))),
             )
+            .children(self.contact_hint(cx).map(|hint| hint.px(px(16.)).pt(px(8.))))
             .when(!empty, |d| d.child(auto))
             .child(if empty {
                 ui::empty_state("search", t("还没有检索式"), t("检索式是写给 PubMed、Europe PMC、Crossref 或 arXiv 的查询。保存后可以反复运行，把新发表的文献带进文献库。")).into_any_element()

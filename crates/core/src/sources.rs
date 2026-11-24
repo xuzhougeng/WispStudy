@@ -139,6 +139,75 @@ fn encode(value: &str) -> String {
     out
 }
 
+/// Who is asking, as the databases want to be told (设置 › 网络 › 文献数据库). All of it is optional:
+/// a search runs without, inside the narrower limits of a caller nobody can write to.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Contact {
+    /// An address the databases may write to: `email` of NCBI and Europe PMC, `mailto` of Crossref.
+    pub email: String,
+    /// The key NCBI gives an account: ten requests a second instead of three.
+    pub ncbi_key: String,
+}
+
+/// The name this app goes by with NCBI (`tool` of the E-utilities; no spaces allowed).
+pub const TOOL: &str = "WispStudy";
+
+/// What a database is to this module: by the host of a URL, and for Europe PMC its path on EBI's.
+fn database(url: &str) -> Option<&'static str> {
+    let rest = url.split_once("://")?.1;
+    let (host, path) = rest.split_once('/').unwrap_or((rest, ""));
+    match host {
+        "eutils.ncbi.nlm.nih.gov" => Some("pubmed"),
+        "api.crossref.org" => Some("crossref"),
+        "www.ebi.ac.uk" if path.starts_with("europepmc/") => Some("europepmc"),
+        _ => None,
+    }
+}
+
+/// `url` with who is asking added, where it goes to a database that takes it; any other address comes back as
+/// it is, so an email never travels to a publisher or a page. NCBI is told the tool's name with or without an
+/// email, and the key when there is one; Crossref answers a `mailto` from its faster pool; Europe PMC keeps
+/// the address to write to when a caller makes trouble.
+pub fn identified(url: &str, contact: &Contact) -> String {
+    let (email, key) = (contact.email.trim(), contact.ncbi_key.trim());
+    let mut more: Vec<(&str, &str)> = vec![];
+    match database(url) {
+        Some("pubmed") => {
+            more.push(("tool", TOOL));
+            if !email.is_empty() { more.push(("email", email)) }
+            if !key.is_empty() { more.push(("api_key", key)) }
+        }
+        Some("crossref") if !email.is_empty() => more.push(("mailto", email)),
+        Some("europepmc") if !email.is_empty() => more.push(("email", email)),
+        _ => {}
+    }
+    let mut url = url.to_string();
+    for (name, value) in more {
+        url.push(if url.contains('?') { '&' } else { '?' });
+        url.push_str(&format!("{name}={}", encode(value)));
+    }
+    url
+}
+
+/// Said to someone a database held back, when there is something they have not given that would have it take more.
+pub const GIVE_EMAIL: &str = "在「设置 › 网络 › 文献数据库」填上联系邮箱后，它允许的请求更多";
+pub const GIVE_NCBI_KEY: &str = "在「设置 › 网络 › 文献数据库」填上 NCBI API Key 后，每秒可以发 10 次请求而不是 3 次";
+
+/// What would have the database behind `url` take more requests from this caller, if there is such a thing
+/// and it was not given: a sentence without its full stop, to stand among `reasons`.
+pub fn more_allowed(url: &str, contact: &Contact) -> Option<&'static str> {
+    match database(url)? {
+        "pubmed" if contact.ncbi_key.trim().is_empty() => Some(GIVE_NCBI_KEY),
+        "crossref" if contact.email.trim().is_empty() => Some(GIVE_EMAIL),
+        _ => None,
+    }
+}
+
+/// Whether `url` goes to NCBI with a key: what answers 400 then is the key, not the query.
+pub fn keyed(url: &str, contact: &Contact) -> bool {
+    database(url) == Some("pubmed") && !contact.ncbi_key.trim().is_empty()
+}
+
 /// Run `query` against one database and return up to `limit` of the newest
 /// records, a page at a time. A page that fails after others came ends the
 /// search with what it has (`Found::stopped`); the first one failing is an error.
@@ -404,6 +473,30 @@ mod tests {
 <PubmedData><ArticleIdList><ArticleId IdType="pubmed">2</ArticleId><ArticleId IdType="doi">10.1101/2021.01.01.1</ArticleId></ArticleIdList></PubmedData></PubmedArticle>
 <PubmedArticle><MedlineCitation><PMID>3</PMID><Article><ArticleTitle></ArticleTitle></Article></MedlineCitation></PubmedArticle>
 </PubmedArticleSet>"#;
+
+    #[test]
+    fn who_is_asking_goes_to_the_databases_only() {
+        let nobody = Contact::default();
+        let known = Contact { email: " me+lab@uni.example ".into(), ncbi_key: "abc123".into() };
+        let pubmed = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term=root";
+        // NCBI hears the tool's name from anyone, the address and the key from those who gave them.
+        assert_eq!(identified(pubmed, &nobody), format!("{pubmed}&tool=WispStudy"));
+        assert_eq!(identified(pubmed, &known), format!("{pubmed}&tool=WispStudy&email=me%2Blab%40uni.example&api_key=abc123"));
+        // A DOI's address has no query yet.
+        assert_eq!(identified("https://api.crossref.org/works/10.1000/a", &known), "https://api.crossref.org/works/10.1000/a?mailto=me%2Blab%40uni.example");
+        assert_eq!(identified("https://api.crossref.org/works?rows=5&query.bibliographic=root", &known), "https://api.crossref.org/works?rows=5&query.bibliographic=root&mailto=me%2Blab%40uni.example");
+        assert!(identified("https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=root", &known).ends_with("query=root&email=me%2Blab%40uni.example"));
+        // Nothing is added without an address, and no one else is told it: arXiv, OpenAlex, a publisher, another service of EBI's.
+        for url in ["https://api.crossref.org/works/10.1000/a", "https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=root"] { assert_eq!(identified(url, &nobody), url) }
+        for url in ["https://export.arxiv.org/api/query?search_query=all%3Aroot", "https://api.openalex.org/works/doi:10.1000/a?select=open_access", "https://link.springer.com/content/pdf/10.1007/x.pdf", "https://www.ebi.ac.uk/ols4/api/search?q=root", "https://eutils.ncbi.nlm.nih.gov.evil.example/?x=1", "not an address"] { assert_eq!(identified(url, &known), url, "{url}") }
+
+        // What to give, said only to those who have not given it, and only of a database that would take more for it.
+        let mailed = Contact { email: "me@uni.example".into(), ..Default::default() };
+        assert_eq!((more_allowed(pubmed, &nobody), more_allowed(pubmed, &mailed), more_allowed(pubmed, &known)), (Some(GIVE_NCBI_KEY), Some(GIVE_NCBI_KEY), None));
+        assert_eq!((more_allowed("https://api.crossref.org/works?rows=5", &nobody), more_allowed("https://api.crossref.org/works?rows=5", &mailed)), (Some(GIVE_EMAIL), None));
+        assert_eq!((more_allowed("https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=root", &nobody), more_allowed("https://export.arxiv.org/api/query", &nobody)), (None, None));
+        assert!(keyed(pubmed, &known) && !keyed(pubmed, &mailed) && !keyed("https://api.crossref.org/works", &known));
+    }
 
     #[test]
     fn pubmed_records() {

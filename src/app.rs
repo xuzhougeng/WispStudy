@@ -306,6 +306,8 @@ pub enum Cmd {
     OpenUrl(String),
     /// The home page's invitation to star the project, answered: true opens the project's page first; either way it is not made again.
     AnswerStar(bool),
+    /// The line that offers a contact email where a search starts (`Workspace::contact_hint`), closed for good.
+    DismissContactHint,
     NoteOpen(Option<Talk>, bool),
     NotePick(usize),
     NoteDestination(bool),
@@ -2621,6 +2623,7 @@ impl Workspace {
         });
         crate::i18n::set_language(settings.language);
         wisp_net::set_proxy(&settings.proxy);
+        wisp_net::set_contact(settings.contact());
         let root = settings.data_root(&default_root());
         let _ = std::fs::create_dir_all(&root);
         let focus = cx.focus_handle();
@@ -3240,6 +3243,10 @@ impl Workspace {
                 if star { cx.open_url(wisp_core::update::PROJECT_URL) }
                 self.star_ask = false;
                 self.settings.star_answered = true;
+                self.save_settings(cx);
+            }
+            Cmd::DismissContactHint => {
+                self.settings.contact_hint_dismissed = true;
                 self.save_settings(cx);
             }
             Cmd::NoteOpen(talk, notion) => self.open_note(talk, notion, window, cx),

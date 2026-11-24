@@ -388,6 +388,7 @@ mod tests {
         assert_eq!(english_reasons("journal.example：返回的不是 PDF，多半是登录页或验证页；花的时间太长，没有再试下去。"), "journal.example: what came back is not a PDF, most likely a sign-in or verification page; it took too long; no further attempts were made.");
         assert_eq!(english_reasons("www.ebi.ac.uk 返回 HTTP 503。"), "www.ebi.ac.uk returned HTTP 503.");
         assert_eq!(english_reasons("请填写检索式。"), "Enter a query.");
+        assert_eq!(english_reasons(&format!("api.crossref.org 限制了请求频率，请稍后再试；{}。", wisp_core::sources::GIVE_EMAIL)), "api.crossref.org is limiting requests; try again later; it allows more requests once a contact email is set under Settings › Network › Literature databases.");
         assert_eq!(english_reasons("看图模型：账户余额不足（HTTP 402）：Insufficient Balance"), "Vision model: insufficient balance (HTTP 402): Insufficient Balance");
         // A reason not known, and words that are no reason at all, stay as they are.
         assert_eq!((english_reasons("磁盘满了；www.ebi.ac.uk 返回 HTTP 503。"), english_reasons("我的研究：根；叶")), ("磁盘满了; www.ebi.ac.uk returned HTTP 503.".to_string(), "我的研究：根；叶".to_string()));
@@ -396,7 +397,7 @@ mod tests {
     #[test]
     fn the_sentences_core_keeps_have_english() {
         use wisp_core::{fulltext, journals, podcast, structure};
-        for sentence in [fulltext::LOCKED, fulltext::NO_ENCODING, fulltext::NO_TEXT_LAYER, structure::NO_BODY, journals::EDITIONS, wisp_core::sources::TIME_UP, wisp_core::comment::ASSISTANT_NAME, podcast::NO_SCRIPT] { assert_ne!(translate(Language::En, sentence), sentence) }
+        for sentence in [fulltext::LOCKED, fulltext::NO_ENCODING, fulltext::NO_TEXT_LAYER, structure::NO_BODY, journals::EDITIONS, wisp_core::sources::TIME_UP, wisp_core::sources::GIVE_EMAIL, wisp_core::sources::GIVE_NCBI_KEY, wisp_core::comment::ASSISTANT_NAME, podcast::NO_SCRIPT] { assert_ne!(translate(Language::En, sentence), sentence) }
         assert_eq!((english_of("无法读取文件：No such file").as_deref(), english_of("不支持提取 .docx 文件的文字。").as_deref()), (Some("The file could not be read: No such file"), Some("Extracting text from .docx files is not supported.")));
         // The journal table's own words: why a list warns against a journal, and the categories of the two partitions.
         let mut words: Vec<&str> = journals::table().journals.iter().flat_map(|journal| [journal.warning.as_str(), journal.cas_category.as_str(), journal.xr_category.as_str()]).filter(|word| !word.is_empty()).collect();
