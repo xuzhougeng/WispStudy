@@ -332,6 +332,8 @@ pub enum Cmd {
     SetJournalZone(String),
     /// 设置 › 网络 › 网页搜索: an engine's key, `websearch::AUTO` or `websearch::OFF`.
     SetWebSearchEngine(String),
+    /// 设置 › 网络 › 文字识别: an engine's key, `ocr::AUTO` or `ocr::OFF`.
+    SetOcrEngine(String),
     /// The voice 朗读 reads in, a key of `speech::VOICES`.
     SetSpeechVoice(String),
     /// The Latin or the Chinese interface font; empty is the platform's own.
@@ -1007,6 +1009,10 @@ pub struct Sorting {
     pub error: String,
     /// The files whose pages were read only in part, longer than `READ_PAGES`: (title, pages read, pages in all).
     pub cut: Vec<(String, usize, usize)>,
+    /// The files with pages an engine stopped in the middle of: (title, those pages, 1-based).
+    pub short: Vec<(String, Vec<usize>)>,
+    /// What reads the pages in a run that reads (`ocr`): chosen when the run starts, the same for all its files.
+    engine: Option<wisp_core::ocr::Ready>,
     /// Bumped when a run starts or stops, so what still arrives for an earlier one is dropped.
     run: u64,
 }
@@ -3323,6 +3329,11 @@ impl Workspace {
             }
             Cmd::SetWebSearchEngine(engine) => {
                 self.settings.web_search.engine = engine;
+                self.save_settings(cx);
+                cx.notify();
+            }
+            Cmd::SetOcrEngine(engine) => {
+                self.settings.ocr.engine = engine;
                 self.save_settings(cx);
                 cx.notify();
             }
@@ -7157,6 +7168,8 @@ impl Workspace {
         let mut catalog = tools::library_catalog();
         // Web search is offered only while an engine can be asked: switched off or without a key, the model would only hear why not.
         if wisp_core::websearch::ready(&self.settings, "").is_err() { catalog.retain(|tool| tool.name != "web_search") }
+        // Pages are read for the assistant by an engine that takes the file; a model's look at pictures of them is the window's own run.
+        if !wisp_core::ocr::ready(&self.settings, "").is_ok_and(|ready| ready.engine.key != wisp_core::ocr::MODEL) { catalog.retain(|tool| tool.name != "ocr_pdf") }
         let build = |chat: &Chat| ai::chat_request_with(&profile, chat.ctx.as_ref()?, &chat.wire, &catalog, &outside).ok();
         let mut request = match chat.ctx.as_ref().map(|ctx| ai::chat_request_with(&profile, ctx, &chat.wire, &catalog, &outside)) {
             Some(Ok(request)) => request,
@@ -8200,13 +8213,28 @@ impl Workspace {
     fn write_run_start(&mut self, reading: bool, only: Option<String>, cx: &mut Context<Self>) {
         let profile = self.settings.profile_for_or_default(Task::Structure);
         let workers = self.settings.screen_workers;
+        // Pages are read by the engine of 文字识别 (设置 › 网络), which may be the model that sorts.
+        let engine = if reading { Some(wisp_core::ocr::ready(&self.settings, "")) } else { None };
+        let by_model = engine.as_ref().is_none_or(|engine| engine.as_ref().is_ok_and(|ready| ready.engine.key == wisp_core::ocr::MODEL));
+        let author = match &engine {
+            Some(Ok(ready)) => ready.author(&self.settings),
+            _ => profile.labelled(),
+        };
         let Some(lib) = self.lib.as_mut() else { return };
         if lib.writing.sorting.running() { return }
         lib.writing.sorting.error.clear();
-        if let Err(err) = ai::plain_request(&profile, "s", "p") {
-            lib.writing.sorting.error = err;
+        let unready = match &engine {
+            Some(Err(err)) => Some(err.clone()),
+            _ if by_model => ai::plain_request(&profile, "s", "p").err(),
+            _ => None,
+        };
+        if let Some(err) = unready {
+            // Said where the run was asked for: of a run that reads, under the file.
+            let sorting = &mut lib.writing.sorting;
+            (sorting.error, sorting.reading, sorting.total, sorting.done, sorting.failed) = (err, reading, 0, 0, 0);
             return cx.notify();
         }
+        let engine = engine.and_then(Result::ok);
         // Pages to look at: only a PDF has them. Parts to sort: the texts the rules had to guess at.
         let mut todo: Vec<String> = lib.writing.structures.iter().filter(|(id, _)| only.as_ref().is_none_or(|only| only == *id)).filter(|(id, info)| if reading { (info.method == "none" || info.read_in_part()) && lib.files.iter().any(|f| f.id == **id && f.format == "pdf") } else { info.worth_asking() }).map(|(id, _)| id.clone()).collect();
         if todo.is_empty() { return }
@@ -8215,10 +8243,12 @@ impl Workspace {
         sorting.run += 1;
         (sorting.reading, sorting.total, sorting.done, sorting.failed, sorting.streak, sorting.todo) = (reading, todo.len(), 0, 0, 0, todo);
         sorting.cut.clear();
-        sorting.model = profile.labelled();
+        sorting.short.clear();
+        sorting.model = author;
+        sorting.engine = engine;
         let run = sorting.run;
-        // A file's pages are read one after another; two files at a time is as much as a service takes kindly.
-        for _ in 0..if reading { workers.min(2) } else { workers } {
+        // A model reads a file's pages one after another; two files at a time is as much as a service takes kindly.
+        for _ in 0..if reading && by_model { workers.min(2) } else { workers } {
             self.write_run_next(run, cx);
         }
         cx.notify();
@@ -8230,22 +8260,33 @@ impl Workspace {
             Sorted(Vec<structure::Sentence>),
             /// All the pages read so far, and how many the file has.
             Read(Vec<String>, usize),
+            /// The whole file as an engine that takes files read it.
+            Recognised(Vec<wisp_core::ocr::Page>),
         }
         let profile = self.settings.profile_for_or_default(Task::Structure);
         let Some(lib) = self.lib.as_mut().filter(|l| l.writing.sorting.run == run) else { return };
         let Some(file_id) = lib.writing.sorting.todo.pop() else { return };
         let Some(file) = lib.files.iter().find(|f| f.id == file_id).cloned() else { return self.write_run_next(run, cx) };
         let (title, summary) = lib.paper(&file.paper_id).map(|p| (p.title.clone(), p.abstract_text.clone())).unwrap_or_default();
-        let author = profile.labelled();
+        // An engine that takes the file itself; a model looks at pictures of the pages instead.
+        let engine = lib.writing.sorting.engine.clone().filter(|ready| lib.writing.sorting.reading && ready.engine.key != wisp_core::ocr::MODEL);
+        let author = engine.as_ref().map_or_else(|| profile.labelled(), |ready| ready.engine.name.to_string());
+        let engine_key = engine.as_ref().map_or("", |ready| ready.engine.key);
         let (library, protocol, reading) = (lib.info.id.clone(), profile.protocol, lib.writing.sorting.reading);
         let path = lib.store.file_path(&file);
+        let file_name = file.title.clone();
         let pages = lib.store.fulltext_pages(&file.id).ok().flatten().and_then(Result::ok).unwrap_or_default();
         // A file read in part goes on from the first page not read.
         let before = if reading && lib.writing.structures.get(&file.id).is_some_and(StructureInfo::read_in_part) { pages.clone() } else { vec![] };
         lib.writing.sorting.working.push(file_id.clone());
         let name = title.clone();
         let work = cx.background_executor().spawn(async move {
-            if reading {
+            if let Some(ready) = engine {
+                let bytes = std::fs::read(&path).map_err(|err| tf!("无法读取文件：{err}", "Cannot read file: {err}"))?;
+                let pages = wisp_net::send_file(&wisp_core::ocr::request(&ready, &file_name, &bytes)?, ready.engine)?;
+                if pages.iter().all(|page| page.text.trim().is_empty()) { return Err(t("页面上没有识别出文字。").to_string()) }
+                Ok(Made::Recognised(pages))
+            } else if reading {
                 let mut pages = before;
                 let (pictures, count) = crate::pdf::page_pictures(&path, pages.len(), READ_PAGES)?;
                 for picture in pictures {
@@ -8282,6 +8323,13 @@ impl Workspace {
                             if pages.len() < count { lib.writing.sorting.cut.push((title.clone(), pages.len(), count)) }
                             lib.store.save_read_pages(&file_id, pages, &author, count)
                         }
+                        Made::Recognised(pages) => {
+                            let short: Vec<usize> = pages.iter().enumerate().filter(|(_, page)| page.cut).map(|(index, _)| index + 1).collect();
+                            if !short.is_empty() { lib.writing.sorting.short.push((title.clone(), short)) }
+                            let count = pages.len();
+                            let (texts, raw): (Vec<String>, Vec<String>) = pages.into_iter().map(|page| (page.text, page.raw)).unzip();
+                            lib.store.save_read_pages(&file_id, texts, &author, count).and_then(|()| lib.store.save_ocr_pages(&file_id, engine_key, &raw))
+                        }
                     }
                     .map_err(|e| format!("{e:#}"))
                 });
@@ -8303,7 +8351,7 @@ impl Workspace {
                             sorting.error = tf!("连续 {SCREEN_GIVE_UP} 篇没有成功，已停止。最后一篇「{title}」：{err}", "Stopped after {SCREEN_GIVE_UP} consecutive failures. Last paper “{title}”: {err}");
                             sorting.todo.clear();
                         } else {
-                            sorting.error = tf!("「{title}」没有整理成：{err}", "Could not structure “{title}”: {err}");
+                            sorting.error = if sorting.reading { tf!("「{title}」没有读成：{err}", "Could not read “{title}”: {err}") } else { tf!("「{title}」没有整理成：{err}", "Could not structure “{title}”: {err}") };
                             this.write_run_next(run, cx);
                         }
                     }

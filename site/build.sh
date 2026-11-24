@@ -21,6 +21,13 @@ cp "$root/docs/images/library.png" "$root"/docs/images/tutorial/*.jpg "$out/img/
 for page in "$root"/site/tutorials/*.html; do
   case $(basename "$page") in _*) ;; *) cp "$page" "$out/tutorials/" ;; esac
 done
+# The English pages, site/en/: the same pages one folder down. They load the
+# styles, the script and the pictures above from one folder up.
+mkdir -p "$out/en/tutorials"
+cp "$root/site/en/index.html" "$out/en/"
+for page in "$root"/site/en/tutorials/*.html; do
+  case $(basename "$page") in _*) ;; *) cp "$page" "$out/en/tutorials/" ;; esac
+done
 for shot in "$root"/docs/images/tutorials/*.jpg; do
   [ -e "$shot" ] && cp "$shot" "$out/img/t/"
 done

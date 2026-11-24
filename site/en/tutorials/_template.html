@@ -1,0 +1,142 @@
+<!doctype html>
+<!-- The skeleton of a tutorial. Copy it to <slug>.html and fill it in; build.sh
+     leaves files that start with "_" out of the site. Every element a tutorial
+     may use is shown here once: use these, and add no styles or scripts. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/_template.html">
+<link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/_template.html">
+<title>Title of the tutorial · Wisp Study tutorials</title>
+<meta name="description" content="One or two sentences: what this tutorial takes the reader through.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../../app-icon.png">
+<link rel="stylesheet" href="../../style.css">
+<link rel="stylesheet" href="../../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="Site">
+      <a href="index.html" aria-current="page">Tutorials</a>
+      <a href="../index.html#ideas">Ideas</a>
+      <a href="../index.html#tools">Tools</a>
+      <a href="../index.html#download">Download</a>
+    </nav>
+    <a class="lang" href="../../tutorials/_template.html" lang="zh-CN" hreflang="zh-CN">中文</a><!-- replace with the file name of this tutorial -->
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="Location"><a href="index.html">Tutorials</a><span>›</span>Read</nav>
+
+  <header class="doc-head">
+    <p class="kicker">Tutorial 03 · Read</p>
+    <h1>Title of the tutorial</h1>
+    <p class="lead">The lead, two or three sentences: who runs into this and when, and what they can do after reading.</p>
+    <dl class="facts">
+      <div><dt>Scenario</dt><dd>A one-sentence research scenario.</dd></div>
+      <div><dt>Needs</dt><dd>What must exist first: a library, a few papers with PDFs, a model provider.</dd></div>
+      <div><dt>Time</dt><dd>About 10 minutes.</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="Sections of this tutorial">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#s1">Name of the first step</a></li>
+        <li><a href="#s2">Name of the second step</a></li>
+        <li class="plain"><a href="#recap">Recap</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>Name of the first step</h2>
+        <p>Body text. Words from the interface go in curly quotes: click “Settings”, then go to “AI”. Write keys as <kbd>⌘</kbd> + <kbd>K</kbd>, and on Windows <kbd>Ctrl</kbd> + <kbd>K</kbd>. Write commands and file names as <code>wisp mcp</code>.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/slug-01-name.jpg" width="1372" height="870" loading="lazy" alt="A one-sentence description that makes sense to someone who cannot see the image.">
+          <figcaption><b>Figure 1.</b> The caption: what to look at in this image.</figcaption>
+        </figure>
+
+        <p>Text the reader should type, and what the assistant said word for word, goes in a quote block:</p>
+        <blockquote><cite>Ask</cite><p>Which sample preparation method does each of these papers use?</p></blockquote>
+
+        <ul>
+          <li>A few things in no particular order.</li>
+          <li>The second one.</li>
+        </ul>
+        <ol>
+          <li>A few steps in order.</li>
+          <li>The second step.</li>
+        </ol>
+
+        <aside class="note"><b>Tip</b>Something that is handy to know.</aside>
+        <aside class="note warn"><b>Note</b>Something that goes wrong if you do not know it, or that sends content off this machine.</aside>
+
+        <h3>A subsection</h3>
+        <div class="scroll">
+          <table>
+            <caption><b>Table 1.</b> What the table shows.</caption>
+            <thead><tr><th>Column</th><th>Column</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Row name</th><td>Content</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <figure class="code">
+          <figcaption>Command line</figcaption>
+<pre><code><span class="p">$</span> wisp list_libraries   <span class="c"># a comment</span></code></pre>
+        </figure>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>Name of the second step</h2>
+        <p>…</p>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>Recap</h2>
+        <ul>
+          <li>What this tutorial got done, three to five items.</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="migrate.html"><small>Previous · 02</small><strong>Bring in the papers you already have</strong></a>
+    <a class="next" href="ask.html"><small>Next · 04</small><strong>Ask the whole library, and check the answers</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>References</h2>
+      <ol>
+        <li><a href="index.html">All tutorials</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">Features: what each page can do (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">Data and privacy: where files live and what leaves your machine (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">Questions and ideas: Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>About this tutorial.</b> The screenshots and numbers come from an actual run in November 2026 on macOS with v0.10.0. The model answers differently each time, so the wording and numbers will differ when you follow along; the steps are the same. The screenshots show the Chinese interface; the text uses the labels of the English one (Settings › General › Interface language).</p>
+      <p><b>The assistant can be wrong.</b> Its suggestions and answers are for you to confirm; check key numbers and conclusions against the original.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

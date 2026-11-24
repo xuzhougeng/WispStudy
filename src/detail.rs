@@ -405,7 +405,7 @@ impl Workspace {
                 let note = match &text {
                     _ if shrinking => t("正在压缩…").to_string(),
                     _ if reading => t("正在提取文字…").to_string(),
-                    _ if by_eye => t("模型正在读页面…").to_string(),
+                    _ if by_eye => t("正在识别页面文字…").to_string(),
                     Some(Ok(pages)) => {
                         // How much of the file gave text: a page without any is a figure, or a page that could not be read.
                         let with_text = pages.iter().filter(|page| !page.trim().is_empty()).count();
@@ -465,7 +465,7 @@ impl Workspace {
                                     .flex_wrap()
                                     .gap(px(6.))
                                     .child(small(("file-reread", i), t("重新读取")).on_click(self.on(Cmd::RereadFile(file.id.clone()), cx)))
-                                    .when(file.format == "pdf" && wisp_core::fulltext::readable_by_eye(&error), |d| d.child(small(("file-by-eye", i), t("让模型读页面")).on_click(self.on(Cmd::ReadPages(file.id.clone()), cx)))),
+                                    .when(file.format == "pdf" && wisp_core::fulltext::readable_by_eye(&error), |d| d.child(small(("file-by-eye", i), t("识别页面文字")).on_click(self.on(Cmd::ReadPages(file.id.clone()), cx)))),
                             )
                             .when(lib.writing.sorting.reading && !lib.writing.sorting.error.is_empty(), |d| d.child(ui::error_line(&lib.writing.sorting.error)))
                     })

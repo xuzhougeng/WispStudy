@@ -74,6 +74,7 @@ pub mod mindmap;
 pub mod offer;
 pub mod model;
 pub mod notes;
+pub mod ocr;
 pub mod oauth;
 pub mod openaccess;
 pub mod panes;

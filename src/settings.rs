@@ -20,6 +20,7 @@ use std::time::Duration;
 use wisp_core::ai::{self, Protocol};
 use wisp_core::provider::{self, Provider};
 use wisp_core::libraries;
+use wisp_core::ocr;
 use wisp_core::settings::{Language, Spacing, Task, TextWidth};
 use wisp_core::update::{self, Release};
 use wisp_core::websearch;
@@ -106,6 +107,8 @@ pub struct SettingsView {
     proxy: Entity<TextInput>,
     /// The key of each web search engine, in the order of `websearch::ENGINES`.
     search_keys: Vec<Entity<TextInput>>,
+    /// The key of each engine of 文字识别 that has one of its own (`ocr_engines_with_keys`), in the order of `ocr::ENGINES`.
+    ocr_keys: Vec<Entity<TextInput>>,
     /// Whose name the comments and tracked changes of a Word export carry.
     author: Entity<TextInput>,
     translation_prompt: Entity<TextInput>,
@@ -282,6 +285,11 @@ pub(crate) fn switch(id: impl Into<ElementId>, on: bool) -> Stateful<Div> {
 }
 
 /// A choice among a few: a groove with the chosen one raised.
+/// The engines of 文字识别 that are asked with a key of their own: the ones 设置 › 网络 shows a field for.
+fn ocr_engines_with_keys() -> impl Iterator<Item = &'static ocr::Engine> {
+    ocr::ENGINES.iter().filter(|engine| !engine.key_env.is_empty())
+}
+
 pub(crate) fn segmented(id: &'static str, choices: Vec<(&'static str, Cmd)>, chosen: usize, this: &Workspace, cx: &mut Context<Workspace>) -> Div {
     div().flex().flex_none().flex_wrap().max_w_full().gap(px(2.)).min_h(px(28.)).p(px(2.)).rounded(px(9.)).bg(Theme::groove()).children(choices.into_iter().enumerate().map(|(i, (label, cmd))| {
         div()
@@ -390,6 +398,15 @@ impl Workspace {
                         input
                     })
                     .collect();
+                let ocr_keys: Vec<Entity<TextInput>> = ocr_engines_with_keys()
+                    .map(|engine| {
+                        let placeholder = if engine.key == "deepseek" { t("留空则使用「AI」页 DeepSeek 服务的 Key").to_string() } else { tf!("留空则读取环境变量 {}", "Leave blank to read {}", engine.key_env) };
+                        let stored = self.settings.ocr.keys.get(engine.key).cloned().unwrap_or_default();
+                        let input = cx.new(|cx| TextInput::new(placeholder, cx).with_text(&stored));
+                        input.update(cx, |input, _| input.masked = true);
+                        input
+                    })
+                    .collect();
                 let mut subscriptions = vec![
                     cx.subscribe_in(&font_search, window, |this, input, event: &InputEvent, window, cx| {
                         if *event == InputEvent::Changed {
@@ -429,7 +446,17 @@ impl Workspace {
                         cx.notify();
                     }));
                 }
-                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, search_keys, author, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, recording: None, shortcut_error: None, balance: None, _subscriptions: subscriptions });
+                for (engine, input) in ocr_engines_with_keys().zip(&ocr_keys) {
+                    subscriptions.push(cx.subscribe(input, |this, input, event: &InputEvent, cx| {
+                        if *event != InputEvent::Changed { return }
+                        let key = input.read(cx).text().trim().to_string();
+                        let keys = &mut this.settings.ocr.keys;
+                        if key.is_empty() { keys.remove(engine.key); } else { keys.insert(engine.key.to_string(), key); }
+                        this.save_settings(cx);
+                        cx.notify();
+                    }));
+                }
+                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, search_keys, ocr_keys, author, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, recording: None, shortcut_error: None, balance: None, _subscriptions: subscriptions });
                 self.read_balance_shown(cx);
             }
         }
@@ -1702,10 +1729,12 @@ impl Workspace {
             (None, true) => (t("未设置，跟随系统环境变量"), theme::status_colors("pending")),
             (None, false) => (t("已启用"), theme::status_colors("included")),
         };
+        // The page is given its width in pixels: under widths that are shares its height is guessed at another
+        // width, short of what its wrapped notes take, and the last group could not be scrolled to.
         div()
             .flex()
             .flex_col()
-            .w_full()
+            .w(px(self.column_width(window)))
             .gap(px(24.))
             .child(
                 group(
@@ -1718,7 +1747,31 @@ impl Workspace {
                 .child(note(t("留空时使用环境变量 ALL_PROXY、HTTPS_PROXY、HTTP_PROXY（NO_PROXY 同样有效）。模型服务可以在「AI」页单独指定代理，或者填 direct 不走代理。命令行 wisp 使用同一个设置。代理地址连同其中的用户名和密码以明文保存在本机的 settings.json 里。"))),
             )
             .child(self.web_search_group(view, window, cx))
+            .child(self.ocr_group(view, window, cx))
             .into_any_element()
+    }
+
+    /// 文字识别: which engine reads the pages of a file that gives no text, and the key of each engine that has one.
+    fn ocr_group(&self, view: &SettingsView, window: &Window, cx: &mut Context<Self>) -> Div {
+        let chosen = self.settings.ocr.engine.trim();
+        let (state, colors) = match ocr::ready(&self.settings, "") {
+            Ok(ready) => (tf!("使用 {}", "Using {}", t(ready.engine.name)), theme::status_colors("included")),
+            Err(_) if chosen == ocr::OFF => (t("已关闭").to_string(), theme::status_colors("pending")),
+            Err(_) if chosen == ocr::MODEL => (t("缺少模型").to_string(), theme::status_colors("uncertain")),
+            Err(_) => (t("缺少 API Key").to_string(), theme::status_colors("uncertain")),
+        };
+        let mut choices = vec![(t("自动"), Cmd::SetOcrEngine(ocr::AUTO.into()))];
+        choices.extend(ocr::ENGINES.iter().map(|engine| (t(engine.name), Cmd::SetOcrEngine(engine.key.into()))));
+        choices.push((t("关闭"), Cmd::SetOcrEngine(ocr::OFF.into())));
+        let at = if chosen == ocr::OFF { choices.len() - 1 } else { ocr::ENGINES.iter().position(|engine| engine.key == chosen).map_or(0, |i| i + 1) };
+        let mut rows = vec![
+            row(t("识别引擎"), Some(t("「自动」用第一个能用的引擎。").into()), div().flex().items_center().gap(px(8.)).child(ui::chip(state, colors.0, colors.1)).child(segmented("ocr-engine", choices, at, self, cx))).into_any_element(),
+        ];
+        for (engine, input) in ocr_engines_with_keys().zip(&view.ocr_keys) {
+            let detail = if engine.key == "deepseek" { tf!("与 DeepSeek 模型共用一个 Key：留空时使用「AI」页 DeepSeek 服务的 Key 或环境变量 {}。", "Shares the key of DeepSeek's models: blank uses the DeepSeek service's key on the AI page, or {}.", engine.key_env) } else { tf!("在 {} 申请；留空时读取环境变量 {}。", "Get one at {}; blank reads {}.", engine.site, engine.key_env) };
+            rows.push(row(tf!("{} API Key", "{} API key", engine.name), Some(detail.into()), div().w(px(INPUT_W)).child(ui::field(input, window, cx))).into_any_element());
+        }
+        group(Some(t("文字识别")), rows).child(note(t("读不出文字的 PDF（扫描件、字体没有文字编码的文件）靠它读出页面上的文字：在文献详情的「文件」里点「识别页面文字」，或让助手和 wisp 命令用 ocr_pdf 工具。DeepSeek OCR 会把整个文件上传到 DeepSeek，每个文件最多 1000 页、100 MB，按页计费；看图模型是「AI」页里「整理全文」这项任务的模型，把页面画成图片一页一页地读。Key 以明文保存在本机的 settings.json 里。")))
     }
 
     /// 网页搜索: which engine the tool `web_search` asks, and each engine's key.

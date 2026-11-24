@@ -13,6 +13,7 @@ use wisp_core::ai::{self, ChatEvent, HttpRequest, Protocol, TurnReader};
 use wisp_core::imagegen;
 use wisp_core::lookup::{self, Identifier};
 use wisp_core::model::Paper;
+use wisp_core::ocr;
 use wisp_core::update::{self, Release};
 use wisp_core::websearch;
 
@@ -380,9 +381,46 @@ fn post_retrying(request: &HttpRequest, answer: Duration) -> Result<ureq::http::
     Ok(response)
 }
 
-/// What the tools are lent here beyond plain requests: Notion through its connector, and web search.
+/// What the tools are lent here beyond plain requests: Notion through its connector, web search, and the reading of pages that give no text.
 pub fn reach() -> wisp_core::tools::Reach<'static> {
-    wisp_core::tools::Reach { publish: Some(&notes::publish), search: Some(&web_search) }
+    wisp_core::tools::Reach { publish: Some(&notes::publish), search: Some(&web_search), read: Some(&read_file) }
+}
+
+/// Have the engine `asked` (empty: as settings say) read the pages of the file `name` holds. Settings are read anew
+/// each time, as for a web search. Only an engine that takes the file itself is asked from here: a model that
+/// looks at pictures of the pages needs them drawn, which the window does.
+pub fn read_file(asked: &str, name: &str, file: &[u8]) -> Result<ocr::Reading, String> {
+    let settings = wisp_core::settings::Settings::load(&wisp_core::settings::settings_file()).map_err(|e| format!("{e:#}"))?;
+    let ready = ocr::ready(&settings, asked)?;
+    if ready.engine.key == ocr::MODEL { return Err("看图模型按页面的图片读，这里画不出页面：请在桌面应用里用它，或在「设置 › 网络 › 文字识别」填写 DeepSeek 的 Key。".into()) }
+    Ok(ocr::Reading { engine: ready.engine, pages: send_file(&ocr::request(&ready, name, file)?, ready.engine)? })
+}
+
+/// How long an engine may take over one file, the upload included: DeepSeek gives up after three minutes itself.
+const READING_WAIT: Duration = Duration::from_secs(240);
+
+/// Send a file to be read and wait for its pages. A service too busy to begin (429, 500, 502, 503) is asked again;
+/// one that began and ran out of time is not, since the file would only go up and run out again.
+pub fn send_file(upload: &ocr::Upload, engine: &'static ocr::Engine) -> Result<Vec<ocr::Page>, String> {
+    let agent = patient_agent(Some(READING_WAIT), &upload.proxy, READING_WAIT)?;
+    let mut tries = 0;
+    loop {
+        let mut call = agent.post(&upload.url);
+        for (name, value) in &upload.headers { call = call.header(name, value) }
+        let last = tries >= RETRY_WAITS.len();
+        match call.send(upload.body.as_slice()) {
+            Ok(mut response) if last || !matches!(response.status().as_u16(), 429 | 500 | 502 | 503) => {
+                let status = response.status().as_u16();
+                let text = response.body_mut().with_config().limit(256 << 20).read_to_string().map_err(|e| format!("{} 的返回内容没有读完：{e}", engine.name))?;
+                return ocr::read(engine, status, &text);
+            }
+            Ok(_) => {}
+            Err(err) if last || matches!(err, ureq::Error::Timeout(_)) => return Err(format!("{}：{}", engine.name, network_error(err))),
+            Err(_) => {}
+        }
+        std::thread::sleep(Duration::from_millis(RETRY_WAITS[tries]));
+        tries += 1;
+    }
 }
 
 /// Search the web with the engine `asked` (empty: as settings say). Settings are read anew each time, so a
@@ -469,6 +507,29 @@ mod tests {
         let asked = server.join().unwrap().to_lowercase();
         assert!(asked.starts_with("get /?q=q%20w&num=3 ") && asked.contains("x-respond-with: no-content"), "{asked}");
         assert!(refused.contains("Jina") && refused.contains("401") && refused.contains("Authentication is required"), "{refused}");
+    }
+
+    #[test]
+    fn a_file_sent_to_be_read() {
+        let deepseek = ocr::engine("deepseek").unwrap();
+        // Line breaks keep the connection while the pages are read; the answer follows them.
+        let (base, server) = serve("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n\n\n{\"id\": \"ocr-1\", \"object\": \"ocr.result\", \"page_count\": 1, \"pages\": [{\"index\": 0, \"text\": \"<｜ref｜>Scanned<｜/ref｜><｜box｜>[[10, 10, 900, 60]]<｜/box｜>\", \"finish_reason\": \"stop\"}]}");
+        let ready = ocr::Ready { engine: deepseek, key: "k".into(), proxy: "direct".into(), base: format!("{base}/v1") };
+        let upload = ocr::request(&ready, "scan.pdf", b"%PDF-1.4 pages").unwrap();
+        let pages = send_file(&upload, deepseek).unwrap();
+        assert_eq!((pages.len(), pages[0].text.as_str()), (1, "Scanned"));
+        let asked = server.join().unwrap();
+        assert!(asked.starts_with("POST /v1/tools/ocr ") && asked.to_lowercase().contains("authorization: bearer k") && asked.to_lowercase().contains("content-type: multipart/form-data; boundary=wisp-study-"), "{asked}");
+        assert!(asked.contains("name=\"purpose\"\r\n\r\ntext_recognition") && asked.contains("filename=\"scan.pdf\"") && asked.contains("%PDF-1.4 pages"), "{asked}");
+        // A refusal before it began, and a failure after, both in the service's words.
+        let (base, server) = serve("HTTP/1.1 402 Payment Required\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{\"error\": {\"message\": \"Insufficient Balance\"}}");
+        let refused = send_file(&ocr::request(&ocr::Ready { base, ..ready.clone() }, "scan.pdf", b"%PDF").unwrap(), deepseek).unwrap_err();
+        server.join().unwrap();
+        assert_eq!(refused, "DeepSeek OCR：账户余额不足（HTTP 402）：Insufficient Balance");
+        let (base, server) = serve("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n\n{\"error\": {\"message\": \"OCR did not finish in time\", \"type\": \"gateway_timeout_error\", \"param\": null, \"code\": \"gateway_timeout_error\"}}");
+        let late = send_file(&ocr::request(&ocr::Ready { base, ..ready }, "scan.pdf", b"%PDF").unwrap(), deepseek).unwrap_err();
+        server.join().unwrap();
+        assert!(late.contains("限定的时间") && late.contains("OCR did not finish in time"), "{late}");
     }
 
     /// Serve one canned HTTP response on a local port; returns the base URL and the request it received.
