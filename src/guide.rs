@@ -142,9 +142,9 @@ impl Workspace {
         let source = label(&sources::KINDS, &entry.idea.source).to_string();
         let found = match &entry.trial {
             None => div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(t("正在试检索…")).into_any_element(),
-            Some(Err(error)) => ui::error_line(&tf!("试检索失败：{error}", "Search preview failed: {error}")).into_any_element(),
+            Some(Err(error)) => ui::error_line(&tf!("试检索失败：{}", "Search preview failed: {}", crate::i18n::reasons(error))).into_any_element(),
             Some(Ok(found)) => {
-                let total = found["total"].as_u64().map(|n| tf!("数据库中共命中 {n} 篇。", "{n} results in the database.")).unwrap_or_default();
+                let total = found["total"].as_u64().map(|n| tf!("数据库中共命中 {n} 篇。", "{n} results in the database. ")).unwrap_or_default();
                 let head = if found["fetched"] == 0 { tf!("{total}没有取回任何记录。", "{total}No records retrieved.") } else { tf!("{total}最新的 {} 篇里，{} 篇是新的，{} 篇已在文献库中：", "{total}Of the latest {} papers, {} are new and {} are already in this library:", found["fetched"], found["new"], found["inLibrary"]) };
                 let titles = found["results"].as_array().into_iter().flatten().take(6).map(|record| {
                     let year = record["year"].as_i64().map(|y| format!("{y} · ")).unwrap_or_default();

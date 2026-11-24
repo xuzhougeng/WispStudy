@@ -569,7 +569,9 @@ impl Workspace {
     /// The manuscript as a Word file with its comments, and what was done in words: one that came from a Word file is that file written again.
     fn manuscript_word(&self, manuscript: &Manuscript, track: bool) -> Result<(Vec<u8>, String), String> {
         let Some(lib) = self.lib.as_ref() else { return Err(String::new()) };
-        let comments = lib.store.comments(&manuscript.id).map_err(|err| format!("{err:#}"))?;
+        let mut comments = lib.store.comments(&manuscript.id).map_err(|err| format!("{err:#}"))?;
+        // The assistant's comments are known by where they are from, not by its name: the file names it in the interface's language.
+        for comment in comments.iter_mut().filter(|comment| comment.origin == wisp_core::comment::ASSISTANT && comment.author == wisp_core::comment::ASSISTANT_NAME) { comment.author = t(wisp_core::comment::ASSISTANT_NAME).to_string() }
         let style = wisp_core::csl::style(&self.settings.cite_style, &self.data_root()).map_err(|err| tf!("没有导出，引用样式读不了：{err:#}", "Not exported, the citation style cannot be read: {err:#}"))?;
         let (done, from_file) = lib.store.manuscript_word(manuscript, &comments, track, &self.settings.author_name(), style).map_err(|err| tf!("没有导出：{err:#}", "Not exported: {err:#}"))?;
         let mut said = vec![];
@@ -579,7 +581,7 @@ impl Workspace {
             if done.added > 0 { said.push(tf!("新增 {} 段", "{} added", done.added)) }
             if done.removed > 0 { said.push(tf!("删去 {} 段", "{} removed", done.removed)) }
             // A table written in the manuscript is put into the file: its text is not among the paragraphs counted.
-            if done.tables > 0 { said.push(tf!("新增表格 {} 张", "{} tables added", done.tables)) }
+            if done.tables > 0 { said.push(tn!("新增表格 {n} 张", "{n} added", done.tables, "table")) }
             if track && done.changed + done.added + done.removed + done.tables > 0 { said.push(t("都记为修订").to_string()) }
         } else if lib.writing.comments.source.as_ref().is_some_and(|source| source.kind == "docx") {
             said.push(t("原来的 Word 文件不在了，按新文档导出").to_string());

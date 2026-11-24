@@ -1159,7 +1159,7 @@ impl Workspace {
             vec![
                 row(crate::i18n::tc("appearance.theme", "主题"), Some(t("跟随系统时，随系统的浅色 / 深色模式切换。").into()), segmented("appearance", vec![(t("跟随系统"), set("")), (t("浅色"), set("light")), (t("深色"), set("dark"))], mode, self, cx)).into_any_element(),
                 row(t("文献列表"), Some(t("紧凑显示更多文献，舒适增加行间留白。").into()), segmented("density", vec![(t("紧凑"), density("compact")), (t("标准"), density("")), (t("舒适"), density("comfortable"))], density_index, self, cx)).into_any_element(),
-                row(t("期刊分区"), Some(tf!("文献列表的「分区」列显示哪一种分区。数据随应用附带：{}。", "Which partition the list's Zone column shows. The data comes with the app: {}.", wisp_core::journals::EDITIONS).into()), segmented("journal-zone", vec![(t("中科院"), zone("")), (t("新锐"), zone("xr")), (t("JCR"), zone("jcr"))], zone_index, self, cx)).into_any_element(),
+                row(t("期刊分区"), Some(tf!("文献列表的「分区」列显示哪一种分区。数据随应用附带：{}。", "Which partition the list's Zone column shows. The data comes with the app: {}.", t(wisp_core::journals::EDITIONS)).into()), segmented("journal-zone", vec![(t("中科院"), zone("")), (t("新锐"), zone("xr")), (t("JCR"), zone("jcr"))], zone_index, self, cx)).into_any_element(),
                 row(t("增强对比度"), Some(t("加深辅助文字和分隔线，在浅色与深色主题下都生效。").into()), switch("high-contrast", self.settings.high_contrast).on_click(self.on(Cmd::ToggleHighContrast, cx))).into_any_element(),
             ],
         )

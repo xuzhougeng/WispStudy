@@ -320,7 +320,7 @@ fn tools_summary(calls: &[&str]) -> String {
     let mut counted: Vec<(&str, usize)> = vec![];
     for call in calls {
         // A call is worded 「检索全文：chromium」; what stands before the colon is the tool.
-        let title = call.split('：').next().unwrap_or(call);
+        let title = crate::i18n::tool_title(call);
         match counted.iter_mut().find(|(known, _)| *known == title) {
             Some((_, count)) => *count += 1,
             None => counted.push((title, 1)),
@@ -885,7 +885,7 @@ impl Workspace {
             .when_some(review, |d, review| {
                 let sections = if review.sections.is_empty() { String::new() } else { tf!("正文 {} 节", "{} sections", review.sections.len()) };
                 let open = review.evidence_rows.iter().filter(|row| row.judgment == wisp_core::review::EvidenceJudgment::Unreviewed || !row.source_current || !review.linked(row)).count();
-                let evidence = if open > 0 { tf!("{open} 条证据待判断", "{open} evidence records awaiting judgment") } else { String::new() };
+                let evidence = if open > 0 { tn!("{n} 条证据待判断", "{n} awaiting judgment", open, "evidence record") } else { String::new() };
                 let counts = [sections, evidence].into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join(" · ");
                 let at = if review.completed { 5 } else { review.step() };
                 let steps = REVIEW_STEPS.iter().enumerate().flat_map(|(n, name)| {
@@ -1447,13 +1447,13 @@ impl Workspace {
                     .bg(Theme::bg_sunken())
                     .child(div().flex().items_center().gap(px(6.)).font_weight(FontWeight::MEDIUM).child(ui::icon("info", 14., Theme::accent())).child(if pending.calls.iter().any(|call| call.confirm && call.outside.is_some()) { t("助手想执行下面的操作，等你同意") } else if draft { t("助手想收进或改动这次对话里的文献，等你同意") } else { t("助手想改动文献库，等你同意") }))
                     .children(pending.calls.iter().enumerate().filter(|(_, call)| call.confirm).map(|(n, call)| {
-                        let line = div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_secondary()).child(call.line.clone());
+                        let line = div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_secondary()).child(crate::i18n::tool_call(&call.line));
                         if call.details.is_empty() { return div().pl(px(20.)).child(line) }
                         // What it would change, paper by paper: all of it, in a box that scrolls when it is long.
                         let rows = call.details.iter().map(|detail| {
                             // A title may hold a colon of its own: the line is cut where the title's bracket closes.
                             let (title, change) = detail.split_once("》：").map(|(title, change)| (format!("{title}》"), change)).unwrap_or((detail.clone(), ""));
-                            div().flex().flex_col().py(px(3.)).text_size(text_px(12.)).line_height(text_px(18.)).child(div().truncate().text_color(Theme::text_tertiary()).child(title)).child(div().text_color(Theme::text()).child(change.to_string()))
+                            div().flex().flex_col().py(px(3.)).text_size(text_px(12.)).line_height(text_px(18.)).child(div().truncate().text_color(Theme::text_tertiary()).child(crate::i18n::phrase(&title))).child(div().text_color(Theme::text()).child(crate::i18n::phrase(change)))
                         });
                         div().pl(px(20.)).flex().flex_col().gap(px(4.)).child(line).child(div().id(SharedString::from(format!("consent-details-{side}-{n}"))).flex().flex_col().max_h(px(240.)).overflow_y_scroll().px(px(10.)).py(px(4.)).rounded(px(8.)).bg(Theme::bg_body()).border_1().border_color(Theme::line()).children(rows))
                     }))
@@ -1679,7 +1679,7 @@ impl Workspace {
                         .hover(|s| s.text_color(Theme::text_secondary()))
                         .on_click(self.on(Cmd::ToggleTools(talk, first), cx))
                         .child(div().min_w_0().truncate().child(tools_summary(&done.iter().map(|(call, _)| *call).collect::<Vec<_>>())))
-                        .when(failed > 0, |d| d.child(div().flex_none().text_color(Theme::danger()).child(tf!("· {failed} 项没有成功", "· {failed} items failed"))))
+                        .when(failed > 0, |d| d.child(div().flex_none().text_color(Theme::danger()).child(tn!("· {n} 项没有成功", "· {n} failed", failed, "item"))))
                         .child(ui::icon(if open { "chevron-down" } else { "chevron-right" }, 12., Theme::text_tertiary())),
                 )
                 .when(open, |d| {
@@ -1689,8 +1689,8 @@ impl Workspace {
                             .items_center()
                             .gap(px(8.))
                             .h(text_px(20.))
-                            .child(div().flex_none().max_w(relative(0.62)).truncate().text_color(Theme::text_secondary()).child(call.to_string()))
-                            .child(div().min_w_0().truncate().text_color(if *failed { Theme::danger() } else { Theme::text_tertiary() }).child(outcome.clone()))
+                            .child(div().flex_none().max_w(relative(0.62)).truncate().text_color(Theme::text_secondary()).child(crate::i18n::tool_call(call)))
+                            .child(div().min_w_0().truncate().text_color(if *failed { Theme::danger() } else { Theme::text_tertiary() }).child(crate::i18n::phrase(outcome)))
                     })))
                 })
             })
@@ -1703,7 +1703,7 @@ impl Workspace {
                     .h(text_px(22.))
                     .text_color(Theme::text_secondary())
                     .child(ui::spinner(SharedString::from(format!("tool-{side}-{}", first + n)), 13., Theme::accent()))
-                    .child(div().min_w_0().truncate().child(call.to_string()))
+                    .child(div().min_w_0().truncate().child(crate::i18n::tool_call(call)))
                     .child(div().flex_none().text_color(Theme::text_placeholder()).child(elapsed(chat)))
             }))
             .into_any_element()
@@ -1785,7 +1785,7 @@ impl Workspace {
         let owner = all.then(|| div().min_w_0().truncate().child(if conversation.paper_id.is_empty() { t("助手").to_string() } else { ui::one_line(&conversation.about) }));
         // Under 今天 and 昨天 the heading has said the day.
         let at = if matches!(time::ago_today(&conversation.updated_at), time::Ago::Today | time::Ago::Yesterday) { time::clock_time(&conversation.updated_at) } else { time::short_time(&conversation.updated_at) };
-        let when = tf!("{} · {} 个问题", "{} · {} questions", at, conversation.questions);
+        let when = tn!("{} · {n} 个问题", "{} · {n}", conversation.questions, "question", at);
         div()
                     .group(group.clone())
                     .flex()

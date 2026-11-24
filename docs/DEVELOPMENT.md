@@ -43,7 +43,7 @@ WISP_STUDY_HOME=/tmp/wisp-demo cargo run
 
 ## 代码结构
 
-界面支持 `zh` / `en`，在「设置 › 通用」即时切换；`settings.json` 的 `language` 保存选择，旧配置及未知语言默认中文。静态文案使用 `src/i18n.rs` 的 `t`，英文维护在 `locales/en.json`；带变量的文案使用 `tf!("中文格式", "English format", ...)`，两个格式都由 Rust 检查。共享状态表在显示处翻译，输入框在绘制时翻译占位文字。文献内容、笔记、稿件和模型提示不随界面语言改写。调试脚本支持 `language:en` / `language:zh`。
+界面支持 `zh` / `en`，在「设置 › 通用」即时切换；`settings.json` 的 `language` 保存选择，旧配置及未知语言默认中文。静态文案使用 `src/i18n.rs` 的 `t`，英文维护在 `locales/en.json`；带变量的文案使用 `tf!("中文格式", "English format", ...)`，两个格式都由 Rust 检查。共享状态表在显示处翻译，输入框在绘制时翻译占位文字。引擎（core）生成后保存或返回的中文句子（对话里的工具调用和结果、询问卡片上的改动、取不到全文和读不出文字的原因、期刊表里的预警和大类）也在显示处认出并译成英文：固定的句子写进 `locales/en.json`，带数值的写进 `i18n.rs` 的 `PHRASES`，分别由 `i18n::phrase`、`reasons`、`tool_call`、`text_failure` 使用；提示条和错误行会自动经过 `phrase`。带数量的文案用 `tn!`，英文名词随数量取单复数。文献内容、笔记、稿件和模型提示不随界面语言改写。调试脚本支持 `language:en` / `language:zh`。
 
 仓库是一个 Cargo workspace，分四个 crate：core 不依赖其他三个，net 只依赖 core，应用和命令行依赖这两个。
 

@@ -280,8 +280,9 @@ pub fn dialog_title(title: impl Into<SharedString>) -> Div {
     div().px(px(20.)).pt(px(18.)).pb(px(6.)).text_size(text_px(16.)).font_weight(FontWeight::SEMIBOLD).child(title.into())
 }
 
+/// What went wrong, in a line. A sentence core said, in Chinese, is drawn in the interface's language where the catalog knows it (`i18n::phrase`).
 pub fn error_line(message: &str) -> Div {
-    div().when(!message.is_empty(), |d| d.px(px(10.)).py(px(7.)).rounded(px(8.)).bg(Theme::danger_soft()).text_color(Theme::danger()).text_size(text_px(12.)).child(message.to_string()))
+    div().when(!message.is_empty(), |d| d.px(px(10.)).py(px(7.)).rounded(px(8.)).bg(Theme::danger_soft()).text_color(Theme::danger()).text_size(text_px(12.)).child(crate::i18n::phrase(message)))
 }
 
 /// The centred message of an empty list.

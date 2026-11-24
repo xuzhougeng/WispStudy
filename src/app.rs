@@ -2813,6 +2813,8 @@ impl Workspace {
     }
 
     fn show_toast(&mut self, message: SharedString, error: bool, cx: &mut Context<Self>) {
+        // What failed is often said by core, in Chinese: a sentence the catalog knows is shown in the interface's language.
+        let message = if crate::i18n::is_english() { crate::i18n::phrase(&message).into() } else { message };
         let at = Instant::now();
         self.toast = Some(Toast { message, error, at });
         cx.notify();
@@ -4047,10 +4049,10 @@ impl Workspace {
             }
             Cmd::AddPreset => {
                 self.change(cx, |lib| {
-                    // BiblioCell's single-cell fields, as a starting point.
+                    // BiblioCell's single-cell fields, as a starting point. A field's name and options are the person's from here on: they are made in the interface's language.
                     for (name, kind, options) in [("物种", FieldKind::Tags, vec![]), ("组织", FieldKind::Tags, vec![]), ("测序类型", FieldKind::Tags, vec!["scRNA-seq", "snRNA-seq", "scATAC-seq", "Multiome", "空间转录组"]), ("测序平台", FieldKind::Tags, vec!["10x Genomics Chromium", "BD Rhapsody", "Smart-seq2"])] {
-                        if lib.fields.iter().any(|f| f.name == name) { continue }
-                        lib.store.save_field(&mut FieldDef { name: name.into(), kind, options: options.into_iter().map(String::from).collect(), in_table: name == "物种", ..Default::default() })?;
+                        if lib.fields.iter().any(|f| f.name == name || f.name == t(name)) { continue }
+                        lib.store.save_field(&mut FieldDef { name: t(name).into(), kind, options: options.into_iter().map(|option| t(option).to_string()).collect(), in_table: name == "物种", ..Default::default() })?;
                     }
                     Ok(())
                 });
@@ -4366,7 +4368,7 @@ impl Workspace {
             Cmd::AnswerToNote(question, answer) => {
                 let Some(lib) = self.lib.as_ref() else { return };
                 let Some(paper_id) = lib.selected.clone() else { return };
-                let note = ai::note_from_answer(&question, &answer, lib.paper_chat.sources(), &paper_id, &time::date_text(&time::now_iso()));
+                let note = ai::note_from_answer(&question, &answer, lib.paper_chat.sources(), &paper_id, &time::date_text(&time::now_iso()), crate::i18n::is_english());
                 self.modal_subscriptions.clear();
                 self.modal_error.clear();
                 let text = cx.new(|cx| TextInput::new("要记下的内容", cx).multiline(8).with_text(&note));
@@ -4523,7 +4525,7 @@ impl Workspace {
                 self.modal_error.clear();
                 self.modal = Some(Modal::Confirm {
                     title: t("撤销这次导入？").into(),
-                    message: tf!("{}\n\n这次导入新增的 {} 篇文献里，还没有处理过的会移出文献库，记录另存在文献库文件夹的 removed 里，可以再导入；已经做过收录判断、读过、收藏、写过笔记、加过标签或附件、提过问、被稿件引用的会保留。", "{}\n\nOf {} papers added by this import, untouched papers leave the library; their records are set aside in the library folder under removed and can be imported again. Papers already screened, read, starred, annotated, tagged, given attachments, asked about or cited in a manuscript are kept.", batch.label, batch.added),
+                    message: tf!("{}\n\n这次导入新增的 {} 篇文献里，还没有处理过的会移出文献库，记录另存在文献库文件夹的 removed 里，可以再导入；已经做过收录判断、读过、收藏、写过笔记、加过标签或附件、提过问、被稿件引用的会保留。", "{}\n\nOf {} papers added by this import, untouched papers leave the library; their records are set aside in the library folder under removed and can be imported again. Papers already screened, read, starred, annotated, tagged, given attachments, asked about or cited in a manuscript are kept.", crate::i18n::import_label(&batch.label), batch.added),
                     action: t("撤销导入").into(),
                     cmd: Cmd::UndoImport(id),
                 });
@@ -5299,8 +5301,9 @@ impl Workspace {
                 }
                 return Some(out);
             });
-            let title = paper.title.clone();
-            Ok(crate::read_aloud::Plan { pieces: Box::new(turns.flatten()), transcript: Some(Box::new(move || podcast::transcript(&title, &kept.lock().map(|turns| turns.clone()).unwrap_or_default()))) })
+            // The script kept beside the sound names its hosts in the interface's language.
+            let (title, english) = (paper.title.clone(), crate::i18n::is_english());
+            Ok(crate::read_aloud::Plan { pieces: Box::new(turns.flatten()), transcript: Some(Box::new(move || podcast::transcript(&title, &kept.lock().map(|turns| turns.clone()).unwrap_or_default(), english))) })
         };
         let (base, proxy) = (provider.base_url.clone(), provider.proxy.clone());
         let reading = crate::read_aloud::Reading::start(resource, crate::read_aloud::Kind::Podcast, plan, move |voice, text| wisp_core::speech::request(&base, &key, &proxy, voice, text));
@@ -5348,7 +5351,7 @@ impl Workspace {
                         list.get(at + 1).map(|(_, file, _)| file.id.clone())
                     });
                     lib.stop_reading(cx);
-                    if let Some(error) = status.error { this.fail(tf!("{}停了：{}", "{} stopped: {}", what, error), cx) }
+                    if let Some(error) = status.error { this.fail(tf!("{}停了：{}", "{} stopped: {}", what, crate::i18n::reasons(&error)), cx) }
                     if let Some(next) = next { this.play_podcast(&next, cx) }
                     cx.notify();
                     return false;
@@ -5374,7 +5377,7 @@ impl Workspace {
     fn keep_podcast(&mut self, resource: &str, sound: Vec<u8>, transcript: String, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_ref() else { return };
         let Some(paper) = lib.files.iter().find(|f| f.id == resource).and_then(|f| lib.papers.iter().find(|p| p.id == f.paper_id)) else { return };
-        let (paper_id, name) = (paper.id.clone(), wisp_core::podcast::file_name(&paper.title));
+        let (paper_id, name) = (paper.id.clone(), wisp_core::podcast::file_name(&paper.title, crate::i18n::is_english()));
         let dir = std::env::temp_dir().join(format!("wisp-podcast-{}", std::process::id()));
         let (audio, text) = (dir.join(format!("{name}.wav")), dir.join(format!("{name}.md")));
         let written = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&audio, wisp_core::podcast::wav(&sound))).and_then(|_| std::fs::write(&text, transcript));
@@ -6402,7 +6405,7 @@ impl Workspace {
             Imported::Attached => tf!("「{stem}」已在文献库中，PDF 已附到原条目。", "“{stem}” is already in this library. PDF attached to existing record."),
             Imported::InTrash => tf!("「{stem}」对应的文献在回收站中，未导入。", "“{stem}” is in trash and was not imported."),
             Imported::Held => tf!("「{stem}」已在文献库中。", "“{stem}” is already in this library."),
-            Imported::Failed(err) => tf!("「{stem}」没有导入：{err}", "“{stem}” not imported: {err}"),
+            Imported::Failed(err) => tf!("「{stem}」没有导入：{}", "“{stem}” not imported: {}", crate::i18n::reasons(err)),
         };
         let said = if row.textless.is_empty() { said } else { tf!("{said} 但没有读出文字（{}），全文暂时不能用于提问。", "{said} But no text was extracted ({}); full text is unavailable for chat.", t(fulltext::failure_brief(&row.textless))) };
         let failed = matches!(row.outcome, Imported::Failed(_));
@@ -6584,7 +6587,7 @@ impl Workspace {
                 lib.extracting.remove(&id);
                 let said = match &pages {
                     Ok(pages) => Ok(tf!("读出了 {} 页文字，现在可以用于提问。", "Read {} pages of text, now available for chat.", pages.len())),
-                    Err(reason) => Err(tf!("还是没有读出文字：{reason}", "Still no readable text: {reason}")),
+                    Err(reason) => Err(tf!("还是没有读出文字：{}", "Still no readable text: {}", crate::i18n::text_failure(reason))),
                 };
                 let kept = lib.store.save_fulltext_pages(&id, &pages).and_then(|()| lib.reload());
                 lib.texts_changed();
@@ -8357,6 +8360,8 @@ impl Workspace {
                         sorting.failed += 1;
                         // A file without body text is an answer about the file: the service is well, and the run goes on.
                         if err != structure::NO_BODY { sorting.streak += 1 }
+                        // Why, as core says it: in the interface's language where the sentence is a known one.
+                        let err = crate::i18n::text_failure(&err);
                         if sorting.streak >= SCREEN_GIVE_UP {
                             sorting.error = tf!("连续 {SCREEN_GIVE_UP} 篇没有成功，已停止。最后一篇「{title}」：{err}", "Stopped after {SCREEN_GIVE_UP} consecutive failures. Last paper “{title}”: {err}");
                             sorting.todo.clear();
@@ -8424,7 +8429,7 @@ impl Workspace {
                     let version = t(wisp_core::openaccess::version_label(found["version"].as_str().unwrap_or("")));
                     let from = [found["source"].as_str().unwrap_or(""), version].into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join(" · ");
                     match found["textReason"].as_str() {
-                        Some(reason) => tf!("来自 {from}。没读出文字：{reason}", "From {from}. No text extracted: {reason}"),
+                        Some(reason) => tf!("来自 {from}。没读出文字：{}", "From {from}. No text extracted: {}", crate::i18n::text_failure(reason)),
                         None => tf!("来自 {from}，读出 {} 页文字", "From {from}, {} pages of text read", found["pages"].as_u64().unwrap_or(0)),
                     }
                 }
@@ -9807,7 +9812,7 @@ pub(crate) fn podcast_files<'a>(lib: &'a Library, paper: &str) -> (Option<&'a Pa
 fn pages_of(kept: Option<Vec<String>>, path: Option<std::path::PathBuf>) -> Result<Vec<String>, String> {
     match (kept, path) {
         (Some(pages), _) => Ok(pages),
-        (None, Some(path)) => wisp_core::fulltext::file_pages(&path).map_err(|error| tf!("读不出这个 PDF 的文字：{}", "Could not read this PDF's text: {}", error)),
+        (None, Some(path)) => wisp_core::fulltext::file_pages(&path).map_err(|error| tf!("读不出这个 PDF 的文字：{}", "Could not read this PDF's text: {}", crate::i18n::text_failure(&error))),
         (None, None) => Ok(vec![]),
     }
 }
