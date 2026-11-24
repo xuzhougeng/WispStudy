@@ -43,7 +43,7 @@ impl Render for Reader {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let width = f32::from(window.viewport_size().width);
         self.view.update(cx, |pdf, _| pdf.set_width(width));
-        let (page, count, percent, zoom) = { let view = self.view.read(cx); (view.current_page(), view.page_count(), view.percent(), view.zoom()) };
+        let (page, count, percent, zoom, overview) = { let view = self.view.read(cx); (view.current_page(), view.page_count(), view.percent(), view.zoom(), view.overview_open()) };
         let tool = |id: &'static str, icon: &'static str| ui::ghost_button(id, Some(icon), None).h(text_px(24.)).min_w(px(24.)).occlude();
         let on = |to: ZoomTo| cx.listener(move |this: &mut Self, _: &ClickEvent, _, cx| this.zoom(to, cx));
         let paper = self.paper.clone();
@@ -59,7 +59,8 @@ impl Render for Reader {
             .text_color(Theme::text_tertiary())
             .child(div().flex_1().min_w_0().truncate().font_weight(FontWeight::MEDIUM).text_color(Theme::text()).child(ui::one_line(&self.title)))
             .when(count > 0, |d| {
-                d.child(div().flex_none().child(tf!("{page} / {count} 页", "{page} / {count} pages")))
+                d.child(ui::ghost_button("reader-overview", None, None).h(text_px(24.)).min_w(px(24.)).occlude().child(ui::icon("layout-grid", 14., if overview { Theme::accent() } else { Theme::text_secondary() })).tooltip(ui::tip(t("页面总览"))).on_click(cx.listener(|this: &mut Self, _: &ClickEvent, _, cx| this.view.update(cx, |view, cx| view.toggle_overview(cx)))))
+                    .child(div().flex_none().child(tf!("{page} / {count} 页", "{page} / {count} pages")))
                     .child(tool("reader-zoom-out", "minus").on_click(on(ZoomTo::Out)))
                     .child(ui::ghost_button("reader-zoom", None, Some(format!("{}%", percent.round()).into())).h(text_px(24.)).px(px(6.)).text_size(text_px(12.)).occlude().tooltip(ui::tip(t("适应宽度"))).on_click(on(ZoomTo::Set(Zoom::FitWidth))))
                     .child(tool("reader-zoom-in", "plus").on_click(on(ZoomTo::In)))

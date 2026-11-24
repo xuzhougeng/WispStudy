@@ -45,6 +45,8 @@ struct PdfBar {
     others: bool,
     page: usize,
     count: usize,
+    /// 页面总览 is on show over the pages.
+    overview: bool,
     percent: f32,
     zoom: Zoom,
     /// The fit the reader reads at, which a zoom by hand goes back to.
@@ -751,9 +753,9 @@ impl Workspace {
                 if !paned { pdf.fit_facing(cx) }
             });
         }
-        let (page, count, percent, zoom, cutting, split, pen, marks_open) = {
+        let (page, count, percent, zoom, cutting, split, pen, marks_open, overview) = {
             let view = pdf.read(cx);
-            (view.current_page(), view.page_count(), view.percent(), view.zoom(), view.cutting(), pair.as_ref().map_or(view.split(), |(_, split, _)| *split), view.tool(), view.annotations_open())
+            (view.current_page(), view.page_count(), view.percent(), view.zoom(), view.cutting(), pair.as_ref().map_or(view.split(), |(_, split, _)| *split), view.tool(), view.annotations_open(), view.overview_open())
         };
         let viewer = match pair {
             None => pdf.into_any_element(),
@@ -802,7 +804,7 @@ impl Workspace {
         // The tools stand in the toolbar, or float at the page's right edge: a habit, kept for every paper.
         let floating = self.settings.pdf_tools_floating;
         let pdf_map = self.lib.as_ref().and_then(|lib| lib.pdf.as_ref()).is_some_and(|pdf| pdf.read(cx).map_shown());
-        let bar = PdfBar { width, file_id: file_id.clone(), paper_id, file_title, others, page, count, percent, zoom, fit: lib.zoom, cutting, split, pen, facing, map: pdf_map, floating, free, can_pin, keep: lib.keep, beside, aloud, paned, hidden: hidden.to_vec() };
+        let bar = PdfBar { width, file_id: file_id.clone(), paper_id, file_title, others, page, count, overview, percent, zoom, fit: lib.zoom, cutting, split, pen, facing, map: pdf_map, floating, free, can_pin, keep: lib.keep, beside, aloud, paned, hidden: hidden.to_vec() };
         // One line whatever the width: what it has no room for gives way level by level, the last of them under ⋯.
         let mut level = 0;
         let parts = loop {
@@ -816,7 +818,7 @@ impl Workspace {
             .flex_col()
             .size_full()
             .child(div().flex().flex_none().items_center().gap(px(ui::BAR_GAP)).h(text_px(BAR_H)).px(px(12.)).overflow_hidden().border_b_1().border_color(Theme::line()).text_size(text_px(12.)).text_color(Theme::text_tertiary()).children(parts.into_iter().map(|part| part.0)))
-            .child(div().flex_1().min_h_0().relative().child(viewer).children(self.player_on_page(&file_id, width, cx)).when(floating && count > 0, |d| d.child(self.pdf_tool_column(file_id, width, pdf_height, cutting, split, pen, marks_open, cx))))
+            .child(div().flex_1().min_h_0().relative().child(viewer).children(self.player_on_page(&file_id, width, cx)).when(floating && count > 0 && !overview, |d| d.child(self.pdf_tool_column(file_id, width, pdf_height, cutting, split, pen, marks_open, cx))))
             .into_any_element()
     }
 
@@ -851,6 +853,8 @@ impl Workspace {
         if has {
             let pages = tf!("{} / {} 页", "{} / {} pages", bar.page, bar.count);
             let width = wide(&pages);
+            // All the pages small, to go to one by the look of it: beside the count, which goes to one by its number.
+            put((ui::ghost_button("pdf-overview", None, None).h(text_px(24.)).min_w(px(24.)).child(ui::icon("layout-grid", 14., if bar.overview { Theme::accent() } else { Theme::text_secondary() })).tooltip(ui::tip(t("页面总览"))).on_click(self.on(Cmd::PdfOverview, cx)), 24.));
             // Where it is read, and the way to a page by its number.
             put((div().id("pdf-pages").flex_none().rounded(px(5.)).cursor_pointer().hover(|s| s.text_color(Theme::text_secondary())).child(pages).tooltip(ui::tip(t("跳到第几页…"))).on_click(self.on(Cmd::AskPdfPage, cx)), width));
             // Smaller, the size in force (a menu of sizes), larger; the whole page in one click; zoomed by hand, the

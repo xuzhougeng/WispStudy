@@ -505,6 +505,8 @@ pub enum Cmd {
     PdfZoom(ZoomTo),
     /// The page count on the PDF's bar: a page typed is gone to (`Modal::PdfPage`).
     AskPdfPage,
+    /// 页面总览 of the PDF on show, on or off: all its pages small, to go to one.
+    PdfOverview,
     /// Show the PDF on show twice, each half scrolled on its own, or once again.
     PdfSplit(Split),
     /// Show a file of the paper (its id) in the other half of the viewer; the file worked in is the viewer split on itself.
@@ -4095,6 +4097,9 @@ impl Workspace {
             }
             Cmd::FloatChat(on) => self.float_chat(on, window, cx),
             Cmd::FoldChat(fold) => self.fold_chat(fold, window, cx),
+            Cmd::PdfOverview => {
+                if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.toggle_overview(cx)) }
+            }
             Cmd::AskPdfPage => {
                 let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) else { return };
                 let (page, count) = { let view = pdf.read(cx); (view.current_page(), view.page_count()) };
@@ -4824,6 +4829,9 @@ impl Workspace {
         } else if self.dismiss_font_picker(window, cx) {
         } else if self.settings_view.is_some() {
             self.close_settings(window, cx);
+        } else if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()).filter(|pdf| pdf.read(cx).overview_open()) {
+            // 页面总览 was opened from the bar, so the viewer need not have the keyboard: it is put away before the paper is.
+            pdf.update(cx, |pdf, cx| pdf.toggle_overview(cx));
         } else if self.lib.is_none() && self.home.open {
             // The assistant's page goes back to the home page; what is in its box stays.
             self.run(Cmd::GoHome, window, cx);
@@ -9862,6 +9870,8 @@ impl Workspace {
                     "triple" => Split::Triple,
                     _ => Split::Off,
                 })),
+                // `pdfoverview`: 页面总览 of the PDF on show, on or off.
+                "pdfoverview" => Some(Cmd::PdfOverview),
                 // `pdfpage`: the dialog that goes to a page typed. `pdfpage:12` goes there.
                 "pdfpage" => match arg.parse::<usize>() {
                     Ok(page) => {
