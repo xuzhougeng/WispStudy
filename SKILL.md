@@ -17,7 +17,7 @@ Wisp Study 是本地优先的文献管理软件。每个文献库是独立文件
 | 新建文献库 | 支持 | `create_library` |
 | 把文献库交给另一台电脑 | 支持 | `export_library`（可不带 PDF）→ 对方 `import_library` |
 | 从在线数据库批量导入书目信息和摘要 | 支持 | `search_online` → `save_search` → `run_search` |
-| 搜索网页（文献数据库之外的信息） | 支持；需要 DeepSeek 或 Jina 的 Key | `web_search` |
+| 搜索网页（文献数据库之外的信息） | 支持；需要 DeepSeek、Jina 或 You.com 的 Key | `web_search` |
 | 按 DOI / PMID 直接添加条目 | 暂无专用命令 | 桌面「添加文献」 |
 | 导入本地 PDF、PDF 文件夹 | 支持 | `import_pdf`；可用 `--paper-id` 将单文件附到已有条目 |
 | 导入 BibTeX / RIS | 支持 | `import_references`，按内容自动识别格式 |

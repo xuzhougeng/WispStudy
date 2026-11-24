@@ -82,10 +82,10 @@ pub fn catalog() -> Vec<ToolDef> {
         ToolDef {
             name: "web_search",
             title: "搜索网页",
-            description: "用网页搜索引擎（DeepSeek 或 Jina，在「设置 › 网络 › 网页搜索」选择并填写 Key）搜索互联网，返回每条结果的标题、网址、摘要、站点和发布时间。用于文献数据库之外的信息：软件和数据库的文档、指南与政策、机构和项目的页面、新闻。找学术文献先用 search_online；网页结果不是文献库里的文献，引用时写出网址，只读到摘要时不要当作读过全文。想把一篇文献的页面收进文献库，用 import_url。不改动文献库。",
+            description: "用网页搜索引擎（DeepSeek、Jina 或 You.com，在「设置 › 网络 › 网页搜索」选择并填写 Key）搜索互联网，返回每条结果的标题、网址、摘要、站点和发布时间。用于文献数据库之外的信息：软件和数据库的文档、指南与政策、机构和项目的页面、新闻。找学术文献先用 search_online；网页结果不是文献库里的文献，引用时写出网址，只读到摘要时不要当作读过全文。想把一篇文献的页面收进文献库，用 import_url。不改动文献库。",
             input_schema: json!({"type": "object", "properties": {
-                "query": {"type": "string", "description": "搜索词。可以用 site:域名 限定站点、\"短语\" 精确匹配、-词 排除；DeepSeek 还支持 lang:zh、after:2025、before:2026-06-01。DeepSeek 的搜索词最多 128 个字符。"},
-                "count": {"type": "integer", "description": "返回多少条，默认 8；DeepSeek 最多 50，Jina 最多 20。"},
+                "query": {"type": "string", "description": "搜索词。可以用 site:域名 限定站点、\"短语\" 精确匹配、-词 排除；DeepSeek 还支持 lang:zh、after:2025、before:2026-06-01；You.com 还支持 filetype:pdf、AND、OR、NOT。DeepSeek 的搜索词最多 128 个字符。"},
+                "count": {"type": "integer", "description": "返回多少条，默认 8；DeepSeek 和 You.com 最多 50，Jina 最多 20。"},
                 "content": {"type": "boolean", "description": "为 true 时每条结果附上网页正文（每条最多 6000 个字符，更慢）；默认 false，只给摘要。"},
                 "engine": {"type": "string", "enum": websearch::ENGINES.iter().map(|engine| engine.key).collect::<Vec<_>>(), "description": "指定搜索引擎；省略时按设置选择。"},
             }, "required": ["query"], "additionalProperties": false}),
