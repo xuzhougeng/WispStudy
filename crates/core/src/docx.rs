@@ -12,6 +12,10 @@
 //! where they were. With `Options::track` the changes are written as Word's
 //! revisions (`w:ins`, `w:del`), for the reader to accept or reject.
 //!
+//! A table written in the manuscript (`Wanted::table`) is matched with
+//! nothing the file has: it is put in after the paragraph before it, as
+//! Word's own table (`Table::xml`).
+//!
 //! A comment is Word's own (`word/comments.xml`, with the range it is about
 //! marked in the text); those the file came with are never touched.
 //!
@@ -21,6 +25,7 @@
 
 use crate::ai::diff_tokens;
 use crate::manuscript::{crc32, xml_escape as escape};
+pub use crate::markdown::Align;
 pub use crate::pptx::Picture;
 use anyhow::{Result, anyhow, bail};
 use std::collections::BTreeMap;
@@ -1504,7 +1509,13 @@ pub struct Look {
     pub sub: bool,
     pub small_caps: bool,
     pub underline: bool,
+    pub strike: bool,
+    /// Set in the font code is set in (`MONO`).
+    pub mono: bool,
 }
+
+/// The font code is set in.
+pub(crate) const MONO: &str = "Consolas";
 
 /// Words that lead to another paragraph when clicked: a citation, to its entry in the reference list.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -1551,6 +1562,101 @@ pub struct Wanted {
     /// figure over its caption) or under it (one without a caption, after the paragraph before it).
     pub above: Vec<Picture>,
     pub below: Vec<Picture>,
+    /// This is no paragraph but a table the manuscript has and the file has not: `text` says nothing, it is matched
+    /// with no paragraph of the file, and it is written after the paragraph before it. Its pictures stand over and
+    /// under it as they do by a paragraph.
+    pub table: Option<Table>,
+}
+
+/// A table to put into a document.
+#[derive(Clone, Debug, Default)]
+pub struct Table {
+    /// How each column's words are set: one for every column, a column without one to the left.
+    pub aligns: Vec<Align>,
+    /// The first row is the header. A cell is its paragraphs, each with its looks, its links and its comments; one
+    /// without any is empty.
+    pub rows: Vec<Vec<Vec<Wanted>>>,
+}
+
+/// The width of the text on a page a document is made with here (`manuscript::docx`), in twentieths of a point:
+/// A4 with inch margins. What a table is as wide as in a file that does not say its page.
+const TEXT_WIDTH: u32 = 9026;
+
+/// The width of the text where a document ends, in twentieths of a point: the page without its margins.
+fn text_width(xml: &str) -> u32 {
+    let section = xml.rfind("<w:sectPr").map_or("", |at| &xml[at..]);
+    let read = |element: &str, name: &str| section.find(&format!("<{element} ")).and_then(|at| attr(open_tag(&section[at..]), name)).and_then(|value| value.parse::<u32>().ok());
+    match (read("w:pgSz", "w:w"), read("w:pgMar", "w:left"), read("w:pgMar", "w:right")) {
+        (Some(page), Some(left), Some(right)) if page > left + right + 1440 => page - left - right,
+        _ => TEXT_WIDTH,
+    }
+}
+
+impl Table {
+    /// The paragraphs of its cells, row by row.
+    pub fn paragraphs_mut(&mut self) -> impl Iterator<Item = &mut Wanted> {
+        self.rows.iter_mut().flatten().flatten()
+    }
+
+    /// The table as Word's, `width` wide: a grid of thin lines, the columns sharing the width by what they hold
+    /// (`markdown::column_shares`, as the app draws it), the first row in bold and said again at the top of each
+    /// page the table goes on to. A cell's paragraph is one of the document's own style without its indent, its
+    /// text set by `rpr`; `set` gives each its looks, links and comments. With `track`, every row is one put in.
+    fn xml(&self, width: u32, rpr: &str, mut track: Option<&mut Track>, set: &mut dyn FnMut(String, &Wanted) -> String) -> String {
+        let columns = self.rows.iter().map(Vec::len).max().unwrap_or(0).max(1);
+        let widths: Vec<Vec<usize>> = self.rows.iter().map(|row| row.iter().map(|cell| cell.iter().map(|para| crate::markdown::width(&para.text)).max().unwrap_or(0)).collect()).collect();
+        let shares = crate::markdown::column_shares(&widths);
+        let mut wide: Vec<u32> = (0..columns).map(|c| (width as f32 * shares.get(c).copied().unwrap_or(1. / columns as f32)) as u32).collect();
+        // What rounding left over goes to the last column: the columns are as wide as the table.
+        let left = width.saturating_sub(wide.iter().sum());
+        if let Some(last) = wide.last_mut() { *last += left }
+        let borders: String = ["top", "left", "bottom", "right", "insideH", "insideV"].iter().map(|side| format!("<w:{side} w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/>")).collect();
+        let grid: String = wide.iter().map(|w| format!("<w:gridCol w:w=\"{w}\"/>")).collect();
+        let mut out = format!("<w:tbl><w:tblPr><w:tblW w:w=\"{width}\" w:type=\"dxa\"/><w:tblBorders>{borders}</w:tblBorders><w:tblCellMar><w:left w:w=\"108\" w:type=\"dxa\"/><w:right w:w=\"108\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr><w:tblGrid>{grid}</w:tblGrid>");
+        let bold = with_look(rpr, Look { bold: true, ..Default::default() });
+        let none: Vec<Wanted> = vec![];
+        for (r, row) in self.rows.iter().enumerate() {
+            let head = if r == 0 { "<w:tblHeader/>" } else { "" };
+            let put_in = track.as_deref_mut().map(|track| format!("<w:ins{}/>", track.attrs())).unwrap_or_default();
+            out.push_str("<w:tr>");
+            if !head.is_empty() || !put_in.is_empty() { out.push_str(&format!("<w:trPr>{head}{put_in}</w:trPr>")) }
+            for (c, wide) in wide.iter().enumerate() {
+                let side = match self.aligns.get(c) {
+                    Some(Align::Center) => "center",
+                    Some(Align::Right) => "right",
+                    _ => "left",
+                };
+                // Whatever the document's text has for a first line or between its lines, a cell's is plain.
+                let ppr = format!("<w:pPr><w:spacing w:before=\"60\" w:after=\"60\" w:line=\"240\" w:lineRule=\"auto\"/><w:ind w:leftChars=\"0\" w:left=\"0\" w:firstLineChars=\"0\" w:firstLine=\"0\"/><w:jc w:val=\"{side}\"/></w:pPr>");
+                let rpr = if r == 0 { bold.as_str() } else { rpr };
+                out.push_str(&format!("<w:tc><w:tcPr><w:tcW w:w=\"{wide}\" w:type=\"dxa\"/></w:tcPr>"));
+                let paras: Vec<&Wanted> = row.get(c).unwrap_or(&none).iter().filter(|para| !para.text.trim().is_empty()).collect();
+                for para in &paras { out.push_str(&set(new_para(&ppr, rpr, para.text.trim(), track.as_deref_mut()), para)) }
+                // A cell ends in a paragraph, also one that says nothing.
+                if paras.is_empty() {
+                    let ppr = match track.as_deref_mut() {
+                        Some(track) => marked(&ppr, &format!("<w:ins{}/>", track.attrs())),
+                        None => ppr,
+                    };
+                    out.push_str(&format!("<w:p>{ppr}</w:p>"));
+                }
+                out.push_str("</w:tc>");
+            }
+            out.push_str("</w:tr>");
+        }
+        out.push_str("</w:tbl>");
+        out
+    }
+
+    /// The table in a document made here, with the looks of its cells and nothing else: no links, no comments.
+    pub(crate) fn plain(&self) -> String {
+        self.xml(TEXT_WIDTH, "", None, &mut |para, wanted| dressed(para, wanted, &Anchors::new()))
+    }
+}
+
+/// Whether a piece of a document's body is a table.
+fn is_table(xml: &str) -> bool {
+    xml.starts_with("<w:tbl>") || xml.starts_with("<w:tbl ")
 }
 
 #[derive(Clone, Debug, Default)]
@@ -1575,6 +1681,8 @@ pub struct Rewritten {
     pub comments: usize,
     /// Pictures put in.
     pub pictures: usize,
+    /// Tables put in.
+    pub tables: usize,
     /// The pictures the manuscript names that were not put in, by their addresses: said by whoever read them
     /// (`Store::manuscript_word`), not by `rewrite`.
     pub left_out: Vec<String>,
@@ -1715,7 +1823,7 @@ fn with_look(rpr: &str, look: Look) -> String {
     let rank = |name: &str| RPR_ORDER.iter().chain(&RPR_LATE).position(|known| *known == name).unwrap_or(usize::MAX);
     let mut kids: Vec<(String, String)> = children(inside(rpr)).into_iter().map(|(name, piece)| (name.to_string(), piece.to_string())).collect();
     let align = if look.sup { Some("superscript") } else if look.sub { Some("subscript") } else { None };
-    let add = [(look.bold, "w:b", "<w:b/>".to_string()), (look.italic, "w:i", "<w:i/>".to_string()), (look.small_caps, "w:smallCaps", "<w:smallCaps/>".to_string()), (look.underline, "w:u", "<w:u w:val=\"single\"/>".to_string()), (align.is_some(), "w:vertAlign", format!("<w:vertAlign w:val=\"{}\"/>", align.unwrap_or_default()))];
+    let add = [(look.mono, "w:rFonts", format!("<w:rFonts w:ascii=\"{MONO}\" w:hAnsi=\"{MONO}\"/>")), (look.bold, "w:b", "<w:b/>".to_string()), (look.italic, "w:i", "<w:i/>".to_string()), (look.small_caps, "w:smallCaps", "<w:smallCaps/>".to_string()), (look.strike, "w:strike", "<w:strike/>".to_string()), (look.underline, "w:u", "<w:u w:val=\"single\"/>".to_string()), (align.is_some(), "w:vertAlign", format!("<w:vertAlign w:val=\"{}\"/>", align.unwrap_or_default()))];
     for (on, name, xml) in add {
         if !on { continue }
         kids.retain(|(kid, _)| kid != name);
@@ -1812,10 +1920,15 @@ pub fn rewrite(source: &[u8], wanted: &[Wanted], options: &Options) -> Result<Re
     let doc = Document::parse(&xml)?;
     let readable = doc.readable(&styles);
     let old: Vec<String> = readable.iter().map(|&block| doc.para(block).text().trim().to_string()).collect();
-    let new: Vec<&str> = wanted.iter().map(|wanted| wanted.text.trim()).collect();
+    // A table is matched with nothing the file has: the paragraphs are, and each table follows the one before it.
+    let flow: Vec<usize> = (0..wanted.len()).filter(|&w| wanted[w].table.is_none()).collect();
+    let new: Vec<&str> = flow.iter().map(|&w| wanted[w].text.trim()).collect();
     // A paragraph to be written anew is no paragraph of the file changed, however alike the two read.
     let steps: Vec<Step> = align(&old.iter().map(String::as_str).collect::<Vec<_>>(), &new).into_iter().flat_map(|step| match step {
-        Step::Changed(o, w) if wanted[w].fresh => vec![Step::Removed(o), Step::Added(w)],
+        Step::Same(o, w) => vec![Step::Same(o, flow[w])],
+        Step::Changed(o, w) if wanted[flow[w]].fresh => vec![Step::Removed(o), Step::Added(flow[w])],
+        Step::Changed(o, w) => vec![Step::Changed(o, flow[w])],
+        Step::Added(w) => vec![Step::Added(flow[w])],
         step => vec![step],
     }).collect();
 
@@ -1868,20 +1981,28 @@ pub fn rewrite(source: &[u8], wanted: &[Wanted], options: &Options) -> Result<Re
     // The paragraph of the file last gone past: among the blocks, and among the paragraphs.
     let (mut last, mut last_old): (Option<usize>, Option<usize>) = (None, None);
     let mut done = Rewritten::default();
-    for step in &steps {
-        match *step {
-            Step::Same(o, w) => {
+    // The tables made here, by where each is: the block it stands after (none: in `front`) and its place there.
+    let mut made: Vec<(Option<usize>, usize)> = vec![];
+    let width = text_width(&xml);
+    // Before the first step: the tables that stand before every paragraph of the manuscript.
+    for step in std::iter::once(None).chain(steps.iter().copied().map(Some)) {
+        // The paragraph of the manuscript after the one just written: the tables that stand there follow it.
+        let next = match step {
+            None => 0,
+            Some(Step::Same(o, w)) => {
                 let block = readable[o];
                 let written = std::mem::take(&mut out[block][0]);
                 out[block] = with_pictures(dressed(noted(written, &wanted[w].notes, &mut comments), &wanted[w], &anchors), &wanted[w]);
                 (last, last_old, done.kept) = (Some(block), Some(o), done.kept + 1);
+                w + 1
             }
-            Step::Changed(o, w) => {
+            Some(Step::Changed(o, w)) => {
                 let block = readable[o];
                 out[block] = with_pictures(dressed(noted(doc.para(block).edited_by(&wanted[w].text, &wanted[w].edits, track.as_mut()), &wanted[w].notes, &mut comments), &wanted[w], &anchors), &wanted[w]);
                 (last, last_old, done.changed) = (Some(block), Some(o), done.changed + 1);
+                w + 1
             }
-            Step::Removed(o) => {
+            Some(Step::Removed(o)) => {
                 let block = readable[o];
                 let para = doc.para(block);
                 out[block] = match track.as_mut() {
@@ -1890,8 +2011,9 @@ pub fn rewrite(source: &[u8], wanted: &[Wanted], options: &Options) -> Result<Re
                     None => vec![],
                 };
                 (last, last_old, done.removed) = (Some(block), Some(o), done.removed + 1);
+                continue;
             }
-            Step::Added(w) => {
+            Some(Step::Added(w)) => {
                 let (ppr, rpr) = template(w, last_old);
                 let paras = with_pictures(dressed(noted(new_para(&ppr, &rpr, wanted[w].text.trim(), track.as_mut()), &wanted[w].notes, &mut comments), &wanted[w], &anchors), &wanted[w]);
                 match last {
@@ -1899,17 +2021,47 @@ pub fn rewrite(source: &[u8], wanted: &[Wanted], options: &Options) -> Result<Re
                     None => front.extend(paras),
                 }
                 done.added += 1;
+                w + 1
             }
+        };
+        for (w, table) in wanted.iter().enumerate().skip(next).map_while(|(w, wanted)| Some((w, wanted.table.as_ref()?))) {
+            // Its words are set like the text around it.
+            let (_, rpr) = template(w, last_old);
+            let xml = table.xml(width, &rpr, track.as_mut(), &mut |para, cell| dressed(noted(para, &cell.notes, &mut comments), cell, &anchors));
+            let pieces = with_pictures(xml, &wanted[w]);
+            let into = match last {
+                Some(block) => &mut out[block],
+                None => &mut front,
+            };
+            made.push((last, into.len() + wanted[w].above.len()));
+            into.extend(pieces);
+            done.tables += 1;
         }
     }
     // What comes before every paragraph of the file stands before the first of them; in a file without any, before the page's properties at the end.
     let front_at = readable.first().copied().or_else(|| doc.blocks.iter().rposition(|block| matches!(block, Block::Other(xml) if xml.starts_with("<w:sectPr")))).unwrap_or(doc.blocks.len());
     let mut body = String::with_capacity(xml.len() + 1024);
+    // Two tables that touch are one table to Word, and a document does not end in a table: an empty paragraph keeps
+    // a table made here apart from the table before or after it and from the page's properties at the end.
+    let mut before: Option<bool> = None;
+    let mut put = |body: &mut String, piece: &str, here: bool| {
+        if piece.is_empty() { return }
+        let apart = if is_table(piece) { before.is_some_and(|was| was || here) } else { piece.starts_with("<w:sectPr") && before == Some(true) };
+        if apart {
+            body.push_str(&match track.as_mut() {
+                Some(track) => format!("<w:p>{}</w:p>", marked("", &format!("<w:ins{}/>", track.attrs()))),
+                None => "<w:p/>".to_string(),
+            });
+        }
+        body.push_str(piece);
+        before = is_table(piece).then_some(here);
+    };
     for (n, pieces) in out.iter().enumerate() {
-        if n == front_at { front.iter().for_each(|para| body.push_str(para)) }
-        pieces.iter().for_each(|piece| body.push_str(piece));
+        if n == front_at { front.iter().enumerate().for_each(|(k, para)| put(&mut body, para, made.contains(&(None, k)))) }
+        pieces.iter().enumerate().for_each(|(k, piece)| put(&mut body, piece, made.contains(&(Some(n), k))));
     }
-    if front_at >= out.len() { front.iter().for_each(|para| body.push_str(para)) }
+    if front_at >= out.len() { front.iter().enumerate().for_each(|(k, para)| put(&mut body, para, made.contains(&(None, k)))) }
+    if before == Some(true) { body.push_str("<w:p/>") }
     zip.set(&main, format!("{}{body}{}", doc.head, doc.tail).as_bytes());
     done.pictures = media.write(&mut zip, &main)?;
 
@@ -2175,6 +2327,35 @@ pub(crate) mod tests {
         // A new heading is set like the heading before it.
         assert!(out.ends_with("<w:p><w:pPr><w:pStyle w:val=\"Sub\"/></w:pPr><w:r><w:t xml:space=\"preserve\">Outlook</w:t></w:r></w:p>"), "{out}");
         assert_eq!((done.kept, done.changed, done.added, done.removed), (4, 0, 4, 1));
+    }
+
+    #[test]
+    fn a_table_is_put_in_after_the_paragraph_before_it_and_matched_with_none() {
+        let source = file(BODY, "");
+        let cell = |text: &str| vec![body(text)];
+        let table = |name: &str| Wanted { table: Some(Table { aligns: vec![Align::Left, Align::Right], rows: vec![vec![cell(name), cell("n")], vec![cell("Roots grow down into the soil."), vec![]]] }), ..Default::default() };
+        let mut wanted: Vec<Wanted> = texts(&source).iter().map(|text| body(text)).collect();
+        // One before every paragraph, two after the paragraph the file's own table follows, one at the end.
+        wanted.insert(3, table("second"));
+        wanted.insert(3, table("first"));
+        wanted.insert(0, table("front"));
+        wanted.push(table("last"));
+        let done = rewrite(&source, &wanted, &Options::default()).unwrap();
+        // A cell that says what a paragraph says is not that paragraph: every one of the file's stays as it was.
+        assert_eq!((done.kept, done.changed, done.added, done.removed, done.tables), (5, 0, 0, 0, 4));
+        assert_eq!(texts(&done.bytes), texts(&source));
+        let out = body_of(&done.bytes);
+        let made = |name: &str| format!("<w:tbl><w:tblPr><w:tblW w:w=\"9026\" w:type=\"dxa\"/>{}", &out[out.find("<w:tblBorders>").unwrap()..out.find(name).unwrap() + name.len()]);
+        assert!(out.starts_with(&made("front")) && out.contains("</w:tbl><w:p><w:pPr><w:pStyle w:val=\"a3\"/>"), "{out}");
+        // Two made here that touch are kept apart by an empty paragraph; the file's own empty paragraph already keeps its table
+        // apart, and the table at the document's end has a paragraph after it.
+        assert!(out.contains("<w:t>.</w:t></w:r></w:p><w:tbl><w:tblPr>") && out.contains("</w:tbl><w:p/><w:tbl><w:tblPr>") && out.contains("</w:tbl><w:p/><w:tbl><w:tr><w:tc><w:p><w:r><w:t>cell</w:t>") && out.ends_with("</w:tbl><w:p/>"), "{out}");
+        assert_eq!((out.matches("<w:tbl>").count(), out.matches("<w:p/>").count()), (5, 3));
+        // The second column is set to the right, and a cell without words holds an empty paragraph.
+        assert!(out.contains("<w:jc w:val=\"right\"/></w:pPr><w:r><w:rPr><w:b/></w:rPr><w:t xml:space=\"preserve\">n</w:t></w:r></w:p></w:tc></w:tr>") && out.contains("<w:jc w:val=\"right\"/></w:pPr></w:p></w:tc></w:tr></w:tbl>"), "{out}");
+        // A page of its own size gives the table its width.
+        let narrow = String::from_utf8(Zip::read(&source).unwrap().get("word/document.xml").unwrap().unwrap()).unwrap().replace("<w:pgSz w:w=\"11906\" w:h=\"16838\"/>", "<w:pgSz w:w=\"11906\" w:h=\"16838\"/><w:pgMar w:top=\"1440\" w:right=\"1800\" w:bottom=\"1440\" w:left=\"1800\"/>");
+        assert_eq!((text_width(&narrow), text_width("<w:body/>")), (8306, TEXT_WIDTH));
     }
 
     #[test]

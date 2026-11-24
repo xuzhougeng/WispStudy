@@ -270,7 +270,7 @@ fn table_cells(line: &str) -> Vec<String> {
 }
 
 /// A pipe table at the start of `lines`: the table, and the lines it took.
-fn pipe_table(lines: &[&str]) -> Option<(Block, usize)> {
+pub fn pipe_table(lines: &[&str]) -> Option<(Block, usize)> {
     let (head, sep) = (lines.first()?, lines.get(1)?);
     if !head.contains('|') || !sep.contains('-') { return None }
     let seps = table_cells(sep);
@@ -298,6 +298,26 @@ fn pipe_table(lines: &[&str]) -> Option<(Block, usize)> {
 /// 0 when they do not start with one. For whoever reads a text line by line and must keep a table's lines together.
 pub fn table_lines(lines: &[&str]) -> usize {
     pipe_table(lines).map_or(0, |(_, used)| used)
+}
+
+/// How wide a text is at its longest line, in letters: a letter of Chinese counts as two of Latin.
+pub fn width(text: &str) -> usize {
+    text.lines().map(|line| line.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum::<usize>()).max().unwrap_or(0)
+}
+
+/// The share of a table's width each of its columns gets, adding up to 1: by the widest of its cells (`width`
+/// of each, row by row), so a column of labels is narrow and one of sentences wide. No column is counted
+/// shorter than `SHORT` or longer than `LONG`: a label stays on one line beside a long sentence, and one very
+/// long cell does not take the table. The window draws a table so, and a Word file has it so.
+pub fn column_shares(rows: &[Vec<usize>]) -> Vec<f32> {
+    const SHORT: usize = 4;
+    const LONG: usize = 30;
+    // The room a cell's padding takes, in letters: what keeps a narrow column from being all padding.
+    const PADDING: usize = 3;
+    let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
+    let widths: Vec<usize> = (0..columns).map(|c| rows.iter().filter_map(|row| row.get(c)).copied().max().unwrap_or(0).clamp(SHORT, LONG) + PADDING).collect();
+    let all: usize = widths.iter().sum();
+    widths.iter().map(|width| *width as f32 / all as f32).collect()
 }
 
 fn is_boundary(c: Option<char>) -> bool {

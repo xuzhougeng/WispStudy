@@ -613,7 +613,7 @@ pub struct Rich {
 }
 
 impl Rich {
-    fn push(&mut self, text: &str) {
+    pub(crate) fn push(&mut self, text: &str) {
         self.text.push_str(text);
     }
 
@@ -624,11 +624,21 @@ impl Rich {
         self.links.push((start..self.text.len(), paper_id.to_string()));
     }
 
-    fn append(&mut self, other: &Rich) {
+    pub(crate) fn append(&mut self, other: &Rich) {
         let base = self.text.len();
         self.text.push_str(&other.text);
         self.looks.extend(other.looks.iter().map(|(range, look)| (base + range.start..base + range.end, *look)));
         self.links.extend(other.links.iter().map(|(range, to)| (base + range.start..base + range.end, to.clone())));
+    }
+
+    /// Without the blanks around it: what is set apart and what cites stays on its words.
+    pub(crate) fn trimmed(self) -> Rich {
+        let lead = self.text.len() - self.text.trim_start().len();
+        let text = self.text.trim().to_string();
+        let within = |range: Range<usize>| range.start.saturating_sub(lead).min(text.len())..range.end.saturating_sub(lead).min(text.len());
+        let looks = self.looks.into_iter().map(|(range, look)| (within(range), look)).filter(|(range, _)| !range.is_empty()).collect();
+        let links = self.links.into_iter().map(|(range, to)| (within(range), to)).filter(|(range, _)| !range.is_empty()).collect();
+        Rich { text, looks, links }
     }
 }
 

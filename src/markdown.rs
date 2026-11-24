@@ -334,20 +334,10 @@ fn block(block: &Block, links: &mut Draw) -> AnyElement {
     }
 }
 
-/// The share of a table's width each of its columns gets, adding up to 1: by the longest line any of its cells
-/// holds, so a column of labels is narrow and one of sentences wide. A letter of Chinese counts as two of Latin.
-/// No column is counted shorter than `SHORT` or longer than `LONG`: a label stays on one line beside a long
-/// sentence, and one very long cell does not take the table.
+/// The share of a table's width each of its columns gets (`markdown::column_shares`, which a Word file follows too).
 fn column_shares(rows: &[Vec<Rich>]) -> Vec<f32> {
-    const SHORT: usize = 4;
-    const LONG: usize = 30;
-    // The room a cell's padding takes, in letters: what keeps a narrow column from being all padding.
-    const PADDING: usize = 3;
-    let columns = rows.iter().map(Vec::len).max().unwrap_or(0);
-    let wide = |cell: &Rich| cell.text.lines().map(|line| line.chars().map(|c| if c.is_ascii() { 1 } else { 2 }).sum::<usize>()).max().unwrap_or(0);
-    let widths: Vec<usize> = (0..columns).map(|c| rows.iter().filter_map(|row| row.get(c)).map(wide).max().unwrap_or(0).clamp(SHORT, LONG) + PADDING).collect();
-    let all: usize = widths.iter().sum();
-    widths.iter().map(|width| *width as f32 / all as f32).collect()
+    let widths: Vec<Vec<usize>> = rows.iter().map(|row| row.iter().map(|cell| wisp_core::markdown::width(&cell.text)).collect()).collect();
+    wisp_core::markdown::column_shares(&widths)
 }
 
 /// What a click in a text leads to.
