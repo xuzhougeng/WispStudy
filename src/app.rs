@@ -291,6 +291,8 @@ pub enum Cmd {
     OpenLibrary(String),
     /// A library's card was dragged onto another's (moved, onto): it takes that place on the home page.
     MoveLibrary(String, String),
+    /// The home page's libraries as rows (true) or as cards: the switch over them, kept in the settings.
+    HomeList(bool),
     NewLibrary,
     EditLibrary(String),
     AskRemoveLibrary(String),
@@ -501,6 +503,8 @@ pub enum Cmd {
     ToggleSidebar,
     /// Draw the pages of the PDF on show larger, smaller, or at a given size.
     PdfZoom(ZoomTo),
+    /// The page count on the PDF's bar: a page typed is gone to (`Modal::PdfPage`).
+    AskPdfPage,
     /// Show the PDF on show twice, each half scrolled on its own, or once again.
     PdfSplit(Split),
     /// Show a file of the paper (its id) in the other half of the viewer; the file worked in is the viewer split on itself.
@@ -1664,6 +1668,8 @@ pub enum Modal {
     Tag { tag: String, name: Entity<TextInput> },
     /// The two ends of a filter by year or by impact factor (`FilterKey::Year`, `FilterKey::Impact`); either may be left empty.
     Range { key: FilterKey, low: Entity<TextInput>, high: Entity<TextInput> },
+    /// 跳到第几页: the page of the PDF on show to go to, of `count`.
+    PdfPage { page: Entity<TextInput>, count: usize },
     /// Tags for several papers at once.
     TagPapers { ids: Vec<String>, name: Entity<TextInput> },
     /// 清空回收站: the papers in the trash deleted from disk, once the phrase is typed.
@@ -3921,6 +3927,12 @@ impl Workspace {
                 }
                 self.ensure_pdf(cx);
             }
+            Cmd::HomeList(rows) => {
+                if self.settings.home_list != rows {
+                    self.settings.home_list = rows;
+                    self.save_settings(cx);
+                }
+            }
             Cmd::ToggleSidebar => {
                 // Asking about a paper put the sidebar away for the while: wanting it back is leaving that.
                 if self.asking(window) {
@@ -4081,6 +4093,19 @@ impl Workspace {
             }
             Cmd::FloatChat(on) => self.float_chat(on, window, cx),
             Cmd::FoldChat(fold) => self.fold_chat(fold, window, cx),
+            Cmd::AskPdfPage => {
+                let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) else { return };
+                let (page, count) = { let view = pdf.read(cx); (view.current_page(), view.page_count()) };
+                if count == 0 { return }
+                self.modal_subscriptions.clear();
+                self.modal_error.clear();
+                // The page read at, selected: a number typed takes its place.
+                let at = page.to_string();
+                let page = self.modal_input("页码", &at, false, window, cx);
+                page.update(cx, |input, cx| input.select_range(0..at.len(), cx));
+                page.read(cx).focus(window);
+                self.modal = Some(Modal::PdfPage { page, count });
+            }
             Cmd::PdfZoom(to) => {
                 if let Some(lib) = self.lib.as_mut().filter(|lib| lib.tab == Tab::Pdf || lib.split) && let Some(pdf) = lib.pdf.clone() {
                     // A fit chosen is the one the next paper opens at; a percentage stays with this paper.
@@ -8860,6 +8885,16 @@ impl Workspace {
                 }
                 if name == tag || self.retag(&tag, Some(&name), cx) { self.run(Cmd::CloseModal, window, cx) }
             }
+            Modal::PdfPage { page, count } => {
+                let (typed, count) = (text(page, cx), *count);
+                match crate::library::page_typed(&typed, count) {
+                    Ok(page) => {
+                        self.run(Cmd::CloseModal, window, cx);
+                        if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.go_to(page, cx)) }
+                    }
+                    Err(why) => self.modal_error = why,
+                }
+            }
             Modal::Range { key, low, high } => {
                 let (key, low, high) = (key.clone(), text(low, cx), text(high, cx));
                 match crate::library::range_value(&key, &low, &high) {
@@ -9143,6 +9178,8 @@ impl Workspace {
                 }
                 // `assistant` is the home page's corner button; `drafts` 历史 inside a conversation (again: back to it).
                 "assistant" => Some(Cmd::Draft(crate::draft::Do::Begin)),
+                // `homelist` / `homelist:cards`: the home page's libraries as rows, or as cards again.
+                "homelist" => Some(Cmd::HomeList(arg != "cards")),
                 // The home page's invitation to star the project, due in this run; nothing is written until it is answered.
                 "starask" => {
                     self.star_ask = true;
@@ -9802,6 +9839,14 @@ impl Workspace {
                     "triple" => Split::Triple,
                     _ => Split::Off,
                 })),
+                // `pdfpage`: the dialog that goes to a page typed. `pdfpage:12` goes there.
+                "pdfpage" => match arg.parse::<usize>() {
+                    Ok(page) => {
+                        if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.go_to(page, cx)) }
+                        None
+                    }
+                    Err(_) => Some(Cmd::AskPdfPage),
+                },
                 // `zoom:150`, `zoom:page`, `zoom:width`, `zoom:in`, `zoom:out`
                 "zoom" => Some(Cmd::PdfZoom(match arg {
                     "in" => ZoomTo::In,

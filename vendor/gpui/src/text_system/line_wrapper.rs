@@ -245,7 +245,8 @@ impl LineWrapper {
     }
 }
 
-fn update_runs_after_truncation(result: &str, ellipsis: &str, runs: &mut Vec<TextRun>) {
+// quiet.md: also called by the text element, which cuts a line again that was shaped too wide.
+pub(crate) fn update_runs_after_truncation(result: &str, ellipsis: &str, runs: &mut Vec<TextRun>) {
     let mut truncate_at = result.len() - ellipsis.len();
     for (run_index, run) in runs.iter_mut().enumerate() {
         if run.len <= truncate_at {

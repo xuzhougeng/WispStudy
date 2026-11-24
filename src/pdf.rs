@@ -4325,7 +4325,9 @@ impl Render for PdfView {
             let pages = list(self.panes[pane].list.clone(), move |index, _, cx| entity.update(cx, |this, cx| this.page(pane, index, cx))).size_full().pt(px(PAGE_GAP));
             // Up the right edge, the bar that goes down the pages; it stops above the sideways bar. Pressed, its view is the one worked in, and leads its group.
             let pressed = cx.entity();
-            let down = crate::scrollbar::scrollbar(("pdf-down", pane), self.panes[pane].list.clone()).on_press(move |_, cx| pressed.update(cx, |this: &mut Self, cx| {
+            // Held, it says the page it has come to: the pages pass too fast to be read off themselves.
+            let (said, count) = (self.panes[pane].list.clone(), self.sizes.len());
+            let down = crate::scrollbar::scrollbar(("pdf-down", pane), self.panes[pane].list.clone()).saying(move || { let page = said.logical_scroll_top().item_ix + 1; tf!("{page} / {count} 页", "{page} / {count} pages").into() }).on_press(move |_, cx| pressed.update(cx, |this: &mut Self, cx| {
                 this.active = pane;
                 cx.emit(PdfEvent::Worked);
                 cx.emit(PdfEvent::Pressed);
