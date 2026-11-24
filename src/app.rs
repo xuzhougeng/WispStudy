@@ -725,7 +725,10 @@ pub enum Cmd {
     ConfirmPart(String),
     ConfirmTickAll(bool),
     ConfirmSort,
+    /// A click on a row: the keys act on it, and it is shown in full under the list again.
     ConfirmCursor(String),
+    /// The × of the row shown in full under the list: it is put away until a row is clicked. Esc here leaves for the queue, as the page's foot says.
+    ConfirmClose,
     /// Write what is ticked; take that back.
     ConfirmApply,
     ConfirmUndo,
@@ -4597,7 +4600,7 @@ impl Workspace {
                 if let Some(lib) = self.lib.as_mut() { lib.screen.filter = filter }
             }
             Cmd::ScreenDecide(..) | Cmd::ScreenMode(_) | Cmd::ScreenGo(_) | Cmd::ScreenUndo | Cmd::ScreenAskOne(_) | Cmd::ScreenBeside => self.run_screen(cmd, window, cx),
-            Cmd::ConfirmTick(_) | Cmd::ConfirmChoose(..) | Cmd::ConfirmPart(_) | Cmd::ConfirmTickAll(_) | Cmd::ConfirmSort | Cmd::ConfirmCursor(_) | Cmd::ConfirmApply | Cmd::ConfirmUndo => self.run_confirm(cmd, window, cx),
+            Cmd::ConfirmTick(_) | Cmd::ConfirmChoose(..) | Cmd::ConfirmPart(_) | Cmd::ConfirmTickAll(_) | Cmd::ConfirmSort | Cmd::ConfirmCursor(_) | Cmd::ConfirmClose | Cmd::ConfirmApply | Cmd::ConfirmUndo => self.run_confirm(cmd, window, cx),
 
             Cmd::OpenGuide(choosing) => {
                 if let Some(lib) = self.lib.as_mut() {
@@ -4729,6 +4732,9 @@ impl Workspace {
                 lib.library_chat.materials_open = false;
                 lib.library_chat.input.read(cx).focus(window);
             }
+        } else if self.lib.as_ref().is_some_and(|l| l.page == Page::Extract && l.selected.is_none() && l.extract_detail_shown()) {
+            // 提取's row in full under the list, once no paper stands beside it: the list gets its room back.
+            self.run(Cmd::Extract(crate::extract::Do::Close), window, cx);
         } else if self.lib.as_ref().is_some_and(|l| l.page == Page::Trash && !l.trash_chosen.is_empty()) {
             if let Some(lib) = self.lib.as_mut() { (lib.trash_chosen, lib.trash_anchor) = (vec![], None) }
         } else if self.lib.as_ref().is_some_and(|l| !l.marked.is_empty()) {
@@ -9316,7 +9322,8 @@ impl Workspace {
                 "zotero-report" => Some(Cmd::ShowZotero),
                 // `screen` starts the assistant on the pending papers, `screen:decided` on the decided ones, `screen:included` on the included ones;
                 // `screen:unincluded` asks to move the decided papers not included to the trash.
-                // `screen:single`, `screen:confirm` and `screen:batch` are the page's three faces; `screen:go;<n>` the n-th paper of a round.
+                // `screen:single`, `screen:confirm` and `screen:batch` are the page's three faces; `screen:go;<n>` the n-th paper of a round;
+                // `screen:close` the × of 确认's row in full under the list.
                 "screen" => Some(match arg {
                     "decided" => Cmd::ScreenRecheck(false),
                     "included" => Cmd::ScreenRecheck(true),
@@ -9326,6 +9333,7 @@ impl Workspace {
                     "batch" => Cmd::ScreenMode(ScreenMode::Batch),
                     "apply" => Cmd::ConfirmApply,
                     "unconfirm" => Cmd::ConfirmUndo,
+                    "close" => Cmd::ConfirmClose,
                     go if go.starts_with("go;") => Cmd::ScreenGo(go[3..].parse().unwrap_or(0)),
                     _ => Cmd::ScreenStart,
                 }),

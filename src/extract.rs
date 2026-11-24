@@ -50,7 +50,10 @@ pub enum Do {
     Choose(Key, String),
     Part(String),
     TickAll(bool),
+    /// A click on a row: the keys go on from it, and it is shown in full under the list again.
     Cursor(Key),
+    /// The × of the row shown in full under the list, and Esc: it is put away until a row is clicked.
+    Close,
     /// The paper of the row the keys are on, beside the list; again puts it away.
     Beside,
     /// Write the ticked rows on show; take the last writing or setting aside back.
@@ -107,6 +110,8 @@ pub struct Extract {
     pub left: Vec<(String, Vec<String>)>,
     /// The run's box shows its one line only.
     pub folded: bool,
+    /// The row at the cursor is not shown in full under the list: the person put it away, and the keys walking the list leave it away.
+    pub put_away: bool,
     pub error: String,
     /// Bumped when a run starts or stops, so answers to an earlier one are dropped.
     run: u64,
@@ -122,7 +127,7 @@ pub struct Extract {
 
 impl Extract {
     pub fn new() -> Extract {
-        Extract { proposals: Proposals::default(), todo: vec![], reading: vec![], total: 0, done: 0, failed: 0, unread: 0, found: 0, streak: 0, model: String::new(), with: String::new(), left: vec![], folded: false, error: String::new(), run: 0, asked: vec![], review: Reviewing::default(), last: None, scroll: UniformListScrollHandle::new(), asking: HashSet::new(), ask_errors: HashMap::new() }
+        Extract { proposals: Proposals::default(), todo: vec![], reading: vec![], total: 0, done: 0, failed: 0, unread: 0, found: 0, streak: 0, model: String::new(), with: String::new(), left: vec![], folded: false, put_away: false, error: String::new(), run: 0, asked: vec![], review: Reviewing::default(), last: None, scroll: UniformListScrollHandle::new(), asking: HashSet::new(), ask_errors: HashMap::new() }
     }
 
     /// Whether the assistant is working through the papers right now.
@@ -177,6 +182,12 @@ impl Library {
         let proposal = self.extract.proposals.get(&key.0, &key.1)?;
         self.pdf_file(&key.0)?;
         proposal.page.filter(|_| !proposal.excerpt.is_empty()).map(|page| (page, proposal.excerpt.clone()))
+    }
+
+    /// Whether the row at the cursor is shown in full under the list.
+    pub(crate) fn extract_detail_shown(&self) -> bool {
+        let Some(key) = self.extract.review.cursor.as_ref().filter(|_| !self.extract.put_away) else { return false };
+        self.extract.review.on_show(self.extract_rows()).iter().any(|row| row.key() == *key)
     }
 
     /// The waiting proposal for a field of a paper.
@@ -290,12 +301,11 @@ impl Workspace {
                 });
             }
             Do::Cursor(key) => {
-                let Some(lib) = self.lib.as_mut() else { return };
-                lib.extract.review.cursor = Some(key.clone());
-                // A paper open beside the list follows the row: its PDF to the row's sentence, any other tab to the paper.
-                if lib.selected.is_some() {
-                    if lib.tab == Tab::Pdf { self.extract_beside(&key, window, cx) } else { self.select(Some(key.0), window, cx) }
-                }
+                if let Some(lib) = self.lib.as_mut() { lib.extract.put_away = false }
+                self.extract_cursor(key, window, cx);
+            }
+            Do::Close => {
+                if let Some(lib) = self.lib.as_mut() { lib.extract.put_away = true }
             }
             Do::Beside => {
                 let Some(lib) = self.lib.as_ref() else { return };
@@ -356,6 +366,16 @@ impl Workspace {
                 self.run(Cmd::SetPage(Page::Extract), window, cx);
             }
             Err(err) => self.modal_error = err,
+        }
+        cx.notify();
+    }
+
+    /// Put the keys on a row. A paper open beside the list follows it: its PDF to the row's sentence, any other tab to the paper.
+    fn extract_cursor(&mut self, key: Key, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        lib.extract.review.cursor = Some(key.clone());
+        if lib.selected.is_some() {
+            if lib.tab == Tab::Pdf { self.extract_beside(&key, window, cx) } else { self.select(Some(key.0), window, cx) }
         }
         cx.notify();
     }
@@ -590,8 +610,8 @@ impl Workspace {
         let rows = lib.extract.review.on_show(lib.extract_rows());
         let Some(row) = lib.extract.review.cursor.as_ref().and_then(|key| rows.iter().find(|row| row.key() == *key)).or(rows.first()) else { return };
         let on = row.key();
-        // The first key only shows which row the keys are on.
-        if lib.extract.review.cursor.as_ref() != Some(&on) { return self.run(Cmd::Extract(Do::Cursor(on)), window, cx) }
+        // The first key only shows which row the keys are on; the row in full stays away if it was put away.
+        if lib.extract.review.cursor.as_ref() != Some(&on) { return self.extract_cursor(on, window, cx) }
         if matches!(key, "space" | "x") { self.run(Cmd::Extract(Do::Tick(on)), window, cx) }
     }
 
@@ -614,11 +634,12 @@ impl Workspace {
             _ => return,
         };
         lib.extract.scroll.scroll_to_item(to, if at.is_some_and(|at| to > at) { ScrollStrategy::Bottom } else { ScrollStrategy::Top });
-        self.run(Cmd::Extract(Do::Cursor(keys[to].clone())), window, cx);
+        // Walking the list leaves the row in full away if it was put away: each row already shows its value and sentence.
+        self.extract_cursor(keys[to].clone(), window, cx);
     }
 
     /// The steps of `WISP_STUDY_DEV` for 提取, after `extract:`. Rows and fields are named by their place, from 0:
-    /// `marked`, `field;<n>`, `again`, `summary`, `stop`, `tick;<n>`, `cursor;<n>`, `choose;<n>;<option>`, `part` / `part;<n>`,
+    /// `marked`, `field;<n>`, `again`, `summary`, `stop`, `tick;<n>`, `cursor;<n>` (a click on the row), `close`, `choose;<n>;<option>`, `part` / `part;<n>`,
     /// `all`, `none`, `beside`, `apply`, `undo`, `dismiss`, and for the selected paper `ask;<n>`, `take;<n>`, `drop;<n>`.
     #[cfg(debug_assertions)]
     pub(crate) fn extract_dev(&self, arg: &str) -> Option<Cmd> {
@@ -642,6 +663,7 @@ impl Workspace {
             "fold" => Do::Fold,
             "tick" => Do::Tick(row()?),
             "cursor" => Do::Cursor(row()?),
+            "close" => Do::Close,
             "choose" => Do::Choose(row()?, second.to_string()),
             "part" => Do::Part(if first.is_empty() { String::new() } else { field()? }),
             "all" => Do::TickAll(true),
@@ -898,11 +920,12 @@ impl Workspace {
 
         let list = uniform_list("extract-rows", rows.len(), cx.processor(move |this, range: Range<usize>, _, cx| this.render_extract_rows(range, cx))).track_scroll(state.scroll.clone()).flex_1();
         // The row the keys are on, in full: a row of the list has one line for the value and one for the sentence.
-        let cursor = review.cursor.as_ref().and_then(|key| rows.iter().find(|row| row.key() == *key)).map(|row| {
+        let cursor = review.cursor.as_ref().filter(|_| !state.put_away).and_then(|key| rows.iter().find(|row| row.key() == *key)).map(|row| {
             let (paper, proposal) = (row.paper, row.proposal);
             let beside = lib.selected.as_deref() == Some(paper.id.as_str());
             let open = ui::ghost_button("extract-beside", Some("file-text"), Some(if beside { t("收起").into() } else if lib.pdf_file(&paper.id).is_some() { t("对照 PDF").into() } else { t("完整记录").into() })).h(text_px(24.)).text_size(text_px(12.)).on_click(self.on(Cmd::Extract(Do::Beside), cx));
             let again = ui::ghost_button("extract-ask-again", Some("sparkle"), Some(t("再问一次").into())).h(text_px(24.)).text_size(text_px(12.)).on_click(self.on(Cmd::Extract(Do::Ask(row.key())), cx));
+            let close = ui::ghost_button("extract-cursor-close", Some("x"), None).h(text_px(24.)).min_w(px(24.)).tooltip(ui::tip(t("收起详情"))).on_click(self.on(Cmd::Extract(Do::Close), cx));
             let asking = state.asking.contains(&row.key());
             let mut about = vec![basis(proposal).to_string(), proposal.author.clone()];
             if !row.held().is_empty() { about.push(tf!("词条现为：{}", "The field holds: {}", row.held().join("；"))) }
@@ -919,7 +942,7 @@ impl Workspace {
                 .py(px(10.))
                 .border_t_1()
                 .border_color(Theme::line())
-                .child(div().flex().items_center().gap(px(8.)).child(div().flex_1().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(paper.title.clone())).child(if asking { div().flex().flex_none().items_center().gap(px(5.)).text_size(text_px(12.)).text_color(Theme::accent()).child(ui::spinner("extract-asking", 13., Theme::accent())).child(t("正在读这一篇…")).into_any_element() } else { again.into_any_element() }).child(open))
+                .child(div().flex().items_center().gap(px(8.)).child(div().flex_1().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(paper.title.clone())).child(if asking { div().flex().flex_none().items_center().gap(px(5.)).text_size(text_px(12.)).text_color(Theme::accent()).child(ui::spinner("extract-asking", 13., Theme::accent())).child(t("正在读这一篇…")).into_any_element() } else { again.into_any_element() }).child(open).child(close))
                 .child(div().flex().items_start().gap(px(8.)).child(div().flex_none().pt(px(1.)).text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(row.field.name.clone())).child(self.selectable(format!("extract-value-{}-{}", paper.id, row.field.id), review.values(row).join("；"), cx).flex_1().min_w_0().line_height(text_px(21.))));
             if !proposal.excerpt.is_empty() {
                 let quote = div().id("extract-quote").flex().gap(px(8.)).px(px(10.)).py(px(8.)).rounded(px(6.)).bg(Theme::bg_sunken()).border_l_2().border_color(Theme::accent()).text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_secondary()).child(div().flex_1().min_w_0().child(ui::one_line(&proposal.excerpt)));

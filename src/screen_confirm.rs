@@ -75,10 +75,10 @@ impl Workspace {
                 lib.screen.confirm_scroll = UniformListScrollHandle::new();
             }
             Cmd::ConfirmCursor(id) => {
-                lib.screen.confirm.cursor = Some(id.clone());
-                // A paper open beside the list follows the row.
-                if lib.selected.is_some() { self.select(Some(id), window, cx) }
+                lib.screen.confirm.put_away = false;
+                self.confirm_cursor(id, window, cx);
             }
+            Cmd::ConfirmClose => lib.screen.confirm.put_away = true,
             Cmd::ConfirmApply => self.confirm_apply(window, cx),
             Cmd::ConfirmUndo => {
                 let Some(confirmed) = lib.screen.confirmed.take() else { return };
@@ -87,6 +87,14 @@ impl Workspace {
             }
             _ => {}
         }
+        cx.notify();
+    }
+
+    /// Put the keys on a row; a paper open beside the list follows it. The row in full stays away if it was put away.
+    fn confirm_cursor(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        lib.screen.confirm.cursor = Some(id.clone());
+        if lib.selected.is_some() { self.select(Some(id), window, cx) }
         cx.notify();
     }
 
@@ -116,7 +124,7 @@ impl Workspace {
         let Some((paper, suggestion)) = lib.screen.confirm.cursor.as_ref().and_then(|id| rows.iter().find(|(p, _)| p.id == *id)).or(rows.first()) else { return };
         let id = paper.id.clone();
         // The first key only shows which row the keys are on.
-        if lib.screen.confirm.cursor.as_deref() != Some(id.as_str()) { return self.run(Cmd::ConfirmCursor(id), window, cx) }
+        if lib.screen.confirm.cursor.as_deref() != Some(id.as_str()) { return self.confirm_cursor(id, window, cx) }
         let cmd = match key {
             "space" | "x" => Cmd::ConfirmTick(id),
             "a" => Cmd::ConfirmChoose(id, suggestion.verdict.clone()),
@@ -148,7 +156,8 @@ impl Workspace {
             _ => return,
         };
         lib.screen.confirm_scroll.scroll_to_item(to, if at.is_some_and(|at| to > at) { ScrollStrategy::Bottom } else { ScrollStrategy::Top });
-        self.run(Cmd::ConfirmCursor(ids[to].clone()), window, cx);
+        // Walking the list leaves the row in full away if it was put away: each row already shows the suggestion.
+        self.confirm_cursor(ids[to].clone(), window, cx);
     }
 
     pub fn render_screen_confirm(&mut self, width: f32, cx: &mut Context<Self>) -> AnyElement {
@@ -224,8 +233,9 @@ impl Workspace {
 
         let list = uniform_list("confirm-rows", rows.len(), cx.processor(move |this, range: Range<usize>, _, cx| this.render_confirm_rows(range, width < 620., cx))).track_scroll(lib.screen.confirm_scroll.clone()).flex_1();
         // The row the keys are on, in full: a row of the list has one line for the reason.
-        let cursor = confirm.cursor.as_ref().and_then(|id| rows.iter().find(|(p, _)| p.id == *id)).map(|(paper, _)| {
+        let cursor = confirm.cursor.as_ref().filter(|_| !confirm.put_away).and_then(|id| rows.iter().find(|(p, _)| p.id == *id)).map(|(paper, _)| {
             let beside = lib.selected.as_deref() == Some(paper.id.as_str());
+            let close = ui::ghost_button("confirm-cursor-close", Some("x"), None).h(text_px(24.)).min_w(px(24.)).tooltip(ui::tip(t("收起详情"))).on_click(self.on(Cmd::ConfirmClose, cx));
             let open = ui::ghost_button("confirm-beside", Some("file-text"), Some(if beside { t("收起").into() } else if lib.pdf_file(&paper.id).is_some() { t("对照 PDF").into() } else { t("完整记录").into() })).h(text_px(24.)).text_size(text_px(12.)).on_click(self.on(Cmd::ScreenBeside, cx));
             div()
                 .id("confirm-cursor")
@@ -239,7 +249,7 @@ impl Workspace {
                 .py(px(10.))
                 .border_t_1()
                 .border_color(Theme::line())
-                .child(div().flex().items_center().gap(px(8.)).child(div().flex_1().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(paper.title.clone())).child(open))
+                .child(div().flex().items_center().gap(px(8.)).child(div().flex_1().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(paper.title.clone())).child(open).child(close))
                 .child(self.render_advice(paper, false, cx))
         });
 
