@@ -308,7 +308,8 @@ impl Workspace {
         tools
     }
 
-    fn skills_on(&self) -> Vec<skill::Skill> {
+    /// The skills switched on: what the assistant may read, and what a slash calls by name.
+    pub(crate) fn skills_on(&self) -> Vec<skill::Skill> {
         self.skills.iter().filter(|skill| !self.settings.skills_off.contains(&skill.name)).cloned().collect()
     }
 
@@ -727,7 +728,7 @@ impl Workspace {
             .flex_col()
             .w_full()
             .gap(px(24.))
-            .child(group(None, skills).child(note(t("技能是一个带 SKILL.md 的文件夹，写法和 Claude 的技能相同：开头的 name 和 description 告诉助手它做什么，正文是做法。助手只在请求符合描述时读它。技能只是文字：文件夹里的脚本不会被运行。在文件夹里增删改以后，重新打开这一页就会读到。"))))
+            .child(group(None, skills).child(note(t("技能是一个带 SKILL.md 的文件夹，写法和 Claude 的技能相同：开头的 name 和 description 告诉助手它做什么，正文是做法。助手只在请求符合描述时读它；也可以在对话框里输入 / 加技能的名称，直接让助手按它来做。技能只是文字：文件夹里的脚本不会被运行。在文件夹里增删改以后，重新打开这一页就会读到。"))))
             .into_any_element()
     }
 }

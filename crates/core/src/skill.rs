@@ -2,7 +2,9 @@
 //! with a `SKILL.md` (a `name` and `description` between `---` lines, then
 //! the instructions), the way Claude's skills are written. The assistant is
 //! told the names and descriptions and reads one with `use_skill` when a
-//! request calls for it. A skill is words only: nothing in its folder is run.
+//! request calls for it; the person calls one by name, `/name` at the start
+//! of a message (`ai::read_input`), and then its instructions go with the
+//! request. A skill is words only: nothing in its folder is run.
 
 use crate::connector::Tool;
 use serde_json::json;
@@ -107,6 +109,20 @@ pub fn tool(skills: &[Skill]) -> Option<Tool> {
 /// What `use_skill` answers for `name`.
 pub fn read(skills: &[Skill], name: &str) -> Result<String, String> {
     skills.iter().find(|skill| skill.name == name).map(|skill| skill.body.clone()).ok_or_else(|| format!("没有名为 {name} 的技能。"))
+}
+
+/// Whether `/name` can call the skill: a name typed as one word.
+pub fn called(skill: &Skill) -> bool {
+    !skill.name.is_empty() && !skill.name.contains(|c: char| c.is_whitespace() || c == '/')
+}
+
+/// The request a skill called by name stands for: its instructions, then
+/// what the person wrote after the name.
+pub fn request(skill: &Skill, argument: &str) -> Result<String, String> {
+    let (name, body) = (&skill.name, skill.body.trim());
+    if body.is_empty() { return Err(format!("技能 {name} 的 {FILE} 里还没有写说明。")) }
+    let asked = if argument.is_empty() { String::new() } else { format!("\n\n要做的事：{argument}") };
+    Ok(format!("用技能「{name}」来做。它的说明就在下面，不必再用 {TOOL} 读：\n\n<skill name=\"{name}\">\n{body}\n</skill>{asked}"))
 }
 
 #[cfg(test)]

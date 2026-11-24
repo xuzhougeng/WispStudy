@@ -1830,7 +1830,7 @@ impl Workspace {
     fn render_composer(&self, talk: Talk, chat: &Chat, model: &str, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let side = talk.side();
         let focused = chat.input.focus_handle(cx).is_focused(window);
-        let commands = if focused { chat.slash_list(&self.settings.commands, cx) } else { vec![] };
+        let commands = if focused { chat.slash_list(&self.settings.commands, &self.skills_on(), cx) } else { vec![] };
         let ready = !chat.input.read(cx).text().trim().is_empty() || !chat.attachments.is_empty() || !chat.quotes.is_empty() || !chat.documents.is_empty();
         let lib = self.lib.as_ref().unwrap();
         // The papers the first question is kept to, while it is still to come; and a paper on its way in.
@@ -1873,8 +1873,8 @@ impl Workspace {
                                 .child(div().flex_none().font_weight(FontWeight::MEDIUM).text_color(Theme::accent()).child(format!("/{}", command.name)))
                                 .when(!command.hint.is_empty(), |d| d.child(div().flex_none().text_color(Theme::text_placeholder()).child(t(&command.hint).to_string())))
                                 .child(div().flex_1().min_w_0().truncate().text_right().text_color(Theme::text_secondary()).child(if command.custom { command.about.clone() } else { t(&command.about).to_string() }))
-                                // One the person wrote says so: what it asks is theirs, not the app's.
-                                .when(command.custom, |d| d.child(div().flex_none().px(px(6.)).rounded(px(5.)).bg(Theme::groove()).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(t("自定义"))))
+                                // One the person wrote, or a skill of theirs, says so: what it asks is theirs, not the app's.
+                                .when(command.custom, |d| d.child(div().flex_none().px(px(6.)).rounded(px(5.)).bg(Theme::groove()).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(if command.skill { t("技能") } else { t("自定义") })))
                         }))
                         .child(div().px(px(8.)).pt(px(5.)).pb(px(2.)).mt(px(3.)).border_t_1().border_color(Theme::line()).text_size(text_px(11.)).text_color(Theme::text_placeholder()).child(t("↑↓ 选择 · Enter 或 Tab 确认 · Esc 关闭"))),
                 )
