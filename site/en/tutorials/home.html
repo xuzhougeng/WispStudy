@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/home.html">
+<link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/home.html">
+<title>Talk first, build the library later · Wisp Study tutorials</title>
+<meta name="description" content="Not sure yet what to call the library? Talk to the assistant on the home page first: have it search and take in a few papers, or read the papers from the reference list of a Word manuscript, and make it a library with one click once the picture is clear.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../../app-icon.png">
+<link rel="stylesheet" href="../../style.css">
+<link rel="stylesheet" href="../../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="Site">
+      <a href="index.html" aria-current="page">Tutorials</a>
+      <a href="../index.html#ideas">Ideas</a>
+      <a href="../index.html#tools">Tools</a>
+      <a href="../index.html#download">Download</a>
+    </nav>
+    <a class="lang" href="../../tutorials/home.html" lang="zh-CN" hreflang="zh-CN">中文</a>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="Location"><a href="index.html">Tutorials</a><span>›</span>Collect</nav>
+
+  <header class="doc-head">
+    <p class="kicker">Tutorial 02 · Collect</p>
+    <h1>Talk first, build the library later: starting from the assistant on the home page</h1>
+    <p class="lead">You have a notion and cannot yet say whether it is a research topic, or all you have is a half-written proposal. Then there is no need to create a library, name it and write a topic first. This tutorial starts from the assistant at the bottom right of the home page: ask a research question and let it search and take in a few papers, then hand it a Word manuscript and let it read every entry of the reference list. When the picture is clear, click “Make it a library”, and the conversation and the papers turn into a library on the spot.</p>
+    <dl class="facts">
+      <div><dt>Scenario</dt><dd>You want to compare plant single-nucleus sequencing with protoplast single-cell sequencing, and you also have a proposal whose references need to come in.</dd></div>
+      <div><dt>Needs</dt><dd>A model provider set up in “Settings › AI”, and a network connection; a Word file with a reference list (optional).</dd></div>
+      <div><dt>Time</dt><dd>About 10 minutes, of which the assistant's search takes three or four.</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="Sections of this tutorial">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#s1">Open the assistant on the home page</a></li>
+        <li><a href="#s2">Ask a research question</a></li>
+        <li><a href="#s3">After you agree, papers are kept in the conversation</a></li>
+        <li><a href="#s4">Make it a library</a></li>
+        <li><a href="#s5">Make a library from a Word manuscript</a></li>
+        <li class="plain"><a href="#recap">Recap</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>Open the assistant on the home page</h2>
+        <p>On launch you land on the home page, which lists your libraries. This example is a brand-new data folder with no library at all. The round blue button at the bottom right is the assistant. Click it to open the conversation page: an input box on top that says “Have an idea, or a draft? Just say it”, and four starters below: “Research an idea”, “Review a manuscript”, “Find a few papers” and “A library from a Word file”. Clicking one only puts an opening sentence into the box (reviewing a manuscript and making a library from Word first ask you to pick a file). It does not send anything by itself.</p>
+        <p>This page has no sidebar. “← Home” at the top left, or <kbd>Esc</kbd>, takes you back, and any text and files you have not sent are kept. Just opening this page and typing a few words leaves nothing on disk; the conversation is created only when you send the first question.</p>
+        <p>Write down what you want to research:</p>
+        <blockquote><cite>Ask</cite><p>I want to look into this: plant single-nucleus sequencing (snRNA-seq) and protoplast single-cell sequencing, which tissues is each suited to? Which studies in the last five years compare the two directly? Find a few worth reading and take them in.</p></blockquote>
+
+        <figure class="shot">
+          <img src="../../img/t/home-01-ask.jpg" width="1372" height="867" loading="lazy" alt="The conversation page of the assistant on the home page: the research question is written in the centered input box, and four starters are under the box: Research an idea, Review a manuscript, Find a few papers, A library from a Word file. “← Home” is at the top left.">
+          <figcaption><b>Figure 1.</b> The conversation page of the home assistant. There is no library yet, and you do not need to create one first.</figcaption>
+        </figure>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>Ask a research question</h2>
+        <p>Press <kbd>Enter</kbd> to send. The conversation is named after the first question, and under the title it says “No library yet: the assistant searches the literature databases when it needs papers”. The assistant knows there is not a single paper here, so it looks in PubMed, Europe PMC, Crossref and arXiv by itself. This time it first said “I'll search PubMed and Europe PMC in parallel”, tried two queries, found “the results are too broad, so I'll switch to a more specific query”, tried three more times, picked out a few worth reading and saved them as one query.</p>
+        <p>A trial search only looks at what can be found and takes nothing in. To really take papers in, the assistant stops and asks you:</p>
+
+        <figure class="shot">
+          <img src="../../img/t/home-02-consent.jpg" width="1372" height="867" loading="lazy" alt="In the conversation, two tool-call lines, “Preview search ×2” and “Preview search ×3 · Save query”, and below them a card: “The assistant wants to add or change papers in this conversation; it waits for your consent”. It says to run a query, and the box shows the query's name, “snRNA-seq vs protoplast scRNA-seq comparison · PubMed”, and a query made of six PubMed IDs, retrieving at most the latest 10; below are three buttons: Allow, Allow for this conversation, Deny.">
+          <figcaption><b>Figure 2.</b> The card before papers are taken in, saying which query will run in which database. This time the assistant picked six papers, so the query is their PubMed IDs.</figcaption>
+        </figure>
+
+        <p>The card says which query will run in which database and how many results it retrieves at most. Look at it, then decide. “Allow” lets this one run only, “Allow for this conversation” stops asking from then on, and “Deny” takes nothing in. The gray line “Preview search ×3 · Save query” can be opened to see what it searched each time and how many it found.</p>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>After you agree, papers are kept in the conversation</h2>
+        <p>Click “Allow”. The line under the title becomes “6 papers kept in this conversation”, and a “Papers 6” appears above it, listing the papers this conversation has taken in. The assistant lists the 6 papers it took in and explains that for now they exist only in this conversation.</p>
+        <p>It did not rush to answer the first question, “which tissues is each suited to”. All it has is bibliographic records and abstracts. It said that only after reading the full texts could it tell which papers really compared the same tissue side by side, and that after you make a library it can first look for open-access full texts for them. That is exactly the next step that is yours to decide, so under the answer there is a card: “This conversation has taken in 6 papers. Make it a library to see it on the home page”, with “Make it a library” and “Later” beside it.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/home-03-answer.jpg" width="1372" height="867" loading="lazy" alt="The conversation's answer lists 6 papers taken in (Wei 2026, Schmidt 2025, Cervantes-Pérez 2022, Sunaga-Franze 2021, Farmer 2021, Long 2021), and below it a card saying that this conversation took in 6 papers, with the buttons “Make it a library” and “Later”. Above the conversation are “Papers 6”, “History”, “New chat” and “Make it a library”.">
+          <figcaption><b>Figure 3.</b> Six papers kept in this conversation. A button on the card acts only when you press it; “Later” puts the card away, and it appears again when more papers are taken in.</figcaption>
+        </figure>
+
+        <aside class="note"><b>Tip</b>When one thing is done and the next step is yours to decide, the assistant often puts a card like this under its answer. There are only a few kinds of buttons: say a sentence for you, make a library, find open full texts, open pages such as Screening or Writing. Each acts only when you press it.</aside>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>Make it a library</h2>
+        <p>Click “Make it a library” (the one on the card and the one at the top right of the conversation are the same). The dialog is the same as the one for a new library: name, topic, accent color. The AI icon next to the name has the model draft a name and topic from this conversation. Here it drafted the name “<span lang="zh-CN">植物 snRNA-seq 与原生质体 scRNA-seq 比较</span>” (plant snRNA-seq vs protoplast scRNA-seq comparison), and a topic of two or three sentences saying what to include and what matters. Edit them if you are not satisfied.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/home-04-promote.jpg" width="1372" height="867" loading="lazy" alt="The “Make it a library” dialog: the Name field holds the model's draft, “plant snRNA-seq vs protoplast scRNA-seq comparison”, the Topic field holds a short description, and the Accent color row has seven dots with blue selected; a note below says the conversation, the papers taken in and the manuscript handed in all stay where they are, and the buttons are Cancel and Make it a library.">
+          <figcaption><b>Figure 4.</b> The name and topic are drafted by the model from the conversation, and you can edit them. The conversation, the papers and the manuscript stay where they are; nothing is moved.</figcaption>
+        </figure>
+
+        <p>Click “Make it a library”, and the window turns into this library on the spot. A sidebar appears on the left, with “All papers 6” and “Missing PDF 6”. Under “Search and import” is the query the assistant saved, which you can run again later or set to update regularly. The conversation you just had is under “Assistant”, and you can just keep asking. Back on the home page, this library is a card like any other.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/home-05-library.jpg" width="1372" height="867" loading="lazy" alt="The library window after it is made: at the top of the sidebar is the blue-marked “plant snRNA-seq vs protoplast…”, then All papers 6, Missing PDF 6, Search and import 1, Screening 6; in the middle is the same conversation as before, titled “Assistant”.">
+          <figcaption><b>Figure 5.</b> The conversation becomes the library's “Assistant” conversation on the spot, and the 6 papers are this library's papers.</figcaption>
+        </figure>
+
+        <p>What you can do next is the same as in any other library: have the assistant “Find open full text” for these papers (for a paper without a PDF, the details have this button too), download the PDFs it can find, then go back to “Assistant” and keep asking the first question. Bulk search and screening are in <a href="start.html">Start from a topic</a>.</p>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>Make a library from a Word manuscript</h2>
+        <p>Another way to start: the proposal already has an introduction, its reference list has eight entries, and they need to go into a library. Back at the assistant on the home page, click “A library from a Word file” and pick this <code><span lang="zh-CN">开题报告</span>.docx</code> (proposal). The file goes into the input box as a small tag, and the box is filled with one sentence, “Take in the papers from the reference list of this Word file and make them a library.” You can edit it or send it as it is. You can also drag a .docx onto the home page and then say yourself what to do; dragging several PDFs works the same way, and the files go into the input box. Dragging a single PDF is different: it goes straight into reading mode for that paper, see <a href="pdf.html">Just one PDF to read</a>.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/home-06-word.jpg" width="1372" height="867" loading="lazy" alt="In the input box of the home assistant, a file tag for the proposal (.docx) on top, and below it the sentence “Take in the papers from the reference list of this Word file and make them a library.”">
+          <figcaption><b>Figure 6.</b> “A library from a Word file” first picks the file, then puts an opening sentence in the box. Whether to send it is up to you.</figcaption>
+        </figure>
+
+        <p>Once sent, the conversation is named “References of <span lang="zh-CN">开题报告</span>”. The assistant reads every entry of the reference list and, with your consent, takes them in. When the file has Zotero or Mendeley citation fields, the paper information is taken directly from the fields. This proposal has a handwritten numbered list, so it reads the entries one by one after “References”. Entries with a DOI are checked against Crossref; entries without one are looked up in Crossref by their text, and a match is accepted only if the title and year both agree.</p>
+        <p>Four of the eight entries in this example ([3], [5], [6] and [8]) have no DOI in the original, and all were found. The answer says “All 8 papers of the reference list have been taken into this conversation. No entry was skipped, and none could not be recognized. The entries were recognized from the text, not from Zotero citation fields”, and suggests spot-checking that the titles match. An entry that cannot be read or matched is not filled in out of thin air; the assistant tells you about each one.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/home-07-references.jpg" width="1372" height="867" loading="lazy" alt="The conversation “References of the proposal”: the assistant lists the 8 papers taken in, each followed by its DOI in brackets, from Spatiotemporal Developmental Trajectories in the Arabidopsis Root to Towards Building a Plant Cell Atlas; below is a card saying that these 8 papers have been taken into this conversation, with the button “Make it a library”.">
+          <figcaption><b>Figure 7.</b> All eight references matched Crossref records, including the four whose DOI was missing in the original. For an entry read only from the text and not verified, the assistant reminds you to check it.</figcaption>
+        </figure>
+
+        <p>The Word file itself is not changed. Afterward, click “Make it a library” in the same way. Conversations you have not decided about can stay: “Recent conversations”, under the home assistant, lists them by time, saying how many papers were taken in and on what day. Click a row to keep talking; right-click to rename, make it a library or delete it. Deleting works like removing a library: the folder is only moved under <code>removed</code> in the data folder.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/home-08-recent.jpg" width="1372" height="867" loading="lazy" alt="The conversation page of the home assistant, with “Recent conversations” under the input box and two rows: “I want to look into this: plant single-nucleus sequencing (snRNA-s…” with 6 papers, and “References of the proposal” with 8 papers, both dated 2026.11.20.">
+          <figcaption><b>Figure 8.</b> “Recent conversations”. All conversations not yet made into libraries are here; they do not appear in the home page's list of libraries.</figcaption>
+        </figure>
+
+        <aside class="note"><b>Tip</b>When a library already exists, the “Assistant” in the library can do the same thing: attach the Word file and say “take in the references”. To review a manuscript rather than take in its references, use “Review a manuscript”: the manuscript is shown on the right of the conversation, and the assistant leaves its comments on the original as comments, see <a href="revise.html">Revise with co-authors</a>.</aside>
+        <aside class="note warn"><b>Note</b>The content of the conversation is sent to the model provider you configured. Search terms are sent to databases such as PubMed and Europe PMC, and the text of a reference entry without a DOI is sent to Crossref for lookup.</aside>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>Recap</h2>
+        <ul>
+          <li>The assistant at the bottom right of the home page is a conversation with no library yet: it is created only when you send the first question, and you can pick it up again at any time from “Recent conversations”.</li>
+          <li>The assistant searches by itself. When it wants to take papers in, the card says which query will run in which database and waits for your permission.</li>
+          <li>“A library from a Word file” reads every entry of the reference list, checks it against Crossref and fills in the DOI. It tells you about each entry it cannot read, and the Word file is not touched.</li>
+          <li>“Make it a library” has the model draft a name and topic, and the conversation and the papers become a library on the spot.</li>
+          <li>Next: if your papers are in Zotero or in a folder of PDFs, see <a href="migrate.html">Bring in the papers you already have</a>.</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="start.html"><small>Previous · 01</small><strong>Start from a topic</strong></a>
+    <a class="next" href="migrate.html"><small>Next · 03</small><strong>Bring in the papers you already have</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>References</h2>
+      <ol>
+        <li><a href="index.html">All tutorials</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">Features: what each page can do (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">Data and privacy: where files live and what leaves your machine (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">Questions and ideas: Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>About this tutorial.</b> The screenshots and numbers come from a real run on macOS with v0.14.0 in November 2026; Figure 2 was captured when the same question was asked again. The model answers differently each time, so the wording, queries and paper counts you see will differ a little. The steps are the same. The screenshots show the Chinese interface; the text uses the labels of the English one (Settings › General › Interface language).</p>
+      <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation; check key numbers and conclusions against the original.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

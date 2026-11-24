@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/follow.html">
+<link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/follow.html">
+<title>Keep up with new papers · Wisp Study tutorials</title>
+<meta name="description" content="Let saved search queries run on a schedule, have the assistant read new papers first and you confirm; then use the wisp command line and MCP to hand the same library to scripts in a terminal and to outside AI clients.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../../app-icon.png">
+<link rel="stylesheet" href="../../style.css">
+<link rel="stylesheet" href="../../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="Site">
+      <a href="index.html" aria-current="page">Tutorials</a>
+      <a href="../index.html#ideas">Ideas</a>
+      <a href="../index.html#tools">Tools</a>
+      <a href="../index.html#download">Download</a>
+    </nav>
+    <a class="lang" href="../../tutorials/follow.html" lang="zh-CN" hreflang="zh-CN">中文</a>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="Location"><a href="index.html">Tutorials</a><span>›</span>Follow up</nav>
+
+  <header class="doc-head">
+    <p class="kicker">Tutorial 15 · Follow up</p>
+    <h1>Keep up with new papers, and hand the library to other tools</h1>
+    <p class="lead">The library is built and has been screened once. Now it has to move with the field without costing you half a day every week. This tutorial first sets up search queries that run on a schedule and lets the assistant read new papers first, in the window; then it uses the <code>wisp</code> command line and MCP to hand the same library to the terminal and to outside AI clients.</p>
+    <dl class="facts">
+      <div><dt>Scenario</dt><dd>“<span lang="zh-CN">植物单细胞转录组</span>” (plant single-cell transcriptomics) already holds 29 screened papers. You want to follow new single-nucleus (snRNA-seq) work too, and to query the library from a terminal and from Claude Code.</dd></div>
+      <div><dt>Needs</dt><dd>A library with saved search queries and a model provider (for screening); you should be comfortable with a terminal.</dd></div>
+      <div><dt>Time</dt><dd>About 15 minutes.</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="Sections of this tutorial">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#s1">Add a search query and preview it first</a></li>
+        <li><a href="#s2">Run, import history and automatic updates</a></li>
+        <li><a href="#s3">The weekly screening: only what is new</a></li>
+        <li><a href="#s4">Use wisp in a terminal</a></li>
+        <li><a href="#s5">Scheduled updates while the window is closed</a></li>
+        <li><a href="#s6">Hand it to an outside AI client: MCP</a></li>
+        <li class="plain"><a href="#recap">Recap</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>Add a search query and preview it first</h2>
+        <p>The library already has two search queries: PubMed for atlases and methods, and Europe PMC for stress responses. Papers on single-nucleus transcriptomes often fall outside both, so you add a third that looks only at titles containing single-nucleus.</p>
+        <p>Open “Search and import” on the left, click “New search”, fill in “Source”, “Query”, “Name” and “Retrieve” (how many of the newest papers to take, 50 by default, 2000 at most), and click “Save”. Saving does not run it. This example uses the command line, with the same effect (the command line is covered in section 4):</p>
+        <figure class="code">
+          <figcaption>Command line</figcaption>
+<pre><code><span class="p">$</span> wisp save_search --source europepmc --name "Europe PMC: single-nucleus transcriptomes" --max-results 20 \
+    --query '(TITLE:"single-nucleus" OR TITLE:"single-nuclei" OR TITLE:snRNA-seq) AND (TITLE:plant OR TITLE:Arabidopsis OR TITLE:rice OR TITLE:maize OR TITLE:tomato OR TITLE:wheat) AND OPEN_ACCESS:y'
+{
+  "id": "S-1794920544477-a8810c21",
+  "kind": "europepmc",
+  "maxResults": 20,
+  "enabled": true,
+  "lastRun": null
+  …
+}</code></pre>
+        </figure>
+        <p>The new query appears at the bottom of the page, marked “Never run”. First click its “Preview search”: this step only asks the database for results and writes nothing to the library.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/follow-01-searches.jpg" width="1372" height="867" loading="lazy" alt="The Search and import page: at the top the four options for automatic updates, below them three search cards, the first two showing the result of their last run and the third expanded to show the results of a preview search.">
+          <figcaption><b>Figure 1.</b> The preview search of the third query: 16 results in the database, of the 16 retrieved 12 are new and 4 are already in the library.</figcaption>
+        </figure>
+
+        <p>Look down the list. The few papers already in the library are grayed out, with “In library · Included” on the right, which shows that this query agrees with the direction of the library; the new ones are all plant single-nucleus transcriptome studies, so it is fine to run.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/follow-02-trial.jpg" width="1372" height="867" loading="lazy" alt="The list of preview results: each row shows a paper's title, authors, year and journal; four rows are in a lighter color and marked “In library · Included” on the right.">
+          <figcaption><b>Figure 2.</b> The preview results run from newest to oldest. The gray rows are already in the library, and the tag shows the screening decision you made then.</figcaption>
+        </figure>
+        <aside class="note"><b>Tip</b>The query is sent to the database you chose (Europe PMC here). A broad query that matches thousands of papers brings back only the newest few each time, so split it into several focused ones.</aside>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>Run, import history and automatic updates</h2>
+        <p>Click “Run and import”. This time it retrieves 16 papers, adds 12 and skips the 4 already there: Wisp Study recognizes papers already in the library by DOI, PMID and title, and those in the trash count too. Run it once more right away and the result is “retrieved 16, added 0, skipped 16 existing”. The first run fetches as many papers as “Retrieve” says; later runs go only for papers the library does not have yet, and usually end after one or two requests.</p>
+        <p>Every run leaves a row in “Import history” at the bottom of the page. A row that added papers has “Undo” on its right: it removes the papers that batch added and that nobody has handled yet; papers you have screened, read, starred, written notes on, or given tags or attachments are kept. You are asked once more before it is undone.</p>
+        <p>“Automatic updates” at the top of the page is “Off” by default, and then the database is contacted only when you click “Run and import”. This example chose “Weekly”, and the note beside it changed to say: enabled searches run at this interval while the app is open, and runs missed while it was closed are caught up the next time you open it. A query whose run fails is tried again after an hour at most. Click “Disable” on a card to keep that one out of automatic updates and “Run all”.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/follow-03-auto.jpg" width="1372" height="867" loading="lazy" alt="The Search and import page: Automatic updates is set to “Weekly”; the third query says its last run matched 16 papers and added 0; below, the import history has four rows, and the three rows that added papers have “Undo” on the right.">
+          <figcaption><b>Figure 3.</b> Automatic updates set to “Weekly”. The top two rows of the import history are two runs of the same query: the first added 12 papers and the second added 0, so it has no “Undo”.</figcaption>
+        </figure>
+        <p>When an automatic update brings in new papers and that library is open, the window says “Automatic update: N new papers awaiting screening”. New papers are always “Pending”, and the number next to “Screening” on the left is how many are waiting for you.</p>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>The weekly screening: only what is new</h2>
+        <p>How to screen a few hundred papers the first time is in <a href="start.html">Tutorial 01</a>. After that the weekly job is much smaller: open “Screening”, leave the “Screening criteria” above as they are, and click “Ask assistant to screen 12 papers”. The assistant reads several papers at once, the full text where there is one and the abstract where there is not. This round was read in under a minute, with the suggestions Included 10 and Related 2.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/follow-04-queue.jpg" width="1372" height="867" loading="lazy" alt="The batch view of the Screening page: under the criteria text box is a progress bar “Round complete 12 / 12” and “The assistant has finished. Review its suggestions”, then buttons grouped by suggestion and a list of papers with tags “Suggestion: Included · Confidence 100%”.">
+          <figcaption><b>Figure 4.</b> The “Batch” view: after a round is read, the queue is grouped by suggestion into “Included 10” and “Related 2”, and the button at the top right becomes “Confirm 12 suggestions”.</figcaption>
+        </figure>
+
+        <p>The Screening page now offers three ways to look. “Batch” is the queue in the figure above; “One by one” shows one paper at a time, with this round's papers on the left and, on the right, the assistant's suggestion, its reason, the sentence it quoted and the abstract, with four decision buttons below; you can also press <kbd>Y</kbd> / <kbd>R</kbd> / <kbd>U</kbd> / <kbd>N</kbd>, and <kbd>A</kbd> accepts the suggestion. The two papers suggested as “Related” are worth a look one by one:</p>
+
+        <figure class="shot">
+          <img src="../../img/t/follow-05-single.jpg" width="1372" height="867" loading="lazy" alt="The one-by-one view: on the left a list of 12 papers with paper 12, GAMETE, selected; on the right the assistant suggests “Related” with confidence 99%, based on the abstract only, with its reason and a sentence quoted from the abstract; below are the abstract and the four decision buttons, the “Related” button marked “Suggestion”.">
+          <figcaption><b>Figure 5.</b> Paper 12 in the “One by one” view. The assistant's reason: this paper uses single-nucleus ATAC-seq and its abstract has no transcriptome data, so it suggests “Related” rather than “Included”.</figcaption>
+        </figure>
+        <p>The two papers are GAMETE maps the genetic architecture of chromatin accessibility in rice pollen at single-nucleus resolution and a 2017 single-nucleus sequencing study of maize haploid induction (whole-genome sequencing, not a transcriptome). The assistant read only the abstracts, the sentences it quoted can be found in them, and the judgments hold up.</p>
+        <p>The third way is the “Confirm suggestions” page: click “Confirm 12 suggestions” to enter it (the switch at the top of the page has only “Batch” and “One by one”). Each paper has a row saying the decision that will be written; change a row you disagree with, untick those you are unsure of, and click “Confirm 12 papers” to write them all at once. Nothing changes before you write, and after writing you can still “Undo”.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/follow-06-confirm.jpg" width="1372" height="867" loading="lazy" alt="The Confirm suggestions page: one paper per row, a checkbox on the left, in the middle the title, the confidence and the start of the reason, and four decisions on the right with “Included” selected; at the bottom it says 12 papers will be saved: Included 10 · Related 2, and at the lower right is the button “Confirm 12 papers”.">
+          <figcaption><b>Figure 6.</b> The “Confirm suggestions” page: the bottom line is the result that will be written, and below it are the keys available on this page.</figcaption>
+        </figure>
+        <p>This example writes them as suggested, and the notice reads “Confirmed 12 papers: Included 10 · Related 2.” The screening decision is yours from start to finish; the assistant only suggests.</p>
+        <aside class="note"><b>After you change the screening criteria</b> Existing suggestions are marked “Suggestion under old criteria”, and the button becomes “Screen N under current criteria”. For papers already screened you can click “Review N screened papers” to have the assistant read them again under the new criteria: those where it disagrees with you go back to the queue, grouped under “Disagrees with your decision”, and you choose whether to keep or change; your original decisions are not touched.</aside>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>Use wisp in a terminal</h2>
+        <p><code>wisp</code> is the entry point that opens no window, and it comes with the installer: on macOS it is at <code>/Applications/Wisp Study.app/Contents/MacOS/wisp</code>; on Windows it sits next to the main program <code>WispStudy.exe</code>, and for the installed version in <code>%LOCALAPPDATA%\Programs\Wisp Study</code>; on Linux it is also next to the main program. It reads and writes the same data folder as the app settings, and can be used while the app is open; <code>--data-dir FOLDER</code> names a different one. The output is always JSON; on an error the message goes to stderr and the exit code is 1. Below it is shortened to <code>wisp</code>; <code>wisp help</code> lists all commands and <code>wisp COMMAND --help</code> lists the parameters of one command. With only one library you can leave out <code>-l</code>.</p>
+
+        <figure class="code">
+          <figcaption>Command line · overview of the library</figcaption>
+<pre><code><span class="p">$</span> wisp list_libraries
+{ "libraries": [ { "id": "L-1794919865367-65179074", "name": "<span lang="zh-CN">植物单细胞转录组</span>",
+    "papers": 41, "autoSyncHours": 168, … } ] }
+
+<span class="p">$</span> wisp library_status
+{ "papers": 41,
+  "screening": { "pending": 0, "included": 38, "excluded": 2, "uncertain": 0, "irrelevant": 1 },
+  "fulltext": { "missing": 0, "linked": 19, "stored": 22, "textless": 0 },
+  "labels": { "screening": { "excluded": "<span lang="zh-CN">相关</span>", … } }, … }</code></pre>
+        </figure>
+        <p>Note that the screening decision is stored under an English key: <code>excluded</code> is shown in the interface as “Related”, and the lookup table is in <code>labels</code> (in the Chinese interface the value is <span lang="zh-CN">相关</span>).</p>
+
+        <figure class="code">
+          <figcaption>Command line · find papers and full text</figcaption>
+<pre><code><span class="p">$</span> wisp list_papers --query protoplast --limit 3
+{ "total": 6, "papers": [ { "id": "P-1794919880205-33da66a1",
+    "title": "Single-Cell Transcriptome and Network Analyses Unveil Key Transcription Factors …",
+    "year": 2022, "screening": "included", "fulltext": "linked", "suggested": "included" }, … ] }
+
+<span class="p">$</span> wisp search_fulltext "protoplast isolation" --limit 3
+{ "total": 80, "papersSearched": 22, "papersWithoutText": 19, "hits": [ {
+    "paperId": "P-1794919877581-a6b186c3",
+    "title": "Integrated experimental and computational workflows for single-cell transcriptomics in plants",
+    "page": 11, "exact": true,
+    "snippet": "… one was used immediately for protoplast isolation, another for fresh nucleus isola- tion …" }, … ] }
+
+<span class="p">$</span> wisp read_fulltext P-1794919877581-a6b186c3 --page 11
+{ "pageCount": 14, "pages": [ { "page": 11, "text": "Page 11 of 14\n\nWang et al. Plant Methods (2026) 22:12 …" } ] }</code></pre>
+        </figure>
+        <p><code>search_fulltext</code> searches only papers whose full text is saved: here 22 papers have text and 19 do not (the 12 just imported have no PDF yet). <code>read_fulltext</code> reads at most 8 pages at a time, to check the context.</p>
+
+        <figure class="code">
+          <figcaption>Command line · preview search and run</figcaption>
+<pre><code><span class="p">$</span> wisp search_online pubmed '"single-nucleus"[Title] AND (plant[Title/Abstract] OR Arabidopsis[Title]) AND 2026[dp]' --limit 3
+{ "source": "pubmed", "total": 20, "fetched": 3, "new": 3, "inLibrary": 0,
+  "results": [ { "title": "A single-nucleus transcriptomic atlas reveals the endodermal gene regulatory network underlying Arabidopsis stem gravitropism",
+                 "year": 2026, "pmid": "43020179", "inLibrary": null }, … ] }
+
+<span class="p">$</span> wisp run_search S-1794920544477-a8810c21
+{ "batchId": "B-1794920690194-3d0159de", "search": "Europe PMC: single-nucleus transcriptomes",
+  "total": 16, "fetched": 16, "added": 12, "skipped": 4,
+  "addedPapers": [ { "title": "Single-nucleus transcriptomics reveals transcriptional dynamics underlying maize ligule development", "year": 2026 }, … ] }</code></pre>
+        </figure>
+        <p><code>search_online</code> writes nothing, like “Preview search” in the window, and for a paper already in the library <code>inLibrary</code> gives its ID and screening decision. The batch ID that <code>run_search</code> returns can be given to <code>undo_import</code> to undo the whole batch, with the same rules as in the window.</p>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>Scheduled updates while the window is closed</h2>
+        <p>Automatic updates run only while the app is open. If you do not open the window often, have the system's scheduler run <code>wisp sync_searches</code> regularly: it runs only the search queries that are due, and it decides what is “due” by the same interval you chose in section 2, so a scheduler that runs more often does not search twice. On macOS and Linux add a line with <code>crontab -e</code> to look once an hour:</p>
+        <figure class="code">
+          <figcaption>crontab</figcaption>
+<pre><code>0 * * * * "/Applications/Wisp Study.app/Contents/MacOS/wisp" sync_searches &gt;&gt; "$HOME/wisp-sync.log" 2&gt;&amp;1</code></pre>
+        </figure>
+        <p>launchd on macOS and Task Scheduler on Windows can do the same: run this command on a schedule.</p>
+        <aside class="note warn"><b>Note</b><code>sync_searches</code> handles only libraries whose automatic updates are not off. When automatic updates are “Off” it does nothing and returns <code>{"runs": [], "added": 0, "failed": 0}</code>; with <code>--force</code> it ignores the interval and the switch and runs every enabled search query. After a partial failure the exit code may still be 0, so look at <code>failed</code> and <code>runs[].error</code> in the JSON.</aside>
+      </section>
+
+      <section id="s6">
+        <h2><i>6</i>Hand it to an outside AI client: MCP</h2>
+        <p><code>wisp mcp</code> serves MCP on standard input and output. Claude Code, Claude Desktop or any other client that supports MCP starts it and can then use the same set of tools as the command line. Add this to the client's configuration:</p>
+        <figure class="code">
+          <figcaption>MCP configuration</figcaption>
+<pre><code>{
+  "mcpServers": {
+    "wisp-study": {
+      "command": "/Applications/Wisp Study.app/Contents/MacOS/wisp",
+      "args": ["mcp", "--read-only"]
+    }
+  }
+}</code></pre>
+        </figure>
+        <p>Claude Code can add it directly with a command:</p>
+        <figure class="code">
+          <figcaption>Command line</figcaption>
+<pre><code><span class="p">$</span> claude mcp add wisp-study -- "/Applications/Wisp Study.app/Contents/MacOS/wisp" mcp --read-only</code></pre>
+        </figure>
+        <p>First make sure the server answers: send it the two requests <code>initialize</code> and <code>tools/list</code>. In this example <code>wisp mcp</code> lists 37 tools and <code>wisp mcp --read-only</code> lists 19:</p>
+        <figure class="code">
+          <figcaption>Command line · check the MCP server</figcaption>
+<pre><code><span class="p">$</span> printf '%s\n' \
+    '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"test","version":"0"}}}' \
+    '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+    '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' | wisp mcp --read-only
+{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18", … "serverInfo":{"name":"wisp-study","title":"Wisp Study","version":"0.10.0"}, …}}
+{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"list_note_sources", … }, …]}}</code></pre>
+        </figure>
+        <p>Once it is connected, you can ask in the client:</p>
+        <blockquote><cite>Ask</cite><p>In the Wisp Study library “<span lang="zh-CN">植物单细胞转录组</span>”, find the papers whose full text mentions protoplast isolation, read the relevant pages, compare the protoplast route with the nuclei isolation route, and give the paper ID, page number and original sentence for each conclusion.</p></blockquote>
+        <p>Check the client's answer yourself: take the paper ID and page number it gives, open the PDF in the window and look at the original sentence.</p>
+
+        <h3>Where writing stops</h3>
+        <p>Without <code>--read-only</code> there are 18 more tools, and all of them change data: creating a library; importing PDFs, BibTeX and Zotero; saving, running, syncing and deleting search queries; undoing an import; finding and downloading PDFs; organizing tags and reading status; writing a section and the outline of a manuscript; exporting and saving notes; and also <code>suggest_screening</code> and <code>suggest_field</code>.</p>
+        <ul>
+          <li>For the screening decision and custom fields, an outside client can at most make suggestions (these two tools are offered only without <code>--read-only</code>): <code>suggest_screening</code> proposes a screening suggestion and <code>suggest_field</code> proposes a field value, both with a verbatim quotation. They show up on the “Screening” and “Extract” pages waiting for you to confirm, and no tool can set a screening decision or a field directly.</li>
+          <li>The assistant in the window asks you first before it imports, runs or deletes search queries, undoes an import, finds PDFs, organizes papers or revises a manuscript; an outside client calling <code>wisp mcp</code> has no such step, and once it calls, the thing is done.</li>
+        </ul>
+        <aside class="note warn"><b>Note</b>If you only want an outside client to look things up and read, use <code>--read-only</code>. Reading full text can still leave a text cache in the library, but it does not change papers or decisions.</aside>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>Recap</h2>
+        <ul>
+          <li>You added a single-nucleus transcriptome search query, previewed it and ran it, which added 12 papers; running it again added 0, and the import history can undo a whole batch.</li>
+          <li>Automatic updates are set to weekly; while the window is closed, cron runs <code>wisp sync_searches</code>, which runs only the queries that are due.</li>
+          <li>The assistant read the 12 new papers in under a minute; after you looked at the two “Related” ones one by one, you wrote everything at once on the “Confirm suggestions” page.</li>
+          <li>The same library is queried with <code>wisp</code> in a terminal and read with <code>wisp mcp --read-only</code> in an outside client; the screening decision is always yours, made in the window.</li>
+          <li>Once new papers are in, go back to <a href="ask.html">Ask the whole library, and check the answers</a> or <a href="extract.html">Read a batch of papers into one table</a>.</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="revise.html"><small>Previous · 14</small><strong>Revise with co-authors</strong></a>
+    <a class="next" href="index.html"><small>Back to</small><strong>All tutorials</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>References</h2>
+      <ol>
+        <li><a href="index.html">All tutorials</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">Features: what each page can do (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">Data and privacy: where files live and what leaves your machine (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">Questions and ideas: Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>About this tutorial.</b> The screenshots and numbers come from an actual run in November 2026 on macOS with v0.10.0. The model answers differently each time, so the wording and numbers will differ when you follow along; the steps are the same. The screenshots show the Chinese interface; the text uses the labels of the English one (Settings › General › Interface language).</p>
+      <p><b>The assistant can be wrong.</b> Its suggestions and answers are for you to confirm; check key numbers and conclusions against the original.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

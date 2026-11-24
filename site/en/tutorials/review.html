@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/review.html">
+<link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/review.html">
+<title>Write a review in stages · Wisp Study tutorials</title>
+<meta name="description" content="Use /review in the assistant to write a short review section in four steps: writing requirements, starting framework, outline, and section-by-section writing. You confirm each step with a button; the saved text carries its evidence item by item and ends as a manuscript.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../../app-icon.png">
+<link rel="stylesheet" href="../../style.css">
+<link rel="stylesheet" href="../../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="Site">
+      <a href="index.html" aria-current="page">Tutorials</a>
+      <a href="../index.html#ideas">Ideas</a>
+      <a href="../index.html#tools">Tools</a>
+      <a href="../index.html#download">Download</a>
+    </nav>
+    <a class="lang" href="../../tutorials/review.html" lang="zh-CN" hreflang="zh-CN">中文</a>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="Location"><a href="index.html">Tutorials</a><span>›</span>Write</nav>
+
+  <header class="doc-head">
+    <p class="kicker">Tutorial 12 · Write</p>
+    <h1>Write a review in stages</h1>
+    <p class="lead">Your advisor wants a short review section in your thesis proposal: sample preparation for plant single-cell transcriptomics, and what bias each of the two routes, protoplasts and nuclei, brings. The papers are already screened. In this tutorial you use <code>/review</code> to have the assistant write it in four steps. You confirm each step, and every citation it writes leaves an item of evidence you can check against the original.</p>
+    <dl class="facts">
+      <div><dt>Scenario</dt><dd>Write a short review section of about two thousand characters from a screened library.</dd></div>
+      <div><dt>Needs</dt><dd>A screened library, preferably with full texts; a model set up in Settings.</dd></div>
+      <div><dt>Time</dt><dd>About 40 minutes, half of it waiting for the model to answer.</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="Sections of this tutorial">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#s1">Start with /review and settle the requirements</a></li>
+        <li><a href="#s2">Only a button confirms</a></li>
+        <li><a href="#s3">Starting framework: read existing reviews first</a></li>
+        <li><a href="#s4">Rebuild the outline from the library's studies</a></li>
+        <li><a href="#s5">Write one section, save one section</a></li>
+        <li><a href="#s6">Evidence: is the sentence there, does it support the claim</a></li>
+        <li><a href="#s7">Verify, mark complete, save as a manuscript</a></li>
+        <li class="plain"><a href="#recap">Recap</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>Start with /review and settle the requirements</h2>
+        <p>The worst way to start a review is to start writing: if scope, readers and length are unclear, you find out halfway that the direction is wrong. <code>/review</code> splits the job into four steps, and the first one is only about requirements.</p>
+        <ol>
+          <li>Open the library and click “Assistant” on the left. The conversation covers the papers in the current list, 28 in this library.</li>
+          <li>In the input box, type <code>/review</code>, leave a space, and write the topic. You can add the length and the readers too. Then send it.</li>
+        </ol>
+        <blockquote><cite>Ask</cite><p>/review Sample preparation for plant single-cell transcriptomics: what bias each route, protoplasts and nuclei, brings. Write a short review section of about two thousand characters. The readers are first-year graduate students</p></blockquote>
+        <p>After you send it, a line of progress appears above the conversation: “Writing requirements › Starting framework › Outline › Writing”. From now on this conversation carries a review record.</p>
+        <p>In under a minute the assistant hands back a checklist of requirements: core question, scope, readers, length, time range of the papers, citation requirements, figures and tables. Each item is marked either as something you already said (“Stated”) or as something it filled in for you (“Suggestion”). For the length it suggests “keep the text to about 1,800 to 2,200 Chinese characters”, and for figures it suggests a comparison table of the sources of bias.</p>
+        <figure class="shot">
+          <img src="../../img/t/review-01-requirements.jpg" width="1372" height="867" loading="lazy" alt="The Assistant page. At the top is the four-step progress line with step 1, Writing requirements, highlighted. The conversation holds a table of writing requirements with three columns: item, requirement or suggestion, and status. At the end of the conversation a card reads step 1, Writing requirements, with a green button “Use as requirements” on its right.">
+          <figcaption><b>Figure 1.</b> The first answer is the checklist of requirements. Look at the card at the bottom: the step that is yours to take is always at the end of the conversation, and here it is “Use as requirements”.</figcaption>
+        </figure>
+        <p>If an item does not fit, keep talking in the conversation. Each time, the assistant gives a complete new checklist.</p>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>Only a button confirms</h2>
+        <p>This time we did not click the button but answered “Fine” in the conversation. The assistant finalized the items marked “Suggestion” and handed back a complete checklist again. Its last line was:</p>
+        <blockquote><cite>Assistant</cite><p>This checklist is final. Click the “Use as requirements” button at the end of this answer to confirm; after that we move on to searching for existing reviews and the starting framework.</p></blockquote>
+        <p>The progress still stood at step 1, and the requirements in the record were still empty. This is by design: what the model says may differ from what you meant, so a “Fine” in the conversation is not written to the record. Only your click is written and counts as confirmation. Clicking “Use as requirements” records the full text of that last answer and confirms it at the same time.</p>
+        <figure class="shot">
+          <img src="../../img/t/review-02-adopted.jpg" width="1372" height="867" loading="lazy" alt="The Assistant page after the button click. A notice at the top says “Taken as writing requirements”. In the progress line a check mark stands before Writing requirements and step 2, Starting framework, is highlighted. The card at the end says the writing requirements are confirmed and the next step is reading existing reviews, with the buttons “Propose framework” and “Skip”.">
+          <figcaption><b>Figure 2.</b> After you accept, “Writing requirements” gets a check mark and the card changes to the two buttons of the next step: “Propose framework” and “Skip”.</figcaption>
+        </figure>
+        <aside class="note"><b>Tip</b>To take only a passage of an answer, select that text and click “Use selection as requirements” next to the selection. The later steps work the same way.</aside>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>Starting framework: read existing reviews first</h2>
+        <p>Before you build a structure, look at how others have already reviewed this topic. Click “Propose framework” on the card. It sends a request for you: “Find the published reviews on this topic, compare them one by one, then propose a starting framework.”</p>
+        <p>In this step the assistant searches the library and also tries searches for reviews outside it on PubMed and Europe PMC, so the search terms are sent to those two databases. This time the wait was two or three minutes, and what came back was:</p>
+        <ul>
+          <li>A comparison table with one row for each of 10 reviews: the core question it asks, its chapter structure, strengths, limits, and what was actually read. Integrated single cell transcriptomics analysis for unraveling heterogeneity and plasticity of root cells for sustainable and regenerative agriculture is in the library with full text, and it is marked “read the full text, pp. 1 to 13”. The other two reviews in the library were read by abstract only. The 7 reviews outside the library have only a bibliographic record and an abstract fragment, and the chapter structure column honestly says “not read”.</li>
+          <li>A starting framework synthesized from them, five chapters, each stating the question it must answer and a provisional answer. For example, for chapter three, “Nuclei route: once some dissociation problems are bypassed, what does it mean that the thing measured has changed?”, the provisional answer says plainly “no conclusion for now”.</li>
+          <li>Outside reviews it suggests reading next, and the note “no new papers imported or downloaded in this round”.</li>
+        </ul>
+        <figure class="shot">
+          <img src="../../img/t/review-03-framework.jpg" width="1372" height="867" loading="lazy" alt="The end of the starting framework answer: a list of four outside reviews to read next; below it, source tags for three papers, P27, P28 and P30, and a citation tag with a check mark, P27 p.13, followed by “Exact quote found”. The card buttons are “Use as framework” and “Skip”.">
+          <figcaption><b>Figure 3.</b> Below the answer are the sources it used. The tag with a quotation is an excerpt, already compared with the text saved for that paper, and it shows “Exact quote found”.</figcaption>
+        </figure>
+        <p>The starting framework is only a starting point drawn from existing reviews, and the original studies have not tested it yet. If you are satisfied, click “Use as framework”. If the topic has no review to draw on, click “Skip” and draft the outline directly from the library.</p>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>Rebuild the outline from the library's studies</h2>
+        <p>Click “Rebuild outline” on the card. For each chapter of the starting framework, the assistant reads the original studies in the library. For each chapter it says whether it keeps, rewrites, merges, splits or drops it, and which paper made it change it.</p>
+        <p>This took about two minutes. It first lists the range it actually read. The most direct evidence is Integrated experimental and computational workflows for single-cell transcriptomics in plants (a study on maize that compares protoplasts with nuclei from fresh and frozen samples), read on pages 1 to 12. For the Arabidopsis leaf drought paper, it notes that the attachment is supplementary material and that it “did not read the body of the paper”. Then it gives an outline of five sections, each with a planned length, representative papers and evidence gaps. The original fourth chapter was split, and “Background contamination and correction” became a section of its own, because the maize study observed a loss of sensitivity after correction.</p>
+        <p>The most useful part is a separate paragraph, “What the library's evidence cannot yet support”. For example, “the nuclei route is closer to the original state of all cells” cannot be a general conclusion, and the difference between fresh and frozen samples cannot be put down entirely to freezing, because that study also changed how the tissue was broken up.</p>
+        <figure class="shot">
+          <img src="../../img/t/review-04-outline.jpg" width="1372" height="867" loading="lazy" alt="The end of the outline answer: a table of what the original studies added; below it, four items to check once the outline is confirmed; below that, source tags such as P22, P36, P38, P40, P46, P45 and P32, and one citation marked as an exact quote. The card is step 3, Outline, with the button “Use as outline”.">
+          <figcaption><b>Figure 4.</b> The progress has reached step 3. The card shows “Use as outline”. Until the outline is confirmed, no text can be saved.</figcaption>
+        </figure>
+        <p>When you have looked at the chapters, representative papers and gaps, click “Use as outline”.</p>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>Write one section, save one section</h2>
+        <p>Once the outline is confirmed, the card shows “Write first section”. Click it and the assistant writes only that section, starting with “## section name”. This time the introduction came back at 146 characters (the outline gave this section about 180). Two of its sentences carry citations in the form <code>[P22 p.8 "Root cap cells were exclusively recovered in nuclei-derived datasets."]</code>: a tag, a page number and a quoted sentence.</p>
+        <p>If it reads well, click “Save section” on the card. The section name is taken from the heading at the start of the answer. Saving again creates another section and does not overwrite.</p>
+        <figure class="shot">
+          <img src="../../img/t/review-05-section.jpg" width="1372" height="867" loading="lazy" alt="The Assistant page after a section was saved. A notice at the top says the section is saved with 2 citation evidence records awaiting your judgment. The progress line shows 1 section and 2 evidence records awaiting judgment. The conversation holds the text of the introduction and two citations marked as exact quotes. The card buttons are “Write next section”, “Verify all” and “Save as new manuscript”.">
+          <figcaption><b>Figure 5.</b> On saving, the notice says “saved with 2 citation evidence records awaiting your judgment”, and the progress line also keeps the number awaiting judgment. The card changes to “Write next section”, “Verify all” and “Save as new manuscript”.</figcaption>
+        </figure>
+        <p>Each further click on “Write next section” continues after the saved sections. To walk the whole path, this tutorial writes only the introduction. The other four sections work the same way.</p>
+      </section>
+
+      <section id="s6">
+        <h2><i>6</i>Evidence: is the sentence there, does it support the claim</h2>
+        <p>Click “View record” at the right of the progress line and the conversation changes to this review record: writing requirements, starting framework, outline, the text of each section, evidence notes and verification record, from top to bottom. Each item has an “Edit” beside it.</p>
+        <p>Under the text of each section is the evidence it brought, one item per citation:</p>
+        <ul>
+          <li><b>Claim</b>: the sentence the citation sits in, for example “For example, in the maize sample-preparation comparison, root cap cells were recovered only in the nuclei data, which shows that atlas coverage depends on the route.”</li>
+          <li><b>Source</b>: the paper and page the citation points to, here p. 8 of that maize study.</li>
+          <li><b>Quote</b>: the original sentence the citation carries, with the comparison result below it.</li>
+        </ul>
+        <figure class="shot">
+          <img src="../../img/t/review-06-evidence.jpg" width="1372" height="867" loading="lazy" alt="In the review record, the section “1 · Introduction: at which levels does sample-preparation bias arise?”: under the text are two evidence cards. Each has a claim, a paper title and page, an English quote and a green “Exact quote found”, plus four judgment buttons, “Supports”, “Partly supports”, “Does not support” and “Cannot judge”. On the first card “Supports” is selected. On the right are “View quote”, “Edit” and “Delete”.">
+          <figcaption><b>Figure 6.</b> The quotes of both items are “Exact quote found”. The first is judged “Supports”, the second still waits for a judgment, and the progress line reads “1 evidence records awaiting judgment”.</figcaption>
+        </figure>
+        <p>The comparison has five outcomes: “Exact quote found”; “Quote found on p.N”, where the sentence was found but on another page; “Only the first N% matches”; “Quote absent from source”; and “No full text to verify”, where the paper has no readable full text. This time both were “Exact quote found”.</p>
+        <p>The comparison answers only one question: <b>is this sentence in the original?</b> It does not answer whether that sentence can carry the claim. The quote of the first item says root cap cells were recovered only in the nuclei data, and the second half of the claim, “which shows that atlas coverage depends on the route”, is inferred from it. Whether to judge it “Supports” or “Partly supports” is for you to decide after you click “View quote”, which opens the PDF (the quote is highlighted), and read the context. Click “Supports”, “Partly supports”, “Does not support” or “Cannot judge” to record a judgment, and click the selected one again to take it back.</p>
+        <h3>What you change must be confirmed again</h3>
+        <p>The writing requirements, the starting framework and the outline in the record can all be edited directly, but an edit has to be confirmed again. If you edit the writing requirements, the framework and the outline after them go back to awaiting confirmation. If you edit the starting framework, the outline follows. A “Confirm” appears beside the heading, and the card at the end of the conversation switches to confirming it. Sections and evidence already saved are kept. If you edit the text, evidence whose sentence is still there keeps its judgment; where the sentence changed, the earlier judgment is taken back.</p>
+        <aside class="note"><b>Tip</b>For a sentence that has no citation in the text but whose basis you want to record, click “Add evidence” in the record, then pick the paper and fill in the page and the quote yourself. The page is the number of the page in the PDF counted from 1, not necessarily the printed page number.</aside>
+      </section>
+
+      <section id="s7">
+        <h2><i>7</i>Verify, mark complete, save as a manuscript</h2>
+        <p>Back in the conversation, click “Verify all” on the card. It sends <code>/verify the saved sections</code>. The assistant breaks the introduction into 9 claims and attaches an original quote and a conclusion to each. The conclusions are not all “Supports”. For the first sentence, “The cell wall is usually removed first to obtain protoplasts”, it judged “Partly supports”, because it checked only the methods of this one study, which cannot carry the word “usually”. For the root cap sentence it judged direct support, and added that this is an observation in particular material and a particular procedure.</p>
+        <figure class="shot">
+          <img src="../../img/t/review-07-verify.jpg" width="1372" height="867" loading="lazy" alt="The end of the verification answer: claims 8 and 9, each with an original quote and a verification result, and a closing summary. Below are nine P22 citation tags, all marked as exact quotes. The card says the result of the verification can be recorded as a verification record, but whether it is true is still for you to review, with the button “Save verification”.">
+          <figcaption><b>Figure 7.</b> Under the verification answer the card has one button, “Save verification”, and says that whether the check is true is still for you to review.</figcaption>
+        </figure>
+        <p>Click “Save verification” and this check is stored in the “Verification record” of the record. After that, “Mark complete” appears on the card. Whether the first sentence of this section should change is yours to decide after reading the verification. This time we did not change it and clicked “Mark complete” directly.</p>
+        <aside class="note warn"><b>Note</b>“Mark complete” does not mean the facts are verified. It only requires that the requirements and the outline are confirmed, at least one section is saved, and the verification record was made on the current text. When we clicked it this time, one item of evidence was still unjudged, and it accepted that all the same. “Exact quote found” also says only that the sentence is in the original. Check key numbers and conclusions against the original yourself.</aside>
+        <p>Finally click “Save as new manuscript”. The saved sections go in order into a new manuscript in “Writing”, and no existing manuscript is overwritten. The citations in the conversation become citations of the Writing page: <code>[P22 p.8 "Root cap cells …"]</code> becomes <code>[@Wang2026c, p. 8]</code>. The original sentence does not go into the text; it stays in the review record. Tags that match no paper are kept as they are and listed at the end of the manuscript under “Source labels (please verify)”. This time both matched.</p>
+        <figure class="shot">
+          <img src="../../img/t/review-08-manuscript.jpg" width="1372" height="867" loading="lazy" alt="The Writing page: in the outline on the left is one section, “Introduction: sample-preparation bias at …”, 146 characters. In the text in the middle two citations show as @Wang2026c, p. 8 and @Wang2026c, p. 9. On the right is the list of candidates, with the tabs “Candidates”, “Comments” and “References 1” at the top.">
+          <figcaption><b>Figure 8.</b> The new manuscript opens on the Writing page, and its title is taken from the sentence after <code>/review</code>. The citations in the text already have the form <code>[@Wang2026c, p. 8]</code>, with 1 paper in the references.</figcaption>
+        </figure>
+        <p>Edits you make on the Writing page after saving do not go back into the review record. The record and this conversation stay in the library. Open them from the assistant's “History” and you can carry on with the next section.</p>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>Recap</h2>
+        <ul>
+          <li>Start with <code>/review topic</code> and confirm four steps in turn: writing requirements, starting framework, outline, and section-by-section writing.</li>
+          <li>Each step counts only the button on the card at the end of the conversation; saying “Fine” in the conversation is not written to the record.</li>
+          <li>When a section is saved, each citation becomes an item of evidence. “Exact quote found” says only that the sentence is in the original; whether it supports the claim is for you to judge.</li>
+          <li>“Verify all”, “Save verification” and “Mark complete” leave a trace of the checking, but they are not fact verification.</li>
+          <li>“Save as new manuscript” sends the sections to the Writing page and turns citations into <code>[@Key, p. N]</code>. For how to edit and add citations there, see <a href="write.html">Write a paper: candidate sentences, citations and sources</a>.</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="extract.html"><small>Previous · 11</small><strong>Read a batch of papers into one table</strong></a>
+    <a class="next" href="write.html"><small>Next · 13</small><strong>Write a paper</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>References</h2>
+      <ol>
+        <li><a href="index.html">All tutorials</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">Features: what each page can do (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">Data and privacy: where files live and what leaves your machine (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">Questions and ideas: Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>About this tutorial.</b> The screenshots and numbers come from a real run in November 2026 on macOS with v0.10.0. The model answers differently each time, so the wording and numbers will differ when you follow along, but the steps are the same. The screenshots show the Chinese interface; the text uses the labels of the English one (Settings › General › Interface language).</p>
+      <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation; check key numbers and conclusions against the original.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

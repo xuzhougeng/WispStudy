@@ -92,6 +92,9 @@ strong, b { font-weight: 650; }
 .top nav a, .gh { font-size: .9rem; text-decoration: none; padding: 6px 12px; border-radius: 7px; color: var(--ink-2); white-space: nowrap; }
 .top nav a:hover, .gh:hover { background: var(--sunken); color: var(--ink); }
 .gh { border: 1px solid var(--line-strong); color: var(--ink); }
+/* The same page in the other language: after the sections, before GitHub. */
+.lang { font-size: .9rem; text-decoration: none; padding: 6px 4px; color: var(--ink-3); white-space: nowrap; margin-inline: -14px -12px; }
+.lang:hover { color: var(--ink); }
 
 /* ---------- hero ---------- */
 .hero { position: relative; isolation: isolate; padding-top: clamp(56px, 9vw, 124px); padding-bottom: clamp(64px, 9vw, 120px); }
@@ -157,6 +160,8 @@ figcaption, .verdict span { background: linear-gradient(var(--marker), var(--mar
 .rail { position: sticky; top: calc(var(--top) + 36px); align-self: start; display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
 .rail .no { font: 600 .8rem/1 var(--mono); color: var(--accent); letter-spacing: .08em; }
 .rail .v { writing-mode: vertical-rl; font: 700 1.6rem/1 var(--serif); letter-spacing: .42em; }
+/* Latin letters lie on their side here and want less air between them than characters do. */
+:lang(en) .rail .v { letter-spacing: .1em; }
 .rail::after { content: ""; width: 1px; height: 72px; background: var(--line-strong); margin-left: .78rem; }
 
 h2 { font: 900 clamp(1.8rem, 4.1vw, 3.15rem)/1.22 var(--serif); letter-spacing: .01em; max-width: 18em; }
@@ -314,6 +319,7 @@ html:not(.js) .steps-list { display: none; }
 .dl { position: relative; background: var(--surface); border: 1px solid var(--line-strong); border-radius: 14px; padding: 26px 24px 24px; display: flex; flex-direction: column; }
 .dl.mine { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow); }
 .dl.mine::after { content: "你的系统"; position: absolute; top: 18px; right: 18px; font-size: .72rem; font-weight: 600; color: var(--accent); background: var(--accent-soft); padding: .2em .7em; border-radius: 999px; }
+:lang(en) .dl.mine::after { content: "Your system"; }
 .dl h3 { font-size: 1.7rem; font-weight: 900; }
 .dl-req { font-size: .86rem; color: var(--ink-3); margin-top: 2px; }
 .dl .btn { margin-top: 22px; align-self: flex-start; }
@@ -375,6 +381,9 @@ html:not(.js) .steps-list { display: none; }
   .guides { grid-template-columns: minmax(0, 1fr); }
   .top nav a { padding: 6px 8px; }
   .gh { display: none; }
+  .lang { margin-inline: 0; }
+  :lang(en) .top nav { gap: 0; }
+  :lang(en) .top nav a { padding: 6px 5px; font-size: .82rem; }
   .brand span { display: none; }
   .top-in { gap: 8px; }
   .ledger { grid-template-columns: repeat(2, minmax(0, 1fr)); }
