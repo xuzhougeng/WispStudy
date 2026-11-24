@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/slides.html">
+<link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/slides.html">
+<title>Turn a paper into lab-meeting slides · Wisp Study tutorials</title>
+<meta name="description" content="Cut the figures you want to present from the PDF, save them to the figure library, then use /slides to have the assistant read the full text and write a .pptx with figures and speaker notes, ready to keep editing in PowerPoint, Keynote or WPS.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../../app-icon.png">
+<link rel="stylesheet" href="../../style.css">
+<link rel="stylesheet" href="../../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="Site">
+      <a href="index.html" aria-current="page">Tutorials</a>
+      <a href="../index.html#ideas">Ideas</a>
+      <a href="../index.html#tools">Tools</a>
+      <a href="../index.html#download">Download</a>
+    </nav>
+    <a class="lang" href="../../tutorials/slides.html" lang="zh-CN" hreflang="zh-CN">中文</a>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="Location"><a href="index.html">Tutorials</a><span>›</span>Read</nav>
+
+  <header class="doc-head">
+    <p class="kicker">Tutorial 08 · Read</p>
+    <h1>Turn a paper into lab-meeting slides</h1>
+    <p class="lead">You have read the paper, and next week you present it at the lab meeting. This tutorial first cuts the figures you want to show from the PDF and saves them to the figure library, then has the assistant read the full text and write a PowerPoint file: a title slide, a few points per slide, figures with captions, the source page number in the footer, and the speaker notes in the notes. The layout is a starting point, not a finished deck; take it to PowerPoint, Keynote or WPS and keep editing.</p>
+    <dl class="facts">
+      <div><dt>Scenario</dt><dd>Turn a paper on a single-cell atlas of rice callus into a lab-meeting talk.</dd></div>
+      <div><dt>Needs</dt><dd>A paper with a PDF, and a model provider set up in “Settings › AI”.</dd></div>
+      <div><dt>Time</dt><dd>About 10 minutes, of which the assistant takes about two minutes to write the slides.</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="Sections of this tutorial">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#s1">Cut the figures you want to show</a></li>
+        <li><a href="#s2">Save them to the figure library</a></li>
+        <li><a href="#s3">Have the assistant write slides with /slides</a></li>
+        <li><a href="#s4">Open the file and keep editing</a></li>
+        <li class="plain"><a href="#recap">Recap</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>Cut the figures you want to show</h2>
+        <p>The paper to present is A single-cell transcriptome atlas reveals the transcriptionally earliest state in rice callus, BMC Plant Biology, 2026, 15 pages in full, with its PDF already stored in the library. Search for <code>callus</code> above the list, click this paper and switch to “PDF” on the right.</p>
+        <p>Figures in the slides come only from the figure library, and the assistant does not crop figures from the PDF by itself. So decide first which ones to show: this paper is about which cells appear first in callus, so it needs Fig. 1 (the cell atlas), Fig. 2 (the developmental trajectory) and Fig. 4 (the establishment of the root meristem niche). Turn to page 5 and click “Screenshot” on the toolbar (the button becomes “Cancel screenshot”), then select Fig. 1 on the page. After you select it, four buttons appear beside it: “Save to figures”, “Ask about screenshot”, “Mark” and “Cancel”.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/slides-01-cut.jpg" width="1372" height="867" loading="lazy" alt="The PDF on the right stands at page 5, with Fig. 1 inside a green frame. Below the frame is a row of buttons: Save to figures, Ask about screenshot, Mark, Cancel.">
+          <figcaption><b>Figure 1.</b> Fig. 1 on page 5 is selected. “Mark” leaves the area on the page as a dashed frame to deal with later.</figcaption>
+        </figure>
+
+        <p>When you have not decided whether to present a figure, click “Mark”: the area stays on the page as a dashed frame. Next time you click into the frame you can likewise save it or ask about it, or delete it. Circle every figure you might present while you read, and save them one by one before you make the slides, so that none is missed.</p>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>Save them to the figure library</h2>
+        <p>Click “Save to figures”. In the dialog, the screenshot is on the left with “Page 5” and its source below it; on the right are the figure label, caption, tags and notes. The caption of this page sits right under the figure, and both the label <code>Fig. 1</code> and the whole caption were read from the page text. The top of the dialog reminds you to “Check and correct them before saving”.</p>
+        <p>The tags are empty. Click the AI icon to the right of “Tags”, and the model looked at the figure and filled in <code>UMAP, <span lang="zh-CN">点图</span>, <span lang="zh-CN">多面板组合排版</span></code> (UMAP, dot plot, multi-panel layout). These tags are used later to find figures in the figure library. You can edit them or leave them out. The AI icon beside a field only makes a suggestion; nothing is stored until you click “Save”.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/slides-02-collect.jpg" width="1372" height="867" loading="lazy" alt="The “Save to figures” dialog floats over a page that is not dimmed. On the left is the screenshot of Fig. 1, with page 5 and the paper's source below it. On the right, the top says the label and caption were read from this page, the label is Fig. 1, the caption is the English caption read from the page, the tags field is still empty, and at the bottom right are Cancel and Save.">
+          <figcaption><b>Figure 2.</b> The label and caption are read from the page and the tags are still empty. Click the AI icon at the right of the field to have the model fill them in from the figure. All of them can be edited, and nothing is stored until you click “Save”.</figcaption>
+        </figure>
+
+        <p>Figure 2 was retaken on v0.17.0, with the tags not yet filled in. While the dialog is open, the page behind it is no longer dimmed and you can still select text on it and copy it into the dialog. Hold the dialog's title or its image to drag it aside. After saving, the figure on the page is left with a green dashed frame, with a check mark and the figure label at its top left, so wherever you turn you can tell which figures have been saved. Click that label to edit the caption and tags, or to “Remove” it. For how it looks, see Figures 8 and 9 of <a href="read.html#s5">Read one paper closely</a>.</p>
+
+        <p>Save Fig. 2 on page 7 and Fig. 4 on page 9 in the same way. Switch to “Figures” under “Favorites” on the left and all three are there. Above them you can filter by tag (“UMAP 1”, “multi-panel layout 1”, “dot plot 1”), and the search box looks through captions, figure labels, tags and notes. Click a card to open it and edit its fields again; “Open source” goes back to the page the screenshot came from, and “Copy image” and “Save as…” take it elsewhere.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/slides-03-figures.jpg" width="1372" height="867" loading="lazy" alt="The “Favorites” page switched to “Figures 3”, listing the cards of Fig. 4 and Fig. 2, each with its label, page number, the beginning of its caption and its source. Above them is the tag filter: All 3, UMAP 1, multi-panel layout 1, dot plot 1.">
+          <figcaption><b>Figure 3.</b> The three figures in the figure library. These are the figures the slides can use.</figcaption>
+        </figure>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>Have the assistant write slides with /slides</h2>
+        <p>Return to this paper and click “Ask”. Type <code>/</code> in the box, choose <code>/slides</code> from the list of commands, and write what you need after it:</p>
+        <blockquote><cite>Ask</cite><p>/slides For next week's lab meeting, about 8 slides, explaining clearly how the earliest transcriptional state in callus was found</p></blockquote>
+        <p>When you ask about a single paper, you do not need to say which paper after <code>/slides</code>. In the “Assistant” of the library, write <code>/slides P3</code>, or just say “turn this paper into a PPT for the lab meeting”. The assistant first reads the full text, then looks up the figures already saved for this paper in the figure library, and the conversation folds this into one line, “Read paper · Query figures”.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/slides-04-working.jpg" width="1372" height="867" loading="lazy" alt="The “Ask” layout: in the middle is the /slides question, below it a line “Read paper · Query figures”, and below that “Organizing findings… 18s”. On the right is page 1 of this paper's PDF.">
+          <figcaption><b>Figure 4.</b> The assistant reads the full text and looks up the figure library before it writes.</figcaption>
+        </figure>
+
+        <p>Before the file is written, a save dialog opens, defaulting to “Documents” with the file name taken from the title of the slides. Closing the dialog means nothing is written, and an existing file of the same name is not overwritten. In this example it took under two minutes and wrote <code><span lang="zh-CN">水稻愈伤组织最早转录状态的单细胞图谱.pptx</span></code> (the file name is “single-cell atlas of the earliest transcriptional state in rice callus”).</p>
+        <p>The answer does not repeat the contents of the slides but tells you what it did: a title slide plus 9 content slides, arranged as “Background and question → Methods → Main results → Conclusions and limits”; which slides carry Fig. 1, Fig. 2 and Fig. 4 from the figure library; and, because the captions are long, only the first three lines are kept on the slide, with the full text in the notes. It also says what it could not do: Fig. 3, Fig. 5 and Fig. 6 are not in the figure library, so the slides on subcluster analysis and on differentiating callus have no figure. “If you like, select and save these figures on the PDF pages and I can do it again.” Finally it points out two things to make clear when you present: the “earliest state” is inferred from RNA velocity and pseudotime, with no lineage tracing; and the link between OsDWT1 and gibberellin is only a coordinated change in expression, with no genetic validation.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/slides-05-answer.jpg" width="1372" height="867" loading="lazy" alt="The second half of the answer: the titles of the 9 content slides, three notes headed “slides with figures”, “slides without figures” and “basis”, and two points to watch when presenting. Below the answer are Copy, Answer again, Branch and “Save as note”.">
+          <figcaption><b>Figure 5.</b> The assistant explains what each slide covers, which slides have figures, and which figures were not saved and so are missing. It also says it has not checked the layout in PowerPoint.</figcaption>
+        </figure>
+
+        <aside class="note"><b>Tip</b>If you want a figure in the slides, save it to the figure library first and then say <code>/slides</code> again. Save tables as figures too: the assistant does not draw tables or charts by itself.</aside>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>Open the file and keep editing</h2>
+        <p>Double-click the .pptx to open it in PowerPoint, Keynote or WPS. Below are six of the slides. The title slide shows the authors, year and journal. On a slide with a figure, the points are on the left and the figure and its caption on the right or below. The footer of each slide gives the source and page number, for example “Lyu et al., 2026 · p. 5 (Fig. 1)”, so if you are asked about a sentence, you can turn back to that page of the original.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/slides-06-deck.jpg" width="1352" height="1176" loading="lazy" alt="Thumbnails of six slides in two columns and three rows: the title slide on the single-cell atlas of the earliest transcriptional state in rice callus; Methods: samples and single-cell library preparation; Result 1: callus cell atlas and annotation, with Fig. 1 on the right; Result 2: founder cells are the earliest state of embryogenic callus, with Fig. 2 below; Result 4: founder cells turn into the root meristem niche, with Fig. 4 on the right; Conclusions and limits.">
+          <figcaption><b>Figure 6.</b> Six of the 10 slides written (slides 1, 3, 5, 6, 8 and 10). The font size of the points is chosen by the amount of content, and when there are too many they run on to the next slide.</figcaption>
+        </figure>
+
+        <p>The speaker notes are in the notes of each slide, and slides with a figure also carry its full caption. For example, the notes of the Fig. 1 slide begin with a sentence to say, “Point out three kinds of evidence for the founder cells: homologs of Arabidopsis early callus initiation cell genes, homologs of WOX11, and in situ hybridization of RAmy3D/E”, followed by the full caption of Fig. 1. You see it at a glance in presenter view.</p>
+        <p>The layout is arranged by the program: white background, one accent color, no animation and no template. Switching to your group's template, adjusting the wording and splitting one slide into two are all done in the presentation software. For a bigger change in structure, keep talking in the same conversation (“squeeze the methods into one slide and merge results 3 and 4”) and the assistant writes a new file and leaves the old one alone.</p>
+
+        <aside class="note warn"><b>Note</b>The points are a summary the model wrote after reading the full text, so go through the numbers and conclusions against the original; the page numbers in the footers are there for that. When slides are generated, the full text of this paper and the label, caption and tags of each figure in the figure library are sent to the model provider you set up. The images themselves are placed in the file from this machine by the program and do not go through the model. A figure is sent out only if you clicked the AI icon when filling in its tags or caption.</aside>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>Recap</h2>
+        <ul>
+          <li>Use “Screenshot” on the PDF to select the figure you want to show and “Save to figures”; for the ones you have not decided on, “Mark” them as a dashed frame.</li>
+          <li>The figure label and caption are read from the page, the model can fill in tags from the figure, and you look them over before saving.</li>
+          <li><code>/slides</code> has the assistant read the full text and look up the figure library, and write a .pptx with figures, source footers and speaker notes in the notes; you choose where to save it.</li>
+          <li>A figure missing from the slides is one you have not saved: save it to the figure library and run it again. Check numbers and conclusions against the original.</li>
+          <li>Next: widen the question to the whole library; see <a href="ask.html">Ask the whole library, and check the answers</a>.</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="listen.html"><small>Previous · 07</small><strong>Listen to a paper</strong></a>
+    <a class="next" href="ask.html"><small>Next · 09</small><strong>Ask the whole library, and check the answers</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>References</h2>
+      <ol>
+        <li><a href="index.html">All tutorials</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">Features: what each page can do (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">Data and privacy: where files live and what leaves your machine (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">Questions and ideas: Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>About this tutorial.</b> The screenshots and numbers come from a real run in November 2026 on macOS with v0.14.0; Figure 2 was retaken on v0.17.0. The model answers differently each time, so the wording and numbers will differ when you follow along, but the steps are the same. The thumbnails of the slides were made by opening the .pptx in LibreOffice. The screenshots show the Chinese interface; the text uses the labels of the English one (Settings › General › Interface language).</p>
+      <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation; check key numbers and conclusions against the original.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
