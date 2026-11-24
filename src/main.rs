@@ -54,6 +54,7 @@ mod transfer;
 mod translate;
 mod ui;
 mod updater;
+mod works;
 mod write;
 mod write_find;
 mod write_seek;

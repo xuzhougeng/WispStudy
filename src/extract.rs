@@ -482,8 +482,9 @@ impl Workspace {
         });
         cx.spawn(async move |this, cx| {
             let (paper, fields, answers) = work.await;
-            this.update(cx, |this, cx| {
-                let Some(lib) = this.lib.as_mut().filter(|l| l.info.id == library && l.extract.run == run) else { return };
+            // The library on show, or one left while this run went on (`in_library`).
+            this.update(cx, |this, cx| this.in_library(&library, cx, |this, cx| {
+                let Some(lib) = this.lib.as_mut().filter(|l| l.extract.run == run) else { return };
                 lib.extract.reading.retain(|reading| *reading != paper.id);
                 lib.extract.done += 1;
                 let kept = answers.and_then(|answers| {
@@ -514,7 +515,7 @@ impl Workspace {
                     }
                 }
                 cx.notify();
-            })
+            }))
             .ok();
         })
         .detach();

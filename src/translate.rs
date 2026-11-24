@@ -142,11 +142,12 @@ impl Workspace {
         let ask = lib.translation_asks.entry(key.clone()).or_default();
         *ask += 1;
         let ask = *ask;
-        let (session, protocol, author) = (lib.translation_session.clone(), profile.protocol, profile.labelled());
+        let (session, protocol, author, library) = (lib.translation_session.clone(), profile.protocol, profile.labelled(), lib.info.id.clone());
         let work = cx.background_executor().spawn(async move { wisp_net::complete(request, protocol) });
         cx.spawn(async move |this, cx| {
             let translated = work.await;
-            this.update(cx, |this, cx| {
+            // The library on show, or one left while a run of translations went on (`in_library`).
+            this.update(cx, |this, cx| this.in_library(&library, cx, |this, cx| {
                 // Even closing and reopening the same library creates a new session.
                 let Some(lib) = this.lib.as_mut().filter(|lib| Arc::ptr_eq(&lib.translation_session, &session)) else { return };
                 if lib.translation_asks.get(&key) != Some(&ask) { return }
@@ -160,7 +161,7 @@ impl Workspace {
                 this.translation_next(Run::Facing, cx);
                 this.sync_facing(cx);
                 cx.notify();
-            }).ok();
+            })).ok();
         }).detach();
     }
 

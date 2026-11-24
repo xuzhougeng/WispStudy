@@ -739,6 +739,8 @@ impl Workspace {
             ))
             .children(self.render_fetching(cx))
             .children(self.render_extract_progress(cx))
+            // What the libraries left at work go on with, after this library's own.
+            .children(self.render_elsewhere(cx))
             .child(
                 div()
                     .flex()
