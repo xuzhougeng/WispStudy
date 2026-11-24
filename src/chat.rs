@@ -230,25 +230,43 @@ fn section_of(text: &str, review: &wisp_core::review::Review) -> (String, String
     (name, body)
 }
 
-/// What a conversation says and the box under it keep to one column of the reading width (设置 › 外观's, the manuscript's),
-/// centred in a page wider than that: a large window leaves its room at the sides, not in longer lines. A maximum,
-/// not a width: in a narrow place (a paper's conversation, the one beside a manuscript) the column is the place.
+/// How much wider than the reading width a conversation's column grows in a wide place, at most, and what share of the
+/// place it then takes. Between the two a wider window gives longer lines, up to where a line is still read in one go.
+const COLUMN_GROWTH: f32 = 1.5;
+const COLUMN_SHARE: f32 = 0.75;
+
+/// The reading width of 设置 › 外观 (the manuscript's) at the interface's text size: a larger text keeps as many
+/// characters to a line instead of fewer.
+fn reading_width() -> f32 {
+    f32::from(theme::manuscript_width()) * f32::from(text_px(1.))
+}
+
+/// How wide what was said is drawn in a conversation `place` wide, for a reading width of `base`: the reading width,
+/// growing with a wider place to `COLUMN_SHARE` of it, at most `COLUMN_GROWTH` times the reading width. 铺满 is a reading
+/// width wider than any place, so its column is the place.
+fn column_width(place: f32, base: f32) -> f32 {
+    (place * COLUMN_SHARE).clamp(base, base * COLUMN_GROWTH)
+}
+
+/// What the assistant's page shows before anything is said (the box of the first question, 最近对话, 历史) keeps to one
+/// column of the reading width (`reading_width`), centred in a page wider than that. A maximum, not a width: in a
+/// narrow place the column is the place.
 /// The column is a row's child with the reading width as its basis, shrinking where there is less room, never a
 /// percentage: a wrapping text field under widths that are all percentages is measured too narrow.
 /// `inset` is the content's own padding at each side, outside the column: the box's card and the answers then share their edges.
 pub(crate) fn reading_column(content: Div, inset: f32) -> Div {
     // A basis of the column's width that shrinks in a narrow place: one of 0 (`flex_1`) would have its text measured at no width, and the row as tall as that.
-    let width = theme::manuscript_width() + px(2. * inset);
+    let width = px(reading_width() + 2. * inset);
     div().flex().flex_none().justify_center().child(content.flex_shrink().flex_basis(width).min_w_0().max_w(width))
 }
 
-/// The padding at each side of a conversation's scroll and of its box that keeps what was said to the reading column
-/// (`theme::manuscript_width`), centred in a wider place; 16px in a narrower one, so the column is a maximum, not a
-/// width. It is worked out from the conversation's width as last drawn (`Chat::drawn_width`, `chat_measured`): a column
-/// grown from a row of its own would have the text of the answers measured at another width than it is drawn at, and
-/// the scroll would run past the end. Before the first frame there is no width yet, and the padding is the narrow one.
+/// The padding at each side of a conversation's scroll and of its box that keeps what was said to its column
+/// (`column_width`), centred in a wider place; 16px in a narrower one, so the column is a maximum, not a width. It is
+/// worked out from the conversation's width as last drawn (`Chat::drawn_width`, `chat_measured`): a column grown from a
+/// row of its own would have the text of the answers measured at another width than it is drawn at, and the scroll
+/// would run past the end. Before the first frame there is no width yet, and the padding is the narrow one.
 pub(crate) fn reading_pad(width: f32) -> f32 {
-    ((width - f32::from(theme::manuscript_width())) / 2.).max(16.)
+    ((width - column_width(width, reading_width())) / 2.).max(16.)
 }
 
 /// The shell of a chip under an answer: a source, or the one that shows the rest.
@@ -2032,7 +2050,7 @@ pub(crate) const PAPER_PLACEHOLDER: &str = "就这篇文献提问，输入 / 选
 #[cfg(test)]
 mod tests {
     // Not `super::*`: that would bring in gpui's own `test` attribute.
-    use super::{beside_selection, paper_placeholder, tools_summary};
+    use super::{COLUMN_GROWTH, beside_selection, column_width, paper_placeholder, tools_summary};
     use crate::i18n::translate;
     use wisp_core::settings::Language;
 
@@ -2047,6 +2065,16 @@ mod tests {
             assert_ne!(translate(Language::En, said), said, "missing translation: {said}");
         }
         assert!(translate(Language::En, paper_placeholder(2)).contains("these papers"));
+    }
+
+    #[test]
+    fn the_conversation_widens_with_a_wide_page_up_to_a_limit() {
+        // The reading width in a page that has only it to spare, more in a wider one, never past the limit.
+        assert_eq!(column_width(800., 720.), 720.);
+        assert_eq!(column_width(1200., 720.), 900.);
+        assert_eq!(column_width(3000., 720.), 720. * COLUMN_GROWTH);
+        // 铺满 is the place itself, whatever it is.
+        assert!(column_width(3000., 100_000.) >= 3000.);
     }
 
     #[test]
