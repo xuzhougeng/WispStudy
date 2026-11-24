@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/">
+<link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/">
+<title>Tutorials · Wisp Study</title>
+<meta name="description" content="Fifteen Wisp Study tutorials, each written around a research scenario: build a library from a topic, talk to the assistant before building a library, migrate Zotero, read just one PDF, read one paper closely, read several papers side by side, listen to a paper, make lab-meeting slides, ask the library, pick papers by impact factor and zone, read papers into a table, write a review, write a paper, revise a manuscript, and keep up with new papers.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Wisp Study tutorials: fifteen research scenarios">
+<meta property="og:description" content="Each one starts from one concrete thing: a new research topic, a paper to read closely, a manuscript to send back.">
+<meta property="og:url" content="https://xuzhougeng.github.io/WispStudy/en/tutorials/">
+<meta property="og:image" content="https://xuzhougeng.github.io/WispStudy/img/library.png">
+<link rel="icon" href="../../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../../app-icon.png">
+<link rel="stylesheet" href="../../style.css">
+<link rel="stylesheet" href="../../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="Site">
+      <a href="index.html" aria-current="page">Tutorials</a>
+      <a href="../index.html#ideas">Ideas</a>
+      <a href="../index.html#tools">Tools</a>
+      <a href="../index.html#download">Download</a>
+    </nav>
+    <a class="lang" href="../../tutorials/index.html" lang="zh-CN" hreflang="zh-CN">中文</a>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <header class="doc-head">
+    <p class="kicker">Tutorials · Fifteen research scenarios</p>
+    <h1>Start from one concrete thing</h1>
+    <p class="lead">Each tutorial is the record of a real run: a research topic you have just taken over, a paper to read closely, a manuscript your advisor has marked up and that has to go back. Apart from 02, which starts from a blank page, they all use the same library, “<span lang="zh-CN">植物单细胞转录组</span>” (plant single-cell transcriptomics). Read them from start to end, or read only the one you need right now.</p>
+    <dl class="facts">
+      <div><dt>Which to read first</dt><dd>No papers yet: start with 01. Only an idea or a manuscript, and no clear topic: start with 02. Papers already in Zotero or in a folder: start with 03. Just one PDF that you want to read first: see 04. After that, the tutorials do not depend on each other.</dd></div>
+      <div><dt>Which need a model</dt><dd>All except 03 and 04 use the assistant (10 only in the last step), so first set up a model provider of your own in “Settings › AI”. The first step of 01 explains how. The voices in 07 also need a DeepSeek API key.</dd></div>
+      <div><dt>Version</dt><dd>Written for v0.10.0 to v0.17.0, run on macOS. On Windows, read Ctrl for ⌘; everything else is the same.</dd></div>
+    </dl>
+  </header>
+
+  <div class="shelf">
+    <section class="shelf-part">
+      <h2><small>I</small>Collect</h2>
+      <div>
+        <a class="entry" href="start.html">
+          <span class="num">01</span>
+          <div>
+            <h3>Start from a topic: search, import, screen</h3>
+            <p>You have just taken over a research direction and have no papers. Write down the topic, let the assistant draft search queries, import in bulk from PubMed and Europe PMC, then have the assistant read each paper while you decide whether to include it.</p>
+          </div>
+          <dl><div><dt>Needs</dt><dd>A model provider</dd></div><div><dt>Time</dt><dd>About 15 minutes</dd></div></dl>
+        </a>
+        <a class="entry" href="home.html">
+          <span class="num">02</span>
+          <div>
+            <h3>Talk first, build the library later: starting from the assistant on the home page</h3>
+            <p>You have only an idea, or a half-written proposal. Skip the library and talk to the assistant on the home page: have it search, take in a few papers, or read every entry of the reference list of a Word manuscript. When the picture is clear, make it a library with one click.</p>
+          </div>
+          <dl><div><dt>Needs</dt><dd>A model provider</dd></div><div><dt>Time</dt><dd>About 10 minutes</dd></div></dl>
+        </a>
+        <a class="entry" href="migrate.html">
+          <span class="num">03</span>
+          <div>
+            <h3>Bring in the papers you already have: Zotero, PDFs and records</h3>
+            <p>Your papers are in Zotero, in a folder of PDFs collected over years, or in a .bib file your advisor sent. Bring them into one library with their tags, notes and PDFs, complete the bibliographic records, and find the missing full texts.</p>
+          </div>
+          <dl><div><dt>Needs</dt><dd>No model</dd></div><div><dt>Time</dt><dd>About 10 minutes</dd></div></dl>
+        </a>
+      </div>
+    </section>
+
+    <section class="shelf-part">
+      <h2><small>II</small>Read</h2>
+      <div>
+        <a class="entry" href="pdf.html">
+          <span class="num">04</span>
+          <div>
+            <h3>Just one PDF to read: drop it in and read</h3>
+            <p>A colleague sent you a PDF and you want to read it right away and mark a few lines. Drop it on the home page and it opens in reading mode, with your annotations and your place remembered. When you are done, make it a library, or move it to an existing one.</p>
+          </div>
+          <dl><div><dt>Needs</dt><dd>A PDF, no model</dd></div><div><dt>Time</dt><dd>About 5 minutes</dd></div></dl>
+        </a>
+        <a class="entry" href="read.html">
+          <span class="num">05</span>
+          <div>
+            <h3>Read one paper closely: read, mark, ask, note</h3>
+            <p>One paper you need to understand thoroughly. Read it next to its translation, highlight and underline, ask the assistant about the passage you do not follow, save the answer as a note, and capture the key figures and tables into Figures. Click a figure number in the text to see the figure, and write a text box on the page.</p>
+          </div>
+          <dl><div><dt>Needs</dt><dd>A paper with a PDF, a model provider</dd></div><div><dt>Time</dt><dd>About 15 minutes</dd></div></dl>
+        </a>
+        <a class="entry" href="compare.html">
+          <span class="num">06</span>
+          <div>
+            <h3>Read several papers side by side</h3>
+            <p>Two or three papers on the same question with different methods, read side by side. Each brings its own translation, you ask the assistant about them together, and the sources jump back to each original. Open one in its own window, move back and forth with Back and Forward, and find the conversation again later in History.</p>
+          </div>
+          <dl><div><dt>Needs</dt><dd>Two or three papers with PDFs, a model provider</dd></div><div><dt>Time</dt><dd>About 15 minutes</dd></div></dl>
+        </a>
+        <a class="entry" href="listen.html">
+          <span class="num">07</span>
+          <div>
+            <h3>Listen to a paper: read aloud and podcast</h3>
+            <p>Read with your ears when your eyes are busy. It reads aloud from the current page to the references and marks the sentence being read. Or two hosts can turn the whole paper into a podcast that keeps playing when you leave the paper, with the saved audio and script ready to play again any time.</p>
+          </div>
+          <dl><div><dt>Needs</dt><dd>A paper with a PDF, a DeepSeek API key, a model provider</dd></div><div><dt>Time</dt><dd>About 10 minutes, plus listening time</dd></div></dl>
+        </a>
+        <a class="entry" href="slides.html">
+          <span class="num">08</span>
+          <div>
+            <h3>Turn a paper into lab-meeting slides</h3>
+            <p>You present this paper at next week's lab meeting. Capture the figures you will talk about from the PDF into Figures, then use <code>/slides</code> to have the assistant read the full text and write a PowerPoint file with the figures, the page numbers of the sources, and the speaker script in the notes.</p>
+          </div>
+          <dl><div><dt>Needs</dt><dd>A paper with a PDF, a model provider</dd></div><div><dt>Time</dt><dd>About 10 minutes</dd></div></dl>
+        </a>
+        <a class="entry" href="ask.html">
+          <span class="num">09</span>
+          <div>
+            <h3>Ask the whole library, and check the answers</h3>
+            <p>“Which sample preparation methods has this field used, and what are their pros and cons?” Have the assistant read the whole library to answer, with a source for every conclusion. Then check, one by one, that the sentences it quotes are in the original.</p>
+          </div>
+          <dl><div><dt>Needs</dt><dd>A library of a few dozen papers, a model provider</dd></div><div><dt>Time</dt><dd>About 10 minutes</dd></div></dl>
+        </a>
+      </div>
+    </section>
+
+    <section class="shelf-part">
+      <h2><small>III</small>Organize</h2>
+      <div>
+        <a class="entry" href="rank.html">
+          <span class="num">10</span>
+          <div>
+            <h3>Which to read first: impact factor, zone and warnings</h3>
+            <p>Rank the papers to read first by the “Impact factor” and “Zone” columns of the list, filter by ranges of year, impact factor and zone, see all the metrics of one journal in the details, switch to JCR or the New Sharp zones, and recognize the journals on the warning list. The data ships with the app and needs no network.</p>
+          </div>
+          <dl><div><dt>Needs</dt><dd>A library; a model provider if you ask the assistant</dd></div><div><dt>Time</dt><dd>About 5 minutes</dd></div></dl>
+        </a>
+        <a class="entry" href="extract.html">
+          <span class="num">11</span>
+          <div>
+            <h3>Read a batch of papers into one table</h3>
+            <p>Species, organ, protoplasts or nuclei, sequencing platform: define your own custom fields and have the assistant find the values in the original text, paper by paper, with the sentence it relied on. You confirm and write them in, then export them as a table.</p>
+          </div>
+          <dl><div><dt>Needs</dt><dd>A library, a model provider</dd></div><div><dt>Time</dt><dd>About 15 minutes</dd></div></dl>
+        </a>
+      </div>
+    </section>
+
+    <section class="shelf-part">
+      <h2><small>IV</small>Write</h2>
+      <div>
+        <a class="entry" href="review.html">
+          <span class="num">12</span>
+          <div>
+            <h3>Write a review in stages</h3>
+            <p>Start with <code>/review</code>: the writing brief, a first framework, the outline, and section-by-section writing, with you confirming each of the four steps. Every citation leaves a piece of evidence, and you judge whether the source supports the claim.</p>
+          </div>
+          <dl><div><dt>Needs</dt><dd>A screened library, ideally with full texts; a model provider</dd></div><div><dt>Time</dt><dd>About 40 minutes</dd></div></dl>
+        </a>
+        <a class="entry" href="write.html">
+          <span class="num">13</span>
+          <div>
+            <h3>Write a paper: candidate sentences, citations and sources</h3>
+            <p>While you write the introduction, the library is at your right hand: find sentences, add citations to a paragraph you have written, and check which original sentence each citation rests on. Or give the assistant one instruction and let it write straight into the manuscript. Put figures from “Materials” into the manuscript, and they export with it.</p>
+          </div>
+          <dl><div><dt>Needs</dt><dd>A few papers with full text, a model provider</dd></div><div><dt>Time</dt><dd>About 20 minutes</dd></div></dl>
+        </a>
+        <a class="entry" href="revise.html">
+          <span class="num">14</span>
+          <div>
+            <h3>Revise with co-authors: Word comments and tracked changes</h3>
+            <p>Your advisor left a string of comments in Word. Import the manuscript, deal with them one by one, have the assistant review it once more, and finally export a Word file with tracked changes to send back, with the layout untouched.</p>
+          </div>
+          <dl><div><dt>Needs</dt><dd>A .docx manuscript, a model provider</dd></div><div><dt>Time</dt><dd>About 15 minutes</dd></div></dl>
+        </a>
+      </div>
+    </section>
+
+    <section class="shelf-part">
+      <h2><small>V</small>Follow up</h2>
+      <div>
+        <a class="entry" href="follow.html">
+          <span class="num">15</span>
+          <div>
+            <h3>Keep up with new papers, and hand the library to other tools</h3>
+            <p>Let a saved search query run by itself every week, and have the assistant go through the new papers first. Then use <code>wisp</code> and MCP to hand the same library to scripts in the terminal and to outside AI clients.</p>
+          </div>
+          <dl><div><dt>Needs</dt><dd>A library with a search query; some comfort with the terminal</dd></div><div><dt>Time</dt><dd>About 15 minutes</dd></div></dl>
+        </a>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>References</h2>
+      <ol>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">Features: what each page can do (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">Data and privacy: where files live and what leaves your machine (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/CLI.md">Command line and MCP (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">Questions and ideas: Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>About these tutorials.</b> The screenshots and numbers come from a real run on macOS in November 2026. The model answers differently each time and the databases change every day, so the wording and numbers you see will differ a little. The steps are the same. The screenshots show the Chinese interface; the text uses the labels of the English one (Settings › General › Interface language).</p>
+      <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation; check key numbers and conclusions against the original.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
