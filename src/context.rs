@@ -287,6 +287,7 @@ impl Workspace {
                 items.push(item(t("复制文件名"), Cmd::CopyText(file.title.clone())));
                 if file.kind == "fulltext" { items.push(item(t("重新读取文字"), Cmd::RereadFile(id.clone()))) }
                 if file.format == "pdf" && !lib.shrinking.contains(id) && !lib.shrunk.contains(id) && !lib.no_smaller.contains(id) { items.push(item(t("压缩 PDF"), Cmd::CompressFile(id.clone()))) }
+                if file.format == "pdf" { items.push(item(t("导出带标注的 PDF…"), Cmd::ExportMarkedPdf(id.clone()))) }
                 breaks.push(items.len());
                 items.push(item(t("移除附件"), Cmd::RemoveFile(id.clone())));
             }

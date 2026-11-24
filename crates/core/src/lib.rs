@@ -42,6 +42,7 @@
 
 pub mod ai;
 pub mod annotation;
+pub mod annotpdf;
 pub mod archive;
 pub mod cite;
 pub mod citefind;

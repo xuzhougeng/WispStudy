@@ -941,6 +941,8 @@
   "复制文件名": "Copy file name",
   "重新读取文字": "Read text again",
   "压缩 PDF": "Compress PDF",
+  "导出带标注的 PDF…": "Export PDF with annotations…",
+  "这个文件还没有标注（截图标记不算），没有可写进 PDF 的。": "This file has no annotations yet (pieces marked to cut out do not count): there is nothing to write into a PDF.",
   "移除附件": "Remove attachment",
   "不再只看这个标签": "Stop filtering by this tag",
   "只看这个标签": "Filter by this tag",

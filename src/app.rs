@@ -479,6 +479,8 @@ pub enum Cmd {
     RereadFile(String),
     /// Make a stored PDF smaller: its pictures written anew (#242).
     CompressFile(String),
+    /// Save a copy of a stored PDF with its reading marks written in as PDF annotations (#273), where the person picks.
+    ExportMarkedPdf(String),
     /// Have a model that sees pictures read the pages of a file that gave no text.
     ReadPages(String),
     SetTab(Tab),
@@ -2789,6 +2791,7 @@ impl Workspace {
             part(items, breaks);
             items.push(plain(t("在新窗口中阅读"), Cmd::PaperWindow(paper.clone())));
             if !self.settings.pdf_tools_floating { items.push(plain(t("用系统应用打开"), Cmd::OpenFile(view.resource_id().to_string()))) }
+            if view.has_exported_marks() { items.push(plain(t("导出带标注的 PDF…"), Cmd::ExportMarkedPdf(view.resource_id().to_string()))) }
             items.push(ticked(t("工具悬浮在页面右侧"), self.settings.pdf_tools_floating, Cmd::FloatPdfTools(!self.settings.pdf_tools_floating)));
         }
     }
@@ -3807,6 +3810,7 @@ impl Workspace {
             }
             Cmd::RereadFile(id) => self.reread_file(id, cx),
             Cmd::CompressFile(id) => self.compress_file(id, cx),
+            Cmd::ExportMarkedPdf(id) => self.export_marked_pdf(id, None, cx),
             Cmd::ReadPages(id) => self.write_run_start(true, Some(id), cx),
             Cmd::SetTab(tab) => {
                 // Without a model the question box is not drawn: the keyboard stays with the window, so Esc is still heard.
@@ -5941,6 +5945,7 @@ impl Workspace {
             PdfEvent::AnnotationNote { resource, id, note } => self.change_pdf_annotation(resource, |store| store.update_pdf_annotation_note(resource, id, note), cx),
             PdfEvent::RecolorAnnotation { resource, id, color } => self.change_pdf_annotation(resource, |store| store.recolor_pdf_annotation(resource, id, color), cx),
             PdfEvent::RemoveAnnotation { resource, id } => self.change_pdf_annotation(resource, |store| store.remove_pdf_annotation(resource, id), cx),
+            PdfEvent::ExportMarked => { let id = view.read(cx).resource_id().to_string(); self.export_marked_pdf(id, None, cx) }
             PdfEvent::AddShape { paper, resource, page, kind, rect, note } => self.change_pdf_annotation(resource, |store| store.add_pdf_shape(paper, resource, *page, *kind, *rect, note).map(|_| ()), cx),
             PdfEvent::MoveShape { resource, id, rect } => self.change_pdf_annotation(resource, |store| store.move_pdf_shape(resource, id, *rect), cx),
             PdfEvent::AddText { paper, resource, page, rect, text, style } => self.change_pdf_annotation(resource, |store| store.add_pdf_text(paper, resource, *page, *rect, text, style).map(|_| ()), cx),
@@ -6587,6 +6592,46 @@ impl Workspace {
                     }
                 }
                 cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// A copy of a stored PDF with all its marks written in as PDF annotations, which other readers show (#273):
+    /// saved where the person picks, or at `to` (a scripted run). The file in the library is not touched.
+    /// A file without marks to write is said so, and nothing is saved: a plain copy is what 在文件夹中显示 gives.
+    pub(crate) fn export_marked_pdf(&mut self, id: String, to: Option<PathBuf>, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_ref() else { return };
+        let Some(file) = lib.files.iter().find(|f| f.id == id && f.format == "pdf") else { return };
+        let marks = match lib.store.pdf_annotations(&file.paper_id, &file.id) {
+            Ok(marks) => marks.into_iter().filter(|mark| wisp_core::annotpdf::exported(mark.kind)).collect::<Vec<_>>(),
+            Err(err) => return self.fail(format!("{err:#}"), cx),
+        };
+        if marks.is_empty() { return self.say(t("这个文件还没有标注（截图标记不算），没有可写进 PDF 的。"), cx) }
+        let source = lib.store.file_path(file);
+        let title = std::path::Path::new(&file.title).file_stem().map(|stem| stem.to_string_lossy().to_string()).unwrap_or_default();
+        let stem = wisp_core::archive::file_stem(&title, "paper");
+        let name = tf!("{stem}（带标注）.pdf", "{stem} (annotated).pdf");
+        let directory = dirs::document_dir().or_else(dirs::home_dir).unwrap_or_else(|| self.root.clone());
+        let picked = to.is_none().then(|| cx.prompt_for_new_path(&directory, Some(&name)));
+        cx.spawn(async move |this, cx| {
+            let mut path = match (picked, to) {
+                (Some(picked), _) => match picked.await { Ok(Ok(Some(path))) => path, _ => return },
+                (None, Some(to)) => to,
+                (None, None) => return,
+            };
+            if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")) {
+                let mut named = path.into_os_string();
+                named.push(".pdf");
+                path = PathBuf::from(named);
+            }
+            let target = path.clone();
+            let result = cx.background_executor().spawn(async move { wisp_core::annotpdf::write(&source, &marks, &target) }).await;
+            this.update(cx, |this, cx| match result {
+                Ok(marked) if marked.left > 0 => this.say(tf!("已导出带 {} 处标注的 PDF 到 {}（{} 处所在的页这个文件没有，没有写进去）", "Exported the PDF with {} marks to {} ({} on pages the file lacks were left out)", marked.written, path.display(), marked.left), cx),
+                Ok(marked) => this.say(tf!("已导出带 {} 处标注的 PDF 到 {}", "Exported the PDF with {} marks to {}", marked.written, path.display()), cx),
+                Err(err) => this.fail(tf!("没有导出：{err:#}", "Not exported: {err:#}"), cx),
             })
             .ok();
         })
@@ -9267,6 +9312,11 @@ impl Workspace {
                 "reread" | "byeye" | "compress" => {
                     let Some(file) = self.lib.as_ref().and_then(|lib| lib.selected.as_deref().and_then(|id| lib.pdf_file(id)).map(|file| file.id.clone())) else { return };
                     Some(match name { "reread" => Cmd::RereadFile(file), "compress" => Cmd::CompressFile(file), _ => Cmd::ReadPages(file) })
+                }
+                // The file on show with its marks, written to a path without the save dialog.
+                "exportpdf" => {
+                    let Some(file) = self.lib.as_ref().and_then(|lib| lib.pdf.as_ref()).map(|view| view.read(cx).resource_id().to_string()) else { return };
+                    return self.export_marked_pdf(file, Some(PathBuf::from(arg)), cx);
                 }
                 "width" => {
                     self.settings.detail_width = arg.parse().unwrap_or(0.);
