@@ -42,7 +42,7 @@
     <dl class="facts">
       <div><dt>Scenario</dt><dd>You want to compare plant single-nucleus sequencing with protoplast single-cell sequencing, and you also have a proposal whose references need to come in.</dd></div>
       <div><dt>Needs</dt><dd>A model provider set up in “Settings › AI”, and a network connection; a Word file with a reference list (optional).</dd></div>
-      <div><dt>Time</dt><dd>About 10 minutes, of which the assistant's search takes three or four.</dd></div>
+      <div><dt>Time</dt><dd>About 10 minutes.</dd></div>
     </dl>
   </header>
 
@@ -75,25 +75,25 @@
 
       <section id="s2">
         <h2><i>2</i>Ask a research question</h2>
-        <p>Press <kbd>Enter</kbd> to send. The conversation is named after the first question, and under the title it says “No library yet: the assistant searches the literature databases when it needs papers”. The assistant knows there is not a single paper here, so it looks in PubMed, Europe PMC, Crossref and arXiv by itself. This time it first said “I'll search PubMed and Europe PMC in parallel”, tried two queries, found “the results are too broad, so I'll switch to a more specific query”, tried three more times, picked out a few worth reading and saved them as one query.</p>
+        <p>Press <kbd>Enter</kbd> to send. The conversation is named after the first question (“I want to look into thi…”), and under the title it says “No library yet: the assistant searches the literature databases when it needs papers”. The assistant knows there is not a single paper here, so it looks in PubMed, Europe PMC, Crossref and arXiv by itself. In this run it tried one narrow PubMed query, picked six of the papers it found and saved them as one query.</p>
         <p>A trial search only looks at what can be found and takes nothing in. To really take papers in, the assistant stops and asks you:</p>
 
         <figure class="shot">
-          <img src="../../img/t/home-02-consent.jpg" width="1372" height="867" loading="lazy" alt="In the conversation, two tool-call lines, “Preview search ×2” and “Preview search ×3 · Save query”, and below them a card: “The assistant wants to add or change papers in this conversation; it waits for your consent”. It says to run a query, and the box shows the query's name, “snRNA-seq vs protoplast scRNA-seq comparison · PubMed”, and a query made of six PubMed IDs, retrieving at most the latest 10; below are three buttons: Allow, Allow for this conversation, Deny.">
-          <figcaption><b>Figure 2.</b> The card before papers are taken in, saying which query will run in which database. This time the assistant picked six papers, so the query is their PubMed IDs.</figcaption>
+          <img src="../../img/en/t/home-02-consent.jpg" width="1372" height="870" loading="lazy" alt="In the conversation, the assistant's short messages with three gray tool-call lines between them (their labels are in Chinese), and below them a card: “The assistant wants to add or change papers in this conversation; it waits for your consent”. It gives the ID of the query to run, and the box shows the query's name, “snRNA-seq vs protoplast scRNA-seq comparison · PubMed”, and a query made of six PubMed IDs, retrieving at most the latest 10 (that part of the line is in Chinese); below are three buttons: Allow, Allow for this conversation, Deny.">
+          <figcaption><b>Figure 2.</b> The card before papers are taken in, saying which query will run in which database. The assistant picked six papers, so the query is their PubMed IDs.</figcaption>
         </figure>
 
-        <p>The card says which query will run in which database and how many results it retrieves at most. Look at it, then decide. “Allow” lets this one run only, “Allow for this conversation” stops asking from then on, and “Deny” takes nothing in. The gray line “Preview search ×3 · Save query” can be opened to see what it searched each time and how many it found.</p>
+        <p>The card says which query will run in which database and how many results it retrieves at most. Look at it, then decide. “Allow” lets this one run only, “Allow for this conversation” stops asking from then on, and “Deny” takes nothing in. The gray lines above the card can be opened to see what each call did and what it found (in this version their labels, and the “at most the latest 10” note in the card, are still drawn in Chinese).</p>
       </section>
 
       <section id="s3">
         <h2><i>3</i>After you agree, papers are kept in the conversation</h2>
         <p>Click “Allow”. The line under the title becomes “6 papers kept in this conversation”, and a “Papers 6” appears above it, listing the papers this conversation has taken in. The assistant lists the 6 papers it took in and explains that for now they exist only in this conversation.</p>
-        <p>It did not rush to answer the first question, “which tissues is each suited to”. All it has is bibliographic records and abstracts. It said that only after reading the full texts could it tell which papers really compared the same tissue side by side, and that after you make a library it can first look for open-access full texts for them. That is exactly the next step that is yours to decide, so under the answer there is a card: “This conversation has taken in 6 papers. Make it a library to see it on the home page”, with “Make it a library” and “Later” beside it.</p>
+        <p>It did not rush to answer the first question, “which tissues is each suited to”. All it has is bibliographic records and abstracts. It said it could not yet tell which papers compared the same tissue with both methods, and that after you make a library it can look for open full texts and read them. That is exactly the next step that is yours to decide, so under the answer there is a card: “This conversation has taken in 6 papers. Make it a library to see it on the home page.”, with “Make it a library” and a close mark beside it.</p>
 
         <figure class="shot">
-          <img src="../../img/t/home-03-answer.jpg" width="1372" height="867" loading="lazy" alt="The conversation's answer lists 6 papers taken in (Wei 2026, Schmidt 2025, Cervantes-Pérez 2022, Sunaga-Franze 2021, Farmer 2021, Long 2021), and below it a card saying that this conversation took in 6 papers, with the buttons “Make it a library” and “Later”. Above the conversation are “Papers 6”, “History”, “New chat” and “Make it a library”.">
-          <figcaption><b>Figure 3.</b> Six papers kept in this conversation. A button on the card acts only when you press it; “Later” puts the card away, and it appears again when more papers are taken in.</figcaption>
+          <img src="../../img/en/t/home-03-answer.jpg" width="1372" height="870" loading="lazy" alt="The conversation's answer lists 6 papers now in the conversation (Wei 2026, Schmidt 2025, Wang 2023, Sunaga-Franze 2021, Farmer 2021, Long 2021), and below it a card saying that this conversation has taken in 6 papers, with the button “Make it a library” and a close mark. Above the conversation are “Papers 6”, “History”, “New chat” and “Make it a library”; under the title it says “6 papers kept in this conversation”.">
+          <figcaption><b>Figure 3.</b> Six papers kept in this conversation. A button on the card acts only when you press it; the close mark puts the card away.</figcaption>
         </figure>
 
         <aside class="note"><b>Tip</b>When one thing is done and the next step is yours to decide, the assistant often puts a card like this under its answer. There are only a few kinds of buttons: say a sentence for you, make a library, find open full texts, open pages such as Screening or Writing. Each acts only when you press it.</aside>
@@ -101,17 +101,17 @@
 
       <section id="s4">
         <h2><i>4</i>Make it a library</h2>
-        <p>Click “Make it a library” (the one on the card and the one at the top right of the conversation are the same). The dialog is the same as the one for a new library: name, topic, accent color. The AI icon next to the name has the model draft a name and topic from this conversation. Here it drafted the name “<span lang="zh-CN">植物 snRNA-seq 与原生质体 scRNA-seq 比较</span>” (plant snRNA-seq vs protoplast scRNA-seq comparison), and a topic of two or three sentences saying what to include and what matters. Edit them if you are not satisfied.</p>
+        <p>Click “Make it a library” (the one on the card and the one at the top right of the conversation are the same). The dialog is the same as the one for a new library: name, topic, accent color. The AI icon next to the name has the model draft a name and topic from this conversation. Here it drafted the name “Plant snRNA-seq vs protoplast scRNA-seq”, and a topic of two or three sentences saying what to include and what matters. Edit them if you are not satisfied.</p>
 
         <figure class="shot">
-          <img src="../../img/t/home-04-promote.jpg" width="1372" height="867" loading="lazy" alt="The “Make it a library” dialog: the Name field holds the model's draft, “plant snRNA-seq vs protoplast scRNA-seq comparison”, the Topic field holds a short description, and the Accent color row has seven dots with blue selected; a note below says the conversation, the papers taken in and the manuscript handed in all stay where they are, and the buttons are Cancel and Make it a library.">
-          <figcaption><b>Figure 4.</b> The name and topic are drafted by the model from the conversation, and you can edit them. The conversation, the papers and the manuscript stay where they are; nothing is moved.</figcaption>
+          <img src="../../img/en/t/home-04-promote.jpg" width="1372" height="870" loading="lazy" alt="The “Make it a library” dialog over the conversation: the Name field holds the model's draft, “Plant snRNA-seq vs protoplast scRNA-seq”, the Topic field holds a short description of what the library collects, and the Accent color row has seven dots with blue selected; a note below says the conversation, the papers kept and any manuscript stay where they are and become the library's, and the buttons are Cancel and Make it a library.">
+          <figcaption><b>Figure 4.</b> The name and topic are drafted by the model from the conversation, and you can edit them. The conversation, the papers and any manuscript stay where they are and become the library's.</figcaption>
         </figure>
 
-        <p>Click “Make it a library”, and the window turns into this library on the spot. A sidebar appears on the left, with “All papers 6” and “Missing PDF 6”. Under “Search and import” is the query the assistant saved, which you can run again later or set to update regularly. The conversation you just had is under “Assistant”, and you can just keep asking. Back on the home page, this library is a card like any other.</p>
+        <p>Click “Make it a library”, and the window turns into this library on the spot. A sidebar appears on the left, with “All papers 6” and “Missing PDF 6”. “Search and import” shows 1: the query the assistant saved, which you can run again later or set to update regularly. The conversation you just had is under “Assistant”, and you can just keep asking. Back on the home page, this library is a card like any other.</p>
 
         <figure class="shot">
-          <img src="../../img/t/home-05-library.jpg" width="1372" height="867" loading="lazy" alt="The library window after it is made: at the top of the sidebar is the blue-marked “plant snRNA-seq vs protoplast…”, then All papers 6, Missing PDF 6, Search and import 1, Screening 6; in the middle is the same conversation as before, titled “Assistant”.">
+          <img src="../../img/en/t/home-05-library.jpg" width="1372" height="870" loading="lazy" alt="The library window after it is made: at the top of the sidebar is the blue-marked “Plant snRNA-seq vs p…” with an “Add papers” button, then All papers 6, Recently added 6, Unread 6, Favorites, Missing PDF 6, Assistant, Search and import 1, Screening 6, Extract and Writing; in the middle is the same conversation as before, titled “Assistant”.">
           <figcaption><b>Figure 5.</b> The conversation becomes the library's “Assistant” conversation on the spot, and the 6 papers are this library's papers.</figcaption>
         </figure>
 
@@ -120,25 +120,25 @@
 
       <section id="s5">
         <h2><i>5</i>Make a library from a Word manuscript</h2>
-        <p>Another way to start: the proposal already has an introduction, its reference list has eight entries, and they need to go into a library. Back at the assistant on the home page, click “A library from a Word file” and pick this <code><span lang="zh-CN">开题报告</span>.docx</code> (proposal). The file goes into the input box as a small tag, and the box is filled with one sentence, “Take in the papers from the reference list of this Word file and make them a library.” You can edit it or send it as it is. You can also drag a .docx onto the home page and then say yourself what to do; dragging several PDFs works the same way, and the files go into the input box. Dragging a single PDF is different: it goes straight into reading mode for that paper, see <a href="pdf.html">Just one PDF to read</a>.</p>
+        <p>Another way to start: the proposal already has an introduction, its reference list has eight entries, and they need to go into a library. Back at the assistant on the home page, click “A library from a Word file” and pick this <code>proposal.docx</code>. The file goes into the input box as a small tag, and the box is filled with one sentence, “Take every work in this Word file's reference list in, as a new library.” You can edit it or send it as it is. You can also drag a .docx onto the home page and then say yourself what to do; dragging several PDFs works the same way, and the files go into the input box. Dragging a single PDF is different: it goes straight into reading mode for that paper, see <a href="pdf.html">Just one PDF to read</a>.</p>
 
         <figure class="shot">
-          <img src="../../img/t/home-06-word.jpg" width="1372" height="867" loading="lazy" alt="In the input box of the home assistant, a file tag for the proposal (.docx) on top, and below it the sentence “Take in the papers from the reference list of this Word file and make them a library.”">
+          <img src="../../img/en/t/home-06-word.jpg" width="1372" height="870" loading="lazy" alt="In the input box of the home assistant, a file tag “proposal.docx” on top, and below it the sentence “Take every work in this Word file's reference list in, as a new library.” The four starters are under the box, and under them “Recent conversations” with one row.">
           <figcaption><b>Figure 6.</b> “A library from a Word file” first picks the file, then puts an opening sentence in the box. Whether to send it is up to you.</figcaption>
         </figure>
 
-        <p>Once sent, the conversation is named “References of <span lang="zh-CN">开题报告</span>”. The assistant reads every entry of the reference list and, with your consent, takes them in. When the file has Zotero or Mendeley citation fields, the paper information is taken directly from the fields. This proposal has a handwritten numbered list, so it reads the entries one by one after “References”. Entries with a DOI are checked against Crossref; entries without one are looked up in Crossref by their text, and a match is accepted only if the title and year both agree.</p>
-        <p>Four of the eight entries in this example ([3], [5], [6] and [8]) have no DOI in the original, and all were found. The answer says “All 8 papers of the reference list have been taken into this conversation. No entry was skipped, and none could not be recognized. The entries were recognized from the text, not from Zotero citation fields”, and suggests spot-checking that the titles match. An entry that cannot be read or matched is not filled in out of thin air; the assistant tells you about each one.</p>
+        <p>Once sent, the conversation is named “References of proposal”. The assistant reads every entry of the reference list and, with your consent, takes them in. When the file has Zotero or Mendeley citation fields, the paper information is taken directly from the fields. This proposal has a handwritten numbered list, so it reads the entries one by one after “References”. Entries with a DOI are checked against Crossref; entries without one are looked up in Crossref by their text, and a match is accepted only if the title and year both agree.</p>
+        <p>Four of the eight entries in this example ([3], [5], [6] and [8]) have no DOI in the original, and all were found. The answer says “All 8 papers of the reference list are now in this conversation. No entry was skipped, and none could not be recognized. The entries were read from the text, not from Zotero citation fields”, and suggests spot-checking that the titles match. An entry that cannot be read or matched is not filled in out of thin air; the assistant tells you about each one.</p>
 
         <figure class="shot">
-          <img src="../../img/t/home-07-references.jpg" width="1372" height="867" loading="lazy" alt="The conversation “References of the proposal”: the assistant lists the 8 papers taken in, each followed by its DOI in brackets, from Spatiotemporal Developmental Trajectories in the Arabidopsis Root to Towards Building a Plant Cell Atlas; below is a card saying that these 8 papers have been taken into this conversation, with the button “Make it a library”.">
+          <img src="../../img/en/t/home-07-references.jpg" width="1372" height="870" loading="lazy" alt="The conversation “References of proposal”: the proposal.docx tag and the sentence sent, then the assistant's answer listing the 8 papers, each followed by its DOI in brackets, from “Single-cell transcriptome atlas and chromatin accessibility landscape reveal differentiation trajectories in the rice root” to “Comparative single-nucleus RNA-seq analysis revealed localized and cell type-specific pathways governing root-microbiome interactions”; below is a card saying that the references are now in this conversation, with the buttons “Make it a library” and “Find full texts first”.">
           <figcaption><b>Figure 7.</b> All eight references matched Crossref records, including the four whose DOI was missing in the original. For an entry read only from the text and not verified, the assistant reminds you to check it.</figcaption>
         </figure>
 
         <p>The Word file itself is not changed. Afterward, click “Make it a library” in the same way. Conversations you have not decided about can stay: “Recent conversations”, under the home assistant, lists them by time, saying how many papers were taken in and on what day. Click a row to keep talking; right-click to rename, make it a library or delete it. Deleting works like removing a library: the folder is only moved under <code>removed</code> in the data folder.</p>
 
         <figure class="shot">
-          <img src="../../img/t/home-08-recent.jpg" width="1372" height="867" loading="lazy" alt="The conversation page of the home assistant, with “Recent conversations” under the input box and two rows: “I want to look into this: plant single-nucleus sequencing (snRNA-s…” with 6 papers, and “References of the proposal” with 8 papers, both dated 2026.11.20.">
+          <img src="../../img/en/t/home-08-recent.jpg" width="1372" height="870" loading="lazy" alt="The conversation page of the home assistant, with “Recent conversations” under the input box and two rows: “References of proposal” with 8 papers and “I want to look into thi…” with 6 papers, both dated 2026.11.24.">
           <figcaption><b>Figure 8.</b> “Recent conversations”. All conversations not yet made into libraries are here; they do not appear in the home page's list of libraries.</figcaption>
         </figure>
 
@@ -177,7 +177,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> The screenshots and numbers come from a real run on macOS with v0.14.0 in November 2026; Figure 2 was captured when the same question was asked again. The model answers differently each time, so the wording, queries and paper counts you see will differ a little. The steps are the same. Most screenshots show the Chinese interface. Those that show the English one were retaken on November 24, 2026 on another library and may show other numbers. The text uses the labels of the English interface (Settings › General › Interface language).</p>
+      <p><b>About this tutorial.</b> The screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface and a stand-in model that answers by fixed rules, so the numbers in this tutorial are those of that run. The text uses the labels of the English interface (Settings › General › Interface language).</p>
       <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation; check key numbers and conclusions against the original.</p>
     </div>
   </div>

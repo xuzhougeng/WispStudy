@@ -40,7 +40,7 @@
     <h1>Ask the whole library, and check the answers</h1>
     <p class="lead">You meet your advisor tomorrow and want a feel for the whole field first: which species and organs are covered, what the protoplast and nucleus routes each cost, and where the papers disagree. In this tutorial the assistant reads the whole library to answer, and then you check the passages it cites one by one instead of taking its word.</p>
     <dl class="facts">
-      <div><dt>Scenario</dt><dd>Before a lab meeting, an overview of the 28 papers in the “<span lang="zh-CN">植物单细胞转录组</span>” (plant single-cell transcriptomics) library.</dd></div>
+      <div><dt>Scenario</dt><dd>Before a lab meeting, an overview of the 90 papers in the “Plant single-cell transcriptomics” library.</dd></div>
       <div><dt>Needs</dt><dd>A screened library in which most papers have a stored PDF; a model provider.</dd></div>
       <div><dt>Time</dt><dd>About 10 minutes, most of it waiting for the answer.</dd></div>
     </dl>
@@ -63,41 +63,41 @@
     <article class="prose">
       <section id="s1">
         <h2><i>1</i>Set the scope first</h2>
-        <p>Click “Assistant” on the left. Before a conversation starts, the page lists a few kinds of things it can do: “Find papers”, “Read papers”, “Organise” and “Write”. Under each group are a few ready-made sentences and slash commands; click one to send it. The line under the title is the scope: “Scope: 28 papers in the current list”.</p>
+        <p>Click “Assistant” on the left. Before a conversation starts, the page lists a few kinds of things it can do: “Find papers”, “Read papers”, “Organise” and “Write”. Under each group are a few ready-made sentences and slash commands; click one to send it. The line under the title is the scope: “Scope: 90 papers in the current list”.</p>
 
         <figure class="shot">
-          <img src="../../img/t/ask-01-start.jpg" width="1372" height="867" loading="lazy" alt="The Assistant page: under the title the scope reads 28 papers in the current list, the middle shows four groups of suggestions (Find papers, Read papers, Organise, Write), and the question box is at the bottom.">
+          <img src="../../img/en/t/ask-01-start.jpg" width="1372" height="870" loading="lazy" alt="The Assistant page: under the title the scope reads 90 papers in the current list, the middle shows four groups of suggestions (Find papers, Read papers, Organise, Write), and the question box is at the bottom.">
           <figcaption><b>Figure 1.</b> The Assistant page before a conversation. Note the scope line under the title.</figcaption>
         </figure>
 
-        <p>The scope is the list currently shown in “All papers”. Search or filter there first, and the assistant reads only that part. For example, search for <code>nuclei</code> first and the scope becomes “Scope: 5 papers in the current list”. You can also click “Papers” at the top right of the Assistant page and type more words in the panel that opens to narrow it down: look for <code>protoplast</code> among those 5 papers and the scope becomes “Scope: 1 papers matching “protoplast””. Each row of the panel has a plus sign on the right; click it (or drag the row into the conversation) to read only that one paper, and “The first question reads only these 1” appears above the question box.</p>
-        <p>Here you want an overview of the whole library, so do not filter: use all 28 papers.</p>
+        <p>The scope is the list currently shown in “All papers”. Search or filter there first, and the assistant reads only that part. You can also click “Papers” at the top right of the Assistant page and type words in the box at the top of the panel that opens to narrow it down: look for <code>protoplast</code> (or <code>nuclei</code>) and the panel lists only the papers that match; Figure 2 shows it. Each row of the panel has a plus sign on the right; click it (or drag the row into the conversation) to read only that one paper, and a line above the question box says so.</p>
+        <p>Here you want an overview of the whole library, so do not filter: use all 90 papers.</p>
       </section>
 
       <section id="s2">
         <h2><i>2</i>Ask, and see what it read</h2>
         <p>Write the question in the question box and press <kbd>Enter</kbd> to send it (<kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line):</p>
-        <blockquote><cite>Ask</cite><p>Which species and organs does the research in this library cover? What does each of the two routes, protoplasts (scRNA-seq) and nuclei (snRNA-seq), cost? Where do the papers disagree? Please quote page numbers and original sentences from the full text wherever you can.</p></blockquote>
-        <p>After you send it, the scope line changes to “Provided records for 28 papers, 40 relevant full-text pages”. When there are too many papers to fit, the rest get only their titles and this line says “N titles only”; this library is small, so all 28 papers were given as full records. Click “Papers” again and the panel now lists the materials handed to the model this time: each paper has a number P1, P2 and so on, then “Full record” or “Full record · 5 full-text pages”, and whether the paper has a full text.</p>
+        <blockquote><cite>Ask</cite><p>What do the papers report about protoplast isolation and about how many cells or nuclei were sequenced? Please quote page numbers and original sentences from the full text.</p></blockquote>
+        <p>After you send it, the scope line changes to “Provided records for 90 papers, 37 relevant full-text pages”. When there are too many papers to fit, the rest get only their titles and this line says so. Here all 90 papers were given as full records. Click “Papers” again and the panel now lists the materials handed to the model this time: each paper has a number P1, P2 and so on, then “Full record” or, for some, “Full record · 4 full-text pages”, and whether the paper has a full text.</p>
 
         <figure class="shot">
-          <img src="../../img/t/ask-02-materials.jpg" width="1372" height="867" loading="lazy" alt="The Papers panel: titles of P1 to P13, each row saying Full record, some also showing a number of full-text pages, with Full text available or No full text marked on the right.">
-          <figcaption><b>Figure 2.</b> The “Papers” panel after a question. The numbers are the labels the sources in the answer use, and “full-text pages” is the number of relevant pages sent along with the question this time.</figcaption>
+          <img src="../../img/en/t/ask-02-materials.jpg" width="1372" height="870" loading="lazy" alt="The Papers panel with protoplast typed in its search box (12 of 90 papers match): rows P13, P19, P27, P29, P33, P34 and others, each saying Full record, some also showing a number of full-text pages, with Full text available or No full text marked on the right.">
+          <figcaption><b>Figure 2.</b> The “Papers” panel after a question, narrowed to the papers that match “protoplast”. The numbers are the labels the sources in the answer use, and “full-text pages” is the number of relevant pages sent along with the question this time.</figcaption>
         </figure>
 
-        <p>This panel is worth a look: 7 papers, including P1, P4, P6, P7 and P8, are marked “No full text”, so anything said about them can only come from the abstract. The papers that do have a full text were sent only the pages relevant to the question, and when the assistant thinks that is not enough it searches and pages through them itself.</p>
-        <p>This time the assistant called no tools and finished writing in about two minutes: first a table of species, organs and study routes, then sections on the cost of each route and on where the papers disagree. The opening paragraph is:</p>
-        <blockquote><cite>Assistant</cite><p>The experimental subjects in this library are mainly Arabidopsis, rice and maize, and have extended to sweet potato, Nepeta, tea plant, Chinese cabbage, patchouli and reed; the organs covered are root, leaf, shoot apex, seed, node and regenerating material.</p></blockquote>
+        <p>This panel is worth a look: papers such as P34 and P52 are marked “No full text”, so anything said about them can only come from the abstract. The papers that do have a full text were sent only the pages relevant to the question, and when the assistant thinks that is not enough it searches and pages through them itself.</p>
+        <p>This time the assistant first searched the stored full texts, then read the pages around the hits (a gray row of tool calls marks each step), and then wrote six short claims, each followed by a source. Remember that the assistant in this run is a stand-in script that answers by fixed rules, so the wording is plain; the mechanics are the ones a real model goes through. The opening paragraph is:</p>
+        <blockquote><cite>Assistant</cite><p>Protoplast isolation is the step the papers say most about, and the cell or nucleus counts depend on which route a study took. What the full texts say:</p></blockquote>
 
         <figure class="shot">
-          <img src="../../img/t/ask-03-answer.jpg" width="1372" height="867" loading="lazy" alt="The second half of the answer: a table of inconsistencies within papers, green sources in the text with page numbers and English quoted sentences, and below them 8 source cards and 41 more sources.">
-          <figcaption><b>Figure 3.</b> The end of the answer. The green square brackets are sources, and the row below is the source cards.</figcaption>
+          <img src="../../img/en/t/ask-03-answer.jpg" width="1372" height="870" loading="lazy" alt="The answer: six numbered claims, each followed by a green source such as P33 p.2 with a quoted sentence, a closing remark about the counts, and below them six source cards, each marked Exact quote found.">
+          <figcaption><b>Figure 3.</b> The answer. The green square brackets are sources, and the rows below are the source cards.</figcaption>
         </figure>
       </section>
 
       <section id="s3">
         <h2><i>3</i>Read the sources and the check marks</h2>
-        <p>Sources in an answer are written in two ways. <code>[P13]</code> says only which paper the claim rests on; <code>[P11 p.9 "The composition of the cell wall…"]</code> also gives the PDF page number and the sentence word for word. Below the answer there is one card for each source: the first 8 are shown, and the rest are kept under “41 more sources”, visible only when you open it.</p>
+        <p>Sources in an answer are written in two ways. <code>[P13]</code> says only which paper the claim rests on; <code>[P33 p.2 "Thus, the prerequisite for applying scRNA-seq…"]</code> also gives the PDF page number and the sentence word for word. Below the answer there is one card for each source: this answer has six. When there are more than 8, the first 8 are shown and the rest are kept behind a button, visible only when you open it.</p>
         <p>A card with a quoted sentence ends with a check result: the app compares the sentence letter by letter with the text saved for that paper (only letters and digits count; line breaks and hyphens do not). The possible results are:</p>
         <ul>
           <li>“Exact quote found”: the sentence is on the page named (or in the abstract).</li>
@@ -108,35 +108,35 @@
         </ul>
 
         <figure class="shot">
-          <img src="../../img/t/ask-04-checks.jpg" width="1372" height="867" loading="lazy" alt="Expanded source cards, each one with a page number and a sentence marked green Exact quote found; below, a /verify run in progress with two collapsed rows of tool calls.">
-          <figcaption><b>Figure 4.</b> With all sources expanded, all 21 quoted sentences of this answer read “Exact quote found”. The lower half is the /verify of step 5 running; the gray row is the collapsed tool calls.</figcaption>
+          <img src="../../img/en/t/ask-04-checks.jpg" width="1372" height="870" loading="lazy" alt="The six source cards of the answer, each with a page number and a sentence marked green Exact quote found; below, the /verify question and the assistant working: a gray row of tool calls and an Organizing findings status.">
+          <figcaption><b>Figure 4.</b> All six quoted sentences of this answer read “Exact quote found”. The lower half is the /verify of step 5 running; the gray row is the collapsed tool calls.</figcaption>
         </figure>
 
-        <p>This time all 21 quoted sentences read “Exact quote found”, and no other result appeared. But that only shows that “the sentence is in the original”, not that it supports the conclusion before it. Step 5 shows that this same answer, whose quotes all match, still overstates a conclusion in places.</p>
+        <p>This time all six quoted sentences read “Exact quote found”, and no other result appeared. But that only shows that “the sentence is in the original”, not that it supports the conclusion before it. Step 5 shows how to check that.</p>
       </section>
 
       <section id="s4">
         <h2><i>4</i>Go back to the page of the original</h2>
-        <p>Click a card with a quoted sentence, for example “P12 p.2 · However, this approach is problematic…”. The PDF of that paper opens on the right, turned to page 2, with the sentence painted yellow.</p>
+        <p>Click a card with a quoted sentence, for example “P33 p.1 · The highest yield …”. The PDF of that paper opens on the right, turned to page 1, with the sentence painted yellow.</p>
 
         <figure class="shot">
-          <img src="../../img/t/ask-05-source.jpg" width="1372" height="867" loading="lazy" alt="The conversation on the left; on the right, page 2 of the PDF of a rice caryopsis paper, with one sentence about the noise of protoplast preparation highlighted in yellow.">
+          <img src="../../img/en/t/ask-05-source.jpg" width="1372" height="870" loading="lazy" alt="The conversation on the left; on the right, page 1 of the PDF of the cotton root protoplast paper, with the sentence about the highest yield and viability highlighted in yellow in the abstract.">
           <figcaption><b>Figure 5.</b> Click a source card and the PDF stops at the page quoted, with the sentence highlighted. Read its context and judge whether it says what the answer takes it to say.</figcaption>
         </figure>
 
-        <p>In P12 this sentence is the introduction summing up earlier methods; the paper did not measure it itself. The answer uses it as evidence for “the cost of the protoplast route”. That is fine, but it weighs differently from an experiment that makes a direct comparison. A matching program cannot see that difference; you have to read the context.</p>
+        <p>In P33 this sentence is from the abstract, where the authors report their own protocol with cotton taproots grown for 72 h; a sentence from an introduction that sums up earlier work would weigh differently. A matching program cannot see that difference; you have to read the context.</p>
       </section>
 
       <section id="s5">
         <h2><i>5</i>Have the assistant check each claim</h2>
-        <p>In the same conversation, type <code>/verify</code> and send it; with nothing else written, it checks the previous answer. It asks the assistant to list the claims one by one, find the source of each in the full text, read the context of that page, and write “claim → excerpt from the original → how far it is supported”. Where only the abstract is available, it says so and gives no page number.</p>
-        <p>This run took about 5 minutes. The conversation first shows two gray rows, “Search full text ×25 · Read full text ×10” and “Read full text ×20 · Get paper ×7 · Search full text”. Click one to expand it: one row per call, saying which words were searched, which paper was read and from which page how many pages, and a result such as “11 results” or “read 2 pages”.</p>
-        <p>The result lists 99 claims, and its 66 excerpts from the originals all read “Exact quote found” as well. What is worth reading is how it corrects the previous answer:</p>
-        <blockquote><cite>Assistant</cite><p>P22 itself uses the wording “broadly comparable”, so it is not in direct contradiction with P23; the range of species also needs to count the cotton data that P25 actually reanalyzed.</p></blockquote>
-        <p>It also points out that the PDF stored for P9 is supplementary material, so its page numbers cannot be taken as page numbers of the main text, and that P1, P4, P7, P14 and P18 can only be checked against their abstracts, so those claims have no page numbers.</p>
+        <p>In the same conversation, type <code>/verify</code> and send it; with nothing else written, it checks the previous answer. It asks the assistant to list the claims one by one, find the source of each in the full text, read the context of that page, and write the claim, an excerpt from the original and how far it is supported. Where only the abstract is available, it says so and gives no page number.</p>
+        <p>The conversation first shows a gray row of tool calls (here five page reads, one for each page behind a quoted sentence). Click it to expand it: one row per call, saying which paper was read and from which page. A real model with a larger answer to check can take minutes, since it searches and reads much more.</p>
+        <p>The result lists the six claims, each with its excerpt from the original, and the excerpts all read “Exact quote found” as well. What is worth reading is how it grades each one. For the wheat claim it says:</p>
+        <blockquote><cite>Assistant</cite><p>The sentence says about 15,000 nuclei were loaded, not how many were kept after quality control, so it is not a count of nuclei sequenced.</p></blockquote>
+        <p>It marks claims 3, 4 and 6 as only partly supported and the other three as directly supported. These grades come from the stand-in script's fixed rules; with a real model they come from its reading, which is why you still open the original.</p>
 
         <figure class="shot">
-          <img src="../../img/t/ask-06-verify.jpg" width="1372" height="867" loading="lazy" alt="The end of the /verify answer: claims 95 to 99 and a summary, with the first sentence of the summary selected and two buttons, Quote and ask and Copy, floating beside it; the source cards below are mostly marked Exact quote found.">
+          <img src="../../img/en/t/ask-06-verify.jpg" width="1372" height="870" loading="lazy" alt="The end of the /verify answer: claims 3 to 6, each with its original sentence and a grade, and a summary, part of which is selected with two buttons, Quote and ask and Copy, floating beside it; the six source cards below are marked Exact quote found.">
           <figcaption><b>Figure 6.</b> The end and summary of /verify. Select a passage of text and “Quote and ask” appears beside it.</figcaption>
         </figure>
 
@@ -148,11 +148,11 @@
         <h2><i>6</i>Compare, search and keep asking</h2>
         <p>Click “New chat” to start another question. Two slash commands come in handy when preparing for a lab meeting:</p>
         <ul>
-          <li><code>/compare P22 P12</code>: it first reads the records and full texts of the two papers (this time P22 pages 1 to 14 and P12 pages 1 to 13), compares research question, materials and methods, conclusions and limitations in a table, then says where they agree, complement each other or contradict each other. This time it concluded that neither paper directly refutes the other, and pointed out that P12's own statements about how ASE changes with development are inconsistent. The numbers depend on the scope: with the same 28 papers, P22 and P12 are the two in the panel.</li>
-          <li><code>/search ambient RNA</code>: find a phrase in the stored full texts and records. This time it listed 4 papers, each with a page number and the original sentence, and said that 7 more papers have only a full-text link and were checked by record only, so nothing can be concluded about whether their text mentions it.</li>
+          <li><code>/compare P33 P32</code>: it reads the records and full texts of the two papers, compares research question, materials and methods, conclusions and limitations in a table, then says where they agree, complement each other or contradict each other. The labels depend on the scope: use the P numbers the panel shows.</li>
+          <li><code>/search ambient RNA</code>: find a phrase in the stored full texts and records. It lists the papers that contain it with a page number and the original sentence, and says which papers have no stored text and were checked by record only, so nothing can be concluded about whether their text mentions it.</li>
         </ul>
         <p>Every conversation is saved in this library. Click “History” at the top right to list past conversations and how many questions each had; open one and under the title it says “Past conversation: continuing will provide materials from the library's current content”, and you can keep asking.</p>
-        <p>When the assistant wants to change the library, it stops and asks you first. This time it was asked to “find open full text for papers that have no PDF yet”, and a card appeared in the conversation: “Assistant requests permission to change this library”, with the operation to be done, “Find open full text: limit 50”, and below it “Allow”, “Allow for this conversation” and “Deny”.</p>
+        <p>When the assistant wants to change the library, it stops and asks you first. Ask it, for example, to “find open full text for papers that have no PDF yet”, and a card appears in the conversation that names the operation to be done and offers “Allow”, “Allow for this conversation” and “Deny”.</p>
         <p>Questions you ask often can be saved as your own commands: in “Settings › AI › Commands”, click “Add command” and fill in a name, a description and a template; where the template has <code>{}</code>, whatever follows the command is put in. After that, typing <code>/</code> in the question box lets you pick it. A command is only a piece of prompt: it gives the assistant no extra tools and skips no confirmation.</p>
         <aside class="note warn"><b>Note</b>What is sent to the model provider you set up in settings when you ask is the question itself, the records and notes of the papers in scope, the relevant full-text pages, and whatever the assistant reads with its tools. For papers with no stored PDF the assistant can read only the abstract; the answer says so and gives no page number. For the few papers you will present at the lab meeting, drag their PDFs into the window to attach them, then ask again.</aside>
       </section>
@@ -188,7 +188,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> The screenshots and numbers come from a real run in November 2026 on macOS with v0.10.0. The model answers differently each time, so your wording and numbers will differ; the steps are the same. The screenshots show the Chinese interface; the text uses the labels of the English one (Settings › General › Interface language).</p>
+      <p><b>About this tutorial.</b> The screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface and a stand-in model that answers by fixed rules, so the numbers in this tutorial are those of that run. A real model answers differently each time, so your wording and numbers will differ; the steps are the same.</p>
       <p><b>The assistant can be wrong.</b> Confirm its suggestions and answers yourself; check key numbers and conclusions against the original.</p>
     </div>
   </div>

@@ -6,7 +6,7 @@
 <link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/revise.html">
 <link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/revise.html">
 <title>Revise with co-authors · Wisp Study tutorials</title>
-<meta name="description" content="Import a Word manuscript your advisor has commented on into Wisp Study, work through the comments one by one, let the assistant review it again, decide which changes to apply, and export a Word file with tracked changes and comments to send back, layout untouched.">
+<meta name="description" content="Import a Word manuscript your co-author has commented on into Wisp Study, work through the comments one by one, let the assistant review it again, decide which changes to apply, and export a Word file with tracked changes and comments to send back, layout untouched.">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
@@ -38,9 +38,9 @@
   <header class="doc-head">
     <p class="kicker">Tutorial 14 · Write</p>
     <h1>Revise with co-authors: Word comments and tracked changes</h1>
-    <p class="lead">Your advisor has sent the first draft back with a column of Word comments in the margin. This tutorial imports the .docx into the Writing page, works through the comments one by one, and lets the assistant review it once more; you decide which changes to apply. Finally you export a Word file with tracked changes, your advisor accepts or rejects them one by one in Word, and the layout stays as it was.</p>
+    <p class="lead">Your co-author has sent the first draft back with a column of Word comments in the margin. This tutorial imports the .docx into the Writing page, works through the comments one by one, and lets the assistant review it once more; you decide which changes to apply. Finally you export a Word file with tracked changes, your co-author accepts or rejects them one by one in Word, and the layout stays as it was.</p>
     <dl class="facts">
-      <div><dt>Scenario</dt><dd>The introduction and methods of a single-cell transcriptome atlas paper, with 5 comments from the advisor, Zhang Ming.</dd></div>
+      <div><dt>Scenario</dt><dd>The introduction and methods of a paper on single-nucleus RNA sequencing of the Arabidopsis root under osmotic stress, with 5 comments from a co-author, M. Reviewer.</dd></div>
       <div><dt>Needs</dt><dd>A .docx manuscript; a model provider (for the review and the rewriting).</dd></div>
       <div><dt>Time</dt><dd>About 15 minutes, of which less than 2 minutes waiting for the model.</dd></div>
     </dl>
@@ -50,8 +50,8 @@
     <nav class="toc" aria-label="Sections of this tutorial">
       <h2>Contents</h2>
       <ol>
-        <li><a href="#s1">Import the Word manuscript your advisor returned</a></li>
-        <li><a href="#s2">Go through the advisor's comments</a></li>
+        <li><a href="#s1">Import the Word manuscript your co-author returned</a></li>
+        <li><a href="#s2">Go through the co-author's comments</a></li>
         <li><a href="#s3">Let the assistant review this section</a></li>
         <li><a href="#s4">Apply, undo or dismiss</a></li>
         <li><a href="#s5">Revise one spot as you tell it</a></li>
@@ -62,59 +62,59 @@
 
     <article class="prose">
       <section id="s1">
-        <h2><i>1</i>Import the Word manuscript your advisor returned</h2>
-        <p>The manuscript is <code>root-atlas-draft_ZM.docx</code>: a title, two top-level headings, “Introduction” and “Methods”, three second-level headings under Methods, and one sample table. Your advisor left 5 comments in Word and also edited one spot directly (inserting a version number after Cell Ranger, not accepted).</p>
+        <h2><i>1</i>Import the Word manuscript your co-author returned</h2>
+        <p>The manuscript is <code>root-snRNA-draft.docx</code>: a title, two top-level headings, “Introduction” and “Methods”, three second-level headings under Methods, and one sample table. Your co-author left 5 comments in Word.</p>
         <p>Open the library, go to “Writing”, click “Manuscript” at the bottom of the outline on the left, and choose “Import a Word / Markdown file…”. You can also drag the .docx into the window, or onto the paper list; after the import you land on the Writing page.</p>
 
         <figure class="shot">
-          <img src="../../img/t/revise-01-import.jpg" width="1372" height="867" loading="lazy" alt="The Writing page: the outline on the left has two sections, Introduction and Methods; the introduction text is in the middle with three passages shaded yellow; the “Comments” tab on the right lists three comments by Zhang Ming; a notice at the top says 2 sections and 5 comments were imported.">
+          <img src="../../img/en/t/revise-01-import.jpg" width="1372" height="870" loading="lazy" alt="The Writing page. The outline on the left has two sections, Introduction with 4 open comments and Methods with 1. The introduction text is in the middle with the commented passages shaded, and the “Comments” tab on the right lists four comments by M. Reviewer, each marked “From the Word file”. A notice at the top reads: Imported “root-snRNA-draft.docx”: 2 sections, 5 comments. 1 tables and 0 pictures stay in the Word file and return on export.">
           <figcaption><b>Figure 1.</b> The notice after the import says what was read in and what stays in the Word file. Commented text is shaded, and the number in the outline is the count of comments still open in each section.</figcaption>
         </figure>
 
         <p>The notice this time reads:</p>
-        <blockquote><cite>Notice</cite><p>Imported “root-atlas-draft_ZM.docx”: 2 sections, 5 comments. 1 table and 0 pictures stay in the Word file and return on export. Tracked changes in the file were read as accepted</p></blockquote>
+        <blockquote><cite>Notice</cite><p>Imported “root-snRNA-draft.docx”: 2 sections, 5 comments. 1 tables and 0 pictures stay in the Word file and return on export</p></blockquote>
         <ul>
           <li>Only the highest heading level starts a section. The three second-level headings stay in the body of “Methods”, one line each.</li>
           <li>Tables and pictures do not enter the text of the manuscript; the table caption line stays as an ordinary paragraph. On export the table returns to its place.</li>
-          <li>The “(version 7.1)” your advisor inserted simply became body text.</li>
+          <li>Tracked changes in a Word file are read as if they were accepted, so their text becomes body text.</li>
           <li>Wisp Study keeps a copy of the Word file in <code>manuscripts/</code> in the library folder and uses it as the base on export. Moving or deleting the original does not matter.</li>
         </ul>
         <p>If the file does not use Word's heading styles (the headings are just bold paragraphs), the import first asks “Which paragraphs start a section?”. It lists the paragraphs that look like headings and says why: “Common section name”, “Bold”, and so on. Each ticked paragraph starts a section; the others stay in the body.</p>
 
         <figure class="shot">
-          <img src="../../img/t/revise-02-headings.jpg" width="1372" height="867" loading="lazy" alt="The “Which paragraphs start a section?” dialog: five candidate paragraphs; Introduction and Methods are marked as common section names and ticked, three bold subheadings are not ticked; the buttons are “Don't import” and “Import at 2 headings”.">
-          <figcaption><b>Figure 2.</b> The same manuscript with the heading styles removed. Untick the three subheadings and import at 2 headings. When you export back to Word they are still the paragraphs they were in the file.</figcaption>
+          <img src="../../img/en/t/revise-02-headings.jpg" width="1372" height="870" loading="lazy" alt="The “Which paragraphs start a section?” dialog with five candidate paragraphs. Introduction and Methods are marked “Common section name” and ticked; Plant material and treatment, Nuclei isolation and sequencing and Data analysis are marked “Bold” and not ticked. The buttons are “Don't import” and “Import at 2 headings”.">
+          <figcaption><b>Figure 2.</b> The same manuscript with the heading styles removed. The three bold subheadings are unticked, so the import makes 2 sections. When you export back to Word they are still the paragraphs they were in the file.</figcaption>
         </figure>
         <aside class="note"><b>Tip</b>The old .doc format cannot be read; save it as .docx in Word first. After the import you can also put the cursor in a paragraph under the manuscript and choose “Make heading”, or “New section from here”.</aside>
       </section>
 
       <section id="s2">
-        <h2><i>2</i>Go through the advisor's comments</h2>
+        <h2><i>2</i>Go through the co-author's comments</h2>
         <p>The “Comments” tab on the right lists this section's comments by position, each with the original text it refers to. Click the quote in a comment and the manuscript jumps to that text and selects it; click shaded text in the manuscript, or the small marker on the right, and the matching comment comes up.</p>
-        <p>Your advisor asks “Check this number against Table 1.” You compare it with the sample table: the four time points add up to exactly 48,312, so nothing needs changing, and you click “Mark resolved” on this comment. A comment that came from Word can only be marked resolved, not deleted; resolved ones are collected under “1 resolved” at the bottom of the list, and you can “Reopen” them.</p>
-        <p>You can leave comments yourself too: select “recent work has combined it with chromatin accessibility in the same cell”, click “Comment on the selection”, write the citation that needs adding, and click “Save” (or press Enter).</p>
+        <p>In the Methods your co-author asks “Check this number against Table 1.” You compare it with the sample table: the four time points (11,874, 12,305, 12,418 and 11,715 nuclei) add up to exactly 48,312, so nothing needs changing, and you click “Mark resolved” on this comment. A comment that came from Word can only be marked resolved, not deleted; resolved ones are counted as “1 resolved” at the bottom of the list, and you can “Reopen” them.</p>
+        <p>You can leave comments yourself too: in the Methods, select “sequenced on an Illumina instrument”, click “Comment on the selection”, write what needs adding (here “Add the instrument model and the read depth.”), and click “Save” (or press Enter).</p>
 
         <figure class="shot">
-          <img src="../../img/t/revise-03-comment.jpg" width="1372" height="867" loading="lazy" alt="The top of the Comments tab on the right is the comment being written: it quotes the selected English sentence, the input box holds a short reminder in Chinese, and below are “Cancel” and “Save”; at the bottom it shows “1 resolved”.">
+          <img src="../../img/en/t/revise-03-comment.jpg" width="1372" height="870" loading="lazy" alt="The Methods section on the Writing page. The top of the Comments tab on the right is the comment being written: it quotes the selected words “sequenced on an Illumina instrument”, the input box holds “Add the instrument model and the read depth.”, and below are “Cancel” and “Save”. At the bottom of the tab it shows “1 resolved”.">
           <figcaption><b>Figure 3.</b> Writing a comment on the selected text. The “1 resolved” at the bottom is the comment whose number you just checked.</figcaption>
         </figure>
-        <aside class="note warn"><b>Note</b>“Mark resolved” only counts inside Wisp Study. Your advisor's 5 comments stay in the exported Word file as they were, including the ones you marked resolved. Whether to “resolve” them in Word is up to your advisor.</aside>
+        <aside class="note warn"><b>Note</b>“Mark resolved” only counts inside Wisp Study. Your co-author's 5 comments stay in the exported Word file as they were, including the ones you marked resolved. Whether to “resolve” them in Word is up to your co-author.</aside>
       </section>
 
       <section id="s3">
         <h2><i>3</i>Let the assistant review this section</h2>
         <p>The result of “Review this section” is like a Word review: a list of comments, each pointing at a passage of the original, with “Suggested change” attached where the wording should change. The input box above lets you say what you want it to look at, or you can leave it empty. This time you wrote:</p>
-        <blockquote><cite>What should the assistant look at?</cite><p>Answer my advisor's comments first; then check whether the research gap is clearly stated</p></blockquote>
-        <p>Click into the body first to make sure no text is selected, then click “Review this section”. With text selected the button becomes “Review the selection” and reviews only that passage. In less than a minute the notice says “The assistant left 5 comments.” Three of them answer comments: two to your advisor, one to the comment you just wrote.</p>
+        <blockquote><cite>What should the assistant look at?</cite><p>Answer my co-author's comments first; then check whether the research gap is clearly stated</p></blockquote>
+        <p>Click into the body first to make sure no text is selected, then click “Review this section”. With text selected the button becomes “Review the selection” and reviews only that passage. The notice says “The assistant left 5 comments.” Four of them answer comments by M. Reviewer, and the fifth is about the sentence that states the aim.</p>
 
         <figure class="shot">
-          <img src="../../img/t/revise-04-review.jpg" width="1372" height="867" loading="lazy" alt="The Comments tab on the right: below Zhang Ming's comment that the research gap is too vague is a comment by the assistant, starting with a reply to Zhang Ming, and below it “Suggested change” gives a new English sentence, with the buttons “Apply” and “Dismiss”. At the top of the tab is “Apply all 4 changes”.">
-          <figcaption><b>Figure 4.</b> Your advisor says the research gap is too vague, and the assistant's comment sits right next to it with a rewritten sentence. “Apply all 4 changes” at the top accepts every comment that carries a suggestion in one go.</figcaption>
+          <img src="../../img/en/t/revise-04-review.jpg" width="1372" height="870" loading="lazy" alt="The Introduction on the Writing page after the review. Above the comments, the notice “The assistant left 5 comments.” and “Apply all 3 changes”. The first card is a comment by the assistant on the sentence that begins “Osmotic stress alters the growth of the root”: a reply to M. Reviewer, then “Suggested change” with a rewritten sentence, and the buttons “Apply” and “Dismiss”. Below it are M. Reviewer's comments, among them “The research gap is too vague here. Say what exactly is unknown.”">
+          <figcaption><b>Figure 4.</b> M. Reviewer says the research gap is too vague, and the assistant's comment sits right next to it with a rewritten sentence. “Apply all 3 changes” at the top accepts every comment that carries a suggestion in one go.</figcaption>
         </figure>
 
-        <p>The reply to your advisor's first comment (cite Denyer 2019 and Shulse 2019) gives no fix:</p>
-        <blockquote><cite>Assistant</cite><p>Please verify the two original papers and insert them in the manuscript's citation format; no bibliographic entries were provided, so no citation marker is made up for now.</p></blockquote>
-        <p>It does not invent citations. Where something needs checking, it says so in the comment, for example “Please verify whether existing studies have already answered these questions”.</p>
+        <p>The reply to the comment that asks for the two original single-nucleus papers gives no fix:</p>
+        <blockquote><cite>Assistant</cite><p>Reply to M. Reviewer: a citation is needed here. No bibliographic entry was given, so no citation marker is made up; add the paper in the manuscript's citation format.</p></blockquote>
+        <p>It does not invent citations. Where something needs checking, it says so in the comment.</p>
         <aside class="note warn"><b>Note</b>For a review, the text of this section (or of the selected part), what you wrote as the request, and this section's open comments (with the authors' names) are sent to the model provider you configured in Settings.</aside>
       </section>
 
@@ -123,32 +123,32 @@
         <p>The assistant's comments never change the manuscript on their own. Only when you click “Apply” is that passage in the manuscript replaced. The comment then moves to the new text and reads “Changed. The original was” followed by the old sentence, with an “Undo change” button beside it.</p>
 
         <figure class="shot">
-          <img src="../../img/t/revise-05-applied.jpg" width="1372" height="867" loading="lazy" alt="The last sentence of the second paragraph of the manuscript has been replaced by a new English sentence; below the assistant's comment on the right it shows “Changed. The original was” and the old sentence, with the buttons “Undo change” and “Mark resolved”.">
+          <img src="../../img/en/t/revise-05-applied.jpg" width="1372" height="870" loading="lazy" alt="The Introduction after two changes were applied: the first sentence of the first paragraph now reads “Osmotic stress alters the growth of the root, yet which cell types respond first is still unknown, because bulk measurements average over them.”, and the first sentence of the third paragraph has been replaced too. In the first assistant comment on the right, “Changed. The original was” is followed by the old sentence, with the buttons “Undo change” and “Mark resolved”.">
           <figcaption><b>Figure 5.</b> After you apply a change, the old sentence stays in the comment and you can undo it at any time.</figcaption>
         </figure>
 
         <p>What you did this time:</p>
         <ul>
-          <li>The research-gap sentence: applied. Your advisor's “Too vague” was then marked resolved.</li>
-          <li>The comment that changes “restricted to the endodermis and the xylem pole pericycle” to “detected specifically in”: applied. The assistant's reason is that “restricted” implies it has been shown that other cell types do not respond, which goes beyond what the data can support.</li>
-          <li>The comment suggesting the research aim be rewritten as “To characterize the temporal dynamics…”: “Dismiss”, which removes that comment.</li>
-          <li>The two comments that only remind you to add a citation and change no wording: left in place, to be marked resolved once you have added the papers.</li>
+          <li>The research-gap sentence: applied. Your co-author's comment “The research gap is too vague here” was then marked resolved.</li>
+          <li>The comment on “the response is restricted to the endodermis and the xylem pole pericycle”: applied. The sentence now reads “Previous studies detected the response mainly in the endodermis and the xylem pole pericycle; whether other cell types are affected is less clear.” The assistant's reason is that “restricted” claims that other cell types do not respond, which goes beyond what the sentence can support.</li>
+          <li>The comment suggesting that the sentence stating the aim be rewritten as “Here we describe the transcriptional changes in each cell type of the root at four time points after treatment.”: “Dismiss”, which removes that comment.</li>
+          <li>The comments that only remind you to add a citation and change no wording: left in place, to be marked resolved once you have added the papers.</li>
         </ul>
         <p>If you review again, the assistant comments from the previous round that you have not dealt with are replaced by the new round; the ones you applied stay. The revised sentences were written by a model; whether the data and conclusions hold up is for you to check against the results.</p>
       </section>
 
       <section id="s5">
         <h2><i>5</i>Revise one spot as you tell it</h2>
-        <p>Your advisor asks in the methods why these four time points were chosen. Go to the “Methods” section and, in the input box under the manuscript (“Tell the assistant what to change in this section”), write:</p>
-        <blockquote><cite>Tell the assistant what to change in this section</cite><p>After the sentence about sampling times, add one sentence explaining why these four time points were chosen; do not make up references or data</p></blockquote>
-        <p>After you send it, the change lands directly in the manuscript: the new text is shaded and has a vertical bar on its left. Above the input box it lists how many places changed, and each can be undone with “Undo”, or you can choose “Undo all” or “Keep”. In under 40 seconds the assistant added one sentence after that one:</p>
-        <blockquote><cite>Assistant</cite><p>These time points were selected to provide a baseline at 0 hours and capture early and later transcriptional responses over the first 24 hours of osmotic stress.</p></blockquote>
+        <p>The methods give no reason for the four time points. Go to the “Methods” section and, in the input box under the manuscript (“Tell the assistant what to change in this section”), write:</p>
+        <blockquote><cite>Tell the assistant what to change in this section</cite><p>After the sentence about sampling times add one sentence explaining why these four time points were chosen; do not make up references or data</p></blockquote>
+        <p>After you send it, the change lands directly in the manuscript: the new text is shaded and has a vertical bar on its left. Above the input box it lists how many places changed, and each can be undone with “Undo”, or you can choose “Undo all” or “Keep”. The assistant added one sentence after the sampling sentence:</p>
+        <blockquote><cite>Assistant</cite><p>The 0 hour sample serves as the baseline, and the three later time points cover the early and the later phases of the response.</p></blockquote>
 
         <figure class="shot">
-          <img src="../../img/t/revise-06-revise.jpg" width="1372" height="867" loading="lazy" alt="The Methods section: after the sampling sentence there is a new sentence shaded green; the box under the manuscript says “1 changes”, with “Undo all” and “Keep”; on the right there is an extra assistant comment recording the request and the original text.">
+          <img src="../../img/en/t/revise-06-revise.jpg" width="1372" height="870" loading="lazy" alt="The Methods section: after the sentence “Roots were sampled at 0, 1, 6 and 24 hours after transfer.” there is a new sentence shaded green. The box under the manuscript says “1 changes”, with “Undo all” and “Keep”. On the right, the assistant's comment records the request and, after “Changed. The original was”, the sampling sentence, with “Undo change” and “Mark resolved”. Below it is the comment by A. Author on “sequenced on an Illumina instrument”.">
           <figcaption><b>Figure 6.</b> In a manuscript imported from Word, every spot the assistant changes gets a comment that records your request and the text as it was before.</figcaption>
         </figure>
-        <p>This comment is left automatically, so after the export your advisor can see what was changed here. Replacing a passage with “Polish” or “Rewrite by example” under the body leaves one as well.</p>
+        <p>This comment is left automatically, so after the export your co-author can see what was changed here. Replacing a passage with “Polish” or “Rewrite by example” under the body leaves one as well.</p>
       </section>
 
       <section id="s6">
@@ -156,35 +156,35 @@
         <p>Click “Export” above the manuscript. A manuscript that came from Word has two Word exports:</p>
         <ul>
           <li>“Word (.docx): original layout, with comments”: the changes are written straight into the body, with no tracked-change record.</li>
-          <li>“Word (.docx): changes as tracked revisions, with comments”: each change is recorded as a Word tracked change, and your advisor can accept or reject them one by one in Word.</li>
+          <li>“Word (.docx): changes as tracked revisions, with comments”: each change is recorded as a Word tracked change, and your co-author can accept or reject them one by one in Word.</li>
         </ul>
 
         <figure class="shot">
-          <img src="../../img/t/revise-07-export.jpg" width="1372" height="867" loading="lazy" alt="The open “Export” menu: Markdown (.md), Word (.docx): original layout, with comments, Word (.docx): changes as tracked revisions, with comments, and Copy manuscript.">
+          <img src="../../img/en/t/revise-07-export.jpg" width="1372" height="870" loading="lazy" alt="The open “Export” menu: Markdown (.md), Word (.docx): original layout, with comments, Word (.docx): changes as tracked revisions, with comments, and Copy manuscript, followed by a list of citation styles with a check mark at “Citations in Word: author–year”.">
           <figcaption><b>Figure 7.</b> The “Export” menu. A manuscript written from scratch has only one Word export.</figcaption>
         </figure>
 
-        <p>Choose the second one. After the export the notice reads “3 paragraphs changed, all as tracked revisions, 6 comments”. The 6 are the comments you and the assistant left; your advisor's 5 were already in the file. Unzip the exported file and compare it with the original:</p>
+        <p>Choose the second one. After the export the notice reads “Exported to … (3 paragraphs changed, all as tracked changes, 6 comments)”. The 6 are the comments you and the assistant left; your co-author's 5 were already in the file. Unzip the exported file and compare it with the original:</p>
         <ul>
           <li>Paragraphs you did not change, headings, the sample table and the style sheet are byte for byte the same as in the original. A changed paragraph has only its text replaced; the formatting stays.</li>
           <li>The tracked changes are word by word: deleted words are struck through and added words are recorded separately. The author is the “Author name” you filled in under “Settings › General › Writing”. If it is empty, the user name of this computer is used.</li>
           <li>Your comments carry your name. The assistant's comments carry “<span lang="zh-CN">Wisp Study 助手</span>” (the Wisp Study assistant), and a suggestion you did not apply is written in the comment as “Suggested change: …”.</li>
-          <li>The tracked change your advisor made and you did not accept (the version number) is still a tracked change in the exported file.</li>
+          <li>A tracked change that was already in the file you imported stays a tracked change in the exported file.</li>
         </ul>
 
         <figure class="shot">
           <img src="../../img/t/revise-08-word.jpg" width="1140" height="1010" loading="lazy" alt="The exported Word file rendered in LibreOffice: in the last sentence of the second paragraph of the introduction the old words are struck through and the new words underlined; in the third paragraph “restricted to” is replaced by “with osmotic stress responses detected specifically in”, and “and” by “or”.">
           <figcaption><b>Figure 8.</b> The introduction of the exported file opened in LibreOffice. Deletions and insertions are marked word by word, waiting for your advisor to accept or reject them one by one.</figcaption>
         </figure>
-        <aside class="note"><b>Tip</b>With the first export the changes leave no trace, and the old sentence survives only in the record of the assistant's comment. For a manuscript you send to your advisor for review, use the second.</aside>
+        <aside class="note"><b>Tip</b>With the first export the changes leave no trace, and the old sentence survives only in the record of the assistant's comment. For a manuscript you send to your co-author for review, use the second.</aside>
       </section>
 
       <section id="recap" class="recap">
         <h2>Recap</h2>
         <ul>
-          <li>Import the Word manuscript: top-level headings start sections, your advisor's comments are read in together with the text they point to, and tables and pictures stay in the file.</li>
-          <li>Check your advisor's comments one by one and mark them resolved; write your own reminders on selected text.</li>
-          <li>In a review the assistant answers your advisor first and then gives a “Suggested change”; you decide whether to apply it, and an applied change can be undone.</li>
+          <li>Import the Word manuscript: top-level headings start sections, your co-author's comments are read in together with the text they point to, and tables and pictures stay in the file.</li>
+          <li>Check your co-author's comments one by one and mark them resolved; write your own reminders on selected text.</li>
+          <li>In a review the assistant answers your co-author first and then gives a “Suggested change”; you decide whether to apply it, and an applied change can be undone.</li>
           <li>Spots revised as you tell it get a comment automatically; on export the changes are recorded as tracked changes, and paragraphs you did not change stay exactly as they were.</li>
           <li>If the manuscript is not written yet, see <a href="write.html">Write a paper: candidate sentences, citations and sources</a>; once it is revised and you want to follow newly published papers, see <a href="follow.html">Keep up with new papers, and hand the library to other tools</a>.</li>
         </ul>
@@ -210,7 +210,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> The screenshots and numbers come from an actual run in November 2026 on macOS with v0.10.0. The model answers differently each time, so the wording and numbers will differ when you follow along; the steps are the same. The screenshots show the Chinese interface; the text uses the labels of the English one (Settings › General › Interface language).</p>
+      <p><b>About this tutorial.</b> Most screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface and a stand-in model that answers by fixed rules; Figure 8 still shows the Chinese interface and the earlier run. A real model answers differently each time, so the wording will differ when you follow along; the steps are the same.</p>
       <p><b>The assistant can be wrong.</b> Its suggestions and answers are for you to confirm; check key numbers and conclusions against the original.</p>
     </div>
   </div>
