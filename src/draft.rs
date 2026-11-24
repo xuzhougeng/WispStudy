@@ -458,13 +458,6 @@ impl Workspace {
             .child(div().flex().flex_wrap().items_center().gap(px(2.)).ml(px(-8.)).children(starts))
     }
 
-    /// A library left while one of its conversations was answering (`Workspace::parked`): a mark for its row or card that says
-    /// it is still at work, or waits for the person's yes to a tool. None for one not answering off screen.
-    pub(crate) fn off_screen_mark(&self, id: &str) -> Option<Div> {
-        let lib = self.parked.iter().find(|lib| lib.info.id == id)?;
-        Some(Self::at_work_mark(SharedString::from(format!("off-screen-{id}")), lib.waits_for_yes()))
-    }
-
     /// 回答中 with a spinner, or 等你同意: said of a conversation at work that is not on show.
     pub(crate) fn at_work_mark(id: SharedString, waits: bool) -> Div {
         let mark = div().flex().flex_none().items_center().gap(px(5.)).text_size(text_px(12.));
