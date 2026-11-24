@@ -160,6 +160,8 @@ pub struct Confirming {
     pub doubtful_first: bool,
     /// The paper the keys act on.
     pub cursor: Option<String>,
+    /// The paper the keys act on is not shown in full under the list: the person put it away, and the keys leave it away.
+    pub put_away: bool,
 }
 
 impl Confirming {
