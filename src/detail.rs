@@ -21,10 +21,11 @@ pub const SPLIT_MIN: f32 = 760.;
 /// paper's conversation beside it, so that the lines under them run on as one (docs/dev/design.md: the frame
 /// stays and the content gives way).
 pub const BAR_H: f32 = 40.;
-/// The levels the bar of the paper on show gives way by to stay one line, each with all before it: the tools by
-/// their icons (the names in their tooltips); the zoom as its percentage alone; the tools under ⋯
-/// (`Workspace::more_items`); the translation's count in a tooltip; the zoom's steps under ⋯ too and 译文 as its
-/// icon; 留在旁边 and the translation's next step under ⋯.
+/// The levels the bar of the paper on show gives way by to stay one line, each with all before it: every button
+/// by its icon (the names in their tooltips), all of them at this one step, so that the bar never reads half in
+/// words and half in icons (译文, 导图 and the way back to the fit among them); the zoom as its percentage alone;
+/// the tools under ⋯ (`Workspace::more_items`); the translation's count in a tooltip; the zoom's steps under ⋯
+/// too; 留在旁边 and the translation's next step under ⋯.
 pub const BAR_ICONS: usize = 1;
 pub const BAR_SHORT_ZOOM: usize = 2;
 pub const BAR_NO_TOOLS: usize = 3;
@@ -863,7 +864,8 @@ impl Workspace {
             let size = if bar.zoom.fits() && level < BAR_SHORT_ZOOM { format!("{} · {}%", fit_label(bar.zoom), bar.percent.round()) } else { format!("{}%", bar.percent.round()) };
             let step = |id: &'static str, icon: &'static str| ui::ghost_button(id, Some(icon), None).h(text_px(24.)).min_w(px(24.));
             let back = (zooms && !bar.zoom.fits() && bar.fit != Zoom::FitPage).then(|| fit_label(bar.fit));
-            let width = wide(&size) + 12. + if zooms { 72. + back.map_or(0., |back| wide(back) + 12.) } else { 0. };
+            // By its name while names have room, then by its icon like every other button of the bar.
+            let width = wide(&size) + 12. + if zooms { 72. + back.map_or(0., |back| if named { wide(back) + 12. } else { 24. }) } else { 0. };
             put((div()
                 .id("pdf-zoom-group")
                 .flex()
@@ -876,13 +878,16 @@ impl Workspace {
                         // The whole page in one click from any size; in force it is marked, and a click brings the page's top back.
                         .child(ui::ghost_button("pdf-zoom-page", None, None).h(text_px(24.)).min_w(px(24.)).child(ui::icon("scan", 16., if bar.zoom == Zoom::FitPage { Theme::accent() } else { Theme::text_secondary() })).tooltip(ui::tip(t("适应整页"))).on_click(self.on(Cmd::PdfZoom(ZoomTo::Set(Zoom::FitPage)), cx)))
                 })
-                .when_some(back, |d, back| d.child(ui::ghost_button("pdf-zoom-fit", None, Some(back.into())).h(text_px(24.)).px(px(6.)).text_size(text_px(12.)).on_click(self.on(Cmd::PdfZoom(ZoomTo::Set(bar.fit)), cx)))), width));
+                .when_some(back, |d, back| {
+                    let fit = if named { ui::ghost_button("pdf-zoom-fit", None, Some(back.into())).h(text_px(24.)).px(px(6.)).text_size(text_px(12.)) } else { ui::ghost_button("pdf-zoom-fit", None, None).h(text_px(24.)).min_w(px(24.)).child(ui::icon("move-horizontal", 16., Theme::text_secondary())).tooltip(ui::tip(back)) };
+                    d.child(fit.on_click(self.on(Cmd::PdfZoom(ZoomTo::Set(bar.fit)), cx)))
+                }), width));
             // How the paper is read, a switch on what it changes: the pages again beside themselves, their
             // paragraphs translated in place. Lit while on, with how far the translation is and the one thing to do next.
-            let (switch, width) = button("pdf-facing", Some("languages"), "languages", t("译文"), bar.facing, Some(if bar.facing { t("收起译文") } else { t("对照译文：左边原文，右边把每段换成译文的页面") }.to_string()), zooms);
+            let (switch, width) = button("pdf-facing", Some("languages"), "languages", t("译文"), bar.facing, Some(if bar.facing { t("收起译文") } else { t("对照译文：左边原文，右边把每段换成译文的页面") }.to_string()), named);
             put((switch.on_click(self.on(Cmd::ToggleFacing, cx)), width));
             // The paper's mind map, a column more beside the pages: made by hand, or drafted by the model and then changed.
-            let (map, width) = button("pdf-map", Some("git-branch"), "git-branch", t("导图"), bar.map, Some(if bar.map { t("收起思维导图") } else { t("思维导图：在旁边一栏整理这篇文献的要点，节点可以连回原文") }.to_string()), zooms);
+            let (map, width) = button("pdf-map", Some("git-branch"), "git-branch", t("导图"), bar.map, Some(if bar.map { t("收起思维导图") } else { t("思维导图：在旁边一栏整理这篇文献的要点，节点可以连回原文") }.to_string()), named);
             put((map.on_click(self.on(Cmd::PdfMap, cx)), width));
         }
         drop(put);
