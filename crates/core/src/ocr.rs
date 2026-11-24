@@ -303,7 +303,7 @@ fn pieces(raw: &str) -> Vec<Piece<'_>> {
 /// The rectangle around the boxes a mark names (`[[x1, y1, x2, y2]]`, or several), as fractions of the page.
 fn rect(boxes: &str) -> Option<[f32; 4]> {
     let numbers: Vec<f32> = boxes.split(|c: char| !(c.is_ascii_digit() || c == '.')).filter(|n| !n.is_empty()).filter_map(|n| n.parse().ok()).collect();
-    if numbers.len() < 4 || numbers.len() % 4 != 0 { return None }
+    if numbers.len() < 4 || !numbers.len().is_multiple_of(4) { return None }
     let mut around = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
     for corners in numbers.chunks(4) {
         around = [around[0].min(corners[0]), around[1].min(corners[1]), around[2].max(corners[2]), around[3].max(corners[3])];
