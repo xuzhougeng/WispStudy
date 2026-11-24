@@ -62,7 +62,7 @@ fn put(tx: &Transaction, table: &str, names: &[String], rows: Vec<Vec<Value>>, c
 
 /// The rows of each table a file's id keys, from one library to another under the file's new id.
 fn put_by_file(from: &Connection, tx: &Transaction, old: &str, new: &str) -> Result<()> {
-    for table in ["fulltext_text", "structures", "sentences", "file_origins", "reading_places"] {
+    for table in ["fulltext_text", "structures", "sentences", "file_origins", "reading_places", "ocr_pages"] {
         let (names, found) = rows(from, table, "resource_id", old)?;
         put(tx, table, &names, found, |name, value| if name == "resource_id" { *value = Value::Text(new.into()) })?;
     }

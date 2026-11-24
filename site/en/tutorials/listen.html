@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/listen.html">
+<link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/listen.html">
+<title>Listen to a paper · Wisp Study tutorials</title>
+<meta name="description" content="Listen to a paper when you are on the road or your hands are busy: set up DeepSeek's speech service, read aloud from the current page to the references, or have two hosts turn the paper into a podcast. The podcast is kept as an attachment of the paper, and you can play it again any time under “Podcast” in the sidebar.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../../app-icon.png">
+<link rel="stylesheet" href="../../style.css">
+<link rel="stylesheet" href="../../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="Site">
+      <a href="index.html" aria-current="page">Tutorials</a>
+      <a href="../index.html#ideas">Ideas</a>
+      <a href="../index.html#tools">Tools</a>
+      <a href="../index.html#download">Download</a>
+    </nav>
+    <a class="lang" href="../../tutorials/listen.html" lang="zh-CN" hreflang="zh-CN">中文</a>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="Location"><a href="index.html">Tutorials</a><span>›</span>Read</nav>
+
+  <header class="doc-head">
+    <p class="kicker">Tutorial 07 · Read</p>
+    <h1>Listen to a paper: read aloud and podcast</h1>
+    <p class="lead">On the commute, or while you wait for a centrifuge run, your eyes are busy but your ears are free. This tutorial turns a paper in the library into something to listen to. First you set up the speech service and let it read from the current page sentence by sentence, or read only a selected passage. Then you turn the whole paper into a conversation between two hosts that keeps playing after you leave the paper. The finished podcast is kept as an attachment of the paper, and one click in the sidebar plays it again.</p>
+    <dl class="facts">
+      <div><dt>Scenario</dt><dd>Listen to a paper on the single-cell atlas of sweet potato root tips, to get the gist first and read it closely later.</dd></div>
+      <div><dt>Needs</dt><dd>A paper with a PDF; a DeepSeek API key (for the voice); an assistant model set up in “Settings › AI” (for the podcast script).</dd></div>
+      <div><dt>Time</dt><dd>About 3 minutes of setup; the rest is listening time: reading aloud depends on the length, and a podcast takes as long as it runs.</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="Sections of this tutorial">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#s1">Set up the voice first</a></li>
+        <li><a href="#s2">Read aloud: from this page to the references</a></li>
+        <li><a href="#s3">Podcast: two hosts talk about the paper</a></li>
+        <li><a href="#s4">Leave the paper and keep listening</a></li>
+        <li><a href="#s5">The kept audio and script</a></li>
+        <li><a href="#s6">“Podcast” in the sidebar: listen again</a></li>
+        <li class="plain"><a href="#recap">Recap</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>Set up the voice first</h2>
+        <p>The paper to listen to is Transcriptional landscape of sweetpotato root tip development at the single-cell level, BMC Plant Biology, 2024, 17 pages, with its PDF stored in the library. Type <code>sweetpotato</code> in the search box above the list, click this paper and switch to “PDF”.</p>
+        <p>The voice for reading aloud and podcasts does not come from the model you assign to the assistant under “Tasks”, but from DeepSeek's speech service. If it is not set up yet, clicking “Read aloud” or “Podcast” brings up a notice instead of a voice:</p>
+
+        <figure class="shot">
+          <img src="../../img/t/listen-01-prompt.jpg" width="1372" height="867" loading="lazy" alt="The paper list shows only the sweet potato root tip paper, with its PDF open on the right. In the middle of the window is a dialog titled “No speech service set up yet”, saying that the voice comes from DeepSeek's speech service and is billed by characters, with the buttons “Cancel” and “Set up DeepSeek”.">
+          <figcaption><b>Figure 1.</b> Clicking “Read aloud” with no speech service set up: a notice whose button leads straight to settings.</figcaption>
+        </figure>
+
+        <p>Click “Set up DeepSeek”. The window goes to “Settings › AI › Model”, where DeepSeek has already been added to the provider list on the left, with the URL <code>https://api.deepseek.com</code> and “No API key” below it. Get a key at platform.deepseek.com (“Get an API key” at the top right leads there) and fill it into the “API Key” field. “No API key” in the list becomes “2 models”, and under the field it says “Saved on this computer.” If DeepSeek is already added and only the key is missing, the button in the notice is “Fill in the API key”, and it lands in the same place.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/listen-02-key.jpg" width="1372" height="867" loading="lazy" alt="“Settings › AI › Model”: DeepSeek is selected in the provider list on the left, showing 2 models. On the right the service URL is https://api.deepseek.com, the “API Key” field is a row of dots, and below it says “Saved on this computer.”">
+          <figcaption><b>Figure 2.</b> The API key is filled in for DeepSeek. The key is saved in plain text in settings.json on this computer.</figcaption>
+        </figure>
+
+        <p>Choose the voice at the very bottom of the “Tasks” page next to it. “Reading voice” has two options, “Female” and “Male”, and the description says which provider's key is used and that it is billed by characters. This setting governs “Read aloud”. The two podcast hosts each use their own voice and are not affected by it.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/listen-03-voice.jpg" width="1372" height="867" loading="lazy" alt="The “Settings › AI › Tasks” page scrolled to the bottom: the “Reading voice” row, with a description saying that “Read aloud” on the PDF toolbar and for selected text uses DeepSeek's speech service, with the key taken from “DeepSeek”, billed by characters. To the right are “Female” and “Male”, with Female selected.">
+          <figcaption><b>Figure 3.</b> “Reading voice” at the bottom of the “Tasks” page.</figcaption>
+        </figure>
+
+        <aside class="note warn"><b>Note</b>Both reading aloud and the podcast send the paper's text to DeepSeek, billed by characters, and a Chinese character counts as two characters. Reading aloud requests only a short stretch ahead of where it is reading, so stopping midway does not request the whole paper. The podcast script also sends the title, abstract and full text to the model the assistant uses.</aside>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>Read aloud: from this page to the references</h2>
+        <p>When the detail panel is narrow, the PDF toolbar has room for only a few icons, and “Read aloud” and “Podcast” are tucked into the ⋯ menu. Press <kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>F</kbd> on Windows, or click the expand icon to the right of the title at the top of the detail) to enter reading mode. The toolbar then has “Read aloud” with a speaker and “Podcast” with headphones.</p>
+        <p>Reading aloud starts from the page you are looking at. In this example, turn to the introduction on page 2 first and then click “Read aloud”: “Read aloud” on the toolbar turns green and a player appears at the bottom of the PDF (Figure 4). The sentence being read has a thin dark gray line under each of its lines (over a very light gray underlay). When a sentence is finished, the line moves to the next one. It differs from the background of selected text, so you can tell them apart even if you select while listening. When the reading reaches the bottom of the screen, the page scrolls on its own and the sentence being read stays in view. After a page it goes on to the next, until it reaches the references.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/listen-04-aloud.jpg" width="1372" height="867" loading="lazy" alt="The introduction on page 2 in reading mode in v0.17.0. The third sentence, “Sweetpotato is a short-day crop rich in multiple nutrients……drought resistance.”, has a thin line under each of its lines. “Read aloud” on the toolbar is green. The player at the bottom of the page shows a pause icon, “Read aloud Page 2”, “1×” and a square.">
+          <figcaption><b>Figure 4.</b> Reading the third sentence of the introduction on page 2. A thin line is under the sentence being read, and the player is at the bottom.</figcaption>
+        </figure>
+
+        <p>In v0.17.0 the player floats at the bottom of the PDF. On the left is pause, which becomes resume once paused; in the middle are “Read aloud” and “Page 2”; on the right are the playback speed and the stop square. The speed is 1× by default, and clicking it lets you choose 0.75×, 1.25×, 1.5× or 2×. Click the square to stop: the player folds away and “Read aloud” on the toolbar goes gray again. Figure 5 shows the speed menu opened while the next sentence is being read.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/listen-10-player.jpg" width="1372" height="867" loading="lazy" alt="The introduction on page 2 in reading mode. The fourth sentence, In addition to it being a nutritious food source……, has a thin line under it. A speed menu pops up above “1×” in the player at the bottom: 0.75×, 1× (checked), 1.25×, 1.5×, 2×.">
+          <figcaption><b>Figure 5.</b> The speed menu on the player, 1× by default.</figcaption>
+        </figure>
+
+        <h3>Read only a selected passage</h3>
+        <p>To hear just one passage, drag to select it on the page. In the row of buttons beside the selection, the last one is “Read aloud”, after “Copy”, “Underline”, “Highlight”, “Add to chat” and “Translate”. This example selects the sentence in the introduction about sweet potato being a short-day, drought-tolerant crop.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/listen-05-selection.jpg" width="1372" height="867" loading="lazy" alt="On page 2, the sentence “Sweetpotato is a short-day crop rich in multiple nutrients……drought resistance.” is selected in the left column. Below the selection is a row of buttons: Copy, Underline, Highlight, Add to chat, Translate, Read aloud.">
+          <figcaption><b>Figure 6.</b> “Read aloud” on the selection toolbar reads only the selected passage.</figcaption>
+        </figure>
+
+        <p>Click it and it starts reading this passage. The player says “Read aloud” and “Selection”. When the passage is done it stops and does not go on reading.</p>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>Podcast: two hosts talk about the paper</h2>
+        <p>Reading aloud recites the original sentence by sentence, which suits the times you want the author's own words. If you only want to know first what the paper says, click “Podcast”: the assistant's model writes a conversation script from the title, abstract and full text (up to the references). The female host, Xiaoxing, and the male host, Achao, talk about the background, methods, main findings, limits and significance, and then DeepSeek's two voices read it out, one for each.</p>
+        <p>You do not wait for the script to be finished. After you click, the button spins and says “Writing the podcast script…”. As soon as the model has written the first turn, playback begins and the button becomes “Stop podcast · round N”, where N is the round being played. The model keeps writing and each round is read as soon as it is written. Click the button again to stop.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/listen-06-podcast.jpg" width="1372" height="867" loading="lazy" alt="Page 2 in reading mode. “Read aloud” on the toolbar is gray again, and next to it is a green “Stop podcast · round 12”.">
+          <figcaption><b>Figure 7.</b> The podcast at round 12 in v0.16.0. A podcast does not mark sentences on the page; the button only says which round is playing.</figcaption>
+        </figure>
+
+        <aside class="note"><b>What changed in v0.17.0.</b> According to the v0.17.0 release notes, the podcast, like reading aloud, is now controlled from the player at the bottom of the PDF: pause / resume, playback speed and stop, and for a podcast also a progress bar you can drag. When the paper already has a kept podcast, clicking “Podcast” does not generate it again but resumes from where it stopped last time, with no further charge. To generate it again, choose that in the “⋯” of the player. The screenshots in this section and the next are from v0.16.0.</aside>
+
+        <p>This time the assistant's model was claude-sonnet-5-5, and the whole script came to 82 rounds. It begins like this:</p>
+        <blockquote><cite>Podcast script</cite><p>Xiaoxing: In short, it takes a cell-level map of gene expression across the root tip of sweet potato, to see which cells are in there and how they go step by step from stem cells to mature cells.</p><p>Achao: Right. The paper wants to answer how many cell types there are in the sweet potato root tip, how they differentiate, and how it differs from Arabidopsis and maize.</p></blockquote>
+        <p>The script covers only what the paper says: the cultivar Guangshu 87, three hours of shaking in the enzyme solution, over 80% living cells, sequencing on the 10x Genomics platform. All of this can be found in the abstract and on page 2 of the original. Near the end Achao also raises a detail the paper does not explain: the mapping rate is given as 75% in some places and as over 89% in others. Such remarks are the model's own reading, and whether they are worth chasing is for you to check in the original. A podcast is for getting the gist first; check any number you want to cite against the original.</p>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>Leave the paper and keep listening</h2>
+        <p>After the podcast starts you can do something else. In this example, press <kbd>Esc</kbd> to leave reading mode and once more to close the detail, and the podcast does not stop. A bar floats up at the bottom of the window: on the left a headphones icon, then the title, the round being played, and the sentence being spoken (with who is speaking), and three buttons on the right.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/listen-07-bar.jpg" width="1372" height="867" loading="lazy" alt="The paper list with the detail closed. The floating bar at the bottom of the window reads “Transcriptional landscape of sweetpotat…”, “Round 20”, and on the next line “Achao: In the end 12,172 cells were left, and a total of two…”. On its right are three buttons: download, list and a square. The sidebar has a new item, “Podcast 1”.">
+          <figcaption><b>Figure 8.</b> The floating bar after the detail is closed. “Podcast 1” in the sidebar is the one just kept (see sections 5 and 6).</figcaption>
+        </figure>
+
+        <p>Click the text part of the bar to return to this paper's PDF. The square on the right stops the podcast, and the list icon in the middle is the playlist (section 6). As long as it is playing, the bar stays at the bottom and shows the round it has reached.</p>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>The kept audio and script</h2>
+        <p>Once all the voice is generated, the podcast is kept as two attachments of the paper: the audio as WAV and the conversation script as Markdown. The audio is generated ahead of the sentence being played, so the podcast is usually already kept before it has played to the end, and it goes on playing afterwards as before. If you stop midway or an error occurs, nothing is kept.</p>
+        <p>After it is kept, a download icon appears next to “Podcast” on the reading mode toolbar, and also on the floating bar. Clicking it opens a small menu: “Save podcast audio (WAV)…” and “Save podcast script (Markdown)…”. Choose one and save a copy anywhere in the save dialog that opens, for example to copy it to your phone and listen there.</p>
+        <p>Go back to the “Info” page and scroll down. Under “Attachments / supplementary material” you can see the two files, named “<span lang="zh-CN">播客 - </span>” (“Podcast - ”) plus the title, among this paper's other attachments.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/listen-08-kept.jpg" width="1372" height="867" loading="lazy" alt="The lower part of the “Info” page: “Main text PDF” is Zhao et al., 2024.pdf. Under “Attachments / supplementary material” are two items, the .wav and the .md file, both named “Podcast - ” (in Chinese) plus Transcriptional landscape of sweetpotato root tip, both marked “Attachment”.">
+          <figcaption><b>Figure 9.</b> The podcast is kept as two attachments of the paper: the audio and the script. When the title is long, the file name takes only the first few words of the title and is cut between two words.</figcaption>
+        </figure>
+
+        <p>The script is the conversation as it was read out, a heading and then one paragraph per round. Any text editor can open, copy and edit it:</p>
+        <figure class="code">
+          <figcaption><span lang="zh-CN">播客 - </span>Transcriptional landscape of sweetpotato root tip.md (beginning)</figcaption>
+<pre><code># Podcast: Transcriptional landscape of sweetpotato root tip development at the single-cell level
+
+**Xiaoxing**: Hello everyone, welcome to this episode. I'm Xiaoxing.
+
+**Achao**: And I'm Achao. Today we're talking about a paper published in BMC Plant Biology in 2024, titled "Transcriptional landscape of sweetpotato root tip development at the single-cell level".</code></pre>
+        </figure>
+      </section>
+
+      <section id="s6">
+        <h2><i>6</i>“Podcast” in the sidebar: listen again</h2>
+        <p>Once there is a first podcast, a “Podcast” item appears in the sidebar under “Missing PDF”, with the number of kept podcasts. When there are none, it does not appear. This example made one more for Orthologous marker groups reveal broad cell identity conservation across plant single-cell transcriptomes, and the number became 2.</p>
+        <p>Click “Podcast” and a playlist opens: one row per podcast, with the title and the length. Choose a row to play the kept audio. It requests no service and costs nothing. The floating bar appears as before, with the round and the sentence being spoken, and clicking it likewise returns to that paper's PDF. Click the row that is playing to stop, or use the square on the right of the floating bar.</p>
+        <p>This example first chose the Orthologous one. When it finished, with nothing clicked, the title on the floating bar changed to the sweet potato paper and it played from the start. Opening the list now shows a check mark before the row that is playing:</p>
+
+        <figure class="shot">
+          <img src="../../img/t/listen-09-playlist.jpg" width="1372" height="867" loading="lazy" alt="The paper list, with a playlist popped up beside “Podcast” in the sidebar. It has two rows, “Orthologous marker groups reveal br…” and “Transcriptional landscape of sweetpo…”, each with a length, and a check mark before the second. The floating bar at the bottom of the window reads “Transcriptional landscape of sweetpotato …”, “Round 6” and a sentence from Achao.">
+          <figcaption><b>Figure 10.</b> The playlist behind “Podcast” in the sidebar, each row a title and a length. When one podcast ends, the next plays, and the check mark shows the one that is playing.</figcaption>
+        </figure>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>Recap</h2>
+        <ul>
+          <li>Add DeepSeek under “Settings › AI › Model” and fill in the API key, and choose the reading voice at the bottom of the “Tasks” page. If it is not set up, clicking “Read aloud” leads you straight there.</li>
+          <li>“Read aloud” reads from the current page to the references. It skips headers, footers, page numbers and the copyright and affiliations on the first page. The sentence being read has a line under it and the page follows along. Select a passage to read only that passage. The player at the bottom of the PDF handles pause, speed and stop.</li>
+          <li>“Podcast” has the assistant's model write the script and two hosts talk it through, read as it is written. When you leave the paper, the floating bar at the bottom keeps playing.</li>
+          <li>When everything is generated, the audio and the script are kept as attachments of the paper and can be saved elsewhere. “Podcast” in the sidebar plays them again any time, with no further charge.</li>
+          <li>Next: when a paper has caught your interest, come back and read it closely; see <a href="read.html">Read one paper closely</a>.</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="compare.html"><small>Previous · 06</small><strong>Read several papers side by side</strong></a>
+    <a class="next" href="slides.html"><small>Next · 08</small><strong>Turn a paper into lab-meeting slides</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>References</h2>
+      <ol>
+        <li><a href="index.html">All tutorials</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">Features: what each page can do (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">Data and privacy: where files live and what leaves your machine (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">Questions and ideas: Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>About this tutorial.</b> The screenshots and numbers come from a real run in November 2026 on macOS with v0.16.0; Figures 4 to 6 were retaken on v0.17.0 with the same paper, and the voice again came from a test service on this machine. The podcast script was written by a real model; the voice was replaced by a local test service, so the text does not describe how it sounds, and the length and file size will be your own. The model writes a different script each time, but the steps are the same. The screenshots show the Chinese interface; the text uses the labels of the English one (Settings › General › Interface language).</p>
+      <p><b>The assistant can be wrong.</b> The podcast script is the model's retelling of the paper; check key numbers and conclusions against the original.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

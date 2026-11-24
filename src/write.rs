@@ -444,6 +444,8 @@ impl Workspace {
         let unread = unread + in_part;
         if reading_now > 0 { facts.push(tf!("正在读取 {reading_now}", "Reading {reading_now}")) }
         let configured = !self.settings.profile_for_or_default(Task::Structure).key().is_empty();
+        // What would read the pages of a file without text: the engine of 文字识别, when one can be asked.
+        let reader = wisp_core::ocr::ready(&self.settings, "").ok();
         let button = |id: &'static str, text: String| ui::secondary_button(id, text).h(text_px(24.)).px(px(8.)).text_size(text_px(12.));
         // A model's run, as an icon with how many papers it would read; what it does is said on hover.
         let sparkle = |id: &'static str, icon: &'static str, n: usize, tip: String| {
@@ -465,9 +467,10 @@ impl Workspace {
                     .child(div().flex_none().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(facts[0].clone()))
                     .when(facts.len() > 1, |d| d.child(ui::hint("write-groundwork-about", facts.join(" · "))))
                     .child(div().flex_1())
-                    .when(!running && !configured && open + unread > 0, |d| d.child(ui::icon_action("write-settings", "settings-gear", Theme::text_secondary(), t("配置模型后，可以让模型为没有标题的全文分节、读出没有文字的页面")).on_click(self.on(Cmd::OpenSettings(SettingsPage::Ai), cx))))
+                    .when(!running && !configured && open > 0, |d| d.child(ui::icon_action("write-settings", "settings-gear", Theme::text_secondary(), t("配置模型后，可以让模型为没有标题的全文分节、读出没有文字的页面")).on_click(self.on(Cmd::OpenSettings(SettingsPage::Ai), cx))))
+                    .when(!running && reader.is_none() && unread > 0 && (configured || open == 0), |d| d.child(ui::icon_action("write-ocr-settings", "settings-gear", Theme::text_secondary(), t("在「设置 › 网络 › 文字识别」选好引擎后，可以读出没有文字的页面")).on_click(self.on(Cmd::OpenSettings(SettingsPage::Network), cx))))
                     .when(!running && configured && open > 0, |d| d.child(sparkle("write-sort", "sparkle", open, tf!("让模型判断 {open} 篇有段落没有标题可依的全文", "Ask the model to sort {open} papers whose paragraphs have no heading")).on_click(self.on(Cmd::WriteRun(false), cx))))
-                    .when(!running && configured && unread > 0, |d| d.child(sparkle("write-read", "scan-text", unread, tf!("让模型读页面：{unread} 篇读不出文字或只读了一部分", "Ask the model to read the pages of {unread} papers without readable text")).on_click(self.on(Cmd::WriteRun(true), cx))))
+                    .when_some(reader.filter(|_| !running && unread > 0), |d, reader| d.child(sparkle("write-read", "scan-text", unread, tf!("识别页面文字：{unread} 篇读不出文字或只读了一部分，用{}来读", "Recognise page text: {unread} papers without readable text, read with {}", t(reader.engine.name))).on_click(self.on(Cmd::WriteRun(true), cx))))
                     .when(running, |d| d.child(button("write-stop", t("停止").into()).on_click(self.on(Cmd::WriteStop, cx)))),
             )
             .when(sorting.total > 0 && (running || sorting.done > 0), |d| {
@@ -488,7 +491,7 @@ impl Workspace {
                                 .gap(px(8.))
                                 .text_size(text_px(12.))
                                 .child(div().flex_none().font_weight(FontWeight::MEDIUM).child(match (running, sorting.reading) {
-                                    (true, true) => t("模型正在读页面"),
+                                    (true, true) => t("正在识别页面文字"),
                                     (true, false) => t("模型正在分节"),
                                     (false, true) => t("页面读完了"),
                                     (false, false) => t("分节完成"),
@@ -502,7 +505,14 @@ impl Workspace {
                         .when(!sorting.cut.is_empty(), |d| {
                             let first = &sorting.cut[0];
                             let more = if sorting.cut.len() > 1 { tf!("等 {} 篇", "{} papers waiting", sorting.cut.len()) } else { String::new() };
-                            d.child(div().text_size(text_px(11.)).text_color(Theme::text_secondary()).child(tf!("「{}」{more}页数较多，这次只读了 {} / {} 页；再点「让模型读页面」从第 {} 页接着读。", "“{}”{more} has many pages; {} / {} were read. Click “Ask model to read” again to continue from page {}.", first.0, first.1, first.2, first.1 + 1)))
+                            d.child(div().text_size(text_px(11.)).text_color(Theme::text_secondary()).child(tf!("「{}」{more}页数较多，这次只读了 {} / {} 页；再点「识别页面文字」从第 {} 页接着读。", "“{}”{more} has many pages; {} / {} were read. Click “Recognise page text” again to continue from page {}.", first.0, first.1, first.2, first.1 + 1)))
+                        })
+                        // Pages an engine stopped in the middle of: their text is there, and not all of it.
+                        .when(!sorting.short.is_empty(), |d| {
+                            let (title, pages) = &sorting.short[0];
+                            let listed = pages.iter().take(8).map(usize::to_string).collect::<Vec<_>>().join(", ");
+                            let more = if sorting.short.len() > 1 { tf!("等 {} 篇", "and {} more", sorting.short.len()) } else { String::new() };
+                            d.child(div().text_size(text_px(11.)).text_color(Theme::text_secondary()).child(tf!("「{title}」{more}有页面内容太多，没有读完，文字不全：第 {listed} 页。", "“{title}” {more} has pages too full to be read to the end; their text is incomplete: page {listed}.")))
                         })
                         .children(titles.iter().enumerate().map(|(n, title)| {
                             let line = div().flex().items_center().gap(px(6.)).text_size(text_px(11.)).text_color(Theme::text_secondary()).child(ui::spinner(("write-working", n), 11., Theme::accent())).child(div().flex_1().min_w_0().truncate().child(title.clone()));

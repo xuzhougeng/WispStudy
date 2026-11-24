@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/">
+<link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/">
+<title>Wisp Study: a local-first literature library</title>
+<meta name="description" content="A local-first literature library. Import in bulk from a search query, let the assistant read every paper and give suggestions backed by quotes from the text, and confirm each one yourself. Answers come with sources you can open.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Wisp Study: the papers are yours, and so is the judgment">
+<meta property="og:description" content="A local-first literature library: import in bulk, get suggestions from the assistant backed by quotes from the text, and confirm them yourself. Answers come with sources you can open.">
+<meta property="og:url" content="https://xuzhougeng.github.io/WispStudy/en/">
+<meta property="og:image" content="https://xuzhougeng.github.io/WispStudy/img/library.png">
+<link rel="icon" href="../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../app-icon.png">
+<link rel="stylesheet" href="../style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="#top" aria-label="Wisp Study"><img src="../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="Sections of this page">
+      <a href="#case">Case</a>
+      <a href="tutorials/index.html">Tutorials</a>
+      <a href="#ideas">Ideas</a>
+      <a href="#tools">Tools</a>
+      <a href="#download">Download</a>
+    </nav>
+    <a class="lang" href="../index.html" lang="zh-CN" hreflang="zh-CN">中文</a>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main">
+
+<section class="hero wrap" id="top">
+  <svg class="wisp" viewBox="168 222 184 146" aria-hidden="true" focusable="false">
+    <defs>
+      <linearGradient id="wisp-ink" x1="0" y1="1" x2="1" y2="0">
+        <stop offset="0" stop-color="#5B4BC4"/>
+        <stop offset="1" stop-color="#A78BFA"/>
+      </linearGradient>
+    </defs>
+    <path class="wisp-thin" pathLength="1" d="M200 262c18-30 38-36 54-16s34 12 46-18"/>
+    <path class="wisp-thick" pathLength="1" d="M186 348c22-66 56-84 80-48s50 18 66-52"/>
+  </svg>
+
+  <p class="kicker">A local-first literature library<span class="kicker-version" data-version hidden></span></p>
+  <h1>The papers are yours.<br>So is the judgment.</h1>
+
+  <div class="hero-cols">
+    <div class="hero-pitch">
+      <p class="lead">Wisp Study keeps your papers and PDFs on your computer. Import in bulk from a search query, let the assistant read every paper and give suggestions backed by quotes from the text, and confirm each one yourself. Then ask the library questions: a source in an answer opens the very page it came from.</p>
+      <div class="cta">
+        <a class="btn primary" id="hero-download" href="#download">Download</a>
+        <a class="btn" href="#case">See a complete run</a>
+      </div>
+      <p class="fine">macOS, Windows, Linux · MIT license · No account needed</p>
+    </div>
+
+    <aside class="abstract" aria-label="Abstract">
+      <p><b>Abstract.</b> We started from an empty Wisp Study and built a library around “<span lang="zh-CN">植物单细胞转录组</span>” (plant single-cell transcriptomics). The assistant drafted 6 search queries <a class="cite" href="#step-c" data-step="c">Fig. 3c</a>; we used 2 of them and imported 355 papers from PubMed and Europe PMC <a class="cite" href="#step-d" data-step="d">Fig. 3d</a>. The assistant read all the abstracts in 4 minutes 40 seconds and gave its suggestions <a class="cite" href="#fig2">Fig. 2</a>. After we confirmed them, 313 papers remained, and we asked one question about them <a class="cite" href="#step-h" data-step="h">Fig. 3h</a>. The whole run took about 15 minutes. This page records that run, and why the tool is designed the way it is.</p>
+      <p class="keywords"><b>Keywords.</b> local-first · broad intake · answers with sources · Rust + GPUI</p>
+    </aside>
+  </div>
+
+  <figure class="shot" id="fig1">
+    <img src="../img/library.png" width="2720" height="1720" alt="The Wisp Study Library page: views and tags on the left, the paper list in the middle, and the selected paper's details and notes on the right." fetchpriority="high">
+    <figcaption><b>Figure 1.</b> The Library page. Views and tags are on the left, the paper list is in the middle, and the selected paper's details and notes are on the right.</figcaption>
+  </figure>
+</section>
+
+<!-- §1 -->
+<section class="sec wrap" id="case">
+  <div class="rail" aria-hidden="true"><span class="no">§1</span><span class="v">Case</span></div>
+  <div class="sec-main">
+    <h2><span class="nb">A real run:</span> <span class="nb">fifteen minutes,</span> <span class="nb">from empty to 313 papers</span></h2>
+    <p class="sec-lead">The numbers and screenshots below come from a run on macOS on November 10, 2026. The topic was single-cell and single-nucleus transcriptome sequencing in plants. The databases change every day and the model answers differently each time, so your numbers will differ when you follow along. The steps are the same.</p>
+
+    <figure class="flow" id="fig2">
+      <ol class="ledger">
+        <li><b>6</b><span>search queries<small>drafted by the assistant, each tried out</small></span></li>
+        <li><b>2</b><span>queries used<small>one each for PubMed and Europe PMC</small></span></li>
+        <li><b>400</b><span>papers fetched<small>the latest 200 per query</small></span></li>
+        <li><b>45</b><span>duplicates<small>skipped by DOI, PMID and title</small></span></li>
+        <li class="sum"><b>355</b><span>papers to judge<small>for the assistant to read first</small></span></li>
+      </ol>
+      <div class="bar" role="img" aria-label="The assistant's suggestions for 355 papers: 257 Included, 52 Related, 4 Insufficient evidence, 42 Irrelevant">
+        <span class="seg ok" style="flex-grow:257"><b>257</b><i>Included</i></span>
+        <span class="seg info" style="flex-grow:52"><b>52</b><i>Related</i></span>
+        <span class="seg warn" style="flex-grow:4"></span>
+        <span class="seg bad" style="flex-grow:42"><b>42</b><i>Irrelevant</i></span>
+      </div>
+      <ul class="legend">
+        <li><span class="chip ok">Included 257</span>Meets the screening goal</li>
+        <li><span class="chip info">Related 52</span>On topic, but does not meet the inclusion criteria; kept for reference</li>
+        <li><span class="chip warn">Insufficient evidence 4</span>Cannot be told from the abstract; 2 of them have no abstract to read</li>
+        <li><span class="chip bad">Irrelevant 42</span>Not about this topic</li>
+      </ul>
+      <p class="after">At confirmation, the 257 Included and the 42 Irrelevant were accepted as groups, as suggested. The remaining 56 were left to read by hand: those are the ones worth a look. Irrelevant papers are no longer listed, so the list holds <b>313</b> papers.</p>
+      <figcaption><b>Figure 2.</b> Where the 355 papers went. The colored bar is what the assistant suggested over 4 minutes 40 seconds. These are suggestions only; a person confirmed the inclusion decisions afterwards.</figcaption>
+    </figure>
+
+    <div class="steps" id="fig3">
+      <div class="steps-list" role="tablist" aria-label="The eight steps of this run">
+        <button role="tab" id="tab-a" aria-controls="step-a"><i>a</i><span>Set up a model</span><time>1 min</time></button>
+        <button role="tab" id="tab-b" aria-controls="step-b"><i>b</i><span>Create a library</span><time>1 min</time></button>
+        <button role="tab" id="tab-c" aria-controls="step-c"><i>c</i><span>Have the assistant draft queries</span><time>about 1 min</time></button>
+        <button role="tab" id="tab-d" aria-controls="step-d"><i>d</i><span>Save and import</span><time>about 40 s</time></button>
+        <button role="tab" id="tab-e" aria-controls="step-e"><i>e</i><span>Have the assistant screen</span><time>4 min 40 s</time></button>
+        <button role="tab" id="tab-f" aria-controls="step-f"><i>f</i><span>Confirm the inclusion decisions</span><time>as closely as you read</time></button>
+        <button role="tab" id="tab-g" aria-controls="step-g"><i>g</i><span>Read translated abstracts</span><time>seconds per paper</time></button>
+        <button role="tab" id="tab-h" aria-controls="step-h"><i>h</i><span>Ask the library</span><time>about 1.5 min</time></button>
+      </div>
+
+      <div class="steps-panels">
+        <article role="tabpanel" id="step-a" aria-labelledby="tab-a">
+          <h3><i>a</i>Set up a model</h3>
+          <p>Wisp Study does not come with a model. In “Settings › AI”, enter a model provider of your own: the Claude API, an OpenAI-compatible chat/completions endpoint, or OpenAI's Responses. There is no save button; changes are kept as you make them. The assistant, bulk screening and translation can each use a different model. This time translation went to a small model that does not think much.</p>
+          <figure class="shot">
+            <img src="../img/02-settings-model.jpg" width="1372" height="870" loading="lazy" alt="A model entry expanded in Settings: Name, Protocol, Base URL, Model, API Key, Thinking, Proxy.">
+            <figcaption><b>Figure 3a.</b> A model entry. When “API key missing” in the top right disappears, the model is ready to use.</figcaption>
+          </figure>
+        </article>
+
+        <article role="tabpanel" id="step-b" aria-labelledby="tab-b">
+          <h3><i>b</i>Create a library</h3>
+          <p>Besides a name, write down the topic: what the library collects and which questions it cares about. It is more than a note. The assistant reads it when it drafts queries, judges inclusion and answers questions, so it is worth being specific. Pick an accent color; from then on it is the library's highlight color.</p>
+          <figure class="shot">
+            <img src="../img/04-new-library.jpg" width="1372" height="870" loading="lazy" alt="The New library dialog: name, topic and accent color.">
+            <figcaption><b>Figure 3b.</b> The name is “<span lang="zh-CN">植物单细胞转录组</span>”. The topic lists species, organs, developmental trajectories, stress responses and methodological questions.</figcaption>
+          </figure>
+        </article>
+
+        <article role="tabpanel" id="step-c" aria-labelledby="tab-c">
+          <h3><i>c</i>Have the assistant draft queries</h3>
+          <p>The assistant drafted three differently aimed queries each for PubMed and Europe PMC, and tried each one out at once: how many papers the database returns, and what the newest few are. The broad query returned over a thousand papers, and its newest results were mixed with fracture healing. The methods query returned almost nothing but plant single-cell studies. Judge by the titles, not by how elegant the query looks.</p>
+          <figure class="shot">
+            <img src="../img/07-guide-queries.jpg" width="1098" height="696" loading="lazy" alt="The queries the assistant drafted, each with a one-line note, the full query, and the newest papers found by the trial search.">
+            <figcaption><b>Figure 3c.</b> Six queries, with hits from 205 to 1212 papers. A trial search writes nothing to the library.</figcaption>
+          </figure>
+        </article>
+
+        <article role="tabpanel" id="step-d" aria-labelledby="tab-d">
+          <h3><i>d</i>Save and import</h3>
+          <p>Two queries were used, each fetching the latest 200 papers. The two databases overlapped by 45 papers; after deduplicating by DOI, PMID and title, 355 papers remained, all “Pending”. This is deliberate: import broadly first, then judge paper by paper. If an import was a mistake, every batch can be undone as a whole.</p>
+          <figure class="shot">
+            <img src="../img/09-searches-imported.jpg" width="1372" height="870" loading="lazy" alt="The Search and import page: two saved queries, the result of each one's last run, and the import records below.">
+            <figcaption><b>Figure 3d.</b> PubMed added 200 papers. Europe PMC added 155 and skipped the 45 already there.</figcaption>
+          </figure>
+        </article>
+
+        <article role="tabpanel" id="step-e" aria-labelledby="tab-e">
+          <h3><i>e</i>Have the assistant screen</h3>
+          <p>Write the screening goal: what kind of papers belong in this library and what kind do not. The assistant reads 8 papers at a time. It reads the full text when there is a PDF; here there were only abstracts. Each paper gets a suggestion, a reason, and one sentence quoted word for word from the text as evidence. You can stop partway, and the papers not yet read wait for the next round.</p>
+          <figure class="shot">
+            <img src="../img/11-screen-running.jpg" width="1098" height="696" loading="lazy" alt="Screening at 118 / 355: a progress bar, the 8 papers being read, and below them the papers that already have suggestions.">
+            <figcaption><b>Figure 3e.</b> At 118 / 355. Below the progress bar are the 8 papers being read; those that are done join the queue with their suggestions.</figcaption>
+          </figure>
+        </article>
+
+        <article role="tabpanel" id="step-f" aria-labelledby="tab-f">
+          <h3><i>f</i>Confirm the inclusion decisions</h3>
+          <p>The assistant never changes a paper's inclusion decision. Only you do. Open a paper, look at its reason and evidence, then accept the suggestion or choose another. Once you have looked at a few papers in a group and trust it, you can accept the whole group; it asks first.</p>
+          <figure class="shot">
+            <img src="../img/13-screen-reason.jpg" width="1372" height="870" loading="lazy" alt="An opened paper: the assistant finds that a single-cell proteomics study does not meet the inclusion criteria and suggests “Related”, with the sentence quoted from the abstract and four decision buttons below.">
+            <figcaption><b>Figure 3f.</b> A single-cell proteomics study. It has no transcriptome data, so the assistant suggests “Related” rather than “Included”.</figcaption>
+          </figure>
+        </article>
+
+        <article role="tabpanel" id="step-g" aria-labelledby="tab-g">
+          <h3><i>g</i>Read translated abstracts</h3>
+          <p>“Show translation” next to the abstract swaps the title and abstract for the translation in place, and “Show original” switches back. Once it is on, other papers you switch to are translated automatically. Translations are saved in the library, so the same text is requested only once.</p>
+          <figure class="shot">
+            <img src="../img/16-translate.jpg" width="1372" height="870" loading="lazy" alt="Paper details: the translation sits above the abstract, with the title translated into Chinese.">
+            <figcaption><b>Figure 3g.</b> The translation appears where the abstract is. The target language and the preferred translations of terms can be set in Settings.</figcaption>
+          </figure>
+        </article>
+
+        <article role="tabpanel" id="step-h" aria-labelledby="tab-h">
+          <h3><i>h</i>Ask the library</h3>
+          <p>Ask in “Assistant” on the left. The scope is the 313 papers in the current list: 181 were given as full records, and the 132 that did not fit were given as titles only. The assistant first used its tools to read 5 papers that compare the two technical routes directly, then answered. It also wrote that these papers have no PDF saved, so this time it cites no page numbers: it read only the abstracts.</p>
+          <figure class="shot">
+            <img src="../img/17-ask.jpg" width="1372" height="870" loading="lazy" alt="The assistant's answer: an overview, then a table of species and organ coverage with a source starting with P after each cell; the source list is below the answer.">
+            <figcaption><b>Figure 3h.</b> The answer is laid out in Markdown, with a source after each conclusion. The first 8 sources are listed below it and the rest are folded.</figcaption>
+          </figure>
+        </article>
+      </div>
+    </div>
+
+    <div class="try">
+      <div class="try-text">
+        <h3>How would you judge this one?</h3>
+        <p>On the right is a real suggestion from that run. The screening goal was: include plant studies that actually produced or analyzed single-cell or single-nucleus <strong>transcriptome</strong> data. This paper does single-cell <strong>proteomics</strong>.</p>
+        <p>The button the assistant suggests is filled in. Click it to accept; or choose another.</p>
+      </div>
+      <figure class="demo" id="fig4">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <strong lang="en">Single-cell proteomics of Arabidopsis leaf mesophyll reveals dynamic protein responses to water-deficit stress</strong>
+              <span class="byline" lang="en">Fulcher, James M et al. · 2026 · Genome biology</span>
+            </div>
+            <span class="chip info" id="screen-chip">Suggestion: Related · confidence 99%</span>
+          </div>
+          <p class="reason">The study takes Arabidopsis leaf mesophyll cells as its subject, builds a single-cell proteomics workflow, and analyzes changes in protein abundance in 117 protoplasts under water-deficit stress. The abstract does not report producing or analyzing scRNA-seq or snRNA-seq data, so it does not meet the inclusion criteria, but its protoplast preparation is a useful reference for plant single-cell stress-response studies.</p>
+          <blockquote lang="en">“Here, we present a single-cell proteomics workflow for plant cells …”<cite>Abstract</cite></blockquote>
+          <p class="card-meta">Abstract only</p>
+          <div class="choices" role="group" aria-label="Your judgment">
+            <button type="button" data-value="included" data-label="Included" data-tone="ok">Included</button>
+            <button type="button" data-value="excluded" data-label="Related" data-tone="info" class="suggested">Accept: Related</button>
+            <button type="button" data-value="uncertain" data-label="Insufficient evidence" data-tone="warn">Insufficient evidence</button>
+            <button type="button" data-value="irrelevant" data-label="Irrelevant" data-tone="bad">Irrelevant</button>
+          </div>
+          <p class="verdict" aria-live="polite"><span id="screen-verdict">No judgment yet. Until you click, this paper stays “Pending”.</span></p>
+        </div>
+        <figcaption><b>Figure 4.</b> One suggestion and four buttons. The sentence after the reason is quoted word for word; a reason with no quotable sentence is not treated as evidence.</figcaption>
+      </figure>
+    </div>
+
+    <div class="guides-head">
+      <h3>Go on: fifteen tutorials</h3>
+      <p>The above is a summary of one run. The screenshots and the exact inputs for each step are in the first tutorial. The other fourteen each cover one task in research, mostly using the same library.</p>
+    </div>
+    <nav class="guides" aria-label="Tutorials">
+      <a href="tutorials/start.html"><span class="num">01</span><span><strong>Start from a topic</strong><span>Search, import, screen: the complete record of this run</span></span></a>
+      <a href="tutorials/home.html"><span class="num">02</span><span><strong>Talk first, build the library later</strong><span>The assistant on the home page: an idea or a Word manuscript is enough to start</span></span></a>
+      <a href="tutorials/migrate.html"><span class="num">03</span><span><strong>Bring in the papers you already have</strong><span>Zotero, PDF folders, BibTeX and RIS</span></span></a>
+      <a href="tutorials/pdf.html"><span class="num">04</span><span><strong>Just one PDF to read</strong><span>Drop it on the home page to read it; decide afterwards which library it goes in</span></span></a>
+      <a href="tutorials/read.html"><span class="num">05</span><span><strong>Read one paper closely</strong><span>Read against the translation, annotate, ask, take notes, collect figures, click a figure number to see the figure</span></span></a>
+      <a href="tutorials/compare.html"><span class="num">06</span><span><strong>Read several papers side by side</strong><span>Side by side, each with its translation, ask together, find them again in History</span></span></a>
+      <a href="tutorials/listen.html"><span class="num">07</span><span><strong>Listen to a paper</strong><span>Read aloud marks each sentence; a podcast is saved as an attachment to play again</span></span></a>
+      <a href="tutorials/slides.html"><span class="num">08</span><span><strong>Turn a paper into lab-meeting slides</strong><span>Figures from the Figures page; /slides writes a .pptx with speaker notes</span></span></a>
+      <a href="tutorials/ask.html"><span class="num">09</span><span><strong>Ask the whole library</strong><span>Answers with sources, and how to check them</span></span></a>
+      <a href="tutorials/rank.html"><span class="num">10</span><span><strong>Which to read first</strong><span>Impact factor, zone and the warning list, with no network needed</span></span></a>
+      <a href="tutorials/extract.html"><span class="num">11</span><span><strong>Read a batch of papers into one table</strong><span>Custom fields: the assistant extracts, you confirm</span></span></a>
+      <a href="tutorials/review.html"><span class="num">12</span><span><strong>Write a review in stages</strong><span>Requirements, framework, outline, sections, each step confirmed</span></span></a>
+      <a href="tutorials/write.html"><span class="num">13</span><span><strong>Write a paper</strong><span>Candidate sentences, citations, and the source of every citation</span></span></a>
+      <a href="tutorials/revise.html"><span class="num">14</span><span><strong>Revise with co-authors</strong><span>Word comments, assistant review, export with tracked changes</span></span></a>
+      <a href="tutorials/follow.html"><span class="num">15</span><span><strong>Keep up with new papers</strong><span>Automatic updates, and wisp and MCP</span></span></a>
+    </nav>
+
+    <p class="more"><a href="tutorials/index.html">All tutorials: what each covers, what it needs, how long it takes<span aria-hidden="true"> →</span></a></p>
+  </div>
+</section>
+
+<!-- §2 -->
+<section class="sec wrap" id="ideas">
+  <div class="rail" aria-hidden="true"><span class="no">§2</span><span class="v">Ideas</span></div>
+  <div class="sec-main">
+    <h2>Why it is designed this way</h2>
+    <p class="sec-lead">Seven rules we follow ourselves. After each one we say where it lands in the product, so you can check.</p>
+
+    <ol class="theses">
+      <li class="thesis">
+        <span class="num">01</span>
+        <div>
+          <h3>The papers are yours</h3>
+          <p>No account, no cloud. Each library is a folder under “Documents/WispStudy”, holding the database, the PDFs and the custom fields. You can back it up on its own, or copy the whole folder elsewhere and keep using it.</p>
+        </div>
+        <p class="proof"><b>In the product</b>Attachments are recorded as paths relative to the library folder. What leaves your machine, and who it goes to, is listed item by item in <a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">Data and privacy</a> (in Chinese).</p>
+      </li>
+
+      <li class="thesis">
+        <span class="num">02</span>
+        <div>
+          <h3>The assistant proposes, a person decides</h3>
+          <p>The assistant reads fast, but whether a paper is included is your judgment. It gives a suggestion, a reason and a confidence, and never changes any paper's inclusion status. It also asks first before a whole group is accepted.</p>
+        </div>
+        <p class="proof"><b>In the product</b>An external agent connected through the command line or MCP can only make suggestions (<code>suggest_screening</code>). No tool can overwrite an inclusion decision.</p>
+      </li>
+
+      <li class="thesis">
+        <span class="num">03</span>
+        <div>
+          <h3>Say it with a source, and let the source be opened</h3>
+          <p>A screening reason must carry one sentence quoted word for word from the abstract or full text; what cannot be quoted does not count as evidence. A <code>[P3 p.5]</code> in an answer opens that paper's PDF at that page, with the quoted sentence highlighted on the page. When it cannot be found, it says so.</p>
+        </div>
+        <p class="proof"><b>In the product</b>Without a PDF the assistant can read only the abstract. It says it read only the abstract, and does not make up page numbers.</p>
+
+        <figure class="demo cite-demo" id="fig5">
+          <div class="cite-cols">
+            <div class="chat">
+              <p class="q">Where does a removed library go? Can I keep using it on another computer?</p>
+              <div class="a">
+                <p>It is not deleted. Removing a library or an attachment only moves it to <code>removed/</code> in the same directory <button type="button" class="cite" data-quote="q1">P1 p.1 “Moved only, never deleted”</button>. Another computer works too: attachments are recorded as relative paths, so you can copy the whole folder over and keep using it <button type="button" class="cite" data-quote="q2">P1 p.1 “the whole folder can be copied elsewhere and used as is”</button>.</p>
+                <p class="sources"><span>P1 · Data and privacy</span></p>
+              </div>
+            </div>
+            <div class="sheet" role="group" aria-label="Data and privacy, page 1">
+              <h4>Data and privacy</h4>
+              <p>Libraries live under “Documents/WispStudy”, one folder per library, containing library.json, wisp-paper.sqlite and papers/.</p>
+              <p>Removed libraries and attachments go to removed/ in the same directory (<mark id="q1">Moved only, never deleted</mark>).</p>
+              <p>Attachments are recorded in the database as paths relative to the library folder, so <mark id="q2">the whole folder can be copied elsewhere and used as is</mark>.</p>
+              <p>The API key is saved in plain text in settings.json. When it is empty, the environment variable is read.</p>
+              <span class="pageno">1</span>
+            </div>
+          </div>
+          <figcaption><b>Figure 5.</b> Click a source in the answer. Here the right side is this project's Data and privacy document; in the app it is your own PDF.</figcaption>
+        </figure>
+      </li>
+
+      <li class="thesis">
+        <span class="num">04</span>
+        <div>
+          <h3>Take in broadly first, read closely after</h3>
+          <p>Rather than write a very narrow query at the start and worry about missing something, import broadly in bulk, deduplicate, and let the assistant go through the papers one by one, leaving you the few dozen worth reading yourself. We call this broad intake.</p>
+        </div>
+        <p class="proof"><b>In the product</b>Each import is a batch and can be undone as a whole; papers you have already handled are kept. A saved query can run by itself every 6 hours, daily or weekly.</p>
+      </li>
+
+      <li class="thesis">
+        <span class="num">05</span>
+        <div>
+          <h3>Nothing is really lost</h3>
+          <p>Removing a library or an attachment only moves it to <code>removed/</code>. Deleted papers go to the Trash and can be restored.</p>
+        </div>
+        <p class="proof"><b>In the product</b>Papers in the Trash stay in the library and keep blocking the same paper from being imported again: what you judged unwanted does not come back with the next sync.</p>
+      </li>
+
+      <li class="thesis">
+        <span class="num">06</span>
+        <div>
+          <h3>Native, not a web page</h3>
+          <p>The whole interface is drawn on the GPU by Rust and GPUI, with no WebView and no Electron. PDFs are rendered by the pure-Rust hayro, with no dependence on a system PDF library.</p>
+        </div>
+        <p class="proof"><b>In the product</b>Light and dark interfaces, an accent color per library, and every shortcut can be changed.</p>
+      </li>
+
+      <li class="thesis">
+        <span class="num">07</span>
+        <div>
+          <h3>One table of tools, three ways in</h3>
+          <p>The assistant in the window, the command line and MCP use the same table of tools. A rule is written in one place, so whichever way you come in, what can and cannot be done is the same.</p>
+        </div>
+        <p class="proof"><b>In the product</b>See the next section.</p>
+      </li>
+    </ol>
+
+    <div class="limits">
+      <h3>Limits for now</h3>
+      <ul>
+        <li>It is early, and it changes fast.</li>
+        <li>The assistant features need a model provider of your own; the API key is saved in plain text in <code>settings.json</code> on your machine.</li>
+        <li>Each run of a query fetches at most the latest 2000 papers; this run was made on a version where the limit was still 200.</li>
+        <li>The Linux version does not update itself; it only tells you a new version exists.</li>
+        <li>The Linux version is not signed and has not been tested on a real machine.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- §3 -->
+<section class="sec wrap" id="tools">
+  <div class="rail" aria-hidden="true"><span class="no">§3</span><span class="v">Tools</span></div>
+  <div class="sec-main">
+    <h2><span class="nb">Beyond the window:</span> <span class="nb"><span lang="en">wisp</span> and MCP</span></h2>
+    <p class="sec-lead"><code>wisp</code> is the way in without a window, and it ships with the installer. It reads and writes the same data folder as the app, and works while the app is open. Each tool is both a subcommand and an MCP tool, and the output is JSON.</p>
+
+    <div class="code-cols">
+      <figure class="code">
+        <figcaption>Command line</figcaption>
+<pre><code><span class="p">$</span> wisp list_libraries
+<span class="p">$</span> wisp list_papers -l <span lang="zh-CN">植物单细胞转录组</span> --query protoplast --limit 10
+<span class="p">$</span> wisp search_fulltext "10x Genomics Chromium"
+<span class="p">$</span> wisp read_fulltext &lt;paper ID&gt; --page 3
+<span class="p">$</span> wisp sync_searches   <span class="c"># hand this to cron, launchd or Task Scheduler</span>
+<span class="p">$</span> wisp help            <span class="c"># list of commands</span></code></pre>
+      </figure>
+      <figure class="code">
+        <figcaption>Hand it to an AI client that supports MCP</figcaption>
+<pre><code>{
+  "mcpServers": {
+    "wisp-study": {
+      "command": "/path/to/wisp",
+      "args": ["mcp"]
+    }
+  }
+}</code></pre>
+      </figure>
+    </div>
+
+    <table class="tool-table">
+      <caption><b>Table 1.</b> Tools at a glance. Those marked <span class="w">write</span> change the library; <code>wisp mcp --read-only</code> does not offer them.</caption>
+      <tbody>
+        <tr><th scope="row"><code>list_libraries</code></th><td>The ID, name, topic and paper count of every library</td></tr>
+        <tr><th scope="row"><code>library_status</code></th><td>An overview of one library: the count for each status, and the custom fields</td></tr>
+        <tr><th scope="row"><code>list_papers</code></th><td>Search, filter and page through papers, with the same rules as the list in the window</td></tr>
+        <tr><th scope="row"><code>get_paper</code></th><td>One paper's full record, fields and attachments</td></tr>
+        <tr><th scope="row"><code>search_fulltext</code></th><td>Find a phrase in the saved full texts; returns page numbers and verbatim snippets</td></tr>
+        <tr><th scope="row"><code>read_fulltext</code></th><td>Read the full text by page, at most 8 pages at a time</td></tr>
+        <tr><th scope="row"><code>find_citations</code></th><td>For a piece of text, find sentence by sentence the papers in the library that may support it</td></tr>
+        <tr><th scope="row"><code>search_online</code></th><td>Try a search query on PubMed, Europe PMC, Crossref or arXiv without writing anything</td></tr>
+        <tr><th scope="row"><code>list_searches</code></th><td>Saved search queries</td></tr>
+        <tr><th scope="row"><code>save_search</code><span class="w">write</span></th><td>Save a search query</td></tr>
+        <tr><th scope="row"><code>remove_search</code><span class="w">write</span></th><td>Delete a search query</td></tr>
+        <tr><th scope="row"><code>run_search</code><span class="w">write</span></th><td>Run and import, skipping papers already there; returns the batch number</td></tr>
+        <tr><th scope="row"><code>list_imports</code></th><td>Import records</td></tr>
+        <tr><th scope="row"><code>undo_import</code><span class="w">write</span></th><td>Undo an import as a whole batch; papers already handled are kept</td></tr>
+        <tr><th scope="row"><code>sync_searches</code><span class="w">write</span></th><td>Run the queries that are due</td></tr>
+        <tr><th scope="row"><code>suggest_screening</code><span class="w">write</span></th><td>Propose an inclusion suggestion for one paper; it does not change the inclusion decision, which you confirm on the Screening page</td></tr>
+      </tbody>
+    </table>
+
+    <p class="more"><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/CLI.md">The full guide to the command line and MCP (in Chinese)<span aria-hidden="true"> →</span></a></p>
+  </div>
+</section>
+
+<!-- §4 -->
+<section class="sec wrap" id="download">
+  <div class="rail" aria-hidden="true"><span class="no">§4</span><span class="v">Download</span></div>
+  <div class="sec-main">
+    <h2>Download Wisp Study</h2>
+    <p class="sec-lead" id="release-line">The latest version is on the <a href="https://github.com/xuzhougeng/WispStudy/releases/latest">release page</a>.</p>
+
+    <div class="dl-grid">
+      <article class="dl" data-os="mac">
+        <h3>macOS</h3>
+        <p class="dl-req">macOS 11 or later, Apple silicon or Intel</p>
+        <div class="dl-pick">
+          <a class="btn primary" data-asset="mac" data-label="Apple silicon" href="https://github.com/xuzhougeng/WispStudy/releases/latest">Apple silicon</a>
+          <a class="btn" data-asset="mac-intel" data-label="Intel" href="https://github.com/xuzhougeng/WispStudy/releases/latest">Intel</a>
+        </div>
+        <p class="dl-file" data-file="mac">WispStudy-v<i>version</i>-macos-arm64.dmg</p>
+        <p class="dl-file" data-file="mac-intel">WispStudy-v<i>version</i>-macos-x64.dmg</p>
+        <p class="dl-note">Signed with a Developer ID and notarized by Apple. After opening it, drag Wisp Study into “Applications” and run it. If you are not sure which one you have: in the Apple menu › About This Mac, a chip named Apple M… is Apple silicon, and one named Intel is Intel.</p>
+      </article>
+      <article class="dl" data-os="win">
+        <h3>Windows</h3>
+        <p class="dl-req">Windows 10 / 11, x64</p>
+        <div class="dl-pick">
+          <a class="btn primary" data-asset="win-setup" data-label="Installer" href="https://github.com/xuzhougeng/WispStudy/releases/latest">Installer</a>
+          <a class="btn" data-asset="win" data-label="Portable" href="https://github.com/xuzhougeng/WispStudy/releases/latest">Portable</a>
+        </div>
+        <p class="dl-file" data-file="win-setup">WispStudy-v<i>version</i>-windows-x64-setup.exe</p>
+        <p class="dl-file" data-file="win">WispStudy-v<i>version</i>-windows-x64.zip</p>
+        <p class="dl-note"><span data-with="win-setup">The installer installs for the current user, needs no administrator rights, and adds an entry to the Start menu. </span>The portable version runs <code>WispStudy.exe</code> after unzipping and does not write to the registry. Both are Authenticode-signed and both update themselves.</p>
+      </article>
+      <article class="dl" data-os="linux">
+        <h3>Linux</h3>
+        <p class="dl-req">x64</p>
+        <a class="btn primary" data-asset="linux" href="https://github.com/xuzhougeng/WispStudy/releases/latest">Download from the release page</a>
+        <p class="dl-file" data-file="linux">WispStudy-v<i>version</i>-linux-x64.tar.gz</p>
+        <p class="dl-note">After unpacking, run <code>wisp-study</code>. It is not signed and has not been tested on a real machine.</p>
+      </article>
+    </div>
+
+    <div class="dl-foot">
+      <div>
+        <h3>After installing</h3>
+        <ul>
+          <li>The command-line tool <code>wisp</code> ships in the package: on Windows and Linux it sits next to the main program (for the installer, in <code>%LOCALAPPDATA%\Programs\Wisp Study</code>), and on macOS it is at <code>Wisp Study.app/Contents/MacOS/wisp</code>.</li>
+          <li>Collecting, organizing, PDFs and export need no model. Asking questions, the library wizard, screening and translation need a model provider of your own, set up in “Settings › AI”.</li>
+          <li><code>SHA256SUMS</code> on the release page holds the checksum of each file.</li>
+        </ul>
+      </div>
+      <figure class="code">
+        <figcaption>Build from source (needs Rust; on Windows also the MSVC build tools)</figcaption>
+<pre><code><span class="p">$</span> git clone https://github.com/xuzhougeng/WispStudy
+<span class="p">$</span> cd WispStudy
+<span class="p">$</span> cargo run --release</code></pre>
+      </figure>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>References</h2>
+      <ol>
+        <li><a href="tutorials/index.html">Tutorials: fifteen research scenarios, from building a library to revising</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">Features: what each page can do (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">Data and privacy: where files live and what leaves your machine (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/CLI.md">Command line and MCP (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DEVELOPMENT.md">Development: building, testing, code layout (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">Questions and ideas: Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>Acknowledgments.</b> The literature part was ported from <a href="https://github.com/xuzhougeng/BiblioCell">BiblioCell</a>; the app structure and the way answers read Markdown follow <a href="https://github.com/s1dashu/quiet-md">quiet-md</a>. The interface is drawn by <a href="https://www.gpui.rs/">GPUI</a> and PDFs are rendered by <a href="https://github.com/LaurenzV/hayro">hayro</a>.</p>
+      <p><b>License.</b> The code is released under the <a href="https://github.com/xuzhougeng/WispStudy/blob/main/LICENSE">MIT</a> license.</p>
+      <p><b>About this page.</b> A few static files, no analytics script, and no third-party resources loaded.</p>
+    </div>
+  </div>
+</footer>
+
+<script src="../site.js" defer></script>
+</body>
+</html>

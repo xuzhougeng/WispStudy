@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/migrate.html">
+<link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/migrate.html">
+<title>Bring in the papers you already have · Wisp Study tutorials</title>
+<meta name="description" content="Move the records in Zotero, a folder of PDFs collected over the years, a .bib from your advisor and a few DOIs into one library, then complete the records that were not recognized and find the missing full texts. No model is needed.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../../app-icon.png">
+<link rel="stylesheet" href="../../style.css">
+<link rel="stylesheet" href="../../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="Site">
+      <a href="index.html" aria-current="page">Tutorials</a>
+      <a href="../index.html#ideas">Ideas</a>
+      <a href="../index.html#tools">Tools</a>
+      <a href="../index.html#download">Download</a>
+    </nav>
+    <a class="lang" href="../../tutorials/migrate.html" lang="zh-CN" hreflang="zh-CN">中文</a>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="Location"><a href="index.html">Tutorials</a><span>›</span>Collect</nav>
+
+  <header class="doc-head">
+    <p class="kicker">Tutorial 03 · Collect</p>
+    <h1>Bring in the papers you already have: Zotero, PDFs and records</h1>
+    <p class="lead">The worst part of switching tools is that everything is scattered. Some of it is in Zotero, some is PDFs you saved over the years, and some is a .bib from your advisor and a few DOIs noted in a report. This tutorial moves all of it into one library, keeps one copy of each duplicate, completes the records that were not recognized and finds the missing full texts.</p>
+    <dl class="facts">
+      <div><dt>Scenario</dt><dd>The project has been running for a while. The papers are spread over Zotero, a PDF folder with subfolders by species, a .bib and a few DOIs.</dd></div>
+      <div><dt>Needs</dt><dd>A library (it can be empty) and a computer that is online. No model is needed: no step here goes through a model provider.</dd></div>
+      <div><dt>Time</dt><dd>About 10 minutes, of which a few minutes are waiting for database lookups and full-text downloads.</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="Sections of this tutorial">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#s1">Ways to add papers</a></li>
+        <li><a href="#s2">Move over from Zotero</a></li>
+        <li><a href="#s3">Import a whole folder of PDFs</a></li>
+        <li><a href="#s4">The advisor's .bib and the DOIs in a report</a></li>
+        <li><a href="#s5">Complete a PDF that was not recognized, by title</a></li>
+        <li><a href="#s6">Find the missing full texts</a></li>
+        <li class="plain"><a href="#recap">Recap</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>Ways to add papers</h2>
+        <p>This example starts from an empty library, “<span lang="zh-CN">植物单细胞转录组</span>” (plant single-cell transcriptomics). Every way in is under “Add papers” at the top left:</p>
+
+        <figure class="shot">
+          <img src="../../img/t/migrate-01-add-menu.jpg" width="1372" height="867" loading="lazy" alt="The home page of an empty library. The menu opened from “Add papers” at the top left has six items: Add by DOI / PMID, Import PDF files, Import folder, Import BibTeX / RIS, Import from Zotero, Enter manually.">
+          <figcaption><b>Figure 1.</b> The “Add papers” menu. The empty space in the middle also says that PDFs and whole folders can be dragged straight into the window.</figcaption>
+        </figure>
+
+        <ul>
+          <li>“Add by DOI / PMID…”: one paper at a time, with the shortcut <kbd>⌘</kbd> + <kbd>N</kbd> (<kbd>Ctrl</kbd> + <kbd>N</kbd> on Windows).</li>
+          <li>“Import PDF files…” and “Import folder…”: the text is read, a DOI is looked for on the first two pages and the record is looked up. The names of subfolders become tags.</li>
+          <li>“Import BibTeX / RIS…”: records only, without PDFs.</li>
+          <li>“Import from Zotero…”: reads the Zotero database on this computer and brings records, tags, notes and PDFs together.</li>
+        </ul>
+
+        <p>However many times you move things, no paper appears twice. Each incoming paper is matched by DOI first, then by PMID, and last by title. A paper already in the library keeps its record untouched. Papers in the trash count as already there: one you deleted does not come back because you imported it again.</p>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>Move over from Zotero</h2>
+        <p>Start with Zotero, because its records are the most complete and the tags and notes are there too.</p>
+        <ol>
+          <li>In Zotero, wait for the sync to finish. Open each PDF you want to take along once, to make sure it has been downloaded to this computer, then <strong>quit Zotero</strong>. If you only close the window, it may still hold the database in the background.</li>
+          <li>In Wisp Study, click “Add papers › Import from Zotero…”, read the note, click “Choose zotero.sqlite…” and pick <code>zotero.sqlite</code> in the Zotero data folder. You can open that folder from Zotero's Settings › Advanced › Files and Folders.</li>
+        </ol>
+        <p>If you have joined groups in Zotero besides “My Library”, the database holds more than one library. Since v0.17.0, once you have picked <code>zotero.sqlite</code> you are first asked which one to import. Each row is a library with its number of items (not counting notes, attachments and what is in Zotero's trash). The last row, “All”, combines them. “My Library” is selected by default. Pick one and click “Import”. When only one library has items, this step is skipped and the import starts at once.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/migrate-09-zotero-libraries.jpg" width="1372" height="867" loading="lazy" alt="The “Import from Zotero” dialog: 3 libraries in this database hold items, choose what to import: My Library with 7 items (selected), a lab-meeting library with 3 items, a lab-shared library with 5 items. Below a divider, All with 15 items. The buttons are Cancel and Import. Behind it is an empty library.">
+          <figcaption><b>Figure 2.</b> A Zotero database with two groups: first choose which library to import, or choose “All”. This screenshot comes from a small database made for the demo on v0.17.0.</figcaption>
+        </figure>
+
+        <p>The import opens the Zotero database read-only. PDFs are copied, the original files are not touched, and this step does not go online. The Zotero library in this example is small, 6 papers, and the import finished in a few seconds:</p>
+
+        <figure class="shot">
+          <img src="../../img/t/migrate-02-zotero-report.jpg" width="1372" height="867" loading="lazy" alt="The “Zotero import” results window: 6 / 6 items processed, import complete. 6 papers added, 4 PDFs added, 1 item pending. Under one paper it says the PDF was not found and to download or repair the path in Zotero first. In the Tags column on the left, tags such as Close reading, Zotero/Arabidopsis and Zotero/Methods/Annotation have appeared.">
+          <figcaption><b>Figure 3.</b> The result of the Zotero import. The yellow row still needs attention: that paper's record came in, but its PDF was not found. A string of <code>Zotero/…</code> tags has appeared on the left.</figcaption>
+        </figure>
+
+        <p>This time the result was “6 added · 0 existing · 0 in trash · 0 failed · 4 PDFs added · 1 pending”, and one web snapshot was not moved. Look at the tags on the left. Zotero's tags came over as they were (“<span lang="zh-CN">精读</span>” (close reading) and “<span lang="zh-CN">数据库</span>” (database)). Collections became tags with a path, such as <code>Zotero/<span lang="zh-CN">方法/注释</span></code> (Zotero/Methods/Annotation), and one click filters that collection. Notes attached to a paper were merged into the paper's note, and the PMID in Extra was recognized too.</p>
+        <p>The pending item is the Multiome paper: Zotero has an attachment record for it, but the file was never downloaded. The record came in anyway, and its full text is left for step 6.</p>
+        <p>For what is moved, common errors (such as “the database is in use”) and how to move only part of it, see <a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/ZOTERO.md">Importing papers from Zotero (in Chinese)</a>.</p>
+        <aside class="note"><b>Tip</b>One paper in Zotero, about dorsal root ganglia, was saved by mistake long ago and has nothing to do with plants. Click “Move to trash” in its details. The folder in the next step also holds its PDF, so you will see what happens to it.</aside>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>Import a whole folder of PDFs</h2>
+        <p>The PDFs collected over the years sit in a folder called “<span lang="zh-CN">历年 PDF</span>” (PDFs over the years), split into three subfolders by species, “<span lang="zh-CN">水稻</span>” (rice), “<span lang="zh-CN">拟南芥</span>” (Arabidopsis) and “<span lang="zh-CN">方法</span>” (methods), 11 files in all. Some file names are an author plus a year. Others, like <code>scan_0032.pdf</code>, give no hint of what the file is.</p>
+        <p>Click “Add papers › Import folder…” and choose this folder, or drag it straight into the window. The import runs in the background. A progress block, “Import PDFs 2/11”, appears at the bottom of the sidebar with a segmented bar under it, and it stays when you switch to another page. Each file has its text read, its DOI looked for and its record looked up once more. The 11 files take under a minute, and the block turns into “PDF import complete 11/11”. Click it to open the details:</p>
+
+        <figure class="shot">
+          <img src="../../img/t/migrate-03-pdf-report.jpg" width="1372" height="867" loading="lazy" alt="The “PDF import” details window: 11 / 11 items processed, import complete. Imported 9, Needs attention 1, Skipped 1. Added 9, Attached to existing paper 1, In trash, not imported 1. The result of each file is listed: scan_0032.pdf was added but no DOI was recognized, the paper of DRG_scRNA.pdf is in the trash and was not imported, the rest were added. At the bottom left, the sidebar shows “PDF import complete 11/11”.">
+          <figcaption><b>Figure 4.</b> The import details. Yellow text is what you should look at again: one file had no DOI recognized, and one matches a paper in the trash. Click a row to open that paper.</figcaption>
+        </figure>
+
+        <ul>
+          <li><strong>Added 9</strong>: the 8 papers with a recognized DOI came in with complete records. <code>scan_0032.pdf</code> was not recognized, so its entry was made from the file name.</li>
+          <li><strong>Attached to existing paper 1</strong>: the rice leaf sheath paper was already there from Zotero, and the PDF is the same file, so it was not stored a second time. The original record gained a “<span lang="zh-CN">水稻</span>” (rice) tag.</li>
+          <li><strong>In trash, not imported 1</strong>: this is the paper you just moved to the trash, and it did not come back.</li>
+        </ul>
+        <p>The Tags column on the left now has “<span lang="zh-CN">拟南芥</span>”, “<span lang="zh-CN">方法</span>” and “<span lang="zh-CN">水稻</span>”, 3 papers each. A PDF that is in none of the subfolders gets no tag.</p>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>The advisor's .bib and the DOIs in a report</h2>
+        <p>The advisor's <code><span lang="zh-CN">导师推荐.bib</span></code> (advisor's picks) has 6 entries. Click “Add papers › Import BibTeX / RIS…” and choose it, or drag it into the window. The top of the window says “Imported 5 papers, skipped 1 existing.” The skipped one is NRTPredictor, which Zotero already had. Papers from a .bib are records only, and their Full text column says “Linked”.</p>
+        <p>Two papers were noted down in a report, one with a DOI and one with only a PMID. Click “Add papers › Add by DOI / PMID…” and paste:</p>
+
+        <figure class="shot">
+          <img src="../../img/t/migrate-04-doi.jpg" width="1372" height="867" loading="lazy" alt="The “Add by DOI / PMID” dialog with 10.3389/fpls.2025.1666531 in the input box. Below it says that title, authors, journal, year and abstract are filled in after a lookup in Crossref and Europe PMC, and that the lookup sends this identifier to those two services.">
+          <figcaption><b>Figure 5.</b> One paper at a time. The dialog says that the identifier is sent to Crossref and Europe PMC.</figcaption>
+        </figure>
+
+        <p>Click “Look up and add”. A few seconds later the maize root paper comes in, with title, authors, journal and abstract filled in. Open the dialog again and enter the PMID <code>42021342</code>. The paper that arrives is the reed invasion one (Genome Biology, 2026). You can also paste a doi.org link. The library now holds 21 papers, 9 of them in the “Missing PDF” view.</p>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>Complete a PDF that was not recognized, by title</h2>
+        <p>The list's “Full text” column has four states: “No full text”, “Linked” (there is a DOI or a web address but no file), “PDF saved”, and “PDF without text” (a file is saved but no text could be read from it, so for now it cannot be used to ask questions). The “Full text” filter above the table header shows just one of them.</p>
+        <p>What needs work now is <code>scan_0032</code>. It is “PDF saved”, yet its title is still the file name, and the authors and year are missing. A look through the PDF tab shows why it was not recognized: the file is the supplement of some article. Its first page is “Supp. Figure 1”, with no title and no DOI. The figure legends reveal that it is the supplement of the single-cell study of drought responses in the Arabidopsis leaf mesophyll.</p>
+        <ol>
+          <li>In the details, click “Look up by title”.</li>
+          <li>The title is still the file name and will not be used for a lookup, so the box is empty. Type the title (here: Dual and spatially resolved drought responses in the Arabidopsis leaf mesophyll revealed by single cell transcriptomics). Authors and year may stay empty.</li>
+          <li>Click “Search”.</li>
+        </ol>
+
+        <figure class="shot">
+          <img src="../../img/t/migrate-05-complete-candidates.jpg" width="1372" height="867" loading="lazy" alt="The “Look up by title” dialog. The title box holds the title that was typed. Below it says Crossref 5 results, Europe PMC 2 results, arXiv none found. There are two candidates: a 2024 preprint (DOI 10.1101/2024.08.30.610433) and the 2025 published version in New Phytologist (DOI 10.1111/nph.20446), both marked as title match.">
+          <figcaption><b>Figure 6.</b> The number of results from each source is written above. A preprint and the published version of the same title are two candidates, and you decide which to take.</figcaption>
+        </figure>
+
+        <p>This time Crossref returned 5 results, Europe PMC 2 and arXiv none. They merged into two candidates: the 2024 preprint and the 2025 published version in New Phytologist, both marked as title match. Being listed first only means the title is closer. This example takes the published version. Click it to check it field by field:</p>
+
+        <figure class="shot">
+          <img src="../../img/t/migrate-06-complete-fields.jpg" width="1372" height="867" loading="lazy" alt="“Title lookup · Review record”: the candidate's sources are Crossref and Europe PMC. Below, each field is listed: title, authors, year, journal, publication status, DOI, PMID, abstract. Each has a checkbox and its current content. The title is currently scan_0032 (file name), the others are currently empty, and all are ticked. The button at the bottom right is “Save 8 fields”.">
+          <figcaption><b>Figure 7.</b> Under each field it says what is there now. By default only empty fields and a title that is just a file name are ticked. Content that already exists is replaced only if you tick it.</figcaption>
+        </figure>
+
+        <p>All 8 fields are empty or just a file name, so all are ticked by default. Click “Save 8 fields”. A message says “Completed”, and the row now has a title, authors and a year.</p>
+        <aside class="note warn"><b>Note</b>Only the title, authors and year are sent in the lookup. The PDF is not uploaded, and no model is involved. A similar title does not mean the same paper: when unsure, click “Open web page” to compare. A candidate that is already another paper in the library cannot be written into this one. If nothing turns up, fill it in by hand with “Edit information and fields”. A paper may stay without a DOI forever.</aside>
+      </section>
+
+      <section id="s6">
+        <h2><i>6</i>Find the missing full texts</h2>
+        <p>Of the records from the .bib, the DOIs and Zotero, 9 have no PDF. Click “Missing PDF” on the left to list them:</p>
+
+        <figure class="shot">
+          <img src="../../img/t/migrate-07-nopdf.jpg" width="1372" height="867" loading="lazy" alt="The “Missing PDF” view lists 9 papers whose full text is “Linked”. Above the list, a green note says that open access full texts can be found for you, that ones behind a paywall or a login are not fetched, and that the lookup sends the DOI or PMID to OpenAlex, Europe PMC and publishers. The button on the right is “Find open full text for 9 papers”.">
+          <figcaption><b>Figure 8.</b> The note at the top of the “Missing PDF” view says what is sent and to whom.</figcaption>
+        </figure>
+
+        <p>It looks only for versions that can be had free and legally: arXiv, the open access files listed by OpenAlex and Europe PMC, and the PDFs at the publisher for Springer / BMC, Nature and Frontiers articles that they mark as open access. It does not sign in and does not get around paywalls. A paper with no DOI, PMID or arXiv ID cannot be looked up.</p>
+        <p>Click “Find open full text for 9 papers”. Another progress block, “Find full text”, appears at the bottom of the sidebar. Its bar is segmented by color: green is saved, yellow is no URL found, red is download failed, blue is being searched and gray is waiting. Click it to open “Full text search”, where you see which papers are being looked up and the result and reason for each. While it runs you can “Stop searching”, or “Collapse” it and do something else. This time it finished in under a minute:</p>
+
+        <figure class="shot">
+          <img src="../../img/t/migrate-08-fetch-report.jpg" width="1372" height="867" loading="lazy" alt="The “Full text search” window: 9 / 9 papers processed, search complete. Saved 2, Download failed 7. The reason is listed for each paper. For example, for the GreenCells and Multiome papers the address given by OpenAlex returned something that is not a PDF, most likely a sign-in or verification page, and for the tea tree trichome paper academic.oup.com returned HTTP 403. Behind it, “Missing PDF” now holds only 7 papers.">
+          <figcaption><b>Figure 9.</b> Of the 9 papers, 2 were saved. For the other 7 an address was found, but the publisher does not let a program download it. The reason is written under each paper.</figcaption>
+        </figure>
+
+        <p>The ones saved are the reed paper (from Springer) and the maize root paper (from Frontiers). The PDFs were attached to the existing entries and their text was read. The other 7 are all open access articles and their addresses were found too, but MDPI and Oxford University Press returned HTTP 403, and the rest returned a sign-in or verification page, which was not stored as a PDF. “Missing PDF” still holds 7 papers.</p>
+        <p>For the rest, click “Open web page” in the details, download the PDF in your browser, then drag the file into the Wisp Study window. It reads the DOI, recognizes that the library already has this paper and attaches the PDF to the existing entry. The details say “Paper already in library; PDF attached to existing record”, and no extra record appears. The “PDF” tab of a single paper also has two buttons, “Find open full text” and “Add PDF”.</p>
+        <aside class="note"><b>Tip</b>A failed download does not mean the paper has no open full text. It only means it could not be fetched for you this time. Try again later in “Missing PDF”: the button only looks for papers that still have no PDF.</aside>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>Recap</h2>
+        <ul>
+          <li>From Zotero came the records of 6 papers with their tags, collections, notes and 4 PDFs. Zotero itself was not changed.</li>
+          <li>A folder of 11 PDFs was imported and its subfolders became tags. Duplicates were attached to the original entries, and the paper in the trash did not come back.</li>
+          <li>The .bib brought in 5 papers and skipped 1 existing one. One paper each was added by DOI and by PMID.</li>
+          <li>The supplement with no recognized DOI was completed by title into the published version in New Phytologist. Of the 9 papers missing full text, 2 were found, and the reasons for the others are in the details.</li>
+          <li>No model was used anywhere. Next you can <a href="read.html">read one of these papers closely</a>, or go back to <a href="start.html">start from a topic</a> and fill out the library with a search.</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="home.html"><small>Previous · 02</small><strong>Talk first, build the library later</strong></a>
+    <a class="next" href="pdf.html"><small>Next · 04</small><strong>Just one PDF to read</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>References</h2>
+      <ol>
+        <li><a href="index.html">All tutorials</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">Features: what each page can do (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">Data and privacy: where files live and what leaves your machine (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">Questions and ideas: Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>About this tutorial.</b> The screenshots and numbers come from one real run in November 2026 on macOS with v0.10.0. Figure 2 is from a run on v0.17.0. A model answers differently each time, so wording and numbers will differ when you follow along, but the steps are the same. The screenshots show the Chinese interface; the text uses the labels of the English one (Settings › General › Interface language).</p>
+      <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation. Check key numbers and conclusions against the original text.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

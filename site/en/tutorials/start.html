@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/start.html">
+<link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/start.html">
+<title>Start from a topic · Wisp Study tutorials</title>
+<meta name="description" content="Start from an empty Wisp Study: set up a model, create a library with a topic, have the assistant draft search queries, import 355 papers from PubMed and Europe PMC, let the assistant read the abstracts and make suggestions, then confirm what to include.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../../app-icon.png">
+<link rel="stylesheet" href="../../style.css">
+<link rel="stylesheet" href="../../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="Site">
+      <a href="index.html" aria-current="page">Tutorials</a>
+      <a href="../index.html#ideas">Ideas</a>
+      <a href="../index.html#tools">Tools</a>
+      <a href="../index.html#download">Download</a>
+    </nav>
+    <a class="lang" href="../../tutorials/start.html" lang="zh-CN" hreflang="zh-CN">中文</a>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="Location"><a href="index.html">Tutorials</a><span>›</span>Collect</nav>
+
+  <header class="doc-head">
+    <p class="kicker">Tutorial 01 · Collect</p>
+    <h1>Start from a topic: search, import, screen</h1>
+    <p class="lead">Your advisor gave you a direction, “<span lang="zh-CN">植物单细胞转录组</span>” (plant single-cell transcriptomics), and you have no papers. This tutorial starts from an empty Wisp Study: set up a model, create a library, have the assistant draft search queries, import 355 papers from PubMed and Europe PMC, let the assistant read each abstract and make a suggestion, and finally decide for yourself what to include.</p>
+    <dl class="facts">
+      <div><dt>Scenario</dt><dd>You have just taken over a research topic and want a first batch of papers in one afternoon, sorted into those worth reading and those not.</dd></div>
+      <div><dt>Needs</dt><dd>Wisp Study and a model provider of your own (Claude API, OpenAI-compatible or OpenAI Responses endpoint).</dd></div>
+      <div><dt>Time</dt><dd>About 15 minutes, of which about 8 minutes is waiting for the model and the databases.</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="Sections of this tutorial">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#s1">Install, set up a model</a></li>
+        <li><a href="#s2">Create a library, write the topic</a></li>
+        <li><a href="#s3">Have the assistant draft search queries</a></li>
+        <li><a href="#s4">Save and import</a></li>
+        <li><a href="#s5">Have the assistant screen</a></li>
+        <li><a href="#s6">Confirm the screening decisions</a></li>
+        <li class="plain"><a href="#recap">Recap</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>Install, set up a model</h2>
+        <p>Download from the <a href="https://github.com/xuzhougeng/WispStudy/releases/latest">release page</a>: on macOS it is a <code>.dmg</code>, and after opening it you drag Wisp Study into the Applications folder. Windows has an installer, <code>-setup.exe</code> (it installs for the current user and needs no administrator rights), and a portable <code>.zip</code>. Drafting queries and screening both call a model. Wisp Study does not ship one, so first connect your own in Settings.</p>
+        <p>Click “Settings” at the top right of the home page (<kbd>⌘</kbd> + <kbd>,</kbd>, or <kbd>Ctrl</kbd> + <kbd>,</kbd> on Windows) and go to “AI”. In the “Model” section, the model providers are on the left. DeepSeek, Kimi and GLM are already listed, each marked “No API key”. To use one of them, open it and fill in the API key. For any other provider, click “Add provider” and choose from the list, or choose “Other OpenAI-compatible service”:</p>
+        <ul>
+          <li><b>Protocol</b>: one of Claude API, OpenAI-compatible and Responses.</li>
+          <li><b>Base URL</b>: for an OpenAI-compatible provider, write it up to <code>/v1</code>.</li>
+          <li><b>API Key</b>: leave it empty to read the matching environment variable, for example <code>OPENAI_API_KEY</code>.</li>
+          <li><b>Model</b>: in the empty box under “Model”, enter the model name the provider requires and click “Add”. One provider can hold several models, and each model has its own thinking level.</li>
+        </ul>
+        <p>There is no save button; changes are saved as you make them. When “No API key” under the provider's name is replaced by the number of models, it is ready to use.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/start-01-models.jpg" width="1372" height="867" loading="lazy" alt="The “Model” section of Settings › AI: the list of model providers on the left; on the right of the selected provider are its name, protocol, base URL, API key, proxy, its two models and the thinking level of each.">
+          <figcaption><b>Figure 1.</b> An OpenAI-compatible provider holding two models. The blue text on the right of a model name says which tasks it handles for now.</figcaption>
+        </figure>
+
+        <p>One model is enough to get through the whole tutorial. Two more things were done this time. Under “Tasks”, “Translate” was given to a smaller model with its thinking turned down. And “Concurrent papers” was raised from the default 3 to 8, so that screening sends that many requests at once; lower it if the provider limits your rate.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/start-02-tasks.jpg" width="1372" height="867" loading="lazy" alt="The “Tasks” section of Settings › AI: the model chosen for Assistant, Batch screening, Translate and Structure full text, with “Concurrent papers” under Batch screening set to 8.">
+          <figcaption><b>Figure 2.</b> The “Tasks” section. Drafting queries uses the “Assistant” model, and screening uses the “Batch screening” model.</figcaption>
+        </figure>
+
+        <aside class="note warn"><b>Note</b>The API key is saved in plain text in <code>settings.json</code> on your machine. When a model is used, the topic, your search requirements and the abstracts of papers are sent to the model provider you configured.</aside>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>Create a library, write the topic</h2>
+        <p>Go back to the home page and click “New library” (<kbd>⌘</kbd> + <kbd>⇧</kbd> + <kbd>N</kbd>). Name it “<span lang="zh-CN">植物单细胞转录组</span>”. The topic is more than a note: the assistant reads it when it drafts queries, judges what to include and answers questions, so it is worth being specific. This time it says:</p>
+        <blockquote><cite>Topic</cite><p>Plant single-cell and single-nucleus transcriptome sequencing (scRNA-seq / snRNA-seq): cell atlases of species and organs, developmental trajectories and cell fate, responses to environmental stress, and methodological questions such as protoplast preparation, cell type annotation and cross-species integration.</p></blockquote>
+
+        <figure class="shot">
+          <img src="../../img/04-new-library.jpg" width="1372" height="870" loading="lazy" alt="The “New library” dialog: name, topic and a row of accent colors, with “Cancel” and “Create” at the bottom right.">
+          <figcaption><b>Figure 3.</b> Pick an accent color, and it becomes the highlight color of this library from then on.</figcaption>
+        </figure>
+
+        <p>After you click “Create”, the page asks where to start. If your papers are already in Zotero or in an exported file, choose “Import existing papers” or “Import from Zotero”; see <a href="migrate.html">Tutorial 03</a>. Here you have nothing, so choose the recommended “Start with a database search”.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/start-03-guide-start.jpg" width="1372" height="867" loading="lazy" alt="The new, empty library: “plant single-cell transcriptomics” is created, where to start? Four choices below: Start with a database search (recommended), Import existing papers, Import from Zotero, Leave it empty for now.">
+          <figcaption><b>Figure 4.</b> The four choices after a library is created.</figcaption>
+        </figure>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>Have the assistant draft search queries</h2>
+        <p>The topic is already filled into the input box, and you can edit it. Below it is a row of databases. PubMed is selected by default; also select Europe PMC, which holds preprints, and new work in this field often appears first on bioRxiv. Crossref and arXiv do not help much with this topic, so leave them out.</p>
+        <p>Click “Suggest queries”. About a minute later the assistant has drafted three queries with different orientations for each database: a broad one, one focused on atlases, development and stress, and one from the angle of methods such as sample preparation and annotation. Under each query is the result of a trial search run at once: how many papers the database matched in all, and what the newest few are.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/start-04-guide-queries.jpg" width="1372" height="867" loading="lazy" alt="The search page of the guide: PubMed and Europe PMC are selected under the topic box; below is the broad query for PubMed, with a one-line explanation, the full query, 999 matches and the six newest titles, among them studies on pancreatitis and fracture healing.">
+          <figcaption><b>Figure 5.</b> The broad query for PubMed. Pancreatitis and fracture healing among the newest titles show that it is too wide. The figure was captured when this step was redone, so the match count differs slightly from the table below.</figcaption>
+        </figure>
+
+        <p>The match counts of this trial search:</p>
+        <div class="scroll">
+          <table>
+            <caption><b>Table 1.</b> Papers matched by the trial search of each of the six queries.</caption>
+            <thead><tr><th>Database</th><th>Broad</th><th>Atlases, development and stress</th><th>Methods</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">PubMed</th><td>1007</td><td>520</td><td>205</td></tr>
+              <tr><th scope="row">Europe PMC</th><td>1212</td><td>635</td><td>247</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p><b>Look at the titles, not at how elegant the query is.</b> Almost everything the methods query matched is a plant study whose title starts with single-cell or single-nucleus. A trial search writes nothing into the library. If you are not satisfied, edit the topic and click “Suggest again”, or click “Write a query yourself”. This time two were chosen: the methods query for PubMed, and the atlases, development and stress query for Europe PMC. Click “Select”, and the button turns into “Selected”.</p>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>Save and import</h2>
+        <p>Click “Save and import 2 selected queries” at the bottom right. The two queries are saved to the “Search and import” page and run at once, in about 40 seconds:</p>
+        <ul>
+          <li>PubMed: 205 matched, 200 retrieved, 200 added.</li>
+          <li>Europe PMC: 635 matched, 200 retrieved, 155 added, 45 already held and skipped. The two databases overlap, and Wisp Study removes duplicates by DOI, PMID and title.</li>
+        </ul>
+
+        <figure class="shot">
+          <img src="../../img/09-searches-imported.jpg" width="1372" height="870" loading="lazy" alt="The Search and import page: two saved queries, each with the numbers matched, retrieved, added and skipped by its last run, and below them two rows of import history with “Undo” on the right of each.">
+          <figcaption><b>Figure 6.</b> The two queries and their import history.</figcaption>
+        </figure>
+
+        <aside class="note"><b>Tip</b>This record was made with a version that retrieved at most 200 papers per query. Queries saved by the guide now retrieve up to the latest 2000 papers each time (200 for Crossref), asking the database for 200 at a time over several requests. The same two queries would bring back all 205 and 635 matches, and the paper counts and times below would grow accordingly. Change the limit under “Retrieve” of the query.</aside>
+
+        <p>That makes 355 papers, all “Pending”: import a little wide first, then judge paper by paper. If you imported the wrong thing, “Undo” on the row in “Import history” removes that batch of newly added papers that nobody has handled yet. “Automatic updates” at the top of the page lets a query run by itself every 6 hours, daily or weekly, and new papers come in as “Pending” in the same way.</p>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>Have the assistant screen</h2>
+        <p>The list already shows some unrelated papers mixed in, for example one about cigarette butts in urban green spaces. Reading 355 abstracts one by one would take half a day, so first let the assistant read them.</p>
+        <p>Open “Screening” on the left. The page head offers two views, “Batch” and “One by one”; use “Batch” first. Under “Screening criteria”, write what kind of paper belongs in this library. If you leave it empty, papers are judged by the topic alone, and a clearly drawn boundary is much more accurate:</p>
+        <blockquote><cite>Screening criteria</cite><p>Include: original studies, methods and data resources that take plants as the subject and actually produce or analyze single-cell or single-nucleus transcriptome data (scRNA-seq, snRNA-seq), and reviews of the field. Exclude: papers whose subject is not a plant, that only use bulk RNA-seq, or that mention single-cell technology only in passing.</p></blockquote>
+        <p>Click “Ask assistant to screen 355 papers”. The assistant reads 8 papers at a time, and reads the full text where there is one; here all have only abstracts. Under the progress bar are the papers being read, and those it has finished join the queue with their suggestions.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/start-05-screen-running.jpg" width="1372" height="867" loading="lazy" alt="“Batch” in Screening: under the screening criteria is the progress box “Assistant reading 9 / 27” with the seven titles being read, and below it the groups by suggestion: All 27, Included 5, Related 1, Insufficient evidence 1, Irrelevant 2, no suggestion yet 18.">
+          <figcaption><b>Figure 7.</b> Halfway through. This figure comes from a small library with only 27 pending papers; with 355 papers the numbers in the box are larger.</figcaption>
+        </figure>
+
+        <p>This round of 355 papers took about 4 minutes 40 seconds, and the suggestions fell into four groups:</p>
+        <div class="scroll">
+          <table>
+            <caption><b>Table 2.</b> The assistant's suggestions for the 355 papers.</caption>
+            <thead><tr><th>Suggestion</th><th>Papers</th><th>Meaning</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Included</th><td>257</td><td>Meets the screening criteria</td></tr>
+              <tr><th scope="row">Related</th><td>52</td><td>Related to the topic but does not meet the inclusion criteria; kept for reference</td></tr>
+              <tr><th scope="row">Insufficient evidence</th><td>4</td><td>Cannot tell from the abstract (2 of them have no abstract)</td></tr>
+              <tr><th scope="row">Irrelevant</th><td>42</td><td>Not on this topic</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>You can click “Stop” midway, and the papers not yet read wait for the next round. A paper that could not be judged does not interrupt the round. You can change the screening criteria at any time: the existing suggestions are marked as given under the old criteria, you have the assistant judge again under the current ones, and the decisions you already made are left alone.</p>
+      </section>
+
+      <section id="s6">
+        <h2><i>6</i>Confirm the screening decisions</h2>
+        <p><b>The assistant's suggestions are only suggestions.</b> It changes no paper's screening decision; only you do. When a round is finished, “The assistant has finished. Review its suggestions” appears under the progress bar, and the button at the top right becomes “Confirm N suggestions”. Click it to enter “Confirm suggestions”:</p>
+
+        <figure class="shot">
+          <img src="../../img/t/start-06-confirm.jpg" width="1372" height="867" loading="lazy" alt="The Confirm suggestions page: one paper per row, a checkbox on the left, under the title the confidence, what was read and the reason, and on the right four decisions with the one the assistant suggested highlighted. “Lowest confidence first” is on, and the top two papers read “No readable content” with the suggestion Insufficient evidence. At the bottom it says 27 papers will be written, and “Confirm 27 papers” is at the bottom right.">
+          <figcaption><b>Figure 8.</b> With “Lowest confidence first” on, the two papers with no abstract to read are at the top, and one of them is about human dorsal root ganglia, not a plant study. It comes from the same 27-paper library.</figcaption>
+        </figure>
+
+        <p>Each row is one paper, the assistant's reason and the decision it will get, all checked by default. If you disagree, click another decision on the right. If you are unsure, uncheck it and it stays pending. “Lowest confidence first” puts the ones that most need a look at the top. Figure 8 has one to change: the dorsal root ganglia study has no abstract, so the assistant could only say “Insufficient evidence”, while the title tells you it is irrelevant. Finally click “Confirm N papers”, and the checked ones are written in one step as screening decisions, with the assistant's reasons recorded as the reasons for the decisions. Nothing changes before you write, and afterward “Undo” is available at the top of the page.</p>
+        <p>If you only want to handle one group first, click a group above the queue in “Batch”, for example “Irrelevant 42”, and the button becomes “Confirm 42 “Irrelevant” suggestions”. To look closely paper by paper, switch to “One by one” in the page head: one paper at a time, with the assistant's suggestion, reason and the sentence it relied on at the top (the sentence is quoted word for word from the abstract or full text, and a reason that cannot quote the original is not taken as evidence), the abstract in the middle and the four decisions at the bottom. Press <kbd>Y</kbd> for Included, <kbd>R</kbd> for Related, <kbd>U</kbd> for Insufficient evidence, <kbd>N</kbd> for Irrelevant and <kbd>A</kbd> to accept the suggestion, and it moves on to the next paper by itself.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/start-07-single.jpg" width="1372" height="867" loading="lazy" alt="Screening “One by one”: on the left the list of the 27 papers of this round, on the right paper 21, a single-cell proteomics study of the cold response of Arabidopsis leaves. The assistant suggests “Related” with 94% confidence, having read only the abstract, with a sentence quoted from the abstract under the reason; at the bottom are four decision buttons, with “Suggestion” marked on “Related”.">
+          <figcaption><b>Figure 9.</b> One it judged well: a single-cell proteomics study. The assistant decided that it produced no scRNA-seq / snRNA-seq data and does not meet the inclusion criteria, so it suggests “Related” rather than “Included”.</figcaption>
+        </figure>
+
+        <p>That run ended up writing 257 Included and 42 Irrelevant, leaving the 52 Related and 4 Insufficient evidence: exactly the ones worth a look yourself. Back in “All papers”, the irrelevant ones are hidden by default, so the list shows 313 papers, and the “Screening” column has results.</p>
+
+        <figure class="shot">
+          <img src="../../img/15-papers-included.jpg" width="1372" height="870" loading="lazy" alt="The All papers list: 313 papers in all, with “Included” in most rows of the Screening column and a few still “Pending”.">
+          <figcaption><b>Figure 10.</b> All papers after confirming. The ones still “Pending” are the 56 kept for you to look at.</figcaption>
+        </figure>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>Recap</h2>
+        <ul>
+          <li>In “Settings › AI” you connected your own model provider and raised the screening concurrency to 8.</li>
+          <li>You wrote a specific topic when creating the library, and from it the assistant drafted 6 queries for two databases. You chose 2 by the titles the trial search matched and imported 355 papers.</li>
+          <li>You wrote the screening criteria, and the assistant read 355 abstracts in about 4 minutes 40 seconds. You went through them in “Confirm”, wrote them in, and 313 papers stay in the library.</li>
+          <li>Next: read one of them closely, see <a href="read.html">Tutorial 05</a>; ask questions of the whole library and check the sources, see <a href="ask.html">Tutorial 09</a>; write a review in stages with <code>/review</code>, see <a href="review.html">Tutorial 12</a>.</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="Previous and next">
+    <a class="next" href="home.html"><small>Next · 02</small><strong>Talk first, build the library later</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>References</h2>
+      <ol>
+        <li><a href="index.html">All tutorials</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">Features: what each page can do (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">Data and privacy: where files live and what leaves your machine (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">Questions and ideas: Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>About this tutorial.</b> The screenshots and numbers come from a real run on macOS with v0.2.0 on November 10, 2026, and on November 17 they were checked against v0.10.0, with the screenshots of changed interfaces retaken. The model answers differently each time and the databases are updated every day, so the wording and numbers you see will differ a little. The steps are the same. The screenshots show the Chinese interface; the text uses the labels of the English one (Settings › General › Interface language).</p>
+      <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation; check key numbers and conclusions against the original.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

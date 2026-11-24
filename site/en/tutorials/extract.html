@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/extract.html">
+<link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/extract.html">
+<title>Read a batch of papers into one table · Wisp Study tutorials</title>
+<meta name="description" content="Define five custom fields (species, tissue, material, sequencing platform and key findings), have the assistant find a value in the original text of each paper with the quoted sentence as its evidence, save them once you have confirmed, then use the fields as table columns and as filters, and export to CSV.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../../app-icon.png">
+<link rel="stylesheet" href="../../style.css">
+<link rel="stylesheet" href="../../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="Site">
+      <a href="index.html" aria-current="page">Tutorials</a>
+      <a href="../index.html#ideas">Ideas</a>
+      <a href="../index.html#tools">Tools</a>
+      <a href="../index.html#download">Download</a>
+    </nav>
+    <a class="lang" href="../../tutorials/extract.html" lang="zh-CN" hreflang="zh-CN">中文</a>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="Location"><a href="index.html">Tutorials</a><span>›</span>Organize</nav>
+
+  <header class="doc-head">
+    <p class="kicker">Tutorial 11 · Organize</p>
+    <h1>Read a batch of papers into one table</h1>
+    <p class="lead">Before you write a review you often need a table first: which species and which organ each paper studies, whether it used protoplasts or nuclei, on which platform it was sequenced, and what it concluded. In this tutorial the assistant reads these out of the papers one by one, with a sentence of the original for each value; you look them over, fix what is wrong, then save them into the library, lay them out as a table and export it.</p>
+    <dl class="facts">
+      <div><dt>Scenario</dt><dd>The library “<span lang="zh-CN">植物单细胞转录组</span>” (plant single-cell transcriptomics) has 28 included papers, and each needs five fields filled in.</dd></div>
+      <div><dt>Needs</dt><dd>A screened library, preferably with PDFs stored for some of the papers; a model provider set up in “Settings › AI”.</dd></div>
+      <div><dt>Time</dt><dd>The assistant reads 28 papers in under two minutes; looking them over takes as long as you read closely, about 10 minutes in this example.</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="Sections of this tutorial">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#s1">Define the fields to fill</a></li>
+        <li><a href="#s2">Have the assistant read paper by paper</a></li>
+        <li><a href="#s3">Look over: does the quoted sentence fit</a></li>
+        <li><a href="#s4">Save, and undo</a></li>
+        <li><a href="#s5">The fields become table columns</a></li>
+        <li><a href="#s6">Export to a spreadsheet file</a></li>
+        <li class="plain"><a href="#recap">Recap</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>Define the fields to fill</h2>
+        <p>A field is a column this library adds to every paper, and it belongs to the current library only. First decide the columns of the table.</p>
+        <p>Click “Custom fields” at the bottom left of the sidebar. When the library has no fields yet, the dialog has an “Add single-cell paper preset”, which adds four at once, species, tissue, sequencing type and sequencing platform, and you can change them from there. Each field has one of three types:</p>
+        <ul>
+          <li><b>Text</b>: one line of text.</li>
+          <li><b>Multiple values</b>: a paper can have several values, for example species or tissue; you can filter by value.</li>
+          <li><b>Single choice</b>: it can only be one of a fixed set of options.</li>
+        </ul>
+        <p>In this example the preset's “Sequencing type” is changed into a single-choice field “Material”, with the options “Protoplast, Nucleus, Both”. Click the pen icon at the right of a field to change it, and click “Save changes” when you are done.</p>
+        <p>It is worth filling in the last box, “Description”: the assistant reads this sentence when it extracts. In this example, “Species” got “The species studied, give the Latin name” and “Tissue” got “The organ or tissue the cells were taken from, for example root tip, leaf, inflorescence, seed”.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/extract-01-fields.jpg" width="1372" height="867" loading="lazy" alt="The Custom fields dialog: five fields, Species, Tissue, Material, Sequencing platform and Key findings; below, Material is being edited, with the type Single choice, the options Protoplast, Nucleus and Both, and a description.">
+          <figcaption><b>Figure 1.</b> The five fields and their types; Material, being edited, is single choice, and its options and description are in the two boxes below.</figcaption>
+        </figure>
+
+        <p>The fifth field, “Key findings”, is ready-made: a sentence or two on what the paper found. You do not have to define it yourself; one click in the dialog of the next step adds it, and by default it is shown as a table column.</p>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>Have the assistant read paper by paper</h2>
+        <p>There are three places to start, with different scopes:</p>
+        <ul>
+          <li>Select several papers in the list (<kbd>Shift</kbd> or <kbd>⌘</kbd> click, <kbd>Ctrl</kbd> on Windows) and right-click “Fill fields with assistant…”: only the selected ones are read.</li>
+          <li>Click “Fill with assistant…” at the bottom left of the “Custom fields” dialog, or the button of the same name at the top right of the “Extract” page in the sidebar: all the papers in the current list are read.</li>
+          <li>Click ✦ beside a field in the details of one paper: only that one item of that one paper is asked.</li>
+        </ul>
+        <p>In this example, “Fill with assistant…” was clicked under “All papers”, where the list is exactly the 28 included papers. The dialog lists all the fields, all ticked by default; when there is no “Key findings” yet, there is a row “Add this field” here.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/extract-02-dialog.jpg" width="1372" height="867" loading="lazy" alt="The Fill fields with assistant dialog: all five fields ticked, each with its type and description; below it says it will read 28 of the 28 papers in the list, 21 of them with full text and the rest by abstract; the button reads Read 28 papers.">
+          <figcaption><b>Figure 2.</b> Before it starts, the dialog says how many papers will be read, how many have a full text, which model is used and how many are read at a time.</figcaption>
+        </figure>
+
+        <p>This time it says “Will read 28 of the 28 papers in the list: 21 with full text, the rest by abstract.” Fields already filled in or already asked about are not asked again; to ask once more, tick “Extract again”. Click “Read 28 papers”.</p>
+
+        <aside class="note warn"><b>Note</b>The title, the bibliographic information and the abstract of each paper, and the full text of those with a stored PDF, are all sent to the model provider you set up in settings. It uses the model of “Batch screening” and reads as many papers at a time as screening does; change both in “Settings › AI”.</aside>
+
+        <p>While the assistant reads, the sidebar shows an “Extracting fields” progress bar below, the top of the “Extract” page lists the papers being read, and the values it proposes appear below as they come. You can switch to other pages and work, or click “Stop”.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/extract-03-running.jpg" width="1372" height="867" loading="lazy" alt="The Extract page: at the top it says the assistant is reading 21/28 and has proposed 76 values, with a Stop button; below is the list of proposed values; at the bottom left of the sidebar there is an Extracting fields 21/28 progress bar.">
+          <figcaption><b>Figure 3.</b> At paper 21: the progress shows in the sidebar and at the top of the page, and the values proposed so far are listed below.</figcaption>
+        </figure>
+
+        <p>A paper that could not be read does not interrupt the run. When a run has stopped and some papers were not read or not reached, “Retry N with…” appears on the progress bar; it lets you choose another model to read only what is left, and the choice is used just this once. In this example all 28 papers were read, so it was not needed.</p>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>Look over: does the quoted sentence fit</h2>
+        <p>When it has finished, a row of the “Extract” page is one field of one paper: the value, the sentence in the original, and the paper it comes from. If the sentence is in the full text, the page number is on the right; click it and the PDF turns to that page with the sentence highlighted. If it is only in the abstract, the right side says “Abstract”. The tabs above let you see just one field.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/extract-04-review.jpg" width="1372" height="867" loading="lazy" alt="The Extract page: the run is done, 28/28, 108 values proposed; by field, Species 23, Tissue 24, Material 18, Sequencing platform 15, Key findings 28; each row has a checkbox, the value, a quoted sentence from the original and the title of the paper; at the bottom it says 107 values will be saved and 1 is unchecked.">
+          <figcaption><b>Figure 4.</b> The result of this run: 108 values, 107 ticked by default. For a single-choice field all three options are listed, and the chosen one is marked.</figcaption>
+        </figure>
+
+        <p>This run asked 28 × 5 = 140 items; the assistant proposed 108 values, and for the other 32 items its answer was none: it does not guess what the text does not say. For example, for the GreenCells database article, species, tissue, material and platform are all empty; in the abstract of the maize mesophyll paper by Tao et al. only “maize” is written, with no Latin name, so “Species” is empty too. These empty ones do not show up on the Extract page; they are left for you to fill in.</p>
+        <p>What is ticked by default is a value for a field that is still empty and for which a basis in the original was found. Two cases are left unticked for you to judge:</p>
+        <ul>
+          <li>The field already has another value. The row says “Holds: … (will be replaced)”; for a multiple-values field it is “Has: … (added after)”, and saving keeps the existing values.</li>
+          <li>There is no basis in the original. The sentence the assistant quotes must appear word for word in the abstract or the full text; if it cannot be found it does not count as a basis, and the row says “No sentence of the paper found for it”. In this example there is only one: the key findings of a maize root paper.</li>
+        </ul>
+        <p>When the answer of a single-choice field matches none of the options, the row says “The assistant said “…”, not one of the options: pick one, or leave it”; you can pick one of the options or leave it unwritten. All 18 “Material” values in this example fall within the options.</p>
+        <p>Even with a quoted sentence, look at where it was taken from. For the ReadZS paper, “Species” is Arabidopsis thaliana, and the value itself is right, but the basis is on “Page 28”. Click it, and what is highlighted is the title of an article in the reference list:</p>
+
+        <figure class="shot">
+          <img src="../../img/t/extract-05-source.jpg" width="1372" height="867" loading="lazy" alt="The Extract page showing only Species, with the ReadZS row selected, its quotation marked Page 28; on the right the PDF of this paper is open at page 28, in the reference list, where one entry is highlighted in yellow.">
+          <figcaption><b>Figure 5.</b> Click “Page 28” and the PDF turns to that page: what was taken as the basis is a title in the references, not a statement of the authors.</figcaption>
+        </figure>
+
+        <p>The “Tissue” of the same paper is more obvious: the assistant filled in “root; lung; blood; heart”, based on the sentence where the authors apply the method to a human lung cell atlas. For a plant library that is not the answer you want. For another paper, on rice caryopsis, the basis for “Species” is also a title in the reference list. In this example two are finally left unticked:</p>
+        <ul>
+          <li>“Tissue” of ReadZS: human organs got mixed in.</li>
+          <li>“Species” of the Multiome paper: it says only Arabidopsis, and the description asks for the Latin name.</li>
+        </ul>
+        <p>Click the checkbox at the start of a row, or move with <kbd>↑</kbd> <kbd>↓</kbd>, tick with <kbd>Space</kbd>, and press <kbd>Enter</kbd> to compare with the PDF on the right.</p>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>Save, and undo</h2>
+        <p>Until you click save, nothing has been written into the fields; what the Extract page shows are only suggestions. The bottom now says “Will save 105 values for 28 papers. 3 unchecked proposals stay here.” Click “Save 105 values”. Saving is done in one step: either all of it is saved or none.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/extract-06-written.jpg" width="1372" height="867" loading="lazy" alt="A green notice at the top of the Extract page: Saved 105 values for 28 papers, with Undo on the right; below, the three unchecked ones remain: Species of Multiome, Tissue of ReadZS, and the key findings of a maize root paper, the last marked as having no sentence of the paper found.">
+          <figcaption><b>Figure 6.</b> After saving you can “Undo”; the 3 unticked ones are still there, to decide later, or to “Set aside the 3 unchecked”.</figcaption>
+        </figure>
+
+        <p>If something was saved wrongly, click “Undo” and the 105 values go back to how they were before saving. Suggestions you have no use for can be cleared with “Clear”; those cleared are no longer listed and will not be asked again.</p>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>The fields become table columns</h2>
+        <p>After saving, open the “Info” tab of a paper: under “Custom fields” each value comes with the sentence of the original it rests on and the page number, so when you see a value later you can click back to its source. Suggestions not yet saved are here too, with “Accept” and “Dismiss” beside them; where the assistant's answer was none, it says “Empty · the assistant found nothing in the paper”. To change a value yourself, click “Edit information and fields”.</p>
+
+        <figure class="shot">
+          <img src="../../img/t/extract-07-detail.jpg" width="1372" height="867" loading="lazy" alt="The Info tab of ReadZS: in the Custom fields section Species is filled in as Arabidopsis thaliana, with a quoted sentence and Page 28 below; Tissue is not filled in, with a pending suggestion root, lung, blood, heart below it and Accept and Dismiss; Material says Not filled in, the assistant found nothing in the paper; Sequencing platform is 10x Genomics Chromium, with a quoted sentence from page 16.">
+          <figcaption><b>Figure 7.</b> The fields of one paper: saved values come with their sentence, suggestions not saved can be accepted or dismissed here, and the ✦ beside each item asks again about that item only.</figcaption>
+        </figure>
+
+        <p>To make fields columns of the paper list, right-click the table header and tick Tissue, Material and Sequencing platform; you can untick the Journal and Reading columns you do not need. Drag the divider between two columns to change a column's width, which is remembered; double-click the divider to return that column to its default width. When there are too many columns for the window, those at the back are not shown: in this example “Key findings” did not fit, so look at it in the details.</p>
+        <p>Multiple-values and single-choice fields also appear on the filter bar. Click “Material” and it lists how many papers each option has:</p>
+
+        <figure class="shot">
+          <img src="../../img/t/extract-08-table.jpg" width="1372" height="867" loading="lazy" alt="The table of the paper list with four more columns, Species, Tissue, Material and Sequencing platform; on the filter bar Material is open, listing All, Protoplast 10, Nucleus 7 and Both 1.">
+          <figcaption><b>Figure 8.</b> Fields as table columns, and as filters: of the included papers in this library, 10 use protoplasts, 7 use nuclei and 1 compared both.</figcaption>
+        </figure>
+
+        <p>Choose “Nucleus” and the list keeps only those 7. You can also search for the value of a field in the search box at the top.</p>
+      </section>
+
+      <section id="s6">
+        <h2><i>6</i>Export to a spreadsheet file</h2>
+        <p>Click “Export” at the top right of the list, choose “Spreadsheet (.csv)”, then choose where to save. What is exported is the papers in the current list: choose with the filter bar first, and the export is that part. The same menu also has “BibTeX (.bib)”, for reference managers.</p>
+        <p>A row of the CSV is one paper. First come the bibliographic record and the status, with English column names: <code>title</code>, <code>authors</code>, <code>journal</code>, <code>year</code>, <code>doi</code>, <code>pmid</code>, <code>screening</code>, <code>reading</code>, <code>fulltext</code>, <code>tags</code> and so on, and the statuses are written as English values too, such as <code>included</code>, <code>unread</code>. Then comes one column for each custom field, named after the field, with the values of a multiple-values field separated by semicolons; last are <code>notes</code>, <code>abstract</code>, <code>source</code> and <code>added_at</code>. The file is UTF-8 encoded with a BOM at the start, so spreadsheet software opens it directly and Chinese does not turn into garbage; content that begins with <code>=</code>, <code>+</code>, <code>-</code> or <code>@</code> gets a single quote in front, so it is not taken for a formula.</p>
+        <aside class="note"><b>Tip</b>The CSV has only the values saved into the fields, not the sentences they rest on. To check a value, go back to the details of that paper, where the sentence and the page number are.</aside>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>Recap</h2>
+        <ul>
+          <li>Five fields were defined: species and tissue (multiple values), material (single choice), sequencing platform (multiple values) and key findings (text), and a description was written for each.</li>
+          <li>The assistant read 28 papers and proposed 108 values, 107 of them with a sentence of the original; for 32 items where the text says nothing it answered none and did not guess.</li>
+          <li>Opening the quoted sentences to check showed two bases taken from the references and one case of human organs mixed in; 2 were left unticked and 105 were saved.</li>
+          <li>The fields became table columns and filters, and were exported as a CSV from the current list.</li>
+          <li>With this table you can go on to <a href="review.html">Write a review in stages</a>; to press on a conclusion in the table, go back to <a href="ask.html">Ask the whole library, and check the answers</a>.</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="rank.html"><small>Previous · 10</small><strong>Which to read first</strong></a>
+    <a class="next" href="review.html"><small>Next · 12</small><strong>Write a review in stages</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>References</h2>
+      <ol>
+        <li><a href="index.html">All tutorials</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">Features: what each page can do (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">Data and privacy: where files live and what leaves your machine (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">Questions and ideas: Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>About this tutorial.</b> The screenshots and numbers come from a real run in November 2026 on macOS with v0.10.0. The model answers differently each time, so your wording and numbers will differ; the steps are the same. The screenshots show the Chinese interface; the text uses the labels of the English one (Settings › General › Interface language).</p>
+      <p><b>The assistant can be wrong.</b> Confirm its suggestions and answers yourself; check key numbers and conclusions against the original.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

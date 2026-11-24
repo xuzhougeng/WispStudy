@@ -90,6 +90,7 @@ wisp search_fulltext --help             # 一个工具的参数
 | `list_zotero_libraries` | 列出本机 `zotero.sqlite` 里的个人库和群组库，各有 `id`、名称和会导入的条目数；以及各文献库的分类（`collections`：`id`、`path`、所属文献库 `library` 和含子分类的条目数），`--path` 必填（只读） |
 | `library_status` | 一个库的概况：各状态的数量、自定义词条、状态值的显示名称 |
 | `list_papers` | 搜索、筛选、翻页；规则与界面上的列表相同。年份可以是区间（`--year-from 2020 --year-to 2026`，只给一头也可以），期刊可以按影响因子（`--min-impact 10`）和分区（`--zone cas:2` 是中科院 1–2 区，`xr:1` 新锐 1 区，`jcr:1` JCR Q1）筛 |
+| `mind_map` | 一篇文献的思维导图：大纲（Markdown 嵌套列表），节点后面方括号里是出处的页码和原句；没有导图时 `nodes` 为 0 |
 | `get_paper` | 一篇文献的完整记录、词条和附件；`journalMetrics` 是它的期刊的影响因子与分区（查不到为 null） |
 | `journal_metrics` | 查一种期刊的影响因子与分区（JCR 2025、中科院分区表升级版 2025、新锐期刊分区表 2026、国际期刊预警名单 2025）：`--journal` 给刊名（全称或缩写）或 ISSN，或 `--paper-id` 用一篇文献的期刊；数据随应用附带，不联网 |
 | `list_figures` | 图片库：从 PDF 里截下来收藏的图片、自己上传的图片（`uploaded`）和模型生成的图片（`drawn`），各自的图号、图注、标签、备注、出处（文献和页码）、图片文件的路径，以及它在稿件里的地址（`address`：稿件里单独一行写 `![图注](address)` 就放进这张图）；可按 `--query`、`--tag`、`--paper` 筛选 |
@@ -124,6 +125,7 @@ wisp search_fulltext --help             # 一个工具的参数
 | `set_outline` | 设定一份稿件的大纲：`--sections` 是一个 JSON 数组，按顺序列出各节（保留的节带 `id`，可以改名、改类型、换位置；不带的是新加的），可同时给 `--title`、`--language`。没列出的节，没写过内容的去掉，写过的保留在最后（会改动稿件） |
 | `find_pdf` | 为没有 PDF 的文献查找开放获取的全文（arXiv、OpenAlex 和 Europe PMC 列出的开放获取文件、部分出版商的开放获取文章），下载后附到原条目并读出文字；取回的文件是论文的补充材料（开头几页只有附图、附表）时不保存，接着试下一个地址；`--paper-id` 只处理一篇，`--limit` 一次最多几篇，`--look-only` 只列出候选地址不下载。不绕过付费墙或登录；会把 DOI 或 PMID 发给这些服务（会改动文献库） |
 | `compress_pdf` | 压缩文献库里过大的 PDF：长边超过 2400 像素的图片缩到 2400 像素，照片存为 JPEG，线条图保持无损，文字、页面和标注不变，并核对每页文字与原来一致；至少小一成才替换，附件 ID 不变。`--resource-id` 只压缩一个附件，`--paper-id` 压缩一篇文献的所有 PDF。结果里 `outcome` 是 `compressed`、`not_worth` 或 `failed`，`original` 是移到 `removed/` 的原文件。带密码或权限保护的 PDF 不处理（会改动文献库） |
+| `ocr_pdf` | 文字识别（OCR）：为读不出文字的 PDF（扫描件、字体没有文字编码的文件，`list_papers --fulltext textless`）读出页面上的文字，按页保存，之后 `read_fulltext`、`search_fulltext`、`find_sentences` 都用得上。引擎按桌面「设置 › 网络 › 文字识别」（`--engine` 指定一个）：DeepSeek OCR 把整个文件上传到 DeepSeek，每个文件最多 1000 页、100 MB，按页计费，Key 取「设置」里的或环境变量 `DEEPSEEK_API_KEY`；看图模型（`model`）只能在桌面应用里用。`--resource-id` 只读一个附件，`--paper-id` 读一篇文献的 PDF，都不给时处理文献库里所有读不出文字的 PDF，一次最多 `--limit` 个（默认 10，最多 50），`remaining` 是还剩几个。每个文件的 `outcome` 是 `read`（`pages`、`pagesWithText`，`cutPages` 是内容太多没读完的页）、`no_text`、`failed`（`error` 是原因），按名指定时还有 `has_text` 和 `unreadable`（设了密码等）；连续 3 个失败就停下。已有文字的文件不动。 |
 | `import_url` | 按网址添加一篇文献（`--url https://…`）：文献在出版商网站上的页面，或 PDF 本身的地址。网址只用本机的网络请求一次（校园网能下载的就能取到）；网页上的 `citation_doi`、`citation_pmid` 等标签给出编号，按编号查询信息后添加（已有的不重复），再下载网页标出的 PDF（`citation_pdf_url`），拿不到时找开放获取的版本（同 `find_pdf`）。网页打不开但网址里写着 DOI 时按这个 DOI 添加；PDF 地址按拖入的 PDF 处理。结果里 `outcome` 是 `added`、`attached`、`held`、`in_trash`、`not_recognised` 或 `failed`，`pdf` 是 `saved`、`had` 或 `none`（`pdfReason` 说明原因）。一个网址最多花两分钟（查询信息和找开放获取的版本都算在内），到时已经添加的文献保留，原因里会说「花的时间太长」；缺的 PDF 可以再用 `find_pdf` 找。不登录、不带 cookie、不冒充浏览器，除 PDF 地址外不跟随网页上的链接（会改动文献库） |
 
 全文检索第一次用到某个 PDF 时会提取它的文字并缓存到库里，同时按标题把它分成导言、方法、结果、讨论并切成句子，之后即时返回。
