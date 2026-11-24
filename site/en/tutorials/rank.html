@@ -38,9 +38,9 @@
   <header class="doc-head">
     <p class="kicker">Tutorial 10 · Organize</p>
     <h1>Which to read first: impact factor, zone and warnings</h1>
-    <p class="lead">You have collected dozens of papers and cannot read them all, so you need to pick a few to start with. A journal's impact factor and zone are a rough but common guide; other journals are on a warning list and deserve a second look before you cite them. In this tutorial you sort the paper list by these two values, look at all the metrics of the journal a paper appeared in, switch to another zone table, spot warning journals, and finally have the assistant and the command line look them up.</p>
+    <p class="lead">You have collected hundreds of papers and cannot read them all, so you need to pick a few to start with. A journal's impact factor and zone are a rough but common guide; other journals are on a warning list and deserve a second look before you cite them. In this tutorial you sort the paper list by these two values, look at all the metrics of the journal a paper appeared in, switch to another zone table, spot warning journals, and finally have the assistant and the command line look them up.</p>
     <dl class="facts">
-      <div><dt>Scenario</dt><dd>The library “<span lang="zh-CN">植物单细胞转录组</span>” (plant single-cell transcriptomics) holds 28 included papers, and you must decide which to read first and which to treat with care.</dd></div>
+      <div><dt>Scenario</dt><dd>The library “Plant single-cell transcriptomics” holds 515 included papers, and you must decide which to read first and which to treat with care.</dd></div>
       <div><dt>Needs</dt><dd>A library whose papers have journal names; to ask the assistant, a model provider set up in “Settings › AI”. Looking up zones needs no network and no model.</dd></div>
       <div><dt>Time</dt><dd>About 5 minutes.</dd></div>
     </dl>
@@ -75,8 +75,8 @@
         <p>If you cannot see the two columns, right-click the table header and tick “Impact factor” and “Zone”; untick the columns you do not need in the same menu.</p>
 
         <figure class="shot">
-          <img src="../../img/t/rank-01-columns.jpg" width="1372" height="867" loading="lazy" alt="The paper list, its header showing Papers, Journal, Impact factor, Zone, Year, Full text, Reading and Screening; the menu that opens on a right-click on the header has seven items ticked: Journal, Impact factor, Zone, Year, Full text, Reading and Screening.">
-          <figcaption><b>Figure 1.</b> Right-click the header and tick the columns to show. A few rows below the menu show what the two columns look like: 5.9 / Zone 2, 5.6 / Zone 3.</figcaption>
+          <img src="../../img/en/t/rank-01-columns.jpg" width="1372" height="870" loading="lazy" alt="The paper list with a menu of seven items, all ticked: Journal, Impact factor, Zone, Year, Full text, Reading and Screening. The header behind it reads Papers, +1 columns, Journal, Impact factor, Zone, Year, Full text and Reading; the rows are preprints on bioRxiv and Research Square with a short dash for both impact factor and zone.">
+          <figcaption><b>Figure 1.</b> Right-click the header and tick the columns to show. The menu lists seven columns, all ticked. The rows behind it show “—” in the two columns, because their journals are not in the table (more on that below).</figcaption>
         </figure>
       </section>
 
@@ -85,15 +85,15 @@
         <p>Click the column name “Impact factor” and the list sorts from high to low; click again for low to high. Clicking “Zone” starts from zone 1, with Top journals first within the same zone.</p>
 
         <figure class="shot">
-          <img src="../../img/t/rank-02-impact.jpg" width="1372" height="867" loading="lazy" alt="The paper list sorted by impact factor from high to low: the first three papers are in Nature communications, 18.1, Zone 1 Top; then one in Advanced science (Weinheim, Baden-Wurttemberg, Germany) 14.1, two in Horticulture research 9.5, four in Genome biology 9.2 and one in The New phytologist 8.7, all Zone 1 Top; further down is Frontiers in plant science 5.9, Zone 2.">
-          <figcaption><b>Figure 2.</b> Sorted by impact factor: the three papers in Nature communications come first, then Advanced science (14.1), Horticulture research, Genome biology and The New phytologist. These eleven papers are all in journals of CAS zone 1 Top.</figcaption>
+          <img src="../../img/en/t/rank-02-impact.jpg" width="1372" height="870" loading="lazy" alt="The paper list sorted by impact factor from high to low, the Impact factor header marked with an arrow: two papers in Nature, 56.1; two in Science (New York, …), 47.3; three in Cell, 45.1; five in Molecular plant, 32.7. Every row shows Zone 1 followed by an ellipsis.">
+          <figcaption><b>Figure 2.</b> Sorted by impact factor: Nature (56.1) comes first, then Science (47.3), Cell (45.1) and Molecular plant (32.7). All twelve papers in view are in Zone 1 journals; the column is too narrow to show the whole label.</figcaption>
         </figure>
 
-        <p>Papers whose journal is not in the table show “—” and sink to the end, whichever way you sort. Scroll to the end of the list in this example:</p>
+        <p>Papers whose journal is not in the table show “—” and sink to the end, whichever way you sort. Scroll to the end of the list in this example, and you find many of them:</p>
 
         <figure class="shot">
-          <img src="../../img/t/rank-03-unknown.jpg" width="1372" height="867" loading="lazy" alt="The end of the same list: BMC plant biology 5.6, Zone 2 Top; Plant methods 5.2, Zone 2; The Journal of biological chemistry 4.1, Zone 2; Genes 3.1, Zone 3; in the last row the journal is bioRxiv, with a short dash for both impact factor and zone.">
-          <figcaption><b>Figure 3.</b> The end of the list: only the bioRxiv paper shows “—”. bioRxiv is a preprint server and is on none of the lists.</figcaption>
+          <img src="../../img/en/t/rank-03-unknown.jpg" width="1372" height="870" loading="lazy" alt="The end of the same list: papers in Plants (Basel, Switzerland), Journal of genetics and genomics, Cold Spring Harbor protocols, bioRxiv and Biology; every row shows a short dash for both impact factor and zone.">
+          <figcaption><b>Figure 3.</b> The end of the list: papers in journals that are not in the table, among them preprints on bioRxiv, show “—” for both columns. bioRxiv is a preprint server.</figcaption>
         </figure>
 
         <aside class="note"><b>Tip</b>The impact factor and the zone describe the journal, not this paper. They are an average or a rank of how often all articles of the journal's previous two years were cited, and the citations of individual papers within one journal differ a great deal; numbers from different fields cannot be compared directly either. Using them to order what to read first is fine; to judge whether a paper is well done, you still have to read it.</aside>
@@ -104,12 +104,12 @@
         <p>Open a paper. On the “Info” tab on the right, below the line with the journal and year, there is one more line with all the metrics of this journal. The “Zone” column of the list has room for only one kind of zone; here all four are written out:</p>
 
         <figure class="shot">
-          <img src="../../img/t/rank-04-detail.jpg" width="1372" height="867" loading="lazy" alt="A Nature communications paper selected, the Info tab on the right: below the authors a line reading Nature communications · 2025 · Published, below it a line in gray text IF 18.1 · JCR Q1 · CAS Zone 1 Top · XR Zone 1 Top; then the DOI and PMID. With the details open the list gets narrower and the header shows +3 columns.">
-          <figcaption><b>Figure 4.</b> The line under the journal: <code>IF 18.1 · JCR Q1 · CAS Zone 1 Top · XR Zone 1 Top</code>.</figcaption>
+          <img src="../../img/en/t/rank-04-detail.jpg" width="1372" height="870" loading="lazy" alt="The paper A rare PRIMER cell state in plant immunity selected, the Info tab on the right: below the authors a line reading Nature 638(8049), 197–205 · 2025 · Published, below it a line in gray text IF 56.1 · JCR Q1 · CAS Zone 1 Top · XR Zone 1 Top; then the DOI and PMID. With the details open the list gets narrower and the header shows +4 columns.">
+          <figcaption><b>Figure 4.</b> The line under the journal: <code>IF 56.1 · JCR Q1 · CAS Zone 1 Top · XR Zone 1 Top</code>.</figcaption>
         </figure>
 
-        <p>Rest the pointer on this line and it lists the subjects of this journal in each table. In this example: “JCR Q1: MULTIDISCIPLINARY SCIENCES”, “CAS category: multidisciplinary journals” and “XR category: multidisciplinary journals”, and last the version of the data. When the journal name in the record differs from the one in the table, the first line says which name it was matched by: for the Advanced science (Weinheim, Baden-Wurttemberg, Germany) paper the hover text says “Matched as “Advanced Science””, so you can check that it is the same journal.</p>
-        <p>While the details are open the list is narrower, and columns that do not fit are put away; the header shows “+3 columns”. In this example the “Journal”, “Zone” and “Screening” columns are put away, and “Impact factor” is still there.</p>
+        <p>Rest the pointer on this line and it lists the subjects of this journal in each table, and last the version of the data. When the journal name in the record differs from the one in the table, the first line says which name it was matched by, so you can check that it is the same journal.</p>
+        <p>While the details are open the list is narrower, and columns that do not fit are put away; the header shows “+4 columns”. In this example the “Journal”, “Impact factor”, “Zone” and “Screening” columns are put away, and “Year”, “Full text” and “Reading” are still there.</p>
       </section>
 
       <section id="s4">
@@ -117,76 +117,76 @@
         <p>Which zone the “Zone” column shows is chosen in “Settings › Appearance › Journal zones”: “CAS”, “XR” or “JCR”. The default is CAS. In this example, switch to JCR.</p>
 
         <figure class="shot">
-          <img src="../../img/t/rank-05-setting.jpg" width="1372" height="867" loading="lazy" alt="The Appearance page of settings, with four rows: theme, paper list, journal zones and increased contrast; the description of the Journal zones row reads: Which partition the list's Zone column shows. The data comes with the app: JCR 2025, CAS journal zone table upgraded edition 2025, XR journal zone table 2026, international journal warning list 2025. The three options on the right are CAS, XR and JCR, with JCR selected.">
-          <figcaption><b>Figure 5.</b> The “Journal zones” row; its description names the lists that come with the app.</figcaption>
+          <img src="../../img/en/t/rank-05-setting.jpg" width="1372" height="870" loading="lazy" alt="The Appearance page of settings, with four rows: Theme, Paper list, Journal zones and Increase contrast. The description of the Journal zones row reads: Which partition the list's Zone column shows. The data comes with the app, followed by the names of the four lists in Chinese with their years. The three options on the right are CAS, XR and JCR, with CAS selected.">
+          <figcaption><b>Figure 5.</b> The “Journal zones” row, with CAS selected; its description names the lists that come with the app, by their Chinese names (<span lang="zh-CN">中科院分区表升级版</span>, <span lang="zh-CN">新锐期刊分区表</span>, <span lang="zh-CN">国际期刊预警名单</span>) even in the English interface.</figcaption>
         </figure>
 
-        <p>Click “Back” to return to the list, and the “Zone” column now shows Q1, Q2. Click the column name again to sort by it:</p>
+        <p>Click “Back” to return to the list, and the “Zone” column now shows Q1, Q2. The list is still sorted by impact factor; click “Zone” to sort by it instead:</p>
 
         <figure class="shot">
-          <img src="../../img/t/rank-06-jcr.jpg" width="1372" height="867" loading="lazy" alt="The Zone column of the paper list switched to JCR zones and sorted by it: Advanced science, Plant methods, Frontiers in plant science, International journal of molecular sciences, The New phytologist, Genome biology, BMC plant biology, Horticulture research and more, all the way Q1.">
-          <figcaption><b>Figure 6.</b> After switching to JCR, the screen is full of Q1: journals that are CAS zone 1, 2 or 3 are almost all Q1 in JCR.</figcaption>
+          <img src="../../img/en/t/rank-06-jcr.jpg" width="1372" height="870" loading="lazy" alt="The paper list with the Zone column switched to JCR zones, still sorted by impact factor: Nature 56.1, Science (New York, …) 47.3, Cell 45.1 and Molecular plant 32.7, every row showing Q1 in the Zone column.">
+          <figcaption><b>Figure 6.</b> After switching to JCR, the “Zone” column shows Q1 for the top of the list instead of “Zone 1 …”.</figcaption>
         </figure>
 
-        <p>The two kinds of zone differ a lot. International journal of molecular sciences is zone 3 in CAS and Q1 in JCR; Frontiers in plant science and Plant methods are zone 2 in CAS and also Q1 in JCR. The JCR zone takes the best one among the subjects the journal belongs to; which one to use depends on which your institution or the journal you submit to recognizes. When you are done, click back to “CAS” in the same place; the screenshots after this use CAS zones.</p>
+        <p>The two kinds of zone can differ a lot: a journal that is zone 3 in CAS may well be Q1 in JCR. The JCR zone takes the best one among the subjects the journal belongs to; which one to use depends on which your institution or the journal you submit to recognizes. When you are done, click back to “CAS” in the same place; the screenshots after this use CAS zones.</p>
       </section>
 
       <section id="s5">
         <h2><i>5</i>Journals on the warning list</h2>
-        <p>None of the original 28 papers in this library is in a warning journal. To see what one looks like, click “Add papers”, choose “Add by DOI / PMID / web address…”, and add an article from Natural Resources Forum (DOI <code>10.1111/1477-8947.12555</code>, about foreign investment in agriculture and methane emissions in sub-Saharan Africa, unrelated to the topic of this library). This journal is on the international journal warning list 2025.</p>
-        <p>Once it is added, the impact factor and zone in its row are no longer gray but in a warning color. Click the column name “Zone” twice to sort from zone 4, and it comes first. Rest the pointer on the number and you see the journal name, all its metrics and the reason for the warning:</p>
+        <p>None of the 515 papers in this library is in a warning journal. To see what one looks like, click “Add papers”, choose “Add by DOI / PMID / web address…”, and add an article from Natural Resources Forum (DOI <code>10.1111/1477-8947.12555</code>, about foreign investment in agriculture and methane emissions in sub-Saharan Africa, unrelated to the topic of this library). This journal is on the international journal warning list 2025.</p>
+        <p>Once it is added, the impact factor and zone in its row are no longer gray but in a warning color. Rest the pointer on the number and you see the journal name, all its metrics and the reason for the warning. The reason comes from the list that comes with the app and is written in Chinese even in the English interface:</p>
 
         <figure class="shot">
-          <img src="../../img/t/rank-07-warning.jpg" width="1372" height="867" loading="lazy" alt="The paper list sorted by CAS zone from zone 4 to zone 1; the first row is Natural Resources Forum, its impact factor 4.7 and its zone Zone 4 in orange; the pointer rests on the zone and the tooltip reads Natural Resources Forum, IF 4.7 · JCR Q2 · CAS Zone 4 · XR Zone 3, International journal warning list 2025: paper mill. The Screening value of this row is Pending.">
-          <figcaption><b>Figure 7.</b> The numbers of a warning journal are in a warning color; hovering shows the reason, “International journal warning list 2025: paper mill”.</figcaption>
+          <img src="../../img/en/t/rank-07-warning.jpg" width="1372" height="870" loading="lazy" alt="The paper list; the first row is a 2026 paper in Natural Resources Forum, its impact factor 4.7 and its zone Zone 4 in orange. The pointer rests on the zone and the tooltip has three lines: Natural Resources Forum; IF 4.7 · JCR Q2 · CAS Zone 4 · XR Zone 3; and a third line in Chinese that gives the reason, International journal warning list 2025: paper mill. The rows below are bioRxiv preprints with short dashes.">
+          <figcaption><b>Figure 7.</b> The numbers of a warning journal are in a warning color; hovering shows the journal, its metrics and the reason, here <span lang="zh-CN">国际期刊预警名单 2025：论文工厂</span> (International journal warning list 2025: paper mill).</figcaption>
         </figure>
 
-        <p>In its details, the line under the journal reads “IF 4.7 · JCR Q2 · CAS Zone 4 · XR Zone 3”, followed, in the same color, by “International journal warning list 2025: paper mill”.</p>
+        <p>In its details, the line under the journal reads “IF 4.7 · JCR Q2 · CAS Zone 4 · XR Zone 3”, followed, in the same color, by the same reason, <span lang="zh-CN">国际期刊预警名单 2025：论文工厂</span>.</p>
         <p>Being on the warning list does not mean this particular paper has a problem; the list speaks of the risk of the journal as a whole. For a paper like this, check its data and methods more closely before you cite it, or find a paper published elsewhere that backs it up.</p>
         <aside class="note"><b>Tip</b>In the tables the app carries, the international journal warning list 2025 has only 5 journals; journals marked “Under Review” in the XR journal zone table are also counted as warnings, with the reason “XR journal zone table Under Review”, for example Heliyon.</aside>
       </section>
 
       <section id="s6">
         <h2><i>6</i>Filter by range: year, impact factor, zone</h2>
-        <p>Sorting puts what you want first; filtering keeps only what you want. Among the row of filter buttons above the list, “Year”, “Impact factor” and “Zone” can filter by range. The screenshots in this section come from another demo library of the same name on v0.17.0, with 61 papers from 2021 to 2026, imported from a PubMed search, so the numbers differ from the sections above.</p>
-        <p>Click “Year”: at the top is “All”, then “Last 3 years”, “Last 5 years”, “Last 10 years” and “Custom range…”, and below those one row per year. Beside each item is the number of papers in the whole library that match it. Here “Last 3 years” is 45 papers, which is the 15, 5 and 25 papers of 2024, 2025 and 2026.</p>
+        <p>Sorting puts what you want first; filtering keeps only what you want. Among the row of filter buttons above the list, “Year”, “Impact factor” and “Zone” can filter by range. The counts in the menus below are those of the whole library.</p>
+        <p>Click “Year”: at the top is “All”, then “Last 3 years”, “Last 5 years”, “Last 10 years” and “Custom range…”, and below those one row per year. Beside each item is the number of papers in the whole library that match it. Here “Last 3 years” is 332 papers: the 68, 100 and 163 papers of 2024, 2025 and 2026, plus one dated 2027.</p>
 
         <figure class="shot">
-          <img src="../../img/t/rank-09-year.jpg" width="1372" height="867" loading="lazy" alt="The menu under the Year button: All (ticked), Last 3 years 45, Last 5 years 47, Last 10 years 61, Custom range…; below a divider 2026 25, 2025 5, 2024 15, 2023 1, 2022 1, 2021 14.">
+          <img src="../../img/en/t/rank-09-year.jpg" width="1372" height="870" loading="lazy" alt="The menu of the Year filter: All (ticked), Last 3 years 332, Last 5 years 427, Last 10 years 505, Custom range…; below a divider one row per year, 2027 1, 2026 163, 2025 100, 2024 68, 2023 50, 2022 45, 2021 41, 2020 17, 2019 11, 2018 8 and older years down to 2006 1.">
           <figcaption><b>Figure 8.</b> The “Year” menu. The number beside each item is how many papers in the whole library match it.</figcaption>
         </figure>
 
         <p>“Custom range…” opens a small dialog with two boxes for the earliest and the latest year. Filling in only one box works too: only the first means that year and later, only the second means that year and earlier. Papers without a year are not in the result.</p>
 
         <figure class="shot">
-          <img src="../../img/t/rank-10-range.jpg" width="1372" height="867" loading="lazy" alt="The Year range dialog: two input boxes with the hints From, e.g. 2000 and To, may be left empty, and to between them; below, a note that one box is enough and that papers without a year are left out; the buttons are Cancel and Filter.">
+          <img src="../../img/en/t/rank-10-range.jpg" width="1372" height="870" loading="lazy" alt="The Year range dialog: two input boxes with the hints From, e.g. 2000 and To, may be left empty, and “to” between them; below, a note that one box is enough and that papers without a year are left out; the buttons are Cancel and Filter.">
           <figcaption><b>Figure 9.</b> A custom range of years.</figcaption>
         </figure>
 
         <p>“Impact factor” has “≥ 3”, “≥ 5”, “≥ 10”, “≥ 20” and “Custom range…”, again with the number of papers for each. The custom dialog also has two boxes, lowest and highest. The impact factor comes from the JCR data that comes with the app, and papers whose journal is not in it (a preprint on bioRxiv, say) are not in the result.</p>
 
         <figure class="shot">
-          <img src="../../img/t/rank-11-impact.jpg" width="1372" height="867" loading="lazy" alt="The menu under the Impact factor button: All (ticked), ≥ 3 51, ≥ 5 47, ≥ 10 28, ≥ 20 6, Custom range…">
+          <img src="../../img/en/t/rank-11-impact.jpg" width="1372" height="870" loading="lazy" alt="The menu of the Impact factor filter: All (ticked), ≥ 3 357, ≥ 5 318, ≥ 10 123, ≥ 20 23, Custom range…">
           <figcaption><b>Figure 10.</b> The steps of “Impact factor” and the number of papers in each.</figcaption>
         </figure>
 
         <figure class="shot">
-          <img src="../../img/t/rank-14-impact-range.jpg" width="1372" height="867" loading="lazy" alt="The Impact factor range dialog: two input boxes with the hints At least, e.g. 5 and At most, may be left empty; below, a note that one box is enough and that the impact factor comes from the JCR data that comes with the app, and papers whose journal is not in it are left out; the buttons are Cancel and Filter.">
+          <img src="../../img/en/t/rank-14-impact-range.jpg" width="1372" height="870" loading="lazy" alt="The Impact factor range dialog: two input boxes with the hints At least, e.g. 5 and At most, may be left empty (cut off), and “to” between them; below, a note that one box is enough and that impact factors are the JCR data that comes with the app, and papers of journals it does not hold are left out; the buttons are Cancel and Filter.">
           <figcaption><b>Figure 11.</b> A custom range of impact factors.</figcaption>
         </figure>
 
         <p>“Zone” gives three steps according to the zone table in use: with CAS zones they are “CAS Zone 1”, “CAS Zones 1–2” and “CAS Zones 1–3”, and after switching to JCR they are “JCR Q1”, “JCR Q1–Q2” and “JCR Q1–Q3”. The lower half of the menu is “Partition: CAS”, “Partition: XR” and “Partition: JCR”; you can switch tables right here, and the “Zone” column of the list follows.</p>
 
         <figure class="shot">
-          <img src="../../img/t/rank-12-zone.jpg" width="1372" height="867" loading="lazy" alt="The menu under the Zone button: All (ticked), CAS Zone 1 35, CAS Zones 1–2 47, CAS Zones 1–3 54; below a divider Partition: CAS (ticked), Partition: XR, Partition: JCR.">
+          <img src="../../img/en/t/rank-12-zone.jpg" width="1372" height="870" loading="lazy" alt="The menu of the Zone filter: All (ticked), CAS Zone 1 232, CAS Zones 1–2 330, CAS Zones 1–3 357; below a divider Partition: CAS (ticked), Partition: XR, Partition: JCR.">
           <figcaption><b>Figure 12.</b> The “Zone” menu; its lower half switches the zone table.</figcaption>
         </figure>
 
-        <p>Several can be combined. In this example “Last 3 years”, “≥ 10” and “CAS Zone 1” were chosen in turn: the three buttons turn green, reading “Year: Last 3 years”, “Impact factor: ≥ 10” and “Zone: CAS Zone 1”, and “Clear filters” appears on the right; the bottom of the list reads “Showing 20 / 61 papers”, and the numbers beside “All papers”, “Unread” and “Missing PDF” in the sidebar are also the filtered 20.</p>
+        <p>Several can be combined. In this example “Last 3 years”, “≥ 10” and “CAS Zone 1” were chosen in turn: the three buttons turn green, reading “Year: Last 3 years”, “Impact factor: ≥ 10” and “Zone: CAS Zone 1”, and “Clear filters” appears on the right; the bottom of the list reads “Showing 88 / 516 papers”, and the numbers beside “All papers”, “Unread” and “Missing PDF” in the sidebar are also the filtered 88.</p>
 
         <figure class="shot">
-          <img src="../../img/t/rank-13-filtered.jpg" width="1372" height="867" loading="lazy" alt="The list with three filters combined: on the filter bar the green Year: Last 3 years, Impact factor: ≥ 10, Zone: CAS Zone 1 and Clear filters; the list holds papers from 2024 to 2026 with impact factors from 11.3 to 32.7, Zone 1 Top, such as Plant communications, Trends in plant science and Molecular plant; the bottom reads Showing 20 / 61 papers; All papers in the sidebar is 20.">
-          <figcaption><b>Figure 13.</b> Three combined: the last three years, impact factor at least 10, CAS zone 1. Of 61 papers, 20 are left.</figcaption>
+          <img src="../../img/en/t/rank-13-filtered.jpg" width="1372" height="870" loading="lazy" alt="The list with three filters combined: on the filter bar the green Year: Last 3 years, Impact factor: ≥ 10, Zone: CAS Zone 1 and Clear filters; the list is sorted by impact factor and holds papers from 2024 to 2026, from Nature 56.1 and Cell 45.1 through Molecular plant 32.7 to Trends in plant science 21.2, all Zone 1; the bottom reads Showing 88 / 516 papers; All papers in the sidebar is 88.">
+          <figcaption><b>Figure 13.</b> Three combined: the last three years, impact factor at least 10, CAS zone 1. Of 516 papers, 88 are left.</figcaption>
         </figure>
       </section>
 
@@ -253,7 +253,7 @@
         <h2>Recap</h2>
         <ul>
           <li>The “Impact factor” and “Zone” columns of the paper list come from four lists that come with the app, with no network; right-click the header to show or put away columns.</li>
-          <li>Click a column name to sort and bring the papers to read first to the top; journals that cannot be found (only bioRxiv in this example) show “—” and sink to the end.</li>
+          <li>Click a column name to sort and bring the papers to read first to the top; journals that cannot be found (preprint servers such as bioRxiv in this example) show “—” and sink to the end.</li>
           <li>In the details, the line under the journal gives all the metrics; “Settings › Appearance › Journal zones” decides whether the list shows CAS, XR or JCR.</li>
           <li>Journals on the warning list are shown in a warning color; hover to see the reason.</li>
           <li>“Year”, “Impact factor” and “Zone” on the filter bar filter by range: last N years or a custom range, ≥ some impact factor or a custom range, zone 1 up to zones 1–3, and several can be combined.</li>
@@ -282,7 +282,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> The screenshots and numbers come from a real run in November 2026 on macOS with v0.16.0; section 6 is from a run on another demo library with v0.17.0. The model answers differently each time, so your wording and numbers will differ; the steps are the same. The screenshots show the Chinese interface; the text uses the labels of the English one (Settings › General › Interface language).</p>
+      <p><b>About this tutorial.</b> All but the last screenshot were retaken on November 24, 2026 on macOS with v0.17.0, with the English interface, on a library of 515 included papers; the last one still shows the Chinese interface and the earlier run. The model answers differently each time, so your wording and numbers will differ; the steps are the same. The text uses the labels of the English interface (Settings › General › Interface language).</p>
       <p><b>The assistant can be wrong.</b> Confirm its suggestions and answers yourself; check key numbers and conclusions against the original.</p>
     </div>
   </div>
