@@ -4,7 +4,8 @@
 
 use crate::i18n::t;
 use crate::input::{InputEvent, TextInput};
-use crate::pdf::{PdfEvent, PdfView, Split, Zoom, ZoomTo};
+use crate::mindmap::{MapEvent, MindMapView};
+use crate::pdf::{PdfEvent, PdfView, Shows, Split, Zoom, ZoomTo};
 use crate::settings::{AiTab, SettingsPage, SettingsView, UpdateState};
 use crate::shortcuts::{self, Dismiss};
 use crate::theme;
@@ -531,6 +532,8 @@ pub enum Cmd {
     FloatPdfTools(bool),
     /// 分屏 自由 or 固定 (`Settings::pdf_split_free`, #245): halves of any width, each zoomed on its own, or of one size zoomed together.
     PdfSplitFree(bool),
+    /// 导图 on the PDF's bar: the paper's mind map as a column of the reader, or that column put away.
+    PdfMap,
     /// Out of the layout for asking about a paper: the tab it was come to from, with the library around it.
     LeaveAsk,
     /// The paper's conversation floats over its PDF, or stands beside it (`Settings::floating`).
@@ -3920,7 +3923,8 @@ impl Workspace {
                     return cx.notify();
                 }
                 // 自由: the file again in a viewer of its own beside it (with 译文 on, the split says where the translation stands).
-                if split != Split::Off && self.settings.pdf_split_free && self.lib.as_ref().is_some_and(|lib| !lib.facing_shown()) {
+                // (A viewer that shows the map beside its pages stays one viewer: its second half comes inside it.)
+                if split != Split::Off && self.settings.pdf_split_free && self.lib.as_ref().is_some_and(|lib| !lib.facing_shown() && !lib.pdf.as_ref().is_some_and(|pdf| pdf.read(cx).map_shown())) {
                     self.split_itself(split, None, false, cx);
                     return;
                 }
@@ -3982,7 +3986,17 @@ impl Workspace {
             Cmd::StopBatchTranslation => {
                 if let Some(run) = self.lib.as_mut().and_then(|lib| lib.translation_run.as_mut()) { run.batch.stop() }
             }
-            Cmd::ToggleFacing => self.toggle_facing(cx),
+            Cmd::ToggleFacing => {
+                // A translation beside the pages is a column more: with three there, say so instead of turning 译文 on to no effect.
+                let full = !self.settings.facing_in_place && self.lib.as_ref().is_some_and(|lib| !lib.facing && lib.pdf.as_ref().is_some_and(|pdf| pdf.read(cx).full()));
+                if full { return self.say(t("已经有三栏了：先关掉一栏，或在某一栏的标签里选「显示译文」。"), cx) }
+                self.toggle_facing(cx)
+            }
+            Cmd::PdfMap => {
+                let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) else { return };
+                if self.ensure_map(&pdf, cx).is_none() { return }
+                if !pdf.update(cx, |pdf, cx| pdf.toggle_map(cx)) { self.say(t("已经有三栏了：先关掉一栏，或在某一栏的标签里选「显示导图」。"), cx) }
+            }
             Cmd::FacingRun => self.run_facing(cx),
             Cmd::FacingRunPane(paper) => self.run_pinned_facing(&paper, cx),
             Cmd::FacingStop => self.stop_facing(cx),
@@ -5770,12 +5784,114 @@ impl Workspace {
     }
 
     /// What the PDF viewer reports: its selection copied, or handed to a conversation.
+    /// The mind map of a viewer's paper, made for the viewer the first time it is asked for: the one kept in
+    /// the library, or a new one with the paper's title for its root (kept once something is made of it).
+    pub(crate) fn ensure_map(&mut self, viewer: &Entity<PdfView>, cx: &mut Context<Self>) -> Option<Entity<MindMapView>> {
+        if let Some(map) = viewer.read(cx).map() { return Some(map.clone()) }
+        let paper = viewer.read(cx).paper_id().to_string();
+        let lib = self.lib.as_ref()?;
+        let title = lib.papers.iter().find(|p| p.id == paper).map(|p| p.title.clone()).unwrap_or_default();
+        let kept = match lib.store.mind_map(&paper) {
+            Ok(kept) => kept,
+            Err(error) => {
+                self.fail(tf!("无法读取思维导图：{error:#}", "Cannot read the mind map: {error:#}"), cx);
+                return None;
+            }
+        };
+        let map = cx.new(|cx| MindMapView::new(kept.unwrap_or_else(|| wisp_core::mindmap::MindMap::new(&title)), cx));
+        // The viewer holds the map and this hearing of it: a strong hold on the viewer here would keep both for ever.
+        let weak = viewer.downgrade();
+        let heard = cx.subscribe(&map, move |this, map, event: &MapEvent, cx| if let Some(viewer) = weak.upgrade() { this.map_event(&viewer, &map, event, cx) });
+        viewer.update(cx, |pdf, _| pdf.set_map(map.clone(), heard));
+        Some(map)
+    }
+
+    /// What was done in a viewer's mind map: a change is kept and shown by every other viewer of the paper, a
+    /// node's page is gone to in the viewer the map stands in, and a draft is asked of the model.
+    fn map_event(&mut self, viewer: &Entity<PdfView>, map: &Entity<MindMapView>, event: &MapEvent, cx: &mut Context<Self>) {
+        let (paper, shown) = { let pdf = viewer.read(cx); (pdf.paper_id().to_string(), pdf.resource_id().to_string()) };
+        match event {
+            MapEvent::Changed => {
+                let kept = map.read(cx).map().clone();
+                let Some(lib) = self.lib.as_mut() else { return };
+                if let Err(error) = lib.store.save_mind_map(&paper, &kept) { return self.fail(tf!("无法保存思维导图：{error:#}", "Cannot save the mind map: {error:#}"), cx) }
+                let viewers = lib.pdf.iter().chain(lib.beside.iter().map(|beside| &beside.view)).chain(lib.pins.iter().map(|pin| &pin.view)).chain(lib.windows.iter().map(|window| &window.view));
+                let others: Vec<Entity<MindMapView>> = viewers.filter(|other| *other != viewer && other.read(cx).paper_id() == paper).filter_map(|other| other.read(cx).map().cloned()).collect();
+                for other in others { other.update(cx, |other, cx| other.set_map(kept.clone(), cx)) }
+            }
+            MapEvent::Goto(anchor) => {
+                if anchor.file.is_empty() || anchor.file == shown { return viewer.update(cx, |pdf, cx| pdf.find(anchor.page, &anchor.quote, cx)) }
+                // Another file of the paper: the panel shows it; a pane or a window of its own reads its one file.
+                if self.lib.as_ref().is_none_or(|lib| lib.pdf.as_ref() != Some(viewer)) { return self.say(t("这段出处在这篇文献的另一个文件里：在文献库窗口里读这篇，才能前往。"), cx) }
+                self.show_file(&paper, Some(anchor.file.clone()), cx);
+                if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.find(anchor.page, &anchor.quote, cx)) }
+            }
+            MapEvent::Draft => self.draft_map(viewer, map, cx),
+        }
+    }
+
+    /// A draft of a paper's mind map from the model (the assistant's): written from the text of the file the
+    /// viewer shows, its passages looked up on the pages, and then the reader's to change. It takes the place
+    /// of the map there, which is a step of Undo away.
+    pub(crate) fn draft_map(&mut self, viewer: &Entity<PdfView>, map: &Entity<MindMapView>, cx: &mut Context<Self>) {
+        if map.read(cx).drafting() { return }
+        let profile = self.settings.profile_for_or_default(wisp_core::settings::Task::Chat);
+        let language = match self.settings.language { wisp_core::settings::Language::Zh => "中文", wisp_core::settings::Language::En => "英文" };
+        let Some(lib) = self.lib.as_ref() else { return };
+        let (paper, file) = { let pdf = viewer.read(cx); (pdf.paper_id().to_string(), pdf.resource_id().to_string()) };
+        let Some(paper) = lib.papers.iter().find(|p| p.id == paper).cloned() else { return };
+        let kept = match lib.store.fulltext_pages(&file) { Ok(Some(Ok(pages))) => Some(pages), _ => None };
+        let path = lib.files.iter().find(|f| f.id == file).map(|f| lib.store.file_path(f));
+        let library = lib.info.id.clone();
+        map.update(cx, |map, cx| map.set_drafting(true, cx));
+        let protocol = profile.protocol;
+        let work = cx.background_executor().spawn(async move {
+            // A file that gives no text still has its abstract to draw from.
+            let pages = pages_of(kept, path).unwrap_or_default();
+            let request = wisp_core::mindmap::request(&profile, language, &paper, &pages)?;
+            let reply = wisp_net::complete(request, protocol)?;
+            wisp_core::mindmap::read_reply(&reply, &paper, &file, &pages)
+        });
+        let map = map.downgrade();
+        cx.spawn(async move |this, cx| {
+            let drafted: Result<wisp_core::mindmap::MindMap, String> = work.await;
+            this.update(cx, |this, cx| {
+                // The library was closed since, or the viewer with its map.
+                if this.lib.as_ref().is_none_or(|lib| lib.info.id != library) { return }
+                let Some(map) = map.upgrade() else { return };
+                map.update(cx, |map, cx| match drafted {
+                    Ok(drafted) => map.take_draft(drafted, cx),
+                    Err(error) => map.draft_failed(error, cx),
+                });
+            }).ok();
+        }).detach();
+    }
+
     fn pdf_event(&mut self, view: Entity<PdfView>, event: &PdfEvent, cx: &mut Context<Self>) {
         match event {
             PdfEvent::Worked => self.work_in(&view, cx),
             // A view's label asked for a translation, or gave up the last one: what the 译文 switch does.
             PdfEvent::Facing(on) => if self.lib.as_ref().is_some_and(|lib| lib.facing != *on) { self.toggle_facing(cx) },
             // A press in the pane of a paper kept beside: that paper is the one worked in from here on.
+            // The paper's mind map is asked for: by a view's label, or by 导图 for a viewer that had none yet.
+            PdfEvent::Map(at) => {
+                if self.ensure_map(&view, cx).is_none() { return }
+                let shown = view.update(cx, |pdf, cx| match at {
+                    Some(at) => { pdf.show_in_view(*at, Shows::Map, cx); true }
+                    None => pdf.toggle_map(cx),
+                });
+                if !shown { self.say(t("已经有三栏了：先关掉一栏，或在某一栏的标签里选「显示导图」。"), cx) }
+            }
+            // 加到导图: the passage is a node under the one chosen, pointing back at its page; the map comes into view.
+            PdfEvent::MapPassage(page, text) => {
+                let Some(map) = self.ensure_map(&view, cx) else { return };
+                let file = view.read(cx).resource_id().to_string();
+                let quote = text.split_whitespace().collect::<Vec<_>>().join(" ");
+                // A node is a few words: a long passage is cut for it, and kept whole as what it points at.
+                let words = if quote.chars().count() > 60 { quote.chars().take(60).collect::<String>() + "…" } else { quote.clone() };
+                map.update(cx, |map, cx| map.add_passage(&words, wisp_core::mindmap::Anchor { file, page: *page, quote }, cx));
+                if !view.update(cx, |pdf, cx| pdf.map_shown() || pdf.toggle_map(cx)) { self.say(t("已加到导图。现在有三栏，关掉一栏就能看到它。"), cx) }
+            }
             PdfEvent::Pressed => {
                 if let Some(paper) = self.lib.as_ref().and_then(|lib| lib.pins.iter().find(|pin| pin.view == view).map(|pin| pin.paper.clone())) { self.work_in_pane(&paper, cx) }
             }
@@ -9227,13 +9343,29 @@ impl Workspace {
                 }
                 // `pdfview:<n>;pages|theirs|before|after|close|menu`: the label of the n-th view (from 0) of the PDF on show:
                 // it shows the pages / their translation, changes places with the view before / after it, is closed, or opens its menu.
+                // `pdfmap`: 导图 on the PDF's bar. `pdfmap:add` makes what is selected a node (after `pdfpick:`), `pdfmap:draft`
+                // asks the model for a draft, and anything else is a step in the map (`MindMapView::script`: `child:<words>`,
+                // `sibling:<words>`, `remove`, `fold`, `indent`, `outdent`, `undo`, `redo`, `up`, `down`, `in`, `out`).
+                "pdfmap" => {
+                    let Some(pdf) = self.lib.as_ref().and_then(|l| l.pdf.clone()) else { return };
+                    match arg {
+                        "" => return self.run(Cmd::PdfMap, window, cx),
+                        "add" => pdf.update(cx, |pdf, cx| pdf.map_selection(cx)),
+                        _ => {
+                            let Some(map) = self.ensure_map(&pdf, cx) else { return };
+                            if arg == "draft" { self.draft_map(&pdf, &map, cx) } else { map.update(cx, |map, cx| map.script(arg, cx)) }
+                        }
+                    }
+                    return;
+                }
                 "pdfview" => {
                     let (view, what) = arg.split_once(';').unwrap_or((arg, "menu"));
                     let view = view.parse::<usize>().unwrap_or(0);
                     if let Some(pdf) = self.lib.as_ref().and_then(|l| l.pdf.clone()) {
                         pdf.update(cx, |pdf, cx| match what {
-                            "pages" => pdf.show_in_view(view, false, cx),
-                            "theirs" => pdf.show_in_view(view, true, cx),
+                            "pages" => pdf.show_in_view(view, Shows::Pages, cx),
+                            "theirs" => pdf.show_in_view(view, Shows::Theirs, cx),
+                            "map" => pdf.show_in_view(view, Shows::Map, cx),
                             "before" => pdf.move_view(view, view.saturating_sub(1), cx),
                             "after" => pdf.move_view(view, view + 1, cx),
                             "close" => pdf.close_view(view, cx),
