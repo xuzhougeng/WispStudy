@@ -649,6 +649,7 @@ impl Workspace {
         view.update(cx, |pdf, _| {
             pdf.set_width(width);
             pdf.library_chat = library_chat;
+            pdf.translates = true;
         });
         let (page, count) = { let view = view.read(cx); (view.current_page(), view.page_count()) };
         let window: &Window = window;
@@ -720,6 +721,7 @@ impl Workspace {
             view.update(cx, |pdf, cx| {
                 pdf.set_width(half_width);
                 pdf.library_chat = library_chat;
+            pdf.translates = true;
                 // Alone in the area, the translation goes beside or under the pages by the width; beside other panes the layout places it (`render_paper_area`).
                 if !paned { pdf.fit_facing(cx) }
             });
@@ -823,7 +825,7 @@ impl Workspace {
             // The same file twice, side by side or one over the other: a figure in one half, the page that speaks of it in the other.
             // With 译文 on it says where the translation stands, on the pages themselves among the places.
             let replaced = bar.facing && self.settings.facing_in_place;
-            let split_label = match bar.split { _ if replaced => t("原地替换"), Split::Off => t("分屏"), Split::Side => t("左右分屏"), Split::Stacked => t("上下分屏") };
+            let split_label = match bar.split { _ if replaced => t("原地替换"), Split::Off => t("分屏"), Split::Side => t("左右分屏"), Split::Stacked => t("上下分屏"), Split::Triple => t("三栏对照") };
             let (split, width) = button("pdf-split", None, "columns-2", split_label, replaced || bar.split != Split::Off, None, named);
             put((split.on_click(self.on_menu(MenuKind::PdfSplit, cx)), width));
             // Cut a piece out of a page (a figure, a table): to keep in the figure library, or as a picture for the next question.
@@ -939,7 +941,7 @@ impl Workspace {
         let list = (width - 16.).clamp(0., 360.);
         if self.settings.pdf_tools_at.is_none() && marks_open && width - list - 16. >= geo::TOOLS.0 + 8. { right = list + 16. }
         let held = self.lib.as_ref().and_then(|lib| lib.float_drag).is_some_and(|drag| drag.held_tools());
-        let split_tip = match split { Split::Off => "分屏", Split::Side => "左右分屏", Split::Stacked => "上下分屏" };
+        let split_tip = match split { Split::Off => "分屏", Split::Side => "左右分屏", Split::Stacked => "上下分屏", Split::Triple => "三栏对照" };
         div()
             .absolute()
             .top(px(top))
