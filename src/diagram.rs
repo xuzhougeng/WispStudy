@@ -3,7 +3,8 @@
 //! makes the SVG in the window's colours; here it becomes pixels (resvg,
 //! off the main thread) and an element as wide as the column allows. On
 //! the picture, on hover: its own size in place of the fitted one (a large
-//! graph scrolls sideways then), a button that copies it as an image on
+//! graph scrolls sideways then, with a bar under it, its cut edges faded and
+//! the picture dragged by hand), a button that copies it as an image on
 //! white, for a slide or a manuscript, and a switch to its source and back.
 
 use crate::i18n::t;
@@ -35,6 +36,15 @@ const FITTED_HEIGHT: f32 = 520.;
 /// From this width on a diagram may have been made smaller to fit the column: then it is offered at its own size.
 const MAY_BE_FITTED: f32 = 480.;
 
+/// Under a picture at its own size wider than the column: how tall the strip is that holds its scrollbar, how
+/// far the track stands in from its ends, how thick the thumb is at rest and under the pointer, and how wide
+/// the fade is at an edge the picture goes on past.
+const STRIP: f32 = 12.;
+const INSET: f32 = 3.;
+const THUMB_H: f32 = 6.;
+const THUMB_H_OVER: f32 = 8.;
+const FADE: f32 = 32.;
+
 /// The most diagrams kept drawn. Each is some tens of kilobytes of SVG; a change of theme draws them all anew.
 const KEPT: usize = 96;
 
@@ -61,6 +71,8 @@ thread_local! {
     static AS_SOURCE: RefCell<HashSet<u64>> = RefCell::new(HashSet::new());
     /// Those asked for at their own size instead of fitted to the column: of this one place, not a habit.
     static OWN_SIZE: RefCell<HashSet<u64>> = RefCell::new(HashSet::new());
+    /// How far each picture at its own size is scrolled, by the place it stands (its element id).
+    static SCROLLS: RefCell<HashMap<u64, ScrollHandle>> = RefCell::new(HashMap::new());
     /// Who hears what a diagram's button asks: the workspace, once it is there.
     static ASKED: RefCell<Option<Rc<dyn Fn(Ask, &mut Window, &mut App)>>> = const { RefCell::new(None) };
 }
@@ -227,12 +239,14 @@ impl Asset for Picture {
 /// between picture and source, lit while the source shows; beside the picture the copy, and for one that may
 /// have been made smaller (`own_size` says whether it is at its own size now) the way to its own size and back.
 fn actions(id: &str, group: &SharedString, source: &str, showing_source: bool, own_size: Option<bool>) -> Div {
-    let (toggled, copied, sized) = (source.to_string(), source.to_string(), source.to_string());
+    let (toggled, copied, sized, place) = (source.to_string(), source.to_string(), source.to_string(), hash_of(id));
     let size = own_size.map(|own| {
         ui::icon_action(SharedString::from(format!("{id}-size")), if own { "zoom-out" } else { "zoom-in" }, if own { Theme::accent() } else { Theme::text_secondary() }, if own { t("适应宽度") } else { t("原始大小") })
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(move |_, window, _| {
                 toggle(&OWN_SIZE, &sized);
+                // Asked for at its own size again, it starts from its left edge.
+                SCROLLS.with(|scrolls| scrolls.borrow_mut().remove(&place));
                 window.refresh();
             })
     });
@@ -278,13 +292,170 @@ pub fn picture(id: &str, source: &str, drawn: &Rc<Drawn>) -> AnyElement {
     let may_be_fitted = drawn.width > MAY_BE_FITTED || drawn.height > FITTED_HEIGHT;
     let own_size = may_be_fitted && OWN_SIZE.with(|own| own.borrow().contains(&hash_of(source)));
     let shown = if own_size {
-        div().id(SharedString::from(format!("{id}-own"))).w_full().overflow_x_scroll().child(picture.flex_none().w(px(drawn.width)).h(px(drawn.height))).into_any_element()
+        let handle = SCROLLS.with(|scrolls| {
+            let mut scrolls = scrolls.borrow_mut();
+            if scrolls.len() >= KEPT { scrolls.clear() }
+            scrolls.entry(hash_of(id)).or_default().clone()
+        });
+        // The strip under the picture is where its scrollbar stands; `Pan` lies over both.
+        let scrolled = div().id(SharedString::from(format!("{id}-own"))).w_full().overflow_x_scroll().track_scroll(&handle).pb(px(STRIP)).child(picture.flex_none().w(px(drawn.width)).h(px(drawn.height)));
+        div().relative().w_full().child(scrolled).child(Pan { id: SharedString::from(format!("{id}-pan")).into(), handle }).into_any_element()
     } else {
         let mut frame = div().w_full().max_w(px(drawn.width.min(FITTED_HEIGHT * ratio)));
         frame.style().aspect_ratio = Some(ratio);
         frame.child(picture.size_full()).into_any_element()
     };
     div().group(group.clone()).relative().w_full().cursor_default().child(shown).child(actions(id, &group, source, false, may_be_fitted.then_some(own_size))).into_any_element()
+}
+
+/// What lies over a picture at its own size that is wider than the column, so that the rest of it is seen to be
+/// there and reached with any pointer, not only a sideways swipe or Shift with the wheel: a scrollbar in the
+/// strip under it (its thumb dragged, its track pressed), the edges it goes on past faded into the ground,
+/// and the picture itself taken by hand and dragged. Where the picture all fits, it is nothing. The wheel goes
+/// through it to the picture and the answer.
+struct Pan {
+    id: ElementId,
+    handle: ScrollHandle,
+}
+
+/// What a press on it took hold of: the thumb, held this far right of its left end, or the picture, taken at
+/// `x` while it was scrolled `offset`.
+#[derive(Clone, Copy)]
+enum Grab {
+    Thumb(f32),
+    Picture { x: Pixels, offset: f32 },
+}
+
+/// Kept between frames: what is held, and where the pointer was when last drawn (over the picture, over the
+/// strip), to know when that changes.
+#[derive(Default)]
+struct Held {
+    grab: Option<Grab>,
+    over: Option<bool>,
+}
+
+/// Measured before it is painted: the thumb on a track `track` long is `len` long and `left` along, of a
+/// picture that scrolls `max` and is scrolled `offset`.
+struct Measured {
+    hitbox: Hitbox,
+    track: f32,
+    len: f32,
+    left: f32,
+    max: f32,
+    offset: f32,
+}
+
+impl IntoElement for Pan {
+    type Element = Self;
+    fn into_element(self) -> Self { self }
+}
+
+impl Element for Pan {
+    type RequestLayoutState = ();
+    type PrepaintState = Option<Measured>;
+
+    fn id(&self) -> Option<ElementId> { Some(self.id.clone()) }
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> { None }
+
+    fn request_layout(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, window: &mut Window, cx: &mut App) -> (LayoutId, ()) {
+        let mut style = Style { position: Position::Absolute, ..Default::default() };
+        style.inset = Edges { top: px(0.).into(), right: px(0.).into(), bottom: px(0.).into(), left: px(0.).into() };
+        (window.request_layout(style, [], cx), ())
+    }
+
+    fn prepaint(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, bounds: Bounds<Pixels>, _: &mut (), window: &mut Window, _: &mut App) -> Option<Measured> {
+        let (view, max, offset) = (f32::from(self.handle.bounds().size.width), f32::from(self.handle.max_offset().width), -f32::from(self.handle.offset().x));
+        let track = f32::from(bounds.size.width) - 2. * INSET;
+        if max < 1. || track < 1. { return None }
+        let (len, left) = crate::scrollbar::thumb(track, view, max, offset.clamp(0., max));
+        Some(Measured { hitbox: window.insert_hitbox(bounds, HitboxBehavior::Normal), track, len, left, max, offset: offset.clamp(0., max) })
+    }
+
+    fn paint(&mut self, id: Option<&GlobalElementId>, _: Option<&InspectorElementId>, bounds: Bounds<Pixels>, _: &mut (), measured: &mut Option<Measured>, window: &mut Window, _: &mut App) {
+        let held = window.with_element_state(id.unwrap(), |state: Option<Rc<RefCell<Held>>>, _| {
+            let state = state.unwrap_or_default();
+            (state.clone(), state)
+        });
+        let Some(Measured { hitbox, track, len, left, max, offset }) = measured.take() else {
+            *held.borrow_mut() = Held::default();
+            return;
+        };
+        let strip_top = bounds.bottom() - px(STRIP);
+        let in_strip = move |y: Pixels| y >= strip_top;
+        let over = hitbox.is_hovered(window).then(|| in_strip(window.mouse_position().y));
+        let grab = held.borrow().grab;
+        held.borrow_mut().over = over;
+
+        // The edges the picture goes on past fade into the ground, so that it is not taken for cut off.
+        let ground = Theme::bg_body();
+        let fade = |x: Pixels| Bounds::new(point(x, bounds.top()), size(px(FADE), strip_top - bounds.top()));
+        if offset > 0.5 { window.paint_quad(fill(fade(bounds.left()), linear_gradient(90., linear_color_stop(ground, 0.), linear_color_stop(ground.opacity(0.), 1.)))) }
+        if offset < max - 0.5 { window.paint_quad(fill(fade(bounds.right() - px(FADE)), linear_gradient(90., linear_color_stop(ground.opacity(0.), 0.), linear_color_stop(ground, 1.)))) }
+
+        // The thumb, always there while there is more to see: the picture alone does not say it scrolls.
+        let thumb_on = over == Some(true) || matches!(grab, Some(Grab::Thumb(_)));
+        let height = if thumb_on { THUMB_H_OVER } else { THUMB_H };
+        let thumb_bounds = Bounds::new(point(bounds.left() + px(INSET + left), bounds.bottom() - px(INSET + height - 1.)), size(px(len), px(height)));
+        window.paint_quad(fill(thumb_bounds, Theme::text_tertiary().opacity(if thumb_on { 0.85 } else { 0.4 })).corner_radii(px(height / 2.)));
+        let cursor = match (grab, over) {
+            (Some(Grab::Picture { .. }), _) => CursorStyle::ClosedHand,
+            (Some(Grab::Thumb(_)), _) | (None, Some(true)) => CursorStyle::Arrow,
+            _ => CursorStyle::OpenHand,
+        };
+        window.set_cursor_style(cursor, &hitbox);
+
+        let view = window.current_view();
+        let handle = self.handle.clone();
+        let origin = bounds.left() + px(INSET);
+        let go = Rc::new(move |to: f32| {
+            let y = handle.offset().y;
+            handle.set_offset(point(px(-to.clamp(0., max)), y));
+        });
+        let go_moved = go.clone();
+        let (down, moved, up) = (held.clone(), held.clone(), held);
+        let pressed = hitbox.clone();
+        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+            if !phase.bubble() || event.button != MouseButton::Left || !pressed.is_hovered(window) { return }
+            let grab = if in_strip(event.position.y) {
+                // Pressed on the thumb, it is held where it was taken; beside it, its middle comes under the pointer.
+                let at = f32::from(event.position.x - origin);
+                let grab = if at >= left && at <= left + len { at - left } else { len / 2. };
+                go(crate::scrollbar::offset_at(track, len, max, at - grab));
+                Grab::Thumb(grab)
+            } else {
+                Grab::Picture { x: event.position.x, offset }
+            };
+            down.borrow_mut().grab = Some(grab);
+            cx.stop_propagation();
+            cx.notify(view);
+        });
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+            if !phase.bubble() { return }
+            let grab = moved.borrow().grab;
+            match grab {
+                Some(grab) if event.pressed_button == Some(MouseButton::Left) => {
+                    match grab {
+                        Grab::Thumb(grab) => go_moved(crate::scrollbar::offset_at(track, len, max, f32::from(event.position.x - origin) - grab)),
+                        Grab::Picture { x, offset } => go_moved(offset - f32::from(event.position.x - x)),
+                    }
+                    cx.notify(view);
+                }
+                // Let go somewhere the release was not heard.
+                Some(_) => {
+                    moved.borrow_mut().grab = None;
+                    cx.notify(view);
+                }
+                None => {
+                    let now = hitbox.is_hovered(window).then(|| in_strip(event.position.y));
+                    if now != moved.borrow().over { cx.notify(view) }
+                }
+            }
+        });
+        window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+            if !phase.bubble() || event.button != MouseButton::Left { return }
+            if up.borrow_mut().grab.take().is_some() { cx.notify(view) }
+        });
+    }
 }
 
 /// A diagram's source as it is shown in place of the picture: `code` is the block of code as any other is
