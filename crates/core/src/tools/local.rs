@@ -422,9 +422,79 @@ fn deck_of(store: &Store, args: &Value) -> Result<(crate::pptx::Deck, Vec<String
     Ok((deck, notes))
 }
 
+/// A PowerPoint file given as a reference, read.
+fn reference_at(path: &str) -> Result<crate::slideref::Reference> {
+    let file = Path::new(path);
+    if !file.extension().is_some_and(|e| e.eq_ignore_ascii_case("pptx") || e.eq_ignore_ascii_case("potx")) { bail!("参考文件应是 .pptx 或 .potx 文件：{path}（旧的 .ppt 请先在 PowerPoint 里另存为 .pptx）") }
+    // Read whole: a deck of a talk, not an archive of films.
+    if std::fs::metadata(file).is_ok_and(|about| about.len() > 400 << 20) { bail!("{path} 太大（超过 400 MB），读不了。") }
+    let bytes = std::fs::read(file).with_context(|| format!("无法读取 {path}"))?;
+    crate::slideref::Reference::read(&bytes).with_context(|| path.to_string())
+}
+
+/// The layouts of a reference that new slides stand on, by the names PowerPoint lists them under.
+fn reference_layouts(reference: &crate::slideref::Reference) -> Value {
+    let name = |at: usize| reference.layouts.get(at).map(|layout| if layout.name.is_empty() { layout.kind.clone() } else { layout.name.clone() }).unwrap_or_default();
+    json!({"cover": name(reference.cover), "section": name(reference.opening), "content": name(reference.content)})
+}
+
+const DRAWN: &str = "参考文件里的大多数页不是用版式里的标题和正文占位符排的（文字是直接画在页面上的文本框）。新幻灯片建在它的母版和版式上，背景和主题是它的，但每一页的排法不会和它原来的页一样。";
+
+/// What a PowerPoint file says and how it looks, for making slides after it. Nothing is written.
+pub(super) fn read_slides(args: &Value) -> Result<Value> {
+    let path = text(args, "path")?;
+    let reference = reference_at(path)?;
+    let total = reference.slides.len();
+    let from = (args["from"].as_u64().unwrap_or(1).max(1) as usize).min(total.max(1));
+    let count = args["count"].as_u64().unwrap_or(40).clamp(1, 200) as usize;
+    let clip = |text: &str, most: usize| if text.chars().count() > most { format!("{}…", text.chars().take(most).collect::<String>()) } else { text.to_string() };
+    let slides: Vec<Value> = reference.slides.iter().enumerate().skip(from - 1).take(count).map(|(n, slide)| {
+        // A text under another stands in by two spaces a level, as the bullets of make_slides do.
+        let mut left = 1500usize;
+        let mut lines = vec![];
+        for (level, line) in &slide.lines {
+            if left == 0 { lines.push("…".to_string()); break }
+            let line = clip(line, left.min(400));
+            left = left.saturating_sub(line.chars().count());
+            lines.push(format!("{}{line}", "  ".repeat(*level)));
+        }
+        let mut one = json!({"n": n + 1, "title": slide.title, "text": lines});
+        if let Some(layout) = slide.layout.and_then(|at| reference.layouts.get(at)) { one["layout"] = json!(layout.name) }
+        if slide.pictures > 0 { one["pictures"] = json!(slide.pictures) }
+        if !slide.notes.is_empty() { one["notes"] = json!(clip(&slide.notes, 600)) }
+        one
+    }).collect();
+    let theme = &reference.theme;
+    let shape = match reference.wide / reference.high {
+        ratio if (ratio - 16.0 / 9.0).abs() < 0.02 => "16:9".to_string(),
+        ratio if (ratio - 4.0 / 3.0).abs() < 0.02 => "4:3".to_string(),
+        ratio if (ratio - 1.6).abs() < 0.02 => "16:10".to_string(),
+        _ => format!("{:.0} × {:.0} pt", reference.wide, reference.high),
+    };
+    let shown = from - 1 + slides.len();
+    let mut next = "这是参考，不是要讲的内容。做幻灯片时把这个文件的路径填进 make_slides 的 reference：新文件建在它的母版和版式上（asReference 里是会用到的三个版式），内容由你按文献来写；要沿用它的讲法时，照 slides 里的分节、每页的要点数和语气来排。".to_string();
+    if shown < total { next.push_str(&format!("这里只列到第 {shown} 页，共 {total} 页：要看后面的，带 from: {} 再读一次。", shown + 1)) }
+    let mut out = json!({
+        "path": path,
+        "slideCount": total,
+        "shape": shape,
+        "theme": {"name": theme.name, "headingFont": theme.heading, "bodyFont": theme.body, "chineseFont": theme.chinese, "text": theme.text, "background": theme.background, "accent": theme.accent},
+        "layouts": reference.layouts.iter().filter(|layout| layout.used > 0).map(|layout| json!({"name": layout.name, "slides": layout.used})).collect::<Vec<_>>(),
+        "asReference": reference_layouts(&reference),
+        "slides": slides,
+        "next": next,
+    });
+    if reference.drawn { out["caution"] = json!(DRAWN) }
+    Ok(out)
+}
+
 /// Slides as a .pptx file where the caller says, or in the person's documents under the deck's title; no file is written over.
 pub(super) fn make_slides(store: &Store, args: &Value) -> Result<Value> {
     let (deck, mut notes) = deck_of(store, args)?;
+    let reference = match text(args, "reference")? {
+        "" => None,
+        path => Some((path, reference_at(path)?)),
+    };
     let output = match text(args, "output")? {
         "" => {
             let folder = dirs::document_dir().or_else(dirs::home_dir).unwrap_or_else(|| store.root().to_path_buf());
@@ -435,20 +505,27 @@ pub(super) fn make_slides(store: &Store, args: &Value) -> Result<Value> {
     };
     if !output.extension().is_some_and(|e| e.eq_ignore_ascii_case("pptx")) { bail!("输出路径应是 .pptx 文件：{}", output.display()) }
     if output.exists() { bail!("{} 已存在，不会覆盖。请换一个文件名。", output.display()) }
-    let written = crate::pptx::write(&deck);
+    let written = match &reference {
+        Some((_, reference)) => crate::pptx::write_on(&deck, reference)?,
+        None => crate::pptx::write(&deck),
+    };
     let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&output).with_context(|| format!("无法创建 {}（已有文件不会覆盖）", output.display()))?;
     std::io::Write::write_all(&mut file, &written.bytes).with_context(|| format!("无法写入 {}", output.display()))?;
     let pages = |numbers: &[usize]| numbers.iter().map(|n| n.to_string()).collect::<Vec<_>>().join("、");
     if !written.continued.is_empty() { notes.push(format!("第 {} 页的要点一页放不下，接着排在了下一页（标题带「续」）。", pages(&written.continued))) }
     if !written.clipped.is_empty() { notes.push(format!("第 {} 页的图注太长，幻灯片上只留了前三行，全文在这一页的备注里。", pages(&written.clipped))) }
-    Ok(json!({
+    if reference.as_ref().is_some_and(|(_, reference)| reference.drawn) { notes.push(DRAWN.to_string()) }
+    let mut out = json!({
         "output": output,
         "title": deck.title,
         "slides": written.pages,
         "pictures": deck.slides.iter().filter(|slide| slide.picture.is_some()).count(),
         "notes": notes,
         "next": "文件已写好。告诉用户文件在哪里（路径照原样写出，不要写成链接）、共几页、放了几张图，以及 notes 里说的情况；请用户在 PowerPoint、Keynote 或 WPS 里打开看版面，要改哪一页告诉你。",
-    }))
+    });
+    // Which file the look is from, and on which of its layouts the slides stand.
+    if let Some((path, reference)) = &reference { out["reference"] = json!({"path": path, "layouts": reference_layouts(reference)}) }
+    Ok(out)
 }
 
 #[cfg(test)]

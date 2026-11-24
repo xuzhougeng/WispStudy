@@ -103,9 +103,10 @@ pub enum Do {
     Manuscript(bool),
 }
 
-/// Whether a file can start a conversation: a Word file (a manuscript to review) or a PDF (a paper to talk about).
+/// Whether a file can start a conversation: a Word file (a manuscript to review), a PDF (a paper to talk about) or
+/// a PowerPoint file (the reference slides are made after).
 pub fn starts_one(path: &Path) -> bool {
-    path.is_file() && path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("docx") || e.eq_ignore_ascii_case("pdf"))
+    path.is_file() && (crate::comments::is_deck(path) || path.extension().and_then(|e| e.to_str()).is_some_and(|e| e.eq_ignore_ascii_case("docx") || e.eq_ignore_ascii_case("pdf")))
 }
 
 impl Workspace {
@@ -191,13 +192,15 @@ impl Workspace {
     /// words that say what the file is for; nothing is sent by itself.
     pub(crate) fn home_attach(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
         let paths: Vec<PathBuf> = paths.into_iter().filter(|path| starts_one(path)).collect();
-        if paths.is_empty() { return self.fail(t("首页的助手收 Word 文件（.docx）和 PDF。其他文件请拖进一个文献库。"), cx) }
+        if paths.is_empty() { return self.fail(t("首页的助手收 Word 文件（.docx）、PDF 和 PowerPoint 文件（.pptx）。其他文件请拖进一个文献库。"), cx) }
         let word = paths.iter().any(|path| crate::comments::is_word(path));
+        // A PowerPoint file alone is a reference to be looked at; with a paper, what the paper's slides are made after.
+        let (deck, paper) = (paths.iter().any(|path| crate::comments::is_deck(path)), paths.iter().chain(&self.home.files).any(|path| path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf"))));
         for path in paths {
             if !self.home.files.contains(&path) { self.home.files.push(path) }
         }
         if self.home.input.read(cx).text().trim().is_empty() {
-            let words = if word { STARTS[1].2 } else { "这篇文献讲了什么？方法和主要结论是什么？" };
+            let words = if word { STARTS[1].2 } else if deck && paper { "把这篇文献做成幻灯片，以附上的这份幻灯片为参考。" } else if deck { "看看这份幻灯片：之后做幻灯片时以它为参考。" } else { "这篇文献讲了什么？方法和主要结论是什么？" };
             self.home.input.update(cx, |input, cx| input.set_text(t(words), cx));
         }
         self.home.focus = true;
@@ -206,7 +209,7 @@ impl Workspace {
     }
 
     fn draft_pick(&mut self, words: Option<&'static str>, cx: &mut Context<Self>) {
-        let picked = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: Some(t("选择 Word 文件或 PDF").into()), extensions: Some(vec!["docx".into(), "pdf".into()]) });
+        let picked = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: true, prompt: Some(t("选择 Word 文件、PDF 或 PowerPoint 文件").into()), extensions: Some(vec!["docx".into(), "pdf".into(), "pptx".into(), "potx".into()]) });
         cx.spawn(async move |this, cx| {
             let Ok(Ok(Some(paths))) = picked.await else { return };
             this.update(cx, |this, cx| {
@@ -232,13 +235,15 @@ impl Workspace {
         if let Some(missing) = self.settings.profile_for_or_default(Task::Chat).missing() {
             return self.fail(tf!("提问需要一个模型服务（{}）。在设置 › AI 里配置后再问。", "Asking needs a model service ({}). Set one up in Settings › AI first.", t(missing)), cx);
         }
+        // A PowerPoint file is taken in nowhere: it goes with the question, read where it is.
+        let (decks, files): (Vec<PathBuf>, Vec<PathBuf>) = files.into_iter().partition(|path| crate::comments::is_deck(path));
         let (words, papers): (Vec<PathBuf>, Vec<PathBuf>) = files.iter().cloned().partition(|path| crate::comments::is_word(path));
         // Under 从 Word 建文献库 the Word files are read for what they cite: the conversation is named after the first of them.
         let (cited, words) = if std::mem::take(&mut self.home.collect) { (words, vec![]) } else { (vec![], words) };
         let stem = |path: &PathBuf| path.file_stem().map(|stem| stem.to_string_lossy().to_string()).unwrap_or_default();
         let about = match cited.first() {
             Some(path) => tf!("{} 的参考文献", "References of {}", stem(path)),
-            None if text.is_empty() => stem(&files[0]),
+            None if text.is_empty() => files.first().or(decks.first()).map(stem).unwrap_or_default(),
             None => text.clone(),
         };
         let info = match libraries::create_draft(&self.root, &about) {
@@ -250,7 +255,7 @@ impl Workspace {
         let Some(lib) = self.lib.as_mut().filter(|lib| lib.info.id == info.id) else { return };
         lib.library_chat.input.update(cx, |input, cx| input.set_text(&text, cx));
         lib.library_chat.input.read(cx).focus(window);
-        lib.library_chat.documents = cited;
+        lib.library_chat.documents = cited.into_iter().chain(decks).collect();
         self.home.input.update(cx, |input, cx| input.set_text("", cx));
         self.home.files.clear();
         if words.is_empty() && papers.is_empty() { return self.ask_library(cx) }

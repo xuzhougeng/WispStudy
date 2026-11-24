@@ -482,7 +482,7 @@ pub fn catalog() -> Vec<ToolDef> {
         scoped(
             "make_slides",
             "做幻灯片",
-            "把内容做成一份 PowerPoint 幻灯片（.pptx），写成一个新文件：读一篇文献做汇报、组会讲文献、把几篇文献的比较讲成几页，都用它。你只说每页有什么（标题、要点、图、图注、出处、讲稿），版面由程序排：字号按内容选，要点一页放不下时接着排到下一页，图和要点并排或上下放；第一页是标题页，不用写在 slides 里。先用 read_fulltext 读过文献再写，内容以文献为准；每页 3 到 5 条要点，每条一句话，展开讲的话放 notes。图来自图片库（先用 list_figures 按 paper 查这篇文献已收藏的图，figure 给图片的 ID，图注和出处会自动带上）或本机的 PNG / JPEG 文件（image）；文献的图还没有收藏时，先出没有图的版本，并告诉用户在 PDF 页上框选收藏图片后可以重做。只有 title 的一页是分节页。输出路径上已有文件时不覆盖。",
+            "把内容做成一份 PowerPoint 幻灯片（.pptx），写成一个新文件：读一篇文献做汇报、组会讲文献、把几篇文献的比较讲成几页，都用它。你只说每页有什么（标题、要点、图、图注、出处、讲稿），版面由程序排：字号按内容选，要点一页放不下时接着排到下一页，图和要点并排或上下放；第一页是标题页，不用写在 slides 里。先用 read_fulltext 读过文献再写，内容以文献为准；每页 3 到 5 条要点，每条一句话，展开讲的话放 notes。图来自图片库（先用 list_figures 按 paper 查这篇文献已收藏的图，figure 给图片的 ID，图注和出处会自动带上）或本机的 PNG / JPEG 文件（image）；文献的图还没有收藏时，先出没有图的版本，并告诉用户在 PDF 页上框选收藏图片后可以重做。只有 title 的一页是分节页。用户给了一份 PowerPoint 文件作参考（「照这个做」「用这个模板」）时，先用 read_slides 读它，再把它的路径填进 reference：新文件沿用它的母版和版式，标题和要点排进它版式里的位置。输出路径上已有文件时不覆盖。",
             json!({
                 "title": {"type": "string", "description": "标题页的标题；省略时用 paperId 那篇文献的题目。"},
                 "subtitle": {"type": "string", "description": "标题页标题下的一行（报告人、场合、日期…）；省略且给了 paperId 时写文献的作者、年份和期刊。"},
@@ -504,9 +504,21 @@ pub fn catalog() -> Vec<ToolDef> {
                         }
                     }
                 },
+                "reference": {"type": "string", "description": "参考的 PowerPoint 文件（本机 .pptx 或 .potx 的路径）。给了以后，新文件建在它的母版和版式上：背景、配色、字体、标志都和它一样，它自己的幻灯片不带过来。先用 read_slides 读过它再用。"},
                 "output": {"type": "string", "description": "新文件的路径（.pptx）；已有文件不会覆盖。省略时写在用户的「文档」文件夹，文件名是标题。"}
             }),
             &["slides"],
+        ),
+        scoped(
+            "read_slides",
+            "读 PowerPoint 文件",
+            "读一个 PowerPoint 文件（.pptx）作为做幻灯片的参考，不改文件：每页的标题、要点（下一级的要点以两个空格开头）、讲稿备注和图片数，用到了哪些版式，主题的字体和颜色。用户交来一份幻灯片说「照这个做」「按这个模板」「参考这份的风格」时先读它：看它怎样分节、每页写多少、用什么语气，再用 make_slides 做新的，并把它的路径填进 reference，新文件就沿用它的母版和版式。只读。",
+            json!({
+                "path": {"type": "string", "description": "本机 .pptx（或 .potx）文件的路径。"},
+                "from": {"type": "integer", "description": "从第几页读起（从 1 起）；省略为 1。"},
+                "count": {"type": "integer", "description": "读几页；省略为 40。"}
+            }),
+            &["path"],
         ),
         scoped("list_manuscripts", "稿件列表", "列出用户在写作页的稿件：题目、语言、各节的名称、属于论文的哪一部分和字数。只读。", json!({}), &[]),
         scoped(
@@ -827,6 +839,7 @@ fn dispatch(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fet
         "import_docx_references" => local::import_docx_references(store, args, fetch),
         "import_manuscript" => local::import_manuscript(store, args),
         "make_slides" => local::make_slides(store, args),
+        "read_slides" => local::read_slides(args),
         "list_manuscripts" => list_manuscripts(store),
         "read_manuscript" => read_manuscript(store, args),
         "comment_manuscript" => comment_manuscript(store, args),
@@ -2951,6 +2964,23 @@ pub(crate) mod tests {
         let made = call(&root, "make_slides", &cli_args(&tool.input_schema, &words).unwrap()).unwrap();
         assert_eq!((made["slides"].as_u64(), made["pictures"].as_u64(), made["notes"].as_array().map(Vec::len)), (Some(2), Some(1), Some(0)));
         assert!(tool.writes && tool.confirm);
+        // A deck is read as the reference for another: what its slides say, and the layouts new slides would stand on.
+        let read = call(&root, "read_slides", &json!({"path": root.join("plot.pptx")})).unwrap();
+        assert_eq!((read["slideCount"].as_u64(), read["shape"].as_str(), read["slides"][0]["title"].as_str(), read["slides"][1]["pictures"].as_u64()), (Some(2), Some("16:9"), Some("Lab meeting"), Some(1)));
+        assert_eq!((read["asReference"]["content"].as_str(), read["theme"]["headingFont"].as_str(), read["caution"].is_null()), (Some("Title and Content"), Some("Arial"), true));
+        let part = call(&root, "read_slides", &json!({"path": output, "from": 2, "count": 1})).unwrap();
+        assert!(part["slides"].as_array().is_some_and(|slides| slides.len() == 1 && slides[0]["n"] == 2) && part["next"].as_str().unwrap().contains("from: 3"));
+        // The new deck stands on its masters and layouts, and says so; the command line names it with a flag.
+        let words = ["[{\"title\": \"Aim\", \"bullets\": [\"one\", \"  under it\"]}]".to_string(), "--title".into(), "Next talk".into(), "--reference".into(), root.join("plot.pptx").display().to_string(), "--output".into(), root.join("next.pptx").display().to_string()];
+        let after = call(&root, "make_slides", &cli_args(&tool.input_schema, &words).unwrap()).unwrap();
+        assert_eq!((after["slides"].as_u64(), after["reference"]["layouts"]["content"].as_str()), (Some(2), Some("Title and Content")));
+        let again = call(&root, "read_slides", &json!({"path": root.join("next.pptx")})).unwrap();
+        assert_eq!((again["slides"][0]["title"].as_str(), again["slides"][1]["text"][1].as_str()), (Some("Next talk"), Some("  under it")));
+        // What is no deck is refused in words, and nothing is written.
+        assert!(call(&root, "read_slides", &json!({"path": picture})).unwrap_err().contains(".pptx"));
+        std::fs::write(root.join("old.pptx"), b"not a deck").unwrap();
+        assert!(call(&root, "make_slides", &json!({"title": "T", "slides": [{"title": "a"}], "reference": root.join("old.pptx"), "output": root.join("refused.pptx")})).unwrap_err().contains("不是 PowerPoint") && !root.join("refused.pptx").exists());
+        assert!(catalog().iter().any(|tool| tool.name == "read_slides" && !tool.writes && !tool.confirm));
         std::fs::remove_dir_all(root).ok();
     }
 

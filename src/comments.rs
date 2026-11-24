@@ -153,6 +153,11 @@ pub(crate) fn is_word(path: &Path) -> bool {
     path.extension().is_some_and(|e| e.eq_ignore_ascii_case("docx"))
 }
 
+/// A PowerPoint file, by its name: on 助手 it is the reference slides are made after (`wisp_core::slideref`).
+pub(crate) fn is_deck(path: &Path) -> bool {
+    path.extension().is_some_and(|e| e.eq_ignore_ascii_case("pptx") || e.eq_ignore_ascii_case("potx"))
+}
+
 /// A file a manuscript can start from, by its name.
 pub fn is_manuscript_file(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).is_some_and(|e| ["docx", "md", "markdown"].iter().any(|known| e.eq_ignore_ascii_case(known)))

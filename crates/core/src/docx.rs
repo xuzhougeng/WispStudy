@@ -166,13 +166,13 @@ fn relationships(xml: &str) -> Vec<(String, String)> {
 }
 
 /// Where a part's relationships are kept.
-fn rels_of(part: &str) -> String {
+pub(crate) fn rels_of(part: &str) -> String {
     let (folder, file) = part.rsplit_once('/').unwrap_or(("", part));
     if folder.is_empty() { format!("_rels/{file}.rels") } else { format!("{folder}/_rels/{file}.rels") }
 }
 
 /// The part a relationship of `part` leads to.
-fn beside(part: &str, target: &str) -> String {
+pub(crate) fn beside(part: &str, target: &str) -> String {
     if let Some(absolute) = target.strip_prefix('/') { return absolute.to_string() }
     let mut path: Vec<&str> = part.split('/').collect();
     path.pop();
@@ -189,7 +189,7 @@ fn beside(part: &str, target: &str) -> String {
 // ---- XML, as it is written
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Node<'a> {
+pub(crate) enum Node<'a> {
     /// A tag that opens an element: its name, and the tag as written.
     Open(&'a str, &'a str),
     /// An element without content.
@@ -200,7 +200,7 @@ enum Node<'a> {
 }
 
 /// The piece of XML that starts at `at`, and where the next one starts.
-fn node(src: &str, at: usize) -> Option<(Node<'_>, usize)> {
+pub(crate) fn node(src: &str, at: usize) -> Option<(Node<'_>, usize)> {
     let rest = src.get(at..).filter(|rest| !rest.is_empty())?;
     if !rest.starts_with('<') {
         let end = rest.find('<').unwrap_or(rest.len());
@@ -231,7 +231,7 @@ fn node(src: &str, at: usize) -> Option<(Node<'_>, usize)> {
 }
 
 /// Where the element (or other piece) that starts at `at` ends.
-fn element_end(src: &str, at: usize) -> usize {
+pub(crate) fn element_end(src: &str, at: usize) -> usize {
     let (mut depth, mut at) = (0usize, at);
     while let Some((piece, end)) = node(src, at) {
         match piece {
@@ -246,7 +246,7 @@ fn element_end(src: &str, at: usize) -> usize {
 }
 
 /// The pieces of an element's content: each element whole under its name, anything else without one.
-fn children(inner: &str) -> Vec<(&str, &str)> {
+pub(crate) fn children(inner: &str) -> Vec<(&str, &str)> {
     let (mut out, mut at) = (vec![], 0);
     while let Some((piece, end)) = node(inner, at) {
         let (name, end) = match piece {
@@ -260,7 +260,7 @@ fn children(inner: &str) -> Vec<(&str, &str)> {
     out
 }
 
-fn open_tag(xml: &str) -> &str {
+pub(crate) fn open_tag(xml: &str) -> &str {
     match node(xml, 0) {
         Some((Node::Open(_, tag) | Node::Empty(_, tag), _)) => tag,
         _ => "",
@@ -268,7 +268,7 @@ fn open_tag(xml: &str) -> &str {
 }
 
 /// What is between an element's opening and closing tags.
-fn inside(xml: &str) -> &str {
+pub(crate) fn inside(xml: &str) -> &str {
     let open = open_tag(xml);
     if open.is_empty() || open.ends_with("/>") { return "" }
     let end = xml.rfind("</").unwrap_or(xml.len());
@@ -280,7 +280,7 @@ fn has_content(xml: &str) -> bool {
     !open.is_empty() && !open.ends_with("/>")
 }
 
-fn attr(tag: &str, name: &str) -> Option<String> {
+pub(crate) fn attr(tag: &str, name: &str) -> Option<String> {
     let mut from = 0;
     while let Some(found) = tag[from..].find(name) {
         let at = from + found;
@@ -327,7 +327,7 @@ fn switched_on(xml: &str, name: &str) -> bool {
 }
 
 /// `xml` without the elements of this name.
-fn without(xml: &str, name: &str) -> String {
+pub(crate) fn without(xml: &str, name: &str) -> String {
     let (mut out, mut at, open) = (String::new(), 0, format!("<{name}"));
     while let Some(found) = xml[at..].find(&open) {
         let start = at + found;
@@ -344,7 +344,7 @@ fn without(xml: &str, name: &str) -> String {
     out
 }
 
-fn unescape(text: &str) -> String {
+pub(crate) fn unescape(text: &str) -> String {
     if !text.contains('&') { return text.to_string() }
     let (mut out, mut rest) = (String::with_capacity(text.len()), text);
     while let Some(at) = rest.find('&') {
