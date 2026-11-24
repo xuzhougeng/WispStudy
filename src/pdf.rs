@@ -17,7 +17,7 @@ use wisp_core::figref;
 use wisp_core::handles::{self, Grab};
 use wisp_core::pdftext::{self, Mark};
 
-actions!(pdf, [CopySelection, FindInPdf, RemoveChosen]);
+actions!(pdf, [CopySelection, FindInPdf, RemoveChosen, UndoMark, RedoMark]);
 
 /// What the viewer tells whoever shows it.
 pub enum PdfEvent {
@@ -39,6 +39,8 @@ pub enum PdfEvent {
     Pressed,
     /// The selected text went to the clipboard.
     Copied,
+    /// ⌘Z (`true`) or ⇧⌘Z in the viewer: the last change of this file's marks is taken back, or done again.
+    StepMarks(bool),
     /// Add what is selected to a conversation: the 1-based page, the text, and whether to the library's (else the paper's own).
     Quote(usize, String, bool),
     /// A piece of a page as a picture (PNG) for the next question, and whether for the library's conversation.
@@ -2405,6 +2407,12 @@ impl PdfView {
         &self.resource_id
     }
 
+    /// Bring a mark taken back or done again into the view (`rect` on a 1-based page, in its points), unless it is there already.
+    pub fn reveal(&mut self, page: usize, rect: [f32; 4], cx: &mut Context<Self>) {
+        if page == 0 || self.in_view(page - 1, &[rect]) { return }
+        self.go_to_place(page, rect[1], cx);
+    }
+
     /// Go to a place on a 1-based page: what stands `top` points below the page's top comes a little under the top of the view.
     pub fn go_to_place(&mut self, page: usize, top: f32, cx: &mut Context<Self>) {
         self.citation.clear();
@@ -4264,6 +4272,10 @@ impl Render for PdfView {
             return ui::empty_state("file-text", t("正在打开 PDF…"), "").size_full().into_any_element();
         }
         self.device_scale = window.scale_factor();
+        // A field put away (a text box left with Esc, a note saved with its button) gives the keyboard back to the
+        // viewer: a focus left on a field no longer drawn would keep ⌘Z and Delete from the viewer.
+        let put_away = |input: &Entity<TextInput>, drawn: bool| !drawn && input.focus_handle(cx).is_focused(window);
+        if put_away(&self.text_input, self.text_edit.is_some()) || put_away(&self.note_input, self.note_editing) || put_away(&self.annotation_note, self.annotation_edit.is_some()) { window.focus(&self.focus) }
         // Views of one group are read as one (the page and its translation): the one last scrolled leads the
         // others. While a view of another group is worked in, they stay as they were left.
         let shown = self.shown();
@@ -4353,6 +4365,9 @@ impl Render for PdfView {
             // Delete (or Backspace) removes the mark chosen, or the highlight whose menu is open; with neither, the key
             // goes on to the window (the paper selected to the trash). A text field of the viewer hears its own first.
             .on_action(cx.listener(|this, _: &RemoveChosen, _, cx| if this.menu_id().is_some() { this.remove_mark(cx) } else { cx.propagate() }))
+            // The marks' undo; a text field of the viewer (a note, a text box being written) hears its own first.
+            .on_action(cx.listener(|_, _: &UndoMark, _, cx| cx.emit(PdfEvent::StepMarks(true))))
+            .on_action(cx.listener(|_, _: &RedoMark, _, cx| cx.emit(PdfEvent::StepMarks(false))))
             // Esc puts a highlight's menu away before it does anything else.
             // Then lets a chosen mark go, then a note's card, then a tool in use.
             .on_action(cx.listener(|this, _: &crate::shortcuts::Dismiss, window, cx| {
