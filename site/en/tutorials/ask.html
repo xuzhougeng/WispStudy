@@ -6,7 +6,7 @@
 <link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/ask.html">
 <link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/ask.html">
 <title>Ask the whole library, and check the answers · Wisp Study tutorials</title>
-<meta name="description" content="Ask a review-style question about the whole library: see which materials the assistant read, learn to read sources with page numbers and quoted sentences, click through to the PDF, then have /verify check every claim.">
+<meta name="description" content="Ask a review-style question about the whole library: see which materials the assistant read, learn to read sources with page numbers and quoted sentences, click through to the PDF, then have /verify check every claim; search the web for what the library does not hold, and have the assistant draw a diagram.">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
@@ -36,12 +36,12 @@
   <nav class="crumbs" aria-label="Location"><a href="index.html">Tutorials</a><span>›</span>Read</nav>
 
   <header class="doc-head">
-    <p class="kicker">Tutorial 09 · Read</p>
+    <p class="kicker">Tutorial 10 · Read</p>
     <h1>Ask the whole library, and check the answers</h1>
-    <p class="lead">You meet your advisor tomorrow and want a feel for the whole field first: which species and organs are covered, what the protoplast and nucleus routes each cost, and where the papers disagree. In this tutorial the assistant reads the whole library to answer, and then you check the passages it cites one by one instead of taking its word.</p>
+    <p class="lead">You meet your advisor tomorrow and want a feel for the whole field first: which species and organs are covered, what the protoplast and nucleus routes each cost, and where the papers disagree. In this tutorial the assistant reads the whole library to answer, and then you check the passages it cites one by one instead of taking its word. What the library cannot answer, such as what a tool's documentation says today, it can look up on the web; what you will explain to others, it can draw as a diagram.</p>
     <dl class="facts">
       <div><dt>Scenario</dt><dd>Before a lab meeting, an overview of the 28 papers in the “<span lang="zh-CN">植物单细胞转录组</span>” (plant single-cell transcriptomics) library.</dd></div>
-      <div><dt>Needs</dt><dd>A screened library in which most papers have a stored PDF; a model provider.</dd></div>
+      <div><dt>Needs</dt><dd>A screened library in which most papers have a stored PDF; a model provider. For web search, a key for a search service (DeepSeek's can be shared with its models).</dd></div>
       <div><dt>Time</dt><dd>About 10 minutes, most of it waiting for the answer.</dd></div>
     </dl>
   </header>
@@ -56,6 +56,8 @@
         <li><a href="#s4">Go back to the page of the original</a></li>
         <li><a href="#s5">Have the assistant check each claim</a></li>
         <li><a href="#s6">Compare, search and keep asking</a></li>
+        <li><a href="#s7">Look beyond the library: web search</a></li>
+        <li><a href="#s8">Have the assistant draw a diagram</a></li>
         <li class="plain"><a href="#recap">Recap</a></li>
       </ol>
     </nav>
@@ -157,6 +159,67 @@
         <aside class="note warn"><b>Note</b>What is sent to the model provider you set up in settings when you ask is the question itself, the records and notes of the papers in scope, the relevant full-text pages, and whatever the assistant reads with its tools. For papers with no stored PDF the assistant can read only the abstract; the answer says so and gives no page number. For the few papers you will present at the lab meeting, drag their PDFs into the window to attach them, then ask again.</aside>
       </section>
 
+      <section id="s7">
+        <h2><i>7</i>Look beyond the library: web search</h2>
+        <p>Some questions the library cannot answer: what a piece of software's documentation says now, or how a tool is meant to be used today. For these the assistant can search the web. First look at the “Web search” group in “Settings › Network”: “Search engine” offers “Auto”, “DeepSeek”, “Jina”, “You.com” and “Off”. “Auto” uses the first engine that has a key; with “Off”, the assistant does not search the web.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/ask-07-websearch.jpg" width="1372" height="867" loading="lazy" alt="The Network page of Settings: the proxy at the top; below it, in the Web search group, the search engine is set to DeepSeek with a green Using DeepSeek label beside it, and under it are key fields for DeepSeek, Jina and You.com.">
+          <figcaption><b>Figure 7.</b> “Web search” in “Settings › Network”. The DeepSeek key is left blank, so the key of the model provider is used.</figcaption>
+        </figure>
+
+        <p>This run uses “DeepSeek”, and the label beside it reads “Using DeepSeek”. The DeepSeek key “Shares the key of DeepSeek's models”: left blank, it takes the key of the DeepSeek service on the AI page or the environment variable <code>DEEPSEEK_API_KEY</code>, so there is no second key to get. Keys for Jina and You.com come from their own sites.</p>
+        <p>Back on “Assistant”, click “New chat” and ask something the library has no answer to, but that someone working in this field would really ask:</p>
+        <blockquote><cite>Ask</cite><p>Our samples are single-nucleus data from the maize ligule. Which tool or method do the current official docs of Scanpy and Seurat each recommend for removing doublets in snRNA-seq? Go by their current documentation and give the URLs.</p></blockquote>
+        <p>The scope line reads “Provided records for 40 papers, 17 relevant full-text pages” (the library has grown to 40 papers by this run). The answer starts with a gray row, “搜索网页 ×4”, folded like the tool calls of step 5. In this build the rows of the tool calls are not translated yet, so they are in Chinese even with the English interface: 搜索网页 is “Search the web”, and 个网页 is “web pages”. Click the row and it opens into one row per search: the words searched and how many pages the engine sent back, for example “搜索网页：Scanpy documentation doublet detection scanpy.pp.scrublet · count 6” and “DeepSeek：6 个网页” (six pages). Two of the four searches were narrowed to one site, <code>site:satijalab.org</code> and <code>site:scanpy.readthedocs.io</code>.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/ask-08-search.jpg" width="1372" height="867" loading="lazy" alt="The conversation: the question in a gray bubble at the top right; below it the expanded row of four web searches, each with its search words and DeepSeek with the number of pages found, then the start of the answer and its Scanpy section with a green documentation link.">
+          <figcaption><b>Figure 8.</b> The expanded tool row: each line is one search, its words and the number of pages it brought back.</figcaption>
+        </figure>
+
+        <p>The answer was complete less than two minutes after it was sent. It opens by saying where it comes from:</p>
+        <blockquote><cite>Assistant</cite><p>This comes from search-result snippets. I didn't open the full pages, and none of this is from your literature library.</p></blockquote>
+        <p>The Scanpy section names Scrublet (<code>scanpy.pp.scrublet</code>) as the one doublet method in the Preprocessing API and links the function page. The Seurat section finds only <code>HTODemux</code> and <code>MULTIseqDemux</code>, which need hashed or multiplexed nuclei, calls a GitHub discussion that mentions scDblFinder “a user thread, not official guidance”, and adds that it cannot prove a page does not exist from a search that did not find one. The last section goes back to the library: the maize ligule atlas in it (P40) removed doublets with DoubletFinder (v2.0.6) at a 1% expected doublet rate and then used SoupX, with a quote from page 10 of P40.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/ask-09-webanswer.jpg" width="1372" height="867" loading="lazy" alt="The second half of the answer: Scanpy and Seurat links underlined in green, a section For your maize ligule data quoting P40, and below it a single source card for P40 p.10 marked Exact quote found.">
+          <figcaption><b>Figure 9.</b> The end of the answer. The web pages are links in the text; the only card below it is the quote from P40 in the library.</figcaption>
+        </figure>
+
+        <p>Note that the two kinds of source are not treated alike. A quote from a paper is compared word for word and the result is written on its card (step 3): here the one from P40 reads “Exact quote found”. A web page is only a link in the text, with no card and no such check. Before it goes into slides or a paper, open the link and read it yourself.</p>
+        <aside class="note warn"><b>Note</b>What goes to DeepSeek when the assistant searches are the search words it writes (the lines in Figure 8), not your whole question or your library; the snippets that come back are then passed to the model you set up. Web search is billed at the prices of the service chosen, and one answer can search several times (four times here). To keep the assistant off the web, choose “Off” in “Settings › Network”.</aside>
+      </section>
+
+      <section id="s8">
+        <h2><i>8</i>Have the assistant draw a diagram</h2>
+        <p>An answer can hold a diagram. Click “New chat” and ask for the maize ligule study in the library as a flow:</p>
+        <blockquote><cite>Ask</cite><p>Please draw a diagram: the main steps of the maize ligule single-nucleus atlas paper from sampling and library sequencing to its conclusions as one flow from left to right.</p></blockquote>
+        <p>This time the assistant called no tool; it worked from the full-text pages sent with the question. The answer opens with the diagram: from “Sampling” on the left, through the libraries, cleanup, clustering, pseudotime and the hormone experiments, splitting into an early and a late stage and joining again at “Conclusion” on the right, ten boxes in all. Below the diagram the steps are listed again with their sources, and the cards below them read “Exact quote found” for all seven quotes. It was done within a minute and a half.</p>
+        <p>The assistant writes the diagram in Mermaid, and the window draws it. Move the pointer over it and three buttons appear at its top right: a magnifier, two squares and angle brackets. Rest on a button to see its name: “Actual size”, “Copy image”, “Show source”.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/ask-10-diagram.jpg" width="1372" height="867" loading="lazy" alt="A left-to-right flowchart in the answer, its ten boxes drawn very small; the pointer rests on the first of three buttons at the diagram's top right, and the tooltip Actual size floats beside it; below are the numbered steps with green quotes.">
+          <figcaption><b>Figure 10.</b> The flowchart in the answer. It is wider than the column, so it is drawn smaller; with the pointer over it, three buttons appear at its top right.</figcaption>
+        </figure>
+
+        <p>This flow runs across ten boxes, far wider than the column, and its words come out tiny. Click “Actual size”: the diagram is shown at its own size with a horizontal scrollbar under it, so you can move along it. The magnifier turns green; click it again (it is now “Fit width”) to fit the column once more.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/ask-11-actual.jpg" width="1372" height="867" loading="lazy" alt="After Actual size: the first boxes of the flowchart at full size and easy to read, the rest cut off at the right edge of the column, and a horizontal scrollbar under the diagram.">
+          <figcaption><b>Figure 11.</b> “Actual size”: the words can be read, and a horizontal scrollbar appears under the diagram.</figcaption>
+        </figure>
+
+        <p>“Copy image” copies the diagram as a PNG on white, to paste into slides or a manuscript. “Show source” replaces the diagram with the Mermaid source the assistant wrote: <code>flowchart LR</code> on the first line, then one line per box and the arrow into it; click again (it is now “Show diagram”) to go back. When a box says something wrong, the source tells you whether the assistant wrote it wrong or it was drawn wrong.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/ask-12-source.jpg" width="1372" height="867" loading="lazy" alt="After Show source: the diagram replaced by monospaced Mermaid source, flowchart LR on the first line and below it the nodes A to J with their arrows.">
+          <figcaption><b>Figure 12.</b> “Show source”: the Mermaid source of the same diagram.</figcaption>
+        </figure>
+
+        <p>Besides flowcharts it can draw timelines, pie charts, mind maps, sequence diagrams and more, for example “draw the papers in the library by year of publication”. Every word in a diagram is the model's: the order of the steps and the numbers (here 65,691 cells or nuclei, 32 clusters) need checking against the original, just like the quotes of step 3.</p>
+      </section>
+
       <section id="recap" class="recap">
         <h2>Recap</h2>
         <ul>
@@ -164,6 +227,8 @@
           <li>After you ask, the “Provided…” line and the “Papers” panel show what was handed to the model this time.</li>
           <li>Sources with a page number and a quoted sentence are compared word for word, the result is written on the card, and clicking the card goes back to that page of the PDF.</li>
           <li>“Exact quote found” says only that the words are in the original; whether the conclusion holds is for /verify and your own reading of the context to decide.</li>
+          <li>What the library cannot answer, the assistant can search the web for (“Settings › Network › Web search”); what leaves is the search words, the service bills for it, and web pages get no word-for-word check, so open them yourself.</li>
+          <li>Ask the assistant to draw a diagram and it writes Mermaid, which the window draws; over the diagram are “Actual size”, “Copy image” and “Show source”.</li>
           <li>To read the whole library into one table, paper by paper, continue with <a href="extract.html">Read a batch of papers into one table</a>; for a deep read of one paper, go back to <a href="read.html">Read one paper closely</a>.</li>
         </ul>
       </section>
@@ -171,8 +236,8 @@
   </div>
 
   <nav class="pager" aria-label="Previous and next">
-    <a class="prev" href="slides.html"><small>Previous · 08</small><strong>Turn a paper into lab-meeting slides</strong></a>
-    <a class="next" href="rank.html"><small>Next · 10</small><strong>Which to read first</strong></a>
+    <a class="prev" href="slides.html"><small>Previous · 09</small><strong>Turn a paper into lab-meeting slides</strong></a>
+    <a class="next" href="rank.html"><small>Next · 11</small><strong>Which to read first</strong></a>
   </nav>
 </main>
 
@@ -188,7 +253,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> The screenshots and numbers come from a real run in November 2026 on macOS with v0.10.0. The model answers differently each time, so your wording and numbers will differ; the steps are the same. The screenshots show the Chinese interface; the text uses the labels of the English one (Settings › General › Interface language).</p>
+      <p><b>About this tutorial.</b> The screenshots and numbers of steps 1 to 6 come from a real run in November 2026 on macOS with v0.10.0; those screenshots show the Chinese interface, and the text uses the labels of the English one (Settings › General › Interface language). Steps 7 and 8 (Figures 7 to 12) come from another run in November 2026 with v0.18.0 and show the English interface, with the questions asked in English; by then the library held 40 papers, the model was Claude Sonnet 5.5 (claude/claude-sonnet-5-5) called through a local gateway, and web search used DeepSeek. The model answers differently each time, so your wording and numbers will differ; the steps are the same.</p>
       <p><b>The assistant can be wrong.</b> Confirm its suggestions and answers yourself; check key numbers and conclusions against the original.</p>
     </div>
   </div>

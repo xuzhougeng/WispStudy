@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/mindmap.html">
+<link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/mindmap.html">
+<title>Turn a paper into a mind map · Wisp Study tutorials</title>
+<meta name="description" content="Open a mind map in a column beside the PDF: have the model read the full text and draft it, click a page number on a node to get back to that sentence, add a sentence from the PDF as a node, add, fold and edit your own, put it beside the translation as three columns, and copy the outline as Markdown.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../../app-icon.png">
+<link rel="stylesheet" href="../../style.css">
+<link rel="stylesheet" href="../../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="Site">
+      <a href="index.html" aria-current="page">Tutorials</a>
+      <a href="../index.html#ideas">Ideas</a>
+      <a href="../index.html#tools">Tools</a>
+      <a href="../index.html#download">Download</a>
+    </nav>
+    <a class="lang" href="../../tutorials/mindmap.html" lang="zh-CN" hreflang="zh-CN">中文</a>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="Location"><a href="index.html">Tutorials</a><span>›</span>Read</nav>
+
+  <header class="doc-head">
+    <p class="kicker">Tutorial 06 · Read</p>
+    <h1>Turn a paper into a mind map</h1>
+    <p class="lead">You have read a 17-page paper and its structure is still loose in your head: what it asked, how, which genes act early and which late, and what it leaves open. This tutorial opens a mind map in a column beside the PDF. First the model reads the full text and drafts it; then you change it as you read: click a page number on a node to get back to that sentence, add sentences you read as nodes, write down your own questions, and finally copy the whole map as an outline to take with you.</p>
+    <dl class="facts">
+      <div><dt>Scenario</dt><dd>The maize ligular region single-nucleus atlas from <a href="read.html">Read one paper closely</a>, turned into a map before the lab meeting.</dd></div>
+      <div><dt>Needs</dt><dd>A paper with a PDF. A model set up in “Settings › AI” for the draft; making the map yourself needs none.</dd></div>
+      <div><dt>Time</dt><dd>About 10 minutes, plus a minute or two for the draft.</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="Sections of this tutorial">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#s1">Open a map beside the PDF</a></li>
+        <li><a href="#s2">Have the model read the full text and draft it</a></li>
+        <li><a href="#s3">Fold branches to see one clearly</a></li>
+        <li><a href="#s4">Click a page number to get back to the sentence</a></li>
+        <li><a href="#s5">Add a sentence from the text, write your own</a></li>
+        <li><a href="#s6">Original · Translation · Map</a></li>
+        <li><a href="#s7">Take the map with you: copy the outline</a></li>
+        <li class="plain"><a href="#recap">Recap</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>Open a map beside the PDF</h2>
+        <p>Open the paper's “PDF” tab (here in reading mode, so the whole window is this paper) and click “Map” next to “Translation” in the toolbar. The PDF gives up the right half of the window to the paper's mind map. At first it has one root node, the paper's title, and three lines of small print on how to use it.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/mindmap-01-empty.jpg" width="1372" height="867" loading="lazy" alt="Reading mode: on the left page 1 of the maize ligular region paper; on the right a column with a “Map” label and a ✦ icon at its top left. The column holds only a green root node with the paper's title and, below it, three lines of grey text: Tab adds a branch, Enter a node beside this one, Space writes in it, Delete removes it; Select a passage in the PDF and click “Add to map”: it hangs under the node chosen, and its page number leads back to the text; Or click ✦ above for a draft from the model, and change it. In the toolbar “Map” is green.">
+          <figcaption><b>Figure 1</b>　“Map” opens a column beside the PDF. The root node is the paper's title.</figcaption>
+        </figure>
+
+        <p>The map is a column of the reader like the original and the translation. Its “Map” label at the top left can change places and close like the other columns' labels (see section 9 of <a href="read.html#s9">Read one paper closely</a>). It is kept with the paper in the library: switch to another paper and back, or close the window and open it again, and it is still there.</p>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>Have the model read the full text and draft it</h2>
+        <p>You can build it yourself from scratch, but for a long paper a skeleton first is quicker. Click the ✦ next to the “Map” label, and “Drafting…” appears beside the label. The model reads the paper's full text, writes a layered outline and draws it as a map. This run used the model of “Ask” under “Settings › AI › Tasks”, Claude Sonnet 5.5 called through a local gateway; the draft was there within two minutes.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/mindmap-02-draft.jpg" width="1372" height="867" loading="lazy" alt="The right column holds the drafted map: the root node at the bottom left now reads “Maize ligular region snRNA-seq atlas and BR”; branches such as “Atlas construction”, “BR and cell fate transitions” and “Early emergence: GELP2/3/6” spread to the right, each with a few points such as “65,691 cells/nuclei, 4 tissues, 9 libraries, 32 clusters (C0-C31)”. The map is wider than the column and is cut off on the right.">
+          <figcaption><b>Figure 2</b>　The model's draft: 7 branches and 33 points, 2 of them with a page number.</figcaption>
+        </figure>
+
+        <p>The draft of this run has 7 branches: Problem, Atlas construction, BR and cell fate transitions, Early emergence, Late elongation, Lignification explains LA diversity, and Significance and limits, with 33 points under them. The root node was replaced by a short summary as well. The model was asked through the English interface, and its draft came back in English.</p>
+        <p>A green page number to the right of a point is its source: the model gives a sentence of the paper, and the app finds it word for word in the full text before it adds the page. When it is not found, no page is added. In this run only 2 of the 33 points have one; in the run with the Chinese interface the draft gave 14 of 35. A point without a page is the model's own summary, to be checked against the text.</p>
+        <aside class="note"><b>Tip</b>The map is laid out at its own size. When it is wider than the column or taller than the window, scroll on it. Choosing a node scrolls the map to it.</aside>
+        <aside class="note warn"><b>Note</b>The draft sends the paper's full text to the model service you set up. A paper whose full text could not be read is drafted from its abstract only.</aside>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>Fold branches to see one clearly</h2>
+        <p>33 points spread out at once do not fit in a column. Each branch node has a small dot to its right; click it to fold the points under it, and the dot shows how many it holds; click again to open them. Here Problem, Atlas construction, BR and cell fate transitions, Early emergence and Lignification were folded, and only “Late elongation” and “Significance and limits” stay open.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/mindmap-03-fold.jpg" width="1372" height="867" loading="lazy" alt="The map column: the four branches at the top, “Problem”, “Atlas construction”, “BR and cell fate transitions” and “Early emergence: GELP2/3/6”, are folded, with 4, 5, 4 and 5 in the small dots beside them; “Late elongation: LG1-BZR1 module” is open with six points, the first, “Three-line S2 comparison: Z58 compact, B73 intermediate, W22 flat”, chosen with a green border; below it “Lignification explains LA diversity” is folded with 5, and “Significance and limits” is open.">
+          <figcaption><b>Figure 3</b>　A folded branch shows how many points it holds. The chosen node has a green border.</figcaption>
+        </figure>
+
+        <p>The keyboard is quicker. Click an empty spot of the map and it takes the keyboard: the arrow keys move between nodes, <kbd>Tab</kbd> adds a branch under the chosen node, <kbd>Enter</kbd> adds a node beside it, Space or a double click writes in it (<kbd>Enter</kbd> keeps the words, <kbd>Esc</kbd> drops them), and <kbd>Delete</kbd> removes it with everything under it. <kbd>Shift</kbd>+<kbd>Tab</kbd> moves it up a level, and <kbd>Alt</kbd> with an arrow key changes its level and its place among its siblings. Made a mistake? <kbd>⌘</kbd>+<kbd>Z</kbd> undoes it, with <kbd>Shift</kbd> it redoes.</p>
+        <aside class="note warn"><b>Note</b>In reading mode, pressing <kbd>Esc</kbd> to drop the words of a node also takes the window out of reading mode (so in v0.18.0). The map is still there and the words count as dropped; go back into reading mode and carry on.</aside>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>Click a page number to get back to the sentence</h2>
+        <p>Open “Problem” again with its dot. Its point “Narrow LA reduces shading, aiding dense-planting yield” carries “p.1”. Rest the pointer on “p.1” and the tip that comes up is the sentence of the paper it rests on. Click it: the original on the left goes to page 1 and the sentence “Narrow LA and upright plant architecture minimize self-shading and inter-plant competition” is marked in yellow.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/mindmap-04-goto.jpg" width="1372" height="867" loading="lazy" alt="On the left the original is on page 1 with a green border; in the introduction the sentence “Narrow LA and upright plant architecture minimize self-shading and inter-plant competition” is marked in yellow. On the right the map has “Problem” open, and its point “Narrow LA reduces shading, aiding dense-planting yield” is chosen, with p.1 to its right.">
+          <figcaption><b>Figure 4</b>　Click “p.1” on a node and the original goes to that page and marks the sentence.</figcaption>
+        </figure>
+
+        <p>Checking a point takes one click: the page was found word for word, so the sentence marked is the one the model quoted. If, having read around it, you think the point sums it up badly, change it right there on the map.</p>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>Add a sentence from the text, write your own</h2>
+        <p>Reading the abstract, you find a sentence that belongs under “Late elongation”. First click the “Late elongation” node to choose it, then select the sentence in the original on the left: By integrating cellular and transcriptomic analyses, we reveal that brassinosteroid (BR) inhibits cell division in the adaxial division zone while promoting elongation in adaxial hypodermal cells. A row of buttons appears under the selection; the last two are “Add to map” and “Read aloud”.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/mindmap-05-pick.jpg" width="1372" height="867" loading="lazy" alt="On the left, in the abstract on page 1, the sentence from “By integrating cellular and transcriptomic analyses” to “adaxial hypodermal cells” is selected with a pale green background; under the selection a row of buttons: Copy, Underline, Highlight, Add to chat, Translate, Add to map, Read aloud. On the right the map has “Late elongation: LG1-BZR1 module” chosen.">
+          <figcaption><b>Figure 5</b>　Select a sentence; “Add to map” is under the selection.</figcaption>
+        </figure>
+
+        <p>Click “Add to map” and the sentence becomes the last node under “Late elongation”, with “p.1” after it. The node shows only its beginning; the whole sentence is kept as its source, and “p.1” leads back to it as well. You can shorten the words on the node (Space writes in it); the source stays.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/mindmap-06-added.jpg" width="1372" height="867" loading="lazy" alt="The map on the right has a new last node under “Late elongation”, “By integrating cellular and transcriptomic analyses, we reve…”, with p.1 to its right and a green border showing it is chosen; the selection is still on the left.">
+          <figcaption><b>Figure 6</b>　The node added hangs under the chosen node, with its page number.</figcaption>
+        </figure>
+
+        <p>Something to ask at the lab meeting comes to mind; it goes into the map too, as a branch under the root: “Ask at group meeting: BR doses and timing of treatment”. A node you write has no page number, and can be moved, folded and deleted like the model's.</p>
+        <p>Click ✦ now and the app does not replace your map straight away: beside the label it first asks “Replace this map with the model's draft?”. Only “Replace” drafts it again; “Keep mine” changes nothing. After a replacement, <kbd>⌘</kbd>+<kbd>Z</kbd> still brings back the map you had.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/mindmap-07-own.jpg" width="1372" height="867" loading="lazy" alt="The map scrolled down a little: the root node on the left, the branches “Late elongation”, “Lignification explains LA diversity” and “Significance and limits”, and at the bottom a branch of your own, “Ask at group meeting: BR doses and timing of treatment”, chosen. To the right of the map label: “Replace this map with the model's draft?”, followed by a green “Replace” and “Keep mine”.">
+          <figcaption><b>Figure 7</b>　Your own branch at the bottom. With nodes of your own on the map, ✦ asks first whether to replace it.</figcaption>
+        </figure>
+      </section>
+
+      <section id="s6">
+        <h2><i>6</i>Original · Translation · Map</h2>
+        <p>The translation can be on show with the map open. Click “Translation” in the toolbar: a column with the same page translated appears beside the original, and the two scroll together; the map stays at the right, which makes three columns, and the layout menu at the top right reads “With translation”. The translation is made by the model set for translation in “Settings › AI”, here GPT-6 Luna through the same gateway; it is into Chinese, as the default instructions ask.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/mindmap-08-columns.jpg" width="1372" height="867" loading="lazy" alt="Three columns: on the left the “Original” column with page 1 of the paper; in the middle the “Translation” column with the same page, its title and abstract in Chinese; on the right the “Map” column with the left part of the map, the root node and the branch “Problem” open. The toolbar shows “Translation” and “Map” in green, 51 / 104 paragraphs and Stop; the layout menu at the top right reads “With translation”.">
+          <figcaption><b>Figure 8</b>　Original · Translation · Map. Each column has its own label at its top left.</figcaption>
+        </figure>
+
+        <p>The reader holds three columns at most. With three on show, clicking “Map” asks you to close one first, or to choose “Show the mind map” in one column's label to turn that column into the map. At least one column of the original stays: the last one cannot be closed or turned into the map.</p>
+      </section>
+
+      <section id="s7">
+        <h2><i>7</i>Take the map with you: copy the outline</h2>
+        <p>For the slides of the lab meeting or your own notes, click “Copy the outline” to the right of ✦. The whole map is copied as a nested Markdown list: the title as a heading, one line per node, the source in square brackets after it. Here is part of what this run copied:</p>
+
+        <figure class="code">
+          <figcaption>The Markdown “Copy the outline” gives (excerpt)</figcaption>
+<pre><code># Maize ligular region snRNA-seq atlas and BR
+
+- Problem
+  - Ligular region sets leaf angle (LA) and plant architecture [p.1 "The ligular region is a critical determinant of leaf angle (LA) and plant architecture in maize"]
+…
+- Late elongation: LG1-BZR1 module
+  - Three-line S2 comparison: Z58 compact, B73 intermediate, W22 flat
+  - BR raised LA ~6.1° (Z58), ~9.3° (B73), ~13° (W22)
+  - ~64% of 261 BR-induced genes sit in adaxial hypodermal cells HP1-ad
+  - LG1 and BZR1 directly bind bHLH30/155 promoters and activate them
+  …
+- Ask at group meeting: BR doses and timing of treatment</code></pre>
+        </figure>
+
+        <p>The command line and MCP read the same outline: <code>wisp mind_map --id &lt;paper ID&gt;</code> returns the number of nodes and the same Markdown, and an outside AI client can carry on from it; see the MCP section of <a href="follow.html#s6">Keep up with new papers</a>.</p>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>Recap</h2>
+        <ul>
+          <li>“Map” in the PDF toolbar opens a column beside it, with the paper's title as the root; the map is kept with the paper in the library.</li>
+          <li>✦ has the model read the full text and draft it; only points whose sentence is found word for word in the paper get a page number, and those without one are yours to check.</li>
+          <li>The small dots fold and open branches; after a click on an empty spot of the map, the keyboard adds, writes in, deletes and moves nodes, and <kbd>⌘</kbd>+<kbd>Z</kbd> undoes.</li>
+          <li>A page number leads back to its sentence; select a passage in the PDF and “Add to map” hangs it under the chosen node, with its page.</li>
+          <li>The map and the translation can stand side by side as three columns; “Copy the outline” copies the whole map as Markdown.</li>
+          <li>Next: read several papers side by side, see <a href="compare.html">Read several papers side by side</a>.</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="read.html"><small>Previous · 05</small><strong>Read one paper closely</strong></a>
+    <a class="next" href="compare.html"><small>Next · 07</small><strong>Read several papers side by side</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>References</h2>
+      <ol>
+        <li><a href="index.html">All tutorials</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">Features: what each page can do (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">Data and privacy: where files live and what leaves your machine (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">Questions and ideas: Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>About this tutorial.</b> The screenshots come from one real run in November 2026 on macOS with v0.18.0, with the English interface; the Chinese page shows a separate run with the Chinese interface, whose draft differs. The draft was made by Claude Sonnet 5.5 and the translation by GPT-6 Luna, both called through a local gateway. A model drafts a different map each time, so the branches, the wording and the number of points with a page will differ when you follow along; the steps are the same.</p>
+      <p><b>The assistant can be wrong.</b> The points it drafts are for you to check; check key numbers and conclusions against the original text.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

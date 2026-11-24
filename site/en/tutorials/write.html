@@ -6,7 +6,7 @@
 <link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/write.html">
 <link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/write.html">
 <title>Write a paper · Wisp Study tutorials</title>
-<meta name="description" content="Write the introduction of a paper on the Writing page: see how others write this part, find citations for your own paragraphs, check the original sentence behind each citation, or give the assistant one instruction and let it write into the manuscript. Then put figures from Materials into the manuscript and export.">
+<meta name="description" content="Write the introduction of a paper on the Writing page: see how others write this part, find citations for your own paragraphs, check the original sentence behind each citation, or give the assistant one instruction and let it write into the manuscript. Then put figures from Materials into the manuscript, write a table, check it in the preview as a reader will see it, and export to Word.">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
@@ -36,9 +36,9 @@
   <nav class="crumbs" aria-label="Location"><a href="index.html">Tutorials</a><span>›</span>Write</nav>
 
   <header class="doc-head">
-    <p class="kicker">Tutorial 13 · Write</p>
+    <p class="kicker">Tutorial 14 · Write</p>
     <h1>Write a paper: candidate sentences, citations and sources</h1>
-    <p class="lead">The data analysis is done and it is time to write the introduction of your own paper. This tutorial walks through the Writing page. First you write down what you mean in Chinese. Then you see how the papers in the library write their introductions, add citations to your paragraphs, and check for each citation which sentence of the original it rests on. You can also give the assistant one instruction and let it write straight into the manuscript.</p>
+    <p class="lead">The data analysis is done and it is time to write the introduction of your own paper. This tutorial walks through the Writing page. First you write down what you mean in Chinese. Then you see how the papers in the library write their introductions, add citations to your paragraphs, and check for each citation which sentence of the original it rests on. You can also give the assistant one instruction and let it write straight into the manuscript. At the end you write a table, check it in “Preview” as a reader will see it, and export to Word.</p>
     <dl class="facts">
       <div><dt>Scenario</dt><dd>Write the introduction for a paper on a single-nucleus atlas of the rice lamina joint, with the library “<span lang="zh-CN">植物单细胞转录组</span>” (plant single-cell transcriptomics) right beside it.</dd></div>
       <div><dt>Needs</dt><dd>A few papers with full text in the library; a model provider set up in “Settings › AI”.</dd></div>
@@ -57,7 +57,8 @@
         <li><a href="#s5">References and sources</a></li>
         <li><a href="#s6">Let the assistant write</a></li>
         <li><a href="#s7">Materials: put figures into the manuscript</a></li>
-        <li><a href="#s8">Export</a></li>
+        <li><a href="#s8">Write a table, preview it as exported</a></li>
+        <li><a href="#s9">Export</a></li>
         <li class="plain"><a href="#recap">Recap</a></li>
       </ol>
     </nav>
@@ -179,7 +180,49 @@
       </section>
 
       <section id="s8">
-        <h2><i>8</i>Export</h2>
+        <h2><i>8</i>Write a table, preview it as exported</h2>
+        <p>The methods have to say how the samples were staged, and a table says it most clearly. This section uses another demo manuscript, made on v0.18.0 in the same library “<span lang="zh-CN">植物单细胞转录组</span>”, with its title in English and its Methods saying which paper the stages of this study follow.</p>
+        <p>A table is written in the text with vertical bars: lines one after another, the cells separated by <code>|</code>, the first line the header, and the second a line of dashes between the header and the rest. Colons beside the dashes set how a column is aligned: <code>|:--|</code> left, <code>|:-:|</code> centred, <code>|--:|</code> right. A section can also have a small heading written with <code>###</code>. Here the section is written like this (the citation inserted as in section 2):</p>
+        <figure class="code">
+          <figcaption>The text of the Methods section</figcaption>
+<pre><code>### Sampling compared with the maize ligule atlas
+
+Our stages follow the single-nucleus atlas of the maize ligular region [@Wang2026]: four stages from the shoot apical meristem to the formed ligular region (Table 1).
+
+**Table 1**  Sampling of the maize ligule atlas by stage
+
+| Stage | Tissue | Cells or nuclei |
+|:--|:-:|--:|
+| S0 | Shoot apical meristem (P0–P6) | 18955 |
+| S1 | Preligule band | 13522 |
+| S2 | Ligular region | 12598 |
+| S3 | Ligular region (L2) | 20616 |</code></pre>
+        </figure>
+        <p>The four stages and their counts of cells or nuclei are the numbers printed on Fig. 1b of that paper. While you edit, the table is these lines of text; the small heading is already shown as a heading, and the citation as <code>(Wang et al., 2026)</code>.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/write-13-table.jpg" width="1372" height="867" loading="lazy" alt="The Writing page, Methods section: the bold heading “Sampling compared with the maize ligule atlas”; a paragraph with the citation shown in green as (Wang et al., 2026); “Table 1 Sampling of the maize ligule atlas by stage”; below it six lines of text with vertical bars, the second being |:--|:-:|--:|. On the right the Candidates panel, under the manuscript a row of buttons and the box to tell the assistant what to change.">
+          <figcaption><b>Figure 13.</b> While you edit, a table is lines of text with vertical bars.</figcaption>
+        </figure>
+
+        <p>Click the eye icon above the manuscript, “Preview” (its tooltip reads “Preview: the whole manuscript laid out, with its Markdown drawn”), and the whole manuscript is laid out as a reader will read it; click it again to go back to editing:</p>
+        <ul>
+          <li>the table written with bars is drawn as a table, its header row shaded and the columns sharing the width by their content;</li>
+          <li>citations are shown in the format chosen in the “Export” menu, here author–year;</li>
+          <li>the entry under “References” at the end is the one the exported file has;</li>
+          <li>the <code>###</code> heading is a step smaller than the section name Methods; an empty section reads “This section is empty.” and is left out of the export.</li>
+        </ul>
+
+        <figure class="shot">
+          <img src="../../img/en/t/write-14-preview.jpg" width="1372" height="867" loading="lazy" alt="The preview on the Writing page: under Methods the bold small heading, the paragraph with (Wang et al., 2026), the title of Table 1 and a table of three columns and five rows (Stage, Tissue, Cells or nuclei); below it the empty Results and Discussion, each reading This section is empty.; at the end “References 1 papers” and one full APA-style entry: Wang, Q., Yang, H., … Li, G. (2026). A single-nucleus atlas of ligular region uncovers brassinosteroid-driven cell fate transitions controlling leaf angle in maize. Nature Communications, 17(1), 10762. with its DOI.">
+          <figcaption><b>Figure 14.</b> “Preview”: the table drawn as a table, the citation and the references at the end in the export's format.</figcaption>
+        </figure>
+
+        <p>In the preview all three columns are left-aligned: the alignment written with colons is used only in the exported Word file. The table's number, “Table 1”, is an ordinary paragraph above the table, made bold with <code>**</code>.</p>
+      </section>
+
+      <section id="s9">
+        <h2><i>9</i>Export</h2>
         <p>Click “Export” above the manuscript. The menu has “Markdown (.md)”, “Word (.docx)” and “Copy manuscript”. When the manuscript has comments, the Word item reads “Word (.docx), with comments”. Sections with nothing written are not exported.</p>
         <p>The lower half of the menu is the citation format in Word: “Citations in Word: author–year”, “Citations in Word: numbered [1]”, and the journal styles APA, Nature, Cell, NLM/Vancouver, IEEE, two GB/T 7714-2015 styles and Chicago, and last “Add a citation style file (Zotero’s .csl)…”. The selected item has a check mark, and the citations in the manuscript are shown in it too.</p>
 
@@ -189,6 +232,13 @@
         </figure>
 
         <p>The exported Word file writes citations in the selected format and lists the references at the end. Exported from the demo manuscript of section 7, the text has <code>(Zhang et al., 2023)</code>, the citation in the figure caption is the same, and at the end is one full entry under References. A citation in the text is a Word field linked to its entry at the end. A figure placed in the manuscript is embedded in the Word file, the figure above and the caption below.</p>
+        <p>A table written in the manuscript is a real table in Word, not lines of text with bars. The manuscript of the section before, exported to Word and opened in LibreOffice: thin cell borders, the header row in bold, the second column centred and the third right-aligned, just as <code>|:--|:-:|--:|</code> says; the columns share the width by their content, as in the preview. The entry under References at the end is the same as in the preview. In the file the header row is set to repeat at the top of each page when the table runs over a page break; this table is short and fits on one page, so that does not show.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/write-15-word.jpg" width="932" height="1017" loading="lazy" alt="The first page of the exported Word file, opened in LibreOffice: the title “A single-nucleus transcriptome atlas of rice lamina joint development”, Methods, the small heading in italics, the paragraph with (Wang et al., 2026), “Table 1 Sampling of the maize ligule atlas by stage”, then a table with thin borders: the header Stage, Tissue, Cells or nuclei in bold, the Tissue column centred and the numbers right-aligned; last, References and one full entry.">
+          <figcaption><b>Figure 15.</b> The exported Word file: the table is a Word table, aligned by the colons of its second line. The empty sections were not exported.</figcaption>
+        </figure>
+
         <p>In Markdown the citations stay as raw text such as <code>[@Zhang2023]</code>, and the pictures are copied to the <code>figures</code> folder beside the .md file. To typeset them in a proper citation format, switch to “Manuscript” on the References page, click “Export BibTeX”, and hand the .md, the .bib and <code>figures</code> together to Pandoc.</p>
         <aside class="note"><b>Tip</b>After your advisor comments in Word, how to import the file, handle the comments one by one and export a file with tracked changes is in the next tutorial.</aside>
       </section>
@@ -201,7 +251,8 @@
           <li>The star button on the References page fills in the basis for citations that have no source, and marks those it cannot find in the warning color.</li>
           <li>“Assistant writes” hands off the looking up of papers and the writing of whole paragraphs. Each change can be undone, and every section keeps versions.</li>
           <li>In “Materials” you upload your own figures or find the ones kept in Figures, and one click puts them into the manuscript. In Word the figures are embedded in the file, and in Markdown they are in the <code>figures</code> folder beside it.</li>
-          <li>Citations in the manuscript are shown in the format chosen in the “Export” menu, and the exported Word file writes citations in it and lists the references.</li>
+          <li>A table is written in the text with vertical bars, and the colons of its second line set how each column is aligned; “Preview” lays out the table, the citations and the references at the end as the export does.</li>
+          <li>Citations in the manuscript are shown in the format chosen in the “Export” menu, and the exported Word file writes citations in it, lists the references, and has written tables as real tables.</li>
           <li>To go back and forth with co-authors on the draft, read on in <a href="revise.html">Revise with co-authors: Word comments and tracked changes</a>. To first build the frame of a review, go back to <a href="review.html">Write a review in stages</a>.</li>
         </ul>
       </section>
@@ -209,8 +260,8 @@
   </div>
 
   <nav class="pager" aria-label="Previous and next">
-    <a class="prev" href="review.html"><small>Previous · 12</small><strong>Write a review in stages</strong></a>
-    <a class="next" href="revise.html"><small>Next · 14</small><strong>Revise with co-authors</strong></a>
+    <a class="prev" href="review.html"><small>Previous · 13</small><strong>Write a review in stages</strong></a>
+    <a class="next" href="revise.html"><small>Next · 15</small><strong>Revise with co-authors</strong></a>
   </nav>
 </main>
 
@@ -226,7 +277,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> The screenshots and numbers come from a real run in November 2026 on macOS with v0.10.0; Fig. 4, section 7 and Fig. 12 come from a demo manuscript on v0.17.0. The model answers differently each time, so the wording and numbers will differ when you follow along, but the steps are the same. The screenshots show the Chinese interface; the text uses the labels of the English one (Settings › General › Interface language).</p>
+      <p><b>About this tutorial.</b> The screenshots and numbers come from a real run in November 2026 on macOS with v0.10.0; Fig. 4, section 7 and Fig. 12 come from a demo manuscript on v0.17.0; section 8 and Fig. 15 from a demo manuscript made on 23 November 2026 with v0.18.0, with no model involved, Fig. 15 being the exported Word file opened in LibreOffice. The model answers differently each time, so the wording and numbers will differ when you follow along, but the steps are the same. The screenshots of section 8 show the English interface; the others show the Chinese one, and the text uses the labels of the English one (Settings › General › Interface language).</p>
       <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation; check key numbers and conclusions against the original.</p>
     </div>
   </div>
