@@ -507,6 +507,8 @@ pub enum Cmd {
     AskPdfPage,
     /// 页面总览 of the PDF on show, on or off: all its pages small, to go to one.
     PdfOverview,
+    /// 下一页 beside the pages of the PDF on show, on or off: a column more, a page on (两页并排).
+    PdfNext,
     /// Show the PDF on show twice, each half scrolled on its own, or once again.
     PdfSplit(Split),
     /// Show a file of the paper (its id) in the other half of the viewer; the file worked in is the viewer split on itself.
@@ -2799,11 +2801,20 @@ impl Workspace {
                 let third = !in_place && current == Split::Triple;
                 breaks.push(items.len());
                 items.push(MenuItem { label: t("再开一栏原文：单独滚动").into(), checked: third, note: None, cmd: Cmd::PdfSplit(if third { Split::Side } else { Split::Triple }) });
+                // Or the page after the one read, which goes along with it: with the third column taken it is that column's label that says so.
+                if !in_place && (view.next_shown() || !view.full()) { items.push(MenuItem { label: t("再开一栏下一页：跟着原文").into(), checked: view.next_shown(), note: None, cmd: Cmd::PdfNext }) }
             }
             return;
         }
         for (label, split) in [("不分屏", Split::Off), ("左右分屏", Split::Side), ("上下分屏", Split::Stacked)] {
             items.push(MenuItem { label: t(label).into(), checked: current == split, note: None, cmd: Cmd::PdfSplit(split) });
+        }
+        // Two pages across are a column more that shows the next page and goes along with the pages (design rule 35):
+        // not a fourth way to split, so it stands apart from them and is ticked beside whichever is in force.
+        if other.is_none() {
+            breaks.push(items.len());
+            items.push(MenuItem { label: t("两页并排：旁边一栏显示下一页").into(), checked: view.next_shown(), note: None, cmd: Cmd::PdfNext });
+            breaks.push(items.len());
         }
         // 固定 or 自由: the same as the button on the bar beside 分屏, kept from paper to paper.
         let free = self.settings.pdf_split_free;
@@ -4097,6 +4108,13 @@ impl Workspace {
             }
             Cmd::FloatChat(on) => self.float_chat(on, window, cx),
             Cmd::FoldChat(fold) => self.fold_chat(fold, window, cx),
+            Cmd::PdfNext => {
+                let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) else { return };
+                // Three columns already, none of them the next page: nothing can come, and the way that is left is said.
+                let nowhere = { let view = pdf.read(cx); view.full() && !view.next_shown() };
+                if nowhere { return self.say(t("已经有三栏了。点一栏左上角的标签，可以让它改为显示下一页。"), cx) }
+                pdf.update(cx, |pdf, cx| pdf.toggle_next(cx));
+            }
             Cmd::PdfOverview => {
                 if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.toggle_overview(cx)) }
             }
@@ -9873,6 +9891,14 @@ impl Workspace {
                     "triple" => Split::Triple,
                     _ => Split::Off,
                 })),
+                // `pdfnext`: 下一页 beside the pages of the PDF on show, on or off. `pdfshow:<view>;<pages|theirs|next|map>` is a view's label told what to show.
+                "pdfnext" => Some(Cmd::PdfNext),
+                "pdfshow" => {
+                    let (view, what) = arg.split_once(';').unwrap_or((arg, "pages"));
+                    let shows = match what { "theirs" => crate::pdf::Shows::Theirs, "next" => crate::pdf::Shows::Next, "map" => crate::pdf::Shows::Map, _ => crate::pdf::Shows::Pages };
+                    if let (Some(pdf), Ok(view)) = (self.lib.as_ref().and_then(|lib| lib.pdf.clone()), view.parse::<usize>()) { pdf.update(cx, |pdf, cx| pdf.show_in_view(view, shows, cx)) }
+                    None
+                }
                 // `pdfoverview`: 页面总览 of the PDF on show, on or off.
                 "pdfoverview" => Some(Cmd::PdfOverview),
                 // `pdfpage`: the dialog that goes to a page typed. `pdfpage:12` goes there.
