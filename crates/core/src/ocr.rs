@@ -321,8 +321,12 @@ pub fn blocks(raw: &str) -> Vec<Block> {
     .collect()
 }
 
-/// The text of a page without its marks of place. A piece with a place is a block of the page (a heading, a
-/// paragraph), so a blank line stands between two of them, as the pages of a PDF that gives its own text have it.
+/// The text of a page as it is kept and asked about, made of what an engine wrote. DeepSeek writes Markdown: a
+/// heading opens with `#`, a table is HTML, and every number with a unit is a formula (`$4\ ^\circ\text{C}$`).
+/// Left like that, no heading names a part of the paper and no sentence is found by its words; so the marks go,
+/// a table becomes its rows, and a formula that says no more than figures, units and plain signs becomes those
+/// (`untex`). A formula that is one stays as written. Marks of place go too: a piece with a place is a block of
+/// the page (a heading, a paragraph), so a blank line stands between two of them.
 pub fn plain(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     for piece in pieces(raw) {
@@ -341,10 +345,38 @@ pub fn plain(raw: &str) -> String {
             }
         }
     }
+    // Tables and formulas are set aside while the Markdown is read: an underscore or a star of theirs is no emphasis.
+    let mut aside: Vec<String> = vec![];
+    let mut hold = |text: String| {
+        aside.push(text);
+        format!("{HELD}{}{HELD_END}", aside.len() - 1)
+    };
+    let mut lifted = String::with_capacity(out.len());
+    let mut at = 0;
+    for (range, rows) in tables(&out) {
+        lifted.push_str(&out[at..range.start]);
+        lifted.push_str("\n\n");
+        lifted.push_str(&hold(rows));
+        lifted.push_str("\n\n");
+        at = range.end;
+    }
+    lifted.push_str(&out[at..]);
+    let mut worded = String::with_capacity(lifted.len());
+    let mut at = 0;
+    for (whole, inner) in formulas(&lifted) {
+        worded.push_str(&lifted[at..whole.start]);
+        worded.push_str(&hold(untex(&lifted[inner]).unwrap_or_else(|| lifted[whole.clone()].to_string())));
+        at = whole.end;
+    }
+    worded.push_str(&lifted[at..]);
+    let mut text = crate::markdown::plain(&mended(&worded));
+    for (index, held) in aside.iter().enumerate().rev() {
+        text = text.replace(&format!("{HELD}{index}{HELD_END}"), held);
+    }
     // Lines without spaces at their ends, and no more than one blank line between two.
-    let mut tidy = String::with_capacity(out.len());
+    let mut tidy = String::with_capacity(text.len());
     let mut blank = 0;
-    for line in out.lines().map(str::trim_end) {
+    for line in text.lines().map(str::trim_end) {
         if line.trim().is_empty() {
             blank += 1;
             continue;
@@ -354,6 +386,228 @@ pub fn plain(raw: &str) -> String {
         tidy.push_str(line);
     }
     tidy
+}
+
+/// A text of Markdown with the paragraphs put together again that the end of a column cut in two: the engine
+/// reads the columns in their order and starts a paragraph anew where one ends. Only what plainly goes on is
+/// joined: a long paragraph that stops at a small letter or a comma, before one that opens with a small letter
+/// or a figure (or, in Chinese, Japanese and Korean, a paragraph that stops at a letter before one that opens
+/// with one); neither is a heading, an item of a list or a table, which the Markdown still says here.
+fn mended(text: &str) -> String {
+    let mut paragraphs: Vec<String> = vec![];
+    let mut open = false;
+    for line in text.lines() {
+        if line.trim().is_empty() {
+            open = false;
+        } else if open && let Some(last) = paragraphs.last_mut() {
+            last.push('\n');
+            last.push_str(line);
+        } else {
+            paragraphs.push(line.to_string());
+            open = true;
+        }
+    }
+    // What stands by itself whatever comes before it: a heading, an item, a quotation, a picture, a table or a formula set aside.
+    let own = |paragraph: &str| {
+        let start = paragraph.trim_start();
+        let numbered = start.split_once(['.', ')']).is_some_and(|(number, rest)| !number.is_empty() && number.len() <= 3 && number.chars().all(|c| c.is_ascii_digit()) && rest.starts_with(' '));
+        numbered || start.starts_with(['#', '<', '|', '>', '!', HELD]) || start.starts_with("- ") || start.starts_with("* ") || start.starts_with("+ ") || start.starts_with("$$")
+    };
+    let mut out: Vec<String> = vec![];
+    for paragraph in paragraphs {
+        let glue = out.last().filter(|before| !own(before) && !own(&paragraph)).and_then(|before| {
+            let (last, first) = (before.trim_end().chars().next_back()?, paragraph.trim_start().chars().next()?);
+            let length = before.chars().count();
+            if crate::structure::is_cjk(last) && crate::structure::is_cjk(first) && length >= 30 {
+                Some("")
+            } else if (last.is_ascii_lowercase() || last == ',') && (first.is_ascii_lowercase() || first.is_ascii_digit()) && length >= 60 {
+                Some(" ")
+            } else {
+                None
+            }
+        });
+        match (glue, out.last_mut()) {
+            (Some(glue), Some(before)) => {
+                let kept = before.trim_end().len();
+                before.truncate(kept);
+                before.push_str(glue);
+                before.push_str(paragraph.trim_start());
+            }
+            _ => out.push(paragraph),
+        }
+    }
+    out.join("\n\n")
+}
+
+/// What stands for a table or a formula set aside in `plain`, around its number: characters no page holds.
+const HELD: char = '\u{E000}';
+const HELD_END: char = '\u{E001}';
+
+/// The HTML tables of a text: where each stands, and its rows as lines, the cells of a row apart by ` | `.
+fn tables(text: &str) -> Vec<(std::ops::Range<usize>, String)> {
+    // ASCII letters only change, so every byte keeps its place.
+    let lower = text.to_ascii_lowercase();
+    let mut out = vec![];
+    let mut at = 0;
+    while let Some(start) = lower[at..].find("<table").map(|found| at + found) {
+        let Some(end) = lower[start..].find("</table>").map(|found| start + found + "</table>".len()) else { break };
+        let (mut rows, mut row, mut cell): (Vec<String>, Vec<String>, String) = (vec![], vec![], String::new());
+        let mut rest = &text[start..end];
+        while let Some(open) = rest.find('<') {
+            cell.push_str(&rest[..open]);
+            let Some(close) = rest[open..].find('>').map(|found| open + found) else { break };
+            let tag = rest[open + 1..close].trim().to_ascii_lowercase();
+            let name = tag.trim_start_matches('/').split(|c: char| !c.is_ascii_alphanumeric()).next().unwrap_or("");
+            match (tag.starts_with('/'), name) {
+                (true, "td" | "th") => row.push(entities(&std::mem::take(&mut cell)).split_whitespace().collect::<Vec<_>>().join(" ")),
+                (true, "tr") => {
+                    if row.iter().any(|cell| !cell.is_empty()) { rows.push(row.join(" | ")) }
+                    row.clear();
+                }
+                (false, "td" | "th") => cell.clear(),
+                (false, "br") => cell.push(' '),
+                _ => {}
+            }
+            rest = &rest[close + 1..];
+        }
+        out.push((start..end, rows.join("\n")));
+        at = end;
+    }
+    out
+}
+
+/// A text with the few entities a table's cell is written with read.
+fn entities(text: &str) -> String {
+    text.replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&")
+}
+
+/// The formulas of a text, as Markdown marks them: each whole, and what is between its marks. `$…$` on one
+/// line (opening before a character that is no blank, closing after one and not before a digit, so that two
+/// prices are no formula), `$$…$$`, `\(…\)` and `\[…\]`.
+fn formulas(text: &str) -> Vec<(std::ops::Range<usize>, std::ops::Range<usize>)> {
+    let bytes = text.as_bytes();
+    let mut out = vec![];
+    let mut at = 0;
+    while at < bytes.len() {
+        let rest = &text[at..];
+        let escaped = at > 0 && bytes[at - 1] == b'\\';
+        let found = if rest.starts_with("$$") && !escaped {
+            rest[2..].find("$$").map(|end| (2, end + 2, 2))
+        } else if rest.starts_with('$') && !escaped {
+            let opens = rest[1..].chars().next().is_some_and(|c| !c.is_whitespace() && c != '$');
+            let line = rest[1..].find('\n').map_or(rest.len(), |end| end + 1);
+            let closes = |end: &usize| !rest[1..*end].ends_with(char::is_whitespace) && !rest[1..*end].ends_with('\\') && !rest[end + 1..].starts_with(|c: char| c.is_ascii_digit());
+            if opens { rest[1..line].match_indices('$').map(|(end, _)| end + 1).find(closes).map(|end| (1, end, 1)) } else { None }
+        } else if rest.starts_with("\\(") && !escaped {
+            rest.find("\\)").map(|end| (2, end, 2))
+        } else if rest.starts_with("\\[") && !escaped {
+            rest.find("\\]").map(|end| (2, end, 2))
+        } else {
+            None
+        };
+        match found {
+            Some((open, end, close)) => {
+                out.push((at..at + end + close, at + open..at + end));
+                at += end + close;
+            }
+            None => at += rest.chars().next().map_or(1, char::len_utf8),
+        }
+    }
+    out
+}
+
+/// The signs a formula names that a text simply writes.
+const SIGNS: [(&str, &str); 66] = [
+    ("alpha", "α"), ("beta", "β"), ("gamma", "γ"), ("delta", "δ"), ("epsilon", "ε"), ("varepsilon", "ε"), ("zeta", "ζ"), ("eta", "η"), ("theta", "θ"), ("iota", "ι"), ("kappa", "κ"),
+    ("lambda", "λ"), ("mu", "μ"), ("nu", "ν"), ("xi", "ξ"), ("pi", "π"), ("rho", "ρ"), ("sigma", "σ"), ("tau", "τ"), ("upsilon", "υ"), ("phi", "φ"), ("varphi", "φ"), ("chi", "χ"),
+    ("psi", "ψ"), ("omega", "ω"), ("Gamma", "Γ"), ("Delta", "Δ"), ("Theta", "Θ"), ("Lambda", "Λ"), ("Xi", "Ξ"), ("Pi", "Π"), ("Sigma", "Σ"), ("Phi", "Φ"), ("Psi", "Ψ"), ("Omega", "Ω"),
+    ("pm", "±"), ("mp", "∓"), ("times", "×"), ("cdot", "·"), ("div", "÷"), ("leq", "≤"), ("le", "≤"), ("geq", "≥"), ("ge", "≥"), ("neq", "≠"), ("ne", "≠"), ("approx", "≈"), ("sim", "~"),
+    ("equiv", "≡"), ("propto", "∝"), ("infty", "∞"), ("rightarrow", "→"), ("to", "→"), ("leftarrow", "←"), ("leftrightarrow", "↔"), ("degree", "°"), ("prime", "′"), ("ldots", "…"),
+    ("dots", "…"), ("cdots", "…"), ("ll", "≪"), ("gg", "≫"), ("ell", "ℓ"), ("partial", "∂"), ("AA", "Å"), ("angstrom", "Å"),
+];
+/// The commands that set what is in their braces in another face: the words are the same.
+const FACES: [&str; 10] = ["text", "textrm", "textit", "textbf", "mathrm", "mathit", "mathbf", "mathsf", "operatorname", "mbox"];
+
+/// A formula as the text it stands for, when it says no more than figures, units and plain signs: `4\ ^\circ\text{C}`
+/// is `4 °C`, `10^{-3}` is `10⁻³`, `\text{CO}_2` is `CO₂`. `None` for one that is built (a fraction, a sum, a
+/// letter raised or lowered, braces of its own): that stays as the engine wrote it.
+fn untex(tex: &str) -> Option<String> {
+    let chars: Vec<char> = tex.chars().collect();
+    let mut out = String::new();
+    let mut at = 0;
+    // The command at `at` (after its backslash): its name and where it ends. A name is letters, or one other character.
+    let command = |at: usize| -> Option<(String, usize)> {
+        let first = *chars.get(at)?;
+        if !first.is_ascii_alphabetic() { return Some((first.to_string(), at + 1)) }
+        let end = (at..chars.len()).find(|i| !chars[*i].is_ascii_alphabetic()).unwrap_or(chars.len());
+        Some((chars[at..end].iter().collect(), end))
+    };
+    // What stands in the braces opening at `at`, when it is plain: no command and no braces within.
+    let braced = |at: usize| -> Option<(String, usize)> {
+        if chars.get(at) != Some(&'{') { return None }
+        let end = (at + 1..chars.len()).find(|i| chars[*i] == '}')?;
+        let inner: String = chars[at + 1..end].iter().collect();
+        (!inner.contains(['{', '\\'])).then_some((inner, end + 1))
+    };
+    while at < chars.len() {
+        match chars[at] {
+            '\\' => {
+                let (name, end) = command(at + 1)?;
+                at = end;
+                match name.as_str() {
+                    face if FACES.contains(&face) => {
+                        let (words, end) = braced(at)?;
+                        out.push_str(&words);
+                        at = end;
+                    }
+                    " " | "," | ";" | ":" | "quad" | "qquad" => out.push(' '),
+                    "!" | "left" | "right" => {}
+                    "%" | "&" | "#" | "_" | "$" | "{" | "}" => out.push_str(&name),
+                    sign => {
+                        out.push_str(SIGNS.iter().find(|(known, _)| *known == sign)?.1);
+                    }
+                }
+            }
+            mark @ ('^' | '_') => {
+                // What is raised or lowered: braces, a command, or one character.
+                let (raised, end) = match chars.get(at + 1)? {
+                    '{' => {
+                        let end = (at + 2..chars.len()).find(|i| chars[*i] == '}')?;
+                        (chars[at + 2..end].iter().collect::<String>(), end + 1)
+                    }
+                    '\\' => {
+                        let (name, end) = command(at + 2)?;
+                        (format!("\\{name}"), end)
+                    }
+                    one => (one.to_string(), at + 2),
+                };
+                at = end;
+                match (mark, raised.trim()) {
+                    ('^', "\\circ") => out.push('°'),
+                    ('^', "\\prime") => out.push('′'),
+                    (_, figures) if !figures.is_empty() => {
+                        for figure in figures.chars() {
+                            let table = if mark == '^' { "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻" } else { "₀₁₂₃₄₅₆₇₈₉₊₋" };
+                            let index = "0123456789+-".find(if figure == '−' { '-' } else { figure })?;
+                            out.push(table.chars().nth(index)?);
+                        }
+                    }
+                    _ => return None,
+                }
+            }
+            '{' | '}' | '&' => return None,
+            '~' => {
+                out.push(' ');
+                at += 1;
+            }
+            plain => {
+                out.push(plain);
+                at += 1;
+            }
+        }
+    }
+    let said = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    (!said.is_empty()).then_some(said)
 }
 
 #[cfg(test)]
@@ -455,6 +709,68 @@ mod tests {
         assert!(read(deepseek, 400, "<html>bad</html>").unwrap_err().ends_with("：<html>bad</html>"));
         assert!(read(deepseek, 200, "<html>").unwrap_err().contains("不是 JSON"));
         assert!(read(deepseek, 200, r#"{"id": "ocr-1"}"#).unwrap_err().contains("无法识别"));
+    }
+
+    /// What DeepSeek answered for a scan of two pages (`purpose: text_recognition`, November 2026), as it came.
+    const ANSWERED: [&str; 2] = [
+        "# Root hair elongation under low phosphate in *Arabidopsis*\n\nZhang Wei, Li Na and Wang Fang\n\nInstitute of Plant Sciences\n\n## Abstract\n\nPhosphate is often the nutrient that limits plant growth. We measured root hair length in seedlings grown on media with $1\\text{ mM}$ or $10\\ \\mu\\text{M}$ phosphate and found that hairs were $2.4$ times longer under low phosphate ($\\text{p} < 0.001$).\n\n### 1. Introduction\n\nRoot hairs extend the absorbing surface of the root. Earlier work showed that their length responds to the supply of phosphate, iron and nitrate, yet the timing of that response has rarely been followed in single seedlings. Here we image the same roots every hour for seven days.\n\nThe transcription factor RSL4 sets the final length of a hair cell, and its abundance rises when phosphate is scarce [1, 2].\n\n### 2. Methods\n\nSeeds of Col-0 were sterilised, kept at $4\\ ^\\circ\\text{C}$ for two days and sown on half-strength MS plates. Plates stood upright at $22\\ ^\\circ\\text{C}$ under $16\\text{ h}$ of light. Length was measured in Fiji from the base of each hair to its tip; the growth rate is $\\text{v} = \\Delta\\text{L} / \\Delta\\text{t}$.\n\n中文摘要：低磷条件下，拟南芥根毛明显伸长，平均长度为对照的 $2.4$ 倍。",
+        "### 3. Results\n\nHairs on low phosphate grew for longer, not faster: the rate over the first six hours was the same in both media, and growth stopped after 9 h on high phosphate and after\n\n21 h on low phosphate.\n\nTable 1 gives the mean length on day seven for three replicates.\n\n<table border=1><tr><td>Medium</td><td>Replicates</td><td>Length (μm)</td></tr><tr><td>1 mM phosphate</td><td>3</td><td>312 ± 28</td></tr><tr><td>10 μM phosphate</td><td>3</td><td>751 ± 64</td></tr></table>\n\n### 4. Discussion\n\nThe longer period of growth agrees with a model in which RSL4 is degraded more slowly when phosphate is scarce. Whether the same holds for iron remains to be tested.\n\n[1] Yi K. et al. (2010) A basic helix-loop-helix transcription factor controls cell growth and size in root hairs. Nat. Genet. 42, 264–267.\n\n[2] Datta S. et al. (2015) Intensity of a pulse of RSL4 transcription factor synthesis determines Arabidopsis root hair cell size. Nat. Plants 1, 15138.\n\n## References",
+    ];
+
+    #[test]
+    fn what_the_service_writes_becomes_the_text_of_a_page() {
+        let pages: Vec<String> = ANSWERED.iter().map(|raw| plain(raw)).collect();
+        // Headings without their marks, each alone; figures and units as a text writes them.
+        assert!(pages[0].starts_with("Root hair elongation under low phosphate in Arabidopsis\n\nZhang Wei, Li Na and Wang Fang\n\nInstitute of Plant Sciences\n\nAbstract\n\nPhosphate is often"), "{}", pages[0]);
+        assert!(pages[0].contains("grown on media with 1 mM or 10 μM phosphate and found that hairs were 2.4 times longer under low phosphate (p < 0.001).\n\n1. Introduction\n\nRoot hairs extend"), "{}", pages[0]);
+        assert!(pages[0].contains("kept at 4 °C for two days") && pages[0].contains("upright at 22 °C under 16 h of light") && pages[0].contains("the growth rate is v = ΔL / Δt."), "{}", pages[0]);
+        assert!(pages[0].ends_with("平均长度为对照的 2.4 倍。") && !pages[0].contains('$') && !pages[0].contains('#') && !pages[0].contains('*'), "{}", pages[0]);
+        // A table as its rows.
+        assert!(pages[1].contains("for three replicates.\n\nMedium | Replicates | Length (μm)\n1 mM phosphate | 3 | 312 ± 28\n10 μM phosphate | 3 | 751 ± 64\n\n4. Discussion\n\nThe longer period"), "{}", pages[1]);
+        assert!(pages[1].starts_with("3. Results\n\nHairs on low phosphate") && pages[1].ends_with("15138.\n\nReferences") && !pages[1].contains('<'), "{}", pages[1]);
+        // With the marks gone the headings name the parts of the paper, which is what the text is sorted by.
+        let made = crate::structure::by_rule(&pages, "");
+        let part = |words: &str| made.sentences.iter().find(|sentence| sentence.text.contains(words)).map(|sentence| sentence.section.as_str());
+        assert_eq!((part("Root hairs extend"), part("Seeds of Col-0"), part("grew for longer"), part("agrees with a model")), (Some("introduction"), Some("methods"), Some("results"), Some("discussion")));
+        assert!(made.sentences.iter().any(|sentence| sentence.text == "Seeds of Col-0 were sterilised, kept at 4 °C for two days and sown on half-strength MS plates."));
+    }
+
+    #[test]
+    fn a_formula_that_is_only_figures_and_units_is_text() {
+        for (tex, said) in [("2.4", "2.4"), ("1\\text{ mM}", "1 mM"), ("10\\ \\mu\\text{M}", "10 μM"), ("4\\ ^\\circ\\text{C}", "4 °C"), ("37^{\\circ}\\mathrm{C}", "37°C"), ("\\text{p} < 0.001", "p < 0.001"), ("10^{-3}", "10⁻³"), ("\\text{CO}_2", "CO₂"), ("\\text{Ca}^{2+}", "Ca²⁺"), ("5\\%", "5%"), ("312 \\pm 28", "312 ± 28"), ("\\sim 3\\,\\text{kb}", "~ 3 kb"), ("n = 3", "n = 3"), ("\\alpha\\text{-helix}", "α-helix"), ("\\leq 0.05", "≤ 0.05"), ("3' \\rightarrow 5'", "3' → 5'")] {
+            assert_eq!(untex(tex).as_deref(), Some(said), "{tex}");
+        }
+        // One that is built stays as it was written.
+        for tex in ["\\frac{a}{b}", "x_i", "e^{x}", "\\sum_{i=1}^{n} x_i", "\\sqrt{2}", "{a}", "a & b", "\\text{a{b}}", "\\unknown", ""] {
+            assert_eq!(untex(tex), None, "{tex}");
+        }
+        assert_eq!(plain("The rate is $\\frac{\\Delta L}{\\Delta t}$ at $25\\ ^\\circ\\text{C}$, with $x_i * y_i$ and $a_1 * b_1$."), "The rate is $\\frac{\\Delta L}{\\Delta t}$ at 25 °C, with $x_i * y_i$ and a₁ * b₁.");
+        assert_eq!(plain("$$E = mc^2$$\n\n\\(5\\,\\text{mM}\\) and \\[\\int_0^1 f\\]"), "E = mc²\n\n5 mM and \\[\\int_0^1 f\\]");
+        // Money is no formula; nor is a mark that never closes.
+        assert_eq!(plain("It cost $5 and then $10 more; from $5–$10. An open $x and a \\$ sign."), "It cost $5 and then $10 more; from $5–$10. An open $x and a $ sign.");
+    }
+
+    #[test]
+    fn a_paragraph_cut_by_the_end_of_a_column_is_one_again() {
+        let long = "Hairs on low phosphate grew for longer, not faster, and growth stopped after 9 h on high phosphate and after";
+        assert_eq!(plain(&format!("### 3. Results\n\n{long}\n\n21 h on low phosphate.\n\nTable 1 gives the mean.")), format!("3. Results\n\n{long} 21 h on low phosphate.\n\nTable 1 gives the mean."));
+        assert_eq!(plain(&format!("{long},\n\nwhich was expected.")), format!("{long}, which was expected."));
+        // Not across a heading, an item or a table, not after a sentence's end, and not for a short line such as a title's.
+        for apart in [format!("{long}\n\n## methods\n\nseeds were sown."), format!("{long}\n\n1. first item"), format!("{long}\n\n- an item"), format!("{long}.\n\nand so on."), format!("{long}\n\nA new sentence."), "Root hair growth\n\nand phosphate".to_string(), format!("{long}\n\n<table><tr><td>a</td></tr></table>")] {
+            assert_eq!(plain(&apart).matches("\n\n").count(), apart.matches("\n\n").count(), "{apart}");
+        }
+        // Chinese has no small letters: a paragraph that stops in the middle of a sentence goes on.
+        let zh = "低磷条件下，拟南芥根毛明显伸长，平均长度为对照的两倍以上，这一结果在三次独立重复中";
+        assert_eq!(plain(&format!("{zh}\n\n都得到了验证。\n\n## 讨论\n\n根毛")), format!("{zh}都得到了验证。\n\n讨论\n\n根毛"));
+        assert_eq!(plain("摘要\n\n低磷条件下根毛伸长。"), "摘要\n\n低磷条件下根毛伸长。");
+    }
+
+    #[test]
+    fn a_table_becomes_its_rows() {
+        let html = "Before.\n<TABLE class=\"x\">\n<tr><th>Gene</th><th colspan=\"2\">Fold&nbsp;change</th></tr>\n<tr><td>RSL4</td><td>2.4<br>(n = 3)</td><td>p &lt; 0.05 &amp; up</td></tr>\n<tr><td></td><td> </td></tr>\n</TABLE>\nAfter *that*.";
+        assert_eq!(plain(html), "Before.\n\nGene | Fold change\nRSL4 | 2.4 (n = 3) | p < 0.05 & up\n\nAfter that.");
+        // One that never ends is left as it stands.
+        assert_eq!(tables("<table><tr><td>a").len(), 0);
     }
 
     #[test]
