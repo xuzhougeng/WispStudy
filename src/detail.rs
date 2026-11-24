@@ -53,6 +53,8 @@ struct PdfBar {
     split: Split,
     pen: Tool,
     facing: bool,
+    /// The paper's mind map stands in a column of the viewer.
+    map: bool,
     /// The tools float at the page's edge (`Settings::pdf_tools_floating`).
     floating: bool,
     /// 分屏 自由 (`Settings::pdf_split_free`): the halves are dragged wider or narrower, each zoomed on its own.
@@ -657,6 +659,7 @@ impl Workspace {
             pdf.set_width(width);
             pdf.library_chat = library_chat;
             pdf.translates = true;
+            pdf.maps = true;
         });
         let (page, count) = { let view = view.read(cx); (view.current_page(), view.page_count()) };
         let window: &Window = window;
@@ -738,6 +741,7 @@ impl Workspace {
                 pdf.set_width(half_width);
                 pdf.library_chat = library_chat;
             pdf.translates = true;
+            pdf.maps = true;
                 // Alone in the area, the translation goes beside or under the pages by the width; beside other panes the layout places it (`render_paper_area`).
                 if !paned { pdf.fit_facing(cx) }
             });
@@ -792,7 +796,8 @@ impl Workspace {
         };
         // The tools stand in the toolbar, or float at the page's right edge: a habit, kept for every paper.
         let floating = self.settings.pdf_tools_floating;
-        let bar = PdfBar { width, file_id: file_id.clone(), paper_id, file_title, others, page, count, percent, zoom, fit: lib.zoom, cutting, split, pen, facing, floating, free, can_pin, keep: lib.keep, beside, aloud, paned, hidden: hidden.to_vec() };
+        let pdf_map = self.lib.as_ref().and_then(|lib| lib.pdf.as_ref()).is_some_and(|pdf| pdf.read(cx).map_shown());
+        let bar = PdfBar { width, file_id: file_id.clone(), paper_id, file_title, others, page, count, percent, zoom, fit: lib.zoom, cutting, split, pen, facing, map: pdf_map, floating, free, can_pin, keep: lib.keep, beside, aloud, paned, hidden: hidden.to_vec() };
         // One line whatever the width: what it has no room for gives way level by level, the last of them under ⋯.
         let mut level = 0;
         let parts = loop {
@@ -866,6 +871,9 @@ impl Workspace {
             // paragraphs translated in place. Lit while on, with how far the translation is and the one thing to do next.
             let (switch, width) = button("pdf-facing", Some("languages"), "languages", t("译文"), bar.facing, Some(if bar.facing { t("收起译文") } else { t("对照译文：左边原文，右边把每段换成译文的页面") }.to_string()), zooms);
             put((switch.on_click(self.on(Cmd::ToggleFacing, cx)), width));
+            // The paper's mind map, a column more beside the pages: made by hand, or drafted by the model and then changed.
+            let (map, width) = button("pdf-map", Some("git-branch"), "git-branch", t("导图"), bar.map, Some(if bar.map { t("收起思维导图") } else { t("思维导图：在旁边一栏整理这篇文献的要点，节点可以连回原文") }.to_string()), zooms);
+            put((map.on_click(self.on(Cmd::PdfMap, cx)), width));
         }
         drop(put);
         if has && keeps { parts.extend(self.facing_controls(level >= BAR_BRIEF_FACING, window, cx)) }
@@ -878,7 +886,7 @@ impl Workspace {
             let (split, width) = button("pdf-split", None, "columns-2", split_label, replaced || bar.split != Split::Off, None, named);
             put((split.on_click(self.on_menu(MenuKind::PdfSplit, cx)), width));
             // Split, how the halves are held: 固定, even and zoomed together; 自由, the band dragged and each half zoomed on its own.
-            if bar.split != Split::Off && !bar.facing {
+            if bar.split != Split::Off && !bar.facing && !bar.map {
                 let (label, icon, tip) = if bar.free { (t("自由"), "lock-open", t("自由：拖动中间的分隔线调整两边宽度；点一下某一边，缩放只改这一边。点此改回固定")) } else { (t("固定"), "lock", t("固定：两边一样宽，缩放一起变。点此改为自由：分隔线可以拖动，两边各自缩放")) };
                 let (hold, width) = button("pdf-split-free", Some(icon), icon, label, bar.free, Some(tip.to_string()), named);
                 put((hold.on_click(self.on(Cmd::PdfSplitFree(!bar.free), cx)), width));

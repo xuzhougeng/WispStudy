@@ -204,6 +204,7 @@ pub fn catalog() -> Vec<ToolDef> {
             &[],
         ),
         scoped("journal_metrics", "查期刊分区与影响因子", "查一种期刊的影响因子和分区：JCR 影响因子与最佳分区（Q1–Q4）、中科院分区表升级版大类分区与是否 Top、新锐期刊分区表分区，以及预警名单。数据随应用附带，不联网。给 journal（刊名，全称或 PubMed 式缩写，或 ISSN），或 paperId（用这篇文献的期刊）。查不到时 found 为 false。", json!({"journal": {"type": "string", "description": "刊名或 ISSN，例如 Nature Communications、Nat Commun、2041-1723。"}, "paperId": {"type": "string", "description": "文献 ID；不给 journal 时用这篇文献的期刊。"}}), &[]),
+        scoped("mind_map", "读取思维导图", "读取一篇文献的思维导图：读者自己做的，或让模型起草后改过的。返回大纲（Markdown 嵌套列表），节点后面的方括号是它的出处：页码和原文里的那一小段。还没有导图时 nodes 为 0。", json!({"id": {"type": "string", "description": "文献 ID，例如 list_papers 返回的 id。"}}), &["id"]),
         scoped("get_paper", "读取文献", "按 ID 读取一篇文献的完整记录：书目信息、摘要、笔记、标签、自定义词条和附件。", json!({"id": {"type": "string", "description": "文献 ID，例如 list_papers 返回的 id。"}}), &["id"]),
         scoped(
             "search_fulltext",
@@ -930,6 +931,7 @@ fn dispatch(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fet
         "list_figures" => list_figures(store, info, args),
         "list_pdf_annotations" => list_pdf_annotations(store, args),
         "get_paper" => get_paper(store, args),
+        "mind_map" => mind_map(store, args),
         "journal_metrics" => journal_metrics(store, args),
         "search_fulltext" => search_fulltext(store, args),
         "read_fulltext" => read_fulltext(store, args),
@@ -1131,6 +1133,15 @@ fn journal_metrics(store: &mut Store, args: &Value) -> Result<Value> {
     Ok(match found {
         Some(journal) => json!({"found": true, "asked": name, "journal": journal, "summary": journal.summary(), "editions": crate::journals::EDITIONS}),
         None => json!({"found": false, "asked": name, "editions": crate::journals::EDITIONS}),
+    })
+}
+
+/// A paper's mind map as the reader left it: its outline, a passage after a node's words where it has one.
+fn mind_map(store: &mut Store, args: &Value) -> Result<Value> {
+    let paper = store.get_paper(text(args, "id")?)?;
+    Ok(match store.mind_map(&paper.id)? {
+        Some(map) => json!({"paperId": paper.id, "title": paper.title, "nodes": map.count(), "outline": map.outline()}),
+        None => json!({"paperId": paper.id, "title": paper.title, "nodes": 0, "outline": "", "note": "这篇文献还没有思维导图。"}),
     })
 }
 

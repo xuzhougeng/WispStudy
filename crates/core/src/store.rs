@@ -189,6 +189,14 @@ CREATE TABLE IF NOT EXISTS reading_places (
     updated_at TEXT NOT NULL
 );
 
+-- A paper's mind map (`mindmap::MindMap` as JSON): one a paper, made by the
+-- reader or drafted by a model and then the reader's. It goes with its paper.
+CREATE TABLE IF NOT EXISTS mind_maps (
+    paper_id TEXT PRIMARY KEY NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- Translations already made, so that a title or an abstract is translated
 -- once. The key is `translation_key`: the source text and the instructions.
 CREATE TABLE IF NOT EXISTS translations (
@@ -1265,6 +1273,21 @@ impl Store {
 
     // ---- translations
 
+    /// A paper's mind map, if one was made.
+    pub fn mind_map(&self, paper_id: &str) -> Result<Option<crate::mindmap::MindMap>> {
+        let body: Option<String> = self.db.query_row("SELECT body FROM mind_maps WHERE paper_id = ?1", [paper_id], |r| r.get(0)).optional()?;
+        Ok(match body {
+            Some(body) => Some(serde_json::from_str(&body).context("这篇文献的思维导图读不出来")?),
+            None => None,
+        })
+    }
+
+    /// Keep a paper's mind map, in place of the one kept.
+    pub fn save_mind_map(&mut self, paper_id: &str, map: &crate::mindmap::MindMap) -> Result<()> {
+        self.db.execute("INSERT INTO mind_maps(paper_id, body, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(paper_id) DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at", params![paper_id, serde_json::to_string(map)?, now_iso()])?;
+        Ok(())
+    }
+
     /// The translation kept under a `translation_key`, if there is one.
     pub fn translation(&self, key: &str) -> Result<Option<String>> {
         Ok(self.db.query_row("SELECT translated_text FROM translations WHERE cache_key = ?1", [key], |r| r.get(0)).optional()?)
@@ -2164,6 +2187,23 @@ mod tests {
         // A name given counts as the title.
         store.rename_conversation(&roots, "根的笔记").unwrap();
         assert_eq!(found(&store, "根的笔记"), [roots]);
+    }
+
+    #[test]
+    fn a_mind_map_is_kept_with_its_paper() {
+        let mut store = Store::in_memory(Path::new("/tmp/wisp-mind-map")).unwrap();
+        let paper = store.add_paper(Paper { title: "A paper with a map".into(), ..Paper::default() }).unwrap().id;
+        assert_eq!(store.mind_map(&paper).unwrap(), None);
+        let mut map = crate::mindmap::MindMap::new("A paper with a map");
+        let node = map.add_child(1, "方法", Some(crate::mindmap::Anchor { file: "r1".into(), page: 2, quote: "we used".into() })).unwrap();
+        store.save_mind_map(&paper, &map).unwrap();
+        map.add_child(node, "细节", None);
+        store.save_mind_map(&paper, &map).unwrap();
+        assert_eq!(store.mind_map(&paper).unwrap(), Some(map));
+        // A map of a paper that is not there is not kept; one goes with its paper.
+        assert!(store.save_mind_map("P-none", &crate::mindmap::MindMap::new("x")).is_err());
+        store.delete_paper(&paper).unwrap();
+        assert_eq!(store.mind_map(&paper).unwrap(), None);
     }
 
     #[test]

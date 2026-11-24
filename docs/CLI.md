@@ -90,6 +90,7 @@ wisp search_fulltext --help             # 一个工具的参数
 | `list_zotero_libraries` | 列出本机 `zotero.sqlite` 里的个人库和群组库，各有 `id`、名称和会导入的条目数；以及各文献库的分类（`collections`：`id`、`path`、所属文献库 `library` 和含子分类的条目数），`--path` 必填（只读） |
 | `library_status` | 一个库的概况：各状态的数量、自定义词条、状态值的显示名称 |
 | `list_papers` | 搜索、筛选、翻页；规则与界面上的列表相同。年份可以是区间（`--year-from 2020 --year-to 2026`，只给一头也可以），期刊可以按影响因子（`--min-impact 10`）和分区（`--zone cas:2` 是中科院 1–2 区，`xr:1` 新锐 1 区，`jcr:1` JCR Q1）筛 |
+| `mind_map` | 一篇文献的思维导图：大纲（Markdown 嵌套列表），节点后面方括号里是出处的页码和原句；没有导图时 `nodes` 为 0 |
 | `get_paper` | 一篇文献的完整记录、词条和附件；`journalMetrics` 是它的期刊的影响因子与分区（查不到为 null） |
 | `journal_metrics` | 查一种期刊的影响因子与分区（JCR 2025、中科院分区表升级版 2025、新锐期刊分区表 2026、国际期刊预警名单 2025）：`--journal` 给刊名（全称或缩写）或 ISSN，或 `--paper-id` 用一篇文献的期刊；数据随应用附带，不联网 |
 | `list_figures` | 图片库：从 PDF 里截下来收藏的图片、自己上传的图片（`uploaded`）和模型生成的图片（`drawn`），各自的图号、图注、标签、备注、出处（文献和页码）、图片文件的路径，以及它在稿件里的地址（`address`：稿件里单独一行写 `![图注](address)` 就放进这张图）；可按 `--query`、`--tag`、`--paper` 筛选 |
