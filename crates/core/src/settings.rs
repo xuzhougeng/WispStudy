@@ -119,6 +119,13 @@ pub struct Settings {
     /// The proxy every request goes through, as a URL (`http://127.0.0.1:7890`,
     /// `socks5://…`); empty leaves it to the environment (`HTTPS_PROXY` and the like).
     pub proxy: String,
+    /// The address the literature databases may write to (设置 › 网络 › 文献数据库): sent to NCBI, Crossref and
+    /// Europe PMC with every request (`Settings::contact`), and to nobody else. Empty asks without one.
+    pub contact_email: String,
+    /// The API key of the person's NCBI account, for PubMed; empty reads `NCBI_API_KEY`.
+    pub ncbi_api_key: String,
+    /// The line that offers the two fields above where a search starts was closed: it does not come back.
+    pub contact_hint_dismissed: bool,
     /// Which engine the tool `web_search` asks and the keys of the engines (设置 › 网络 › 网页搜索).
     pub web_search: crate::websearch::WebSearchSettings,
     /// Which engine reads the pages of a file that gives no text, and the keys of the engines (设置 › 网络 › 文字识别).
@@ -180,7 +187,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let providers = provider::DEFAULT_PRESETS.iter().filter_map(|key| provider::preset(key)).map(Provider::from_preset).collect();
-        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), play_speed: 1., commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), web_search: Default::default(), ocr: Default::default(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, pdf_split_free: false, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, library_order: vec![], days_used: 0, last_used_day: String::new(), star_answered: false };
+        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), play_speed: 1., commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), contact_email: String::new(), ncbi_api_key: String::new(), contact_hint_dismissed: false, web_search: Default::default(), ocr: Default::default(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, pdf_split_free: false, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, library_order: vec![], days_used: 0, last_used_day: String::new(), star_answered: false };
         settings.tidy();
         settings
     }
@@ -367,6 +374,16 @@ pub fn proxy_problem(value: &str, allow_direct: bool) -> Option<String> {
     None
 }
 
+/// What is wrong with a contact address, if anything. Empty is fine: it means "not given". No more is asked
+/// than that it could be an address (`name@host.tld`, no spaces): the databases do not check it either, they
+/// write to it.
+pub fn email_problem(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() { return None }
+    let sound = value.split_once('@').is_some_and(|(name, host)| !name.is_empty() && !host.contains('@') && host.split('.').count() >= 2 && host.split('.').all(|part| !part.is_empty())) && !value.contains(|c: char| c.is_whitespace() || c.is_control());
+    if sound { None } else { Some("邮箱地址要写完整，例如 name@university.edu。".into()) }
+}
+
 /// On how many days of use the app asks, once, to be starred on GitHub: by then the person has plainly taken to it.
 pub const STAR_AFTER_DAYS: u32 = 5;
 
@@ -390,6 +407,19 @@ impl Settings {
         let named = self.author.trim();
         if !named.is_empty() { return named.to_string() }
         ["USER", "USERNAME"].iter().find_map(|key| std::env::var(key).ok()).map(|name| name.trim().to_string()).filter(|name| !name.is_empty()).unwrap_or_else(|| "作者".to_string())
+    }
+
+    /// Who the literature databases are told is asking: the address when it could be one (a half-typed one
+    /// is not sent), and the NCBI key set here, else the one in `NCBI_API_KEY`.
+    pub fn contact(&self) -> crate::sources::Contact {
+        self.contact_from(&|name| std::env::var(name).ok())
+    }
+
+    fn contact_from(&self, env: &dyn Fn(&str) -> Option<String>) -> crate::sources::Contact {
+        let email = if email_problem(&self.contact_email).is_none() { self.contact_email.trim().to_string() } else { String::new() };
+        let stored = self.ncbi_api_key.trim();
+        let ncbi_key = if stored.is_empty() { env("NCBI_API_KEY").map(|key| key.trim().to_string()).unwrap_or_default() } else { stored.to_string() };
+        crate::sources::Contact { email, ncbi_key }
     }
 
     /// A missing file is the defaults; a broken one is an error, so it is
@@ -1001,6 +1031,24 @@ mod tests {
         assert_eq!((s.tasks.screen.as_str(), s.profile_for(Task::Screen).map(|p| p.judges())), (jev.as_str(), Some(false)));
         s.set_model_kind(typesafe, 0, crate::imagegen::KIND);
         assert_eq!((s.tasks.screen.as_str(), s.profile_for(Task::Screen).map(|p| p.model)), ("", Some("deepseek-flash".into())));
+    }
+
+    #[test]
+    fn who_the_databases_are_told() {
+        for good in ["", "  ", "me@uni.example", " first.last+lab@mail.sub.ac.cn "] { assert_eq!(email_problem(good), None, "{good}") }
+        for bad in ["me", "me@", "@uni.example", "me@uni", "me@uni.", "me@@uni.example", "me @uni.example", "me@uni..example"] { assert!(email_problem(bad).is_some(), "{bad}") }
+        let none = |_: &str| None;
+        let from_env = |name: &str| (name == "NCBI_API_KEY").then(|| " envkey ".to_string());
+        // Old settings files have neither field; an address half typed is not sent.
+        let mut settings: Settings = serde_json::from_str("{}").unwrap();
+        assert_eq!(settings.contact_from(&none), crate::sources::Contact::default());
+        settings.contact_email = "me@uni".into();
+        assert_eq!(settings.contact_from(&from_env), crate::sources::Contact { email: String::new(), ncbi_key: "envkey".into() });
+        // The key set here goes before the environment's.
+        (settings.contact_email, settings.ncbi_api_key) = (" me@uni.example ".into(), " mine ".into());
+        assert_eq!(settings.contact_from(&from_env), crate::sources::Contact { email: "me@uni.example".into(), ncbi_key: "mine".into() });
+        let kept: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(serde_json::to_string(&settings).unwrap().contains(r#""contactEmail":" me@uni.example ""#) && kept == settings);
     }
 
     #[test]

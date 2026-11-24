@@ -112,6 +112,7 @@ impl Workspace {
                             .child(ui::secondary_button("guide-manual", t("自己写检索式")).on_click(self.on(Cmd::NewSearch, cx)))
                             .child(ui::primary_button("guide-generate", if guide.busy { t("正在拟检索式…") } else if guide.ideas.is_empty() { t("拟检索式") } else { t("重新拟") }).when(guide.busy, |d| d.opacity(0.5)).on_click(self.on(Cmd::GuideGenerate, cx))),
                     )
+                    .children(self.contact_hint(cx))
                     .when(!guide.error.is_empty(), |d| d.child(ui::error_line(&guide.error))),
             )
             .child(if cards.is_empty() {

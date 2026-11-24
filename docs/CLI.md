@@ -130,7 +130,7 @@ wisp search_fulltext --help             # 一个工具的参数
 
 全文检索第一次用到某个 PDF 时会提取它的文字并缓存到库里，同时按标题把它分成导言、方法、结果、讨论并切成句子，之后即时返回。
 
-代理用的是应用「设置 › 网络」里的同一个设置。
+代理用的是应用「设置 › 网络」里的同一个设置。「文献数据库」里的联系邮箱和 NCBI API Key 也一样：`wisp` 的检索和元数据查询带着它们去问 PubMed、Crossref 和 Europe PMC；没有窗口的机器上可以把 Key 放在环境变量 `NCBI_API_KEY`，或者在 `settings.json` 里写 `"contactEmail"` 和 `"ncbiApiKey"`。
 
 ## MCP
 

@@ -109,6 +109,9 @@ pub struct SettingsView {
     fields: ProviderFields,
     /// The proxy for everything.
     proxy: Entity<TextInput>,
+    /// The address the literature databases may write to, and the key of the person's NCBI account (文献数据库).
+    contact_email: Entity<TextInput>,
+    ncbi_key: Entity<TextInput>,
     /// The key of each web search engine, in the order of `websearch::ENGINES`.
     search_keys: Vec<Entity<TextInput>>,
     /// The key of each engine of 文字识别 that has one of its own (`ocr_engines_with_keys`), in the order of `ocr::ENGINES`.
@@ -394,6 +397,9 @@ impl Workspace {
                 let shown = self.settings.providers.get(index).cloned().unwrap_or_default();
                 let fields = ProviderFields::new(&shown, cx);
                 let proxy = cx.new(|cx| TextInput::new("http://127.0.0.1:7890", cx).with_text(&self.settings.proxy));
+                let contact_email = cx.new(|cx| TextInput::new("name@university.edu", cx).with_text(&self.settings.contact_email));
+                let ncbi_key = cx.new(|cx| TextInput::new(tf!("留空则读取环境变量 {}", "Leave blank to read {}", "NCBI_API_KEY"), cx).with_text(&self.settings.ncbi_api_key));
+                ncbi_key.update(cx, |input, _| input.masked = true);
                 let author = cx.new(|cx| TextInput::new(wisp_core::settings::Settings::default().author_name(), cx).with_text(&self.settings.author));
                 let translation_prompt = cx.new(|cx| TextInput::new("留空则使用默认要求：译成简体中文，保留术语、基因名、物种学名和数字原样，只输出译文。", cx).multiline(3).with_text(&self.settings.translation_prompt));
                 let font_search = cx.new(|cx| TextInput::new(t("搜索已安装的字体"), cx));
@@ -432,6 +438,12 @@ impl Workspace {
                     cx.subscribe(&proxy, |this, _, event: &InputEvent, cx| {
                         if *event == InputEvent::Changed { this.save_proxy(cx) }
                     }),
+                    cx.subscribe(&contact_email, |this, _, event: &InputEvent, cx| {
+                        if *event == InputEvent::Changed { this.save_contact(cx) }
+                    }),
+                    cx.subscribe(&ncbi_key, |this, _, event: &InputEvent, cx| {
+                        if *event == InputEvent::Changed { this.save_contact(cx) }
+                    }),
                     cx.subscribe(&author, |this, input, event: &InputEvent, cx| {
                         if *event == InputEvent::Changed {
                             this.settings.author = input.read(cx).text().trim().to_string();
@@ -466,7 +478,7 @@ impl Workspace {
                         cx.notify();
                     }));
                 }
-                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, search_keys, ocr_keys, author, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, recording: None, shortcut_error: None, balance: None, storage: None, measuring: false, storage_open: None, _subscriptions: subscriptions });
+                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, contact_email, ncbi_key, search_keys, ocr_keys, author, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, recording: None, shortcut_error: None, balance: None, storage: None, measuring: false, storage_open: None, _subscriptions: subscriptions });
                 self.read_balance_shown(cx);
             }
         }
@@ -1034,6 +1046,19 @@ impl Workspace {
         if wisp_core::settings::proxy_problem(&address, false).is_some() || self.settings.proxy == address { return }
         self.settings.proxy = address;
         wisp_net::set_proxy(&self.settings.proxy);
+        self.save_settings(cx);
+    }
+
+    /// Keep who the literature databases are told is asking, and tell them so from the next request on. An
+    /// address still being typed is not kept: the last one that could be an address stays until this one can.
+    fn save_contact(&mut self, cx: &mut Context<Self>) {
+        let Some(view) = &self.settings_view else { return };
+        let (email, key) = (view.contact_email.read(cx).text().trim().to_string(), view.ncbi_key.read(cx).text().trim().to_string());
+        cx.notify();
+        let email = if wisp_core::settings::email_problem(&email).is_none() { email } else { self.settings.contact_email.clone() };
+        if (&email, &key) == (&self.settings.contact_email, &self.settings.ncbi_api_key) { return }
+        (self.settings.contact_email, self.settings.ncbi_api_key) = (email, key);
+        wisp_net::set_contact(self.settings.contact());
         self.save_settings(cx);
     }
 
@@ -1794,9 +1819,21 @@ impl Workspace {
                 )
                 .child(note(t("留空时使用环境变量 ALL_PROXY、HTTPS_PROXY、HTTP_PROXY（NO_PROXY 同样有效）。模型服务可以在「AI」页单独指定代理，或者填 direct 不走代理。命令行 wisp 使用同一个设置。代理地址连同其中的用户名和密码以明文保存在本机的 settings.json 里。"))),
             )
+            .child(self.databases_group(view, window, cx))
             .child(self.web_search_group(view, window, cx))
             .child(self.ocr_group(view, window, cx))
             .into_any_element()
+    }
+
+    /// 文献数据库: who PubMed, Crossref and Europe PMC are told is asking. Nothing here is needed to search;
+    /// each field says what it buys.
+    fn databases_group(&self, view: &SettingsView, window: &Window, cx: &mut Context<Self>) -> Div {
+        let problem = wisp_core::settings::email_problem(view.contact_email.read(cx).text()).map(|problem| crate::i18n::phrase(&problem));
+        let rows = vec![
+            row(t("联系邮箱"), Some(problem.unwrap_or_else(|| t("随检索和元数据查询发给 PubMed（NCBI）、Crossref 和 Europe PMC。留了邮箱，Crossref 给的限额更高，NCBI 在请求过多时先来信而不是直接封掉。").to_string()).into()), div().w(px(INPUT_W)).child(ui::field(&view.contact_email, window, cx))).into_any_element(),
+            row(tf!("NCBI API Key", "NCBI API key"), Some(tf!("有了它，PubMed 每秒可以请求 10 次而不是 3 次。登录 NCBI 账户，在 Account Settings 里生成；留空时读取环境变量 {}。", "With it PubMed takes 10 requests a second instead of 3. Sign in to your NCBI account and create one under Account Settings; blank reads {}.", "NCBI_API_KEY").into()), div().w(px(INPUT_W)).child(ui::field(&view.ncbi_key, window, cx))).into_any_element(),
+        ];
+        group(Some(t("文献数据库")), rows).child(note(t("这两项都可以不填：不填也能检索，只是数据库对不知道是谁的请求限得更紧，一次取回很多文献、几条检索式一起运行时容易被要求稍后再试。邮箱只是联系方式，不用注册，也只发给上面三个数据库，不发给出版社和别的网站。修改会自动保存，下一次请求起生效；命令行 wisp 使用同一个设置。邮箱和 Key 以明文保存在本机的 settings.json 里。")))
     }
 
     /// 文字识别: which engine reads the pages of a file that gives no text, and the key of each engine that has one.
