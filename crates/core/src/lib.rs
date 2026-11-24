@@ -33,6 +33,7 @@
 //! - `sources`  literature database searches: URLs to ask, records read from the replies
 //! - `openaccess` where a paper's full text can be had for free: addresses to ask, candidates read from the replies
 //! - `settings` settings.json, and where it and the libraries live
+//! - `storage`  存储空间: what each library takes on the disk, and what in it takes the space
 //! - `tools`    what an agent can do with a library: the one table behind the command line, MCP and the assistant
 //! - `mcp`      the Model Context Protocol replies for those tools
 //! - `offer`    a card of buttons the assistant puts under its answer, run only when the person presses one
@@ -97,6 +98,7 @@ pub mod shrink;
 pub mod skill;
 pub mod slideref;
 pub mod sources;
+pub mod storage;
 pub mod store;
 pub mod structure;
 pub mod time;

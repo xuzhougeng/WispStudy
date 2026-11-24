@@ -318,6 +318,12 @@ pub enum Cmd {
     PickDataDir,
     ResetDataDir,
     RevealDataDir,
+    /// Open a folder in the system's file manager (存储空间).
+    RevealDir(PathBuf),
+    /// Measure the data folder again on 设置 › 存储空间.
+    MeasureStorage,
+    /// Show or fold one library's parts on 存储空间, by id (`drafts` for the conversations not made libraries).
+    StorageLibrary(String),
     ToggleAutoUpdate,
     ToggleAutoDownload,
     ToggleRestoreSession,
@@ -3248,6 +3254,9 @@ impl Workspace {
             Cmd::PickDataDir => self.pick_data_dir(cx),
             Cmd::ResetDataDir => self.set_data_dir(None, cx),
             Cmd::RevealDataDir => cx.open_with_system(&self.root),
+            Cmd::RevealDir(dir) => cx.open_with_system(&dir),
+            Cmd::MeasureStorage => self.measure_storage(cx),
+            Cmd::StorageLibrary(id) => self.toggle_storage_library(id, cx),
             Cmd::ToggleAutoUpdate => {
                 self.settings.auto_update = !self.settings.auto_update;
                 self.save_settings(cx);
@@ -9756,6 +9765,7 @@ impl Workspace {
                         "appearance" => SettingsPage::Appearance,
                         "shortcuts" => SettingsPage::Shortcuts,
                         "network" => SettingsPage::Network,
+                        "storage" => SettingsPage::Storage,
                         "about" => SettingsPage::About,
                         _ => SettingsPage::General,
                     }),
