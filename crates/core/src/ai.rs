@@ -11,6 +11,7 @@
 
 use crate::fulltext::{bare, score, terms};
 use crate::model::{FieldDef, PUBLICATION_STATUSES, Paper, PaperFile, READINGS, SCREENINGS, label};
+use crate::skill::{self, Skill};
 use crate::tools::ToolDef;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -1342,15 +1343,18 @@ pub enum Input {
 }
 
 /// Read a typed message; `custom` are the person's own commands, which a
-/// built-in one of the same name comes before. The error is a sentence for
-/// the person: an unknown command, or one that is missing what it works on.
-pub fn read_input(input: &str, custom: &[Command]) -> Result<Input, String> {
+/// built-in one of the same name comes before, and `skills` the skills on,
+/// each called by its name after both (`skill::called`). The error is a
+/// sentence for the person: an unknown command, or one that is missing what
+/// it works on.
+pub fn read_input(input: &str, custom: &[Command], skills: &[Skill]) -> Result<Input, String> {
     let input = input.trim();
     let Some(rest) = input.strip_prefix('/') else { return Ok(Input::Ask(input.to_string())) };
     let (name, argument) = rest.split_once(char::is_whitespace).unwrap_or((rest, ""));
     let Some(command) = SLASH.iter().find(|command| command.name == name) else {
         if let Some(command) = custom.iter().find(|command| command.name == name) { return command.expand(argument.trim()).map(Input::Ask) }
-        let known = SLASH.iter().map(|command| (command.name, command.about)).chain(custom.iter().map(|command| (command.name.as_str(), command.about.as_str())));
+        if let Some(skill) = callable(custom, skills).find(|skill| skill.name.to_lowercase() == name.to_lowercase()) { return skill::request(skill, argument.trim()).map(Input::Ask) }
+        let known = SLASH.iter().map(|command| (command.name, command.about)).chain(custom.iter().map(|command| (command.name.as_str(), command.about.as_str()))).chain(callable(custom, skills).map(|skill| (skill.name.as_str(), "")));
         return Err(format!("没有 /{name} 这个命令。可用：{}", known.map(|(name, about)| if about.is_empty() { format!("/{name}") } else { format!("/{name}（{about}）") }).collect::<Vec<_>>().join("、")));
     };
     if command.template.is_empty() { return Ok(if command.name == COMPACT { Input::Compact } else { Input::NewChat }) }
@@ -1359,12 +1363,18 @@ pub fn read_input(input: &str, custom: &[Command]) -> Result<Input, String> {
     Ok(Input::Ask(command.template.replace("{}", argument)))
 }
 
+/// The skills a slash calls: those whose name can be typed as one word and
+/// that no command, built in or the person's own, has taken.
+fn callable<'a>(custom: &'a [Command], skills: &'a [Skill]) -> impl Iterator<Item = &'a Skill> {
+    skills.iter().filter(move |skill| skill::called(skill) && !SLASH.iter().any(|command| command.name == skill.name) && !custom.iter().any(|command| command.name == skill.name))
+}
+
 /// The request behind a question kept before conversations kept what they
 /// sent (`Said::User::prompt`): a built-in command is expanded as it is
 /// now. A command of the person's own is not, since its template then is
 /// not known: the question goes as it was typed.
 pub fn expand_slash(input: &str) -> String {
-    match read_input(input, &[]) {
+    match read_input(input, &[], &[]) {
         Ok(Input::Ask(prompt)) => prompt,
         _ => input.trim().to_string(),
     }
@@ -1377,8 +1387,10 @@ pub struct Offer {
     pub about: String,
     /// What to write after the name.
     pub hint: String,
-    /// One of the person's own.
+    /// One of the person's own: a command they wrote, or a skill.
     pub custom: bool,
+    /// A skill, called by its name.
+    pub skill: bool,
     /// Taking it carries it out at once (`/new`); the others are written out for the person to go on.
     pub runs: bool,
 }
@@ -1386,22 +1398,26 @@ pub struct Offer {
 /// The commands to offer while a message is still the beginning of one: a
 /// slash and perhaps part of a name, nothing after it. Those whose name
 /// starts with what was typed come first, then those described by it
-/// (`/引` finds 「配引用」); the built-in ones before the person's own.
-pub fn slash_matches(input: &str, custom: &[Command]) -> Vec<Offer> {
+/// (`/引` finds 「配引用」); the built-in ones before the person's own, and
+/// the skills on last.
+pub fn slash_matches(input: &str, custom: &[Command], skills: &[Skill]) -> Vec<Offer> {
     let Some(typed) = input.strip_prefix('/') else { return vec![] };
     if typed.chars().any(char::is_whitespace) { return vec![] }
     let typed = typed.to_lowercase();
-    let builtin = SLASH.iter().map(|command| Offer { name: command.name.into(), about: command.about.into(), hint: command.hint.into(), custom: false, runs: command.template.is_empty() });
+    let builtin = SLASH.iter().map(|command| Offer { name: command.name.into(), about: command.about.into(), hint: command.hint.into(), custom: false, skill: false, runs: command.template.is_empty() });
     // One that a built-in command hides, or that has no name yet, cannot be called.
     let own = custom.iter().filter(|command| command_name_problem(&command.name, std::iter::empty()).is_none()).map(|command| Offer {
         name: command.name.clone(),
         about: command.about.clone(),
         hint: if command.template.contains("{}") { "要处理的内容" } else { "可以接着补充" }.into(),
         custom: true,
+        skill: false,
         runs: false,
     });
-    let all: Vec<Offer> = builtin.chain(own).collect();
-    let (mut found, rest): (Vec<Offer>, Vec<Offer>) = all.into_iter().partition(|offer| offer.name.starts_with(&typed));
+    let skills = callable(custom, skills).map(|skill| Offer { name: skill.name.clone(), about: skill.description.clone(), hint: "可以接着补充".into(), custom: true, skill: true, runs: false });
+    let all: Vec<Offer> = builtin.chain(own).chain(skills).collect();
+    // A skill's name may have capitals; a command's has none.
+    let (mut found, rest): (Vec<Offer>, Vec<Offer>) = all.into_iter().partition(|offer| offer.name.to_lowercase().starts_with(&typed));
     if !typed.is_empty() { found.extend(rest.into_iter().filter(|offer| offer.about.to_lowercase().contains(&typed))) }
     found
 }
@@ -2561,15 +2577,15 @@ mod tests {
 
     #[test]
     fn slash_commands() {
-        assert_eq!(read_input("  WOX5 做什么？ ", &[]).unwrap(), Input::Ask("WOX5 做什么？".into()));
+        assert_eq!(read_input("  WOX5 做什么？ ", &[], &[]).unwrap(), Input::Ask("WOX5 做什么？".into()));
         let search = expand_slash("/search 10x Genomics");
         assert!(search.starts_with("在文献库里检索：10x Genomics\n") && search.contains("search_fulltext"));
         let cite = expand_slash("/cite 根尖有干细胞。\n它们由 WOX5 维持。");
         assert!(cite.contains("根尖有干细胞。\n它们由 WOX5 维持。") && cite.contains("find_citations"));
-        assert!(read_input("/search", &[]).unwrap_err().contains("/search 后面写上内容"));
-        assert!(read_input("/dance now", &[]).unwrap_err().contains("/cite"));
-        assert_eq!(read_input("/new", &[]).unwrap(), Input::NewChat);
-        assert_eq!(read_input("/compact", &[]).unwrap(), Input::Compact);
+        assert!(read_input("/search", &[], &[]).unwrap_err().contains("/search 后面写上内容"));
+        assert!(read_input("/dance now", &[], &[]).unwrap_err().contains("/cite"));
+        assert_eq!(read_input("/new", &[], &[]).unwrap(), Input::NewChat);
+        assert_eq!(read_input("/compact", &[], &[]).unwrap(), Input::Compact);
         // A message that cannot be expanded is replayed as it was typed.
         assert_eq!(expand_slash("/dance now"), "/dance now");
         // Every command that stands for a request says what to write after it.
@@ -2587,24 +2603,24 @@ mod tests {
         let command = |name: &str, about: &str, template: &str| Command { name: name.into(), about: about.into(), template: template.into() };
         let own = [command("style-check", "找出空泛的表达", "指出下面文字里的套话：\n{}\n保留 {} 里的数值。"), command("润色", "", "把上一个回答改得更简洁。"), command("search", "mine", "x"), command("empty", "", "  ")];
         // The text after the name goes where the template says, as it is: braces in it are not read again.
-        assert_eq!(read_input("/style-check a {} b\n第二行", &own).unwrap(), Input::Ask("指出下面文字里的套话：\na {} b\n第二行\n保留 a {} b\n第二行 里的数值。".into()));
-        assert!(read_input("/style-check  ", &own).unwrap_err().contains("/style-check 后面写上内容"));
+        assert_eq!(read_input("/style-check a {} b\n第二行", &own, &[]).unwrap(), Input::Ask("指出下面文字里的套话：\na {} b\n第二行\n保留 a {} b\n第二行 里的数值。".into()));
+        assert!(read_input("/style-check  ", &own, &[]).unwrap_err().contains("/style-check 后面写上内容"));
         // A template without a place for it stands alone, and takes what follows at its end.
-        assert_eq!(read_input("/润色", &own).unwrap(), Input::Ask("把上一个回答改得更简洁。".into()));
-        assert_eq!(read_input("/润色 用英文", &own).unwrap(), Input::Ask("把上一个回答改得更简洁。\n\n用英文".into()));
-        assert!(read_input("/empty", &own).unwrap_err().contains("还没有写模板"));
+        assert_eq!(read_input("/润色", &own, &[]).unwrap(), Input::Ask("把上一个回答改得更简洁。".into()));
+        assert_eq!(read_input("/润色 用英文", &own, &[]).unwrap(), Input::Ask("把上一个回答改得更简洁。\n\n用英文".into()));
+        assert!(read_input("/empty", &own, &[]).unwrap_err().contains("还没有写模板"));
         // A built-in command is never replaced by one of the same name.
-        assert!(matches!(read_input("/search x", &own), Ok(Input::Ask(prompt)) if prompt.starts_with("在文献库里检索：x")));
-        assert!(read_input("/dance", &own).unwrap_err().contains("/style-check（找出空泛的表达）、/润色"));
+        assert!(matches!(read_input("/search x", &own, &[]), Ok(Input::Ask(prompt)) if prompt.starts_with("在文献库里检索：x")));
+        assert!(read_input("/dance", &own, &[]).unwrap_err().contains("/style-check（找出空泛的表达）、/润色"));
         // A conversation from before the request was kept does not guess at a template.
         assert_eq!(expand_slash("/style-check 一段话"), "/style-check 一段话");
 
-        let names = |input: &str| slash_matches(input, &own).into_iter().map(|offer| offer.name).collect::<Vec<_>>();
+        let names = |input: &str| slash_matches(input, &own, &[]).into_iter().map(|offer| offer.name).collect::<Vec<_>>();
         assert_eq!(names("/"), ["search", "cite", "review", "compare", "write", "slides", "verify", "compact", "new", "style-check", "润色", "empty"]);
         assert_eq!(names("/s"), ["search", "slides", "style-check"]);
         assert_eq!(names("/润"), ["润色"]);
         assert_eq!(names("/空泛"), ["style-check"]);
-        let offers = slash_matches("/", &own);
+        let offers = slash_matches("/", &own, &[]);
         assert!(offers.iter().all(|offer| offer.custom == !SLASH.iter().any(|command| command.name == offer.name) && offer.runs == matches!(offer.name.as_str(), "new" | "compact")));
 
         let problem = |name: &str| command_name_problem(name, own.iter().map(|command| command.name.as_str()));
@@ -2613,12 +2629,36 @@ mod tests {
     }
 
     #[test]
+    fn skills_are_called_by_name() {
+        let skill = |name: &str, description: &str, body: &str| Skill { name: name.into(), description: description.into(), body: body.into(), dir: Default::default() };
+        let own = [Command { name: "tidy".into(), about: "mine".into(), template: "整理一下。".into() }];
+        let skills = [skill("Journal-Club", "准备组会上讲一篇文献", "1. 读全文。\n2. 列三个问题。"), skill("tidy", "hidden by a command", "x"), skill("search", "hidden by a built-in", "x"), skill("two words", "cannot be typed", "x"), skill("bare", "", "  ")];
+        // The instructions go with the request, so the model need not read them first; what follows the name is what to do.
+        let Ok(Input::Ask(prompt)) = read_input("/journal-club P3 这篇", &own, &skills) else { panic!() };
+        assert!(prompt.contains("技能「Journal-Club」") && prompt.contains("1. 读全文。\n2. 列三个问题。") && prompt.ends_with("要做的事：P3 这篇"));
+        let Ok(Input::Ask(alone)) = read_input("/Journal-Club", &own, &skills) else { panic!() };
+        assert!(alone.contains("2. 列三个问题。") && !alone.contains("要做的事："));
+        // A command of the same name comes first; a skill without instructions says so.
+        assert_eq!(read_input("/tidy", &own, &skills).unwrap(), Input::Ask("整理一下。".into()));
+        assert!(matches!(read_input("/search x", &own, &skills), Ok(Input::Ask(prompt)) if prompt.starts_with("在文献库里检索：x")));
+        assert!(read_input("/bare", &own, &skills).unwrap_err().contains("没有写说明"));
+        let unknown = read_input("/dance", &own, &skills).unwrap_err();
+        assert!(unknown.contains("/tidy（mine）、/Journal-Club、/bare") && !unknown.contains("two words"));
+
+        let offers = |input: &str| slash_matches(input, &own, &skills).into_iter().map(|offer| (offer.name, offer.skill)).collect::<Vec<_>>();
+        assert_eq!(offers("/")[9..], [("tidy".to_string(), false), ("Journal-Club".to_string(), true), ("bare".to_string(), true)]);
+        assert_eq!(offers("/j"), [("Journal-Club".to_string(), true)]);
+        assert_eq!(offers("/组会"), [("Journal-Club".to_string(), true)]);
+        assert!(slash_matches("/j", &own, &skills).iter().all(|offer| offer.custom && !offer.runs));
+    }
+
+    #[test]
     fn slash_popup() {
-        let names = |input: &str| slash_matches(input, &[]).into_iter().map(|command| command.name).collect::<Vec<_>>();
+        let names = |input: &str| slash_matches(input, &[], &[]).into_iter().map(|command| command.name).collect::<Vec<_>>();
         assert_eq!(names("/"), ["search", "cite", "review", "compare", "write", "slides", "verify", "compact", "new"]);
         // A command that can stand alone works on what it says it does.
-        assert!(matches!(read_input("/verify", &[]), Ok(Input::Ask(prompt)) if prompt.contains("逐条核对下面这段内容的依据：上一个回答")));
-        assert!(read_input("/cite", &[]).is_err());
+        assert!(matches!(read_input("/verify", &[], &[]), Ok(Input::Ask(prompt)) if prompt.contains("逐条核对下面这段内容的依据：上一个回答")));
+        assert!(read_input("/cite", &[], &[]).is_err());
         assert_eq!(names("/c"), ["cite", "compare", "compact"]);
         assert_eq!(names("/RE"), ["review"]);
         // Found by what it does, after those found by name.

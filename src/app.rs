@@ -2071,8 +2071,8 @@ impl Chat {
 
     /// The slash commands to offer for what is in the box right now.
     /// `own` are the person's commands from the settings.
-    pub fn slash_list(&self, own: &[ai::Command], cx: &App) -> Vec<ai::Offer> {
-        if self.slash_closed { vec![] } else { ai::slash_matches(self.input.read(cx).text(), own) }
+    pub fn slash_list(&self, own: &[ai::Command], skills: &[wisp_core::skill::Skill], cx: &App) -> Vec<ai::Offer> {
+        if self.slash_closed { vec![] } else { ai::slash_matches(self.input.read(cx).text(), own, skills) }
     }
 
     /// Have the context built again with the next question. The labels
@@ -6971,9 +6971,10 @@ impl Workspace {
 
     /// A key or a paste in a conversation's box.
     fn chat_input(&mut self, talk: Talk, event: InputEvent, cx: &mut Context<Self>) {
+        let skills = self.skills_on();
         let Some(lib) = self.lib.as_mut() else { return };
         let chat = lib.chat_mut(talk);
-        let (offered, picked) = (chat.slash_list(&self.settings.commands, cx).len(), chat.slash);
+        let (offered, picked) = (chat.slash_list(&self.settings.commands, &skills, cx).len(), chat.slash);
         match event {
             // Enter on a command in the list takes it; otherwise the message goes.
             InputEvent::Submit if offered > 0 => return self.pick_slash(talk, picked, cx),
@@ -6993,7 +6994,7 @@ impl Workspace {
             _ => {}
         }
         // While the list is on show the arrow keys and Tab are its keys.
-        let choosing = !chat.slash_list(&self.settings.commands, cx).is_empty();
+        let choosing = !chat.slash_list(&self.settings.commands, &skills, cx).is_empty();
         chat.input.update(cx, |input, _| input.choosing = choosing);
         cx.notify();
     }
@@ -7002,9 +7003,10 @@ impl Workspace {
     /// runs, the others are written out for their subject to follow, or
     /// to be sent as they are.
     fn pick_slash(&mut self, talk: Talk, at: usize, cx: &mut Context<Self>) {
+        let skills = self.skills_on();
         let Some(lib) = self.lib.as_mut() else { return };
         let chat = lib.chat_mut(talk);
-        let Some(command) = chat.slash_list(&self.settings.commands, cx).into_iter().nth(at) else { return };
+        let Some(command) = chat.slash_list(&self.settings.commands, &skills, cx).into_iter().nth(at) else { return };
         let alone = command.runs;
         chat.slash = 0;
         chat.input.update(cx, |input, cx| {
@@ -7092,6 +7094,7 @@ impl Workspace {
         // A conversation not yet made a library: what it was handed to review, said with every question, as the
         // manuscript is to the conversation that writes it (the manuscript can come after the first question).
         let draft = talk == Talk::Library && self.in_draft();
+        let skills = self.skills_on();
         let reviewing = self.lib.as_ref().filter(|_| draft).and_then(|lib| {
             let handed: Vec<(&Manuscript, Option<String>)> = lib.writing.manuscripts.iter().filter(|m| m.sections.iter().any(|s| !s.body.trim().is_empty())).map(|m| (m, lib.store.manuscript_source(&m.id).ok().flatten().filter(|source| source.kind == "docx").map(|source| lib.store.source_file(&source).display().to_string()))).collect();
             ai::manuscript_review_note(&handed)
@@ -7123,8 +7126,8 @@ impl Workspace {
             cx.notify();
             return false;
         }
-        // `/search …` and the like stand for a longer request; the bubble shows what was typed.
-        let prompt = match ai::read_input(if question.is_empty() && !asked_again && !chat.quotes.is_empty() { t("这段原文说了什么？在这篇文献里起什么作用？") } else { &question }, &self.settings.commands) {
+        // `/search …` and the like stand for a longer request, a skill's name for its instructions; the bubble shows what was typed.
+        let prompt = match ai::read_input(if question.is_empty() && !asked_again && !chat.quotes.is_empty() { t("这段原文说了什么？在这篇文献里起什么作用？") } else { &question }, &self.settings.commands, &skills) {
             Ok(ai::Input::Ask(prompt)) => prompt,
             Ok(ai::Input::NewChat) => {
                 chat.reset(cx);
@@ -10000,6 +10003,16 @@ impl Workspace {
                         lib.library_chat.input.read(cx).focus(window);
                     }
                     self.chat_input(Talk::Library, InputEvent::Changed, cx);
+                    None
+                }
+                // `typewrite:/jo` does the same in the box of the assistant that writes the manuscript on show.
+                "typewrite" => {
+                    self.agent_attend(cx);
+                    if let Some(lib) = self.lib.as_ref() {
+                        lib.write_chat.input.update(cx, |input, cx| input.set_text(arg, cx));
+                        lib.write_chat.input.read(cx).focus(window);
+                    }
+                    self.chat_input(Talk::Write, InputEvent::Changed, cx);
                     None
                 }
                 // `image:/path/to.png` puts a picture with the next question to the library.
