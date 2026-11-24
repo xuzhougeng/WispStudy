@@ -159,6 +159,8 @@ impl Workspace {
         }
         for (label, also, value) in [("跟随系统", "system", ""), ("浅色", "light", "light"), ("深色", "dark", "dark")] { made("palette", tf!("外观：{}", "Appearance: {}", t(label)), &format!("外观 主题 {label} appearance theme {also}"), "", Cmd::SetAppearance(value.into())) }
         for page in SettingsPage::ALL { made(page.icon(), tf!("设置 › {}", "Settings › {}", page.title()), "设置 settings", if page == SettingsPage::General { "settings" } else { "" }, Cmd::OpenSettings(page)) }
+        // The words looked for through the whole library: full texts, marks, notes (`library_find.rs`).
+        if !query.trim().is_empty() && self.lib.as_ref().is_some_and(|lib| !lib.info.draft) { made("file-text", tf!("在全文和标注里找「{}」", "Find “{}” in full texts and marks", query.trim()), "全文 标注 查找 find full text marks", "", Cmd::LibraryFind(crate::library_find::Do::Query(query.trim().to_string()))) }
         let commands = rows.len();
         if !query.trim().is_empty() && let Some(lib) = self.lib.as_ref() {
             // The words are looked for where the list's search box looks: title, authors, tags, abstract, notes.

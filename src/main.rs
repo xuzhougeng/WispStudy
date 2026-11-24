@@ -26,6 +26,7 @@ mod guide;
 mod home;
 mod input;
 mod library;
+mod library_find;
 mod manuscripts;
 mod write_figures;
 mod markdown;

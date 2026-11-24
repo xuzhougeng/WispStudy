@@ -815,6 +815,8 @@ pub enum Cmd {
     WriteFigures(crate::write_figures::Do),
     /// Looking for words in the manuscript (`write_seek.rs`).
     Seek(crate::write_seek::Do),
+    /// Looking for words through the whole library: full texts, marks, notes (`library_find.rs`).
+    LibraryFind(crate::library_find::Do),
     // The figure library (`src/figures.rs`)
     /// Only the figures with this tag; the tag chosen already, or none, shows all of them.
     FigureTag(String),
@@ -1729,6 +1731,8 @@ pub struct Library {
     /// What the sidebar counts beside its views and tags, under the search and filters set (`filter::counts`).
     pub counts: filter::Counts,
     pub search: Entity<TextInput>,
+    /// What the search box holds looked for through the whole library, on show in the list's place (`library_find.rs`).
+    pub finding: crate::library_find::Finding,
     pub page: Page,
     pub selected: Option<String>,
     /// The papers marked in the list with Shift or ⌘ / Ctrl, for doing something with all of them.
@@ -3540,6 +3544,7 @@ impl Workspace {
             }
 
             Cmd::SetView(view) => {
+                if self.lib.as_ref().is_some_and(|lib| lib.finding.open) { self.run_find(crate::library_find::Do::Close, window, cx) }
                 if let Some(lib) = self.lib.as_mut() {
                     lib.filters.view = view;
                     lib.page = Page::Papers;
@@ -3629,6 +3634,7 @@ impl Workspace {
             Cmd::WriteCited(what) => self.cite_do(what, window, cx),
             Cmd::Revise(what) => self.run_revise(what, cx),
             Cmd::Seek(what) => self.run_seek(what, window, cx),
+            Cmd::LibraryFind(what) => self.run_find(what, window, cx),
             Cmd::Agent(what) => self.run_agent(what, window, cx),
             Cmd::WriteFigures(what) => self.run_write_figures(what, window, cx),
             Cmd::WriteStop => {
@@ -4753,6 +4759,9 @@ impl Workspace {
             self.run(Cmd::LeaveAsk, window, cx);
         } else if self.lib.as_ref().is_some_and(|l| l.selected.is_some()) {
             self.select(None, window, cx);
+        } else if self.lib.as_ref().is_some_and(|l| l.page == Page::Papers && l.finding.open) {
+            // The places found in the whole library give the list back.
+            self.run(Cmd::LibraryFind(crate::library_find::Do::Close), window, cx);
         } else if self.lib.as_ref().is_some_and(|l| l.page == Page::Screen && l.screen.mode != ScreenMode::Batch) {
             // Out of a round or the confirmation, back to the queue.
             self.run(Cmd::ScreenMode(ScreenMode::Batch), window, cx);
@@ -4955,13 +4964,16 @@ impl Workspace {
             cx.subscribe(&scope_find, |this, input, event: &InputEvent, cx| {
                 if *event == InputEvent::Changed { this.scope_typed(input.read(cx).text().to_string(), cx) }
             }),
-            cx.subscribe(&search, |this, input, event: &InputEvent, cx| {
+            cx.subscribe_in(&search, window, |this, input, event: &InputEvent, window, cx| {
                 if *event == InputEvent::Changed && let Some(lib) = this.lib.as_mut() {
                     lib.filters.search = input.read(cx).text().to_string();
                     lib.page = Page::Papers;
                     lib.refilter();
+                    this.find_typed(input.read(cx).text().to_string(), cx);
                     cx.notify();
                 }
+                // Enter: the words looked for through the whole library.
+                if *event == InputEvent::Submit { this.run(Cmd::LibraryFind(crate::library_find::Do::Open), window, cx) }
             }),
             cx.subscribe(&notes, |this, input, event: &InputEvent, cx| {
                 if *event == InputEvent::Changed {
@@ -5047,6 +5059,7 @@ impl Workspace {
             shown: vec![],
             counts: filter::Counts::default(),
             search,
+            finding: Default::default(),
             page: Page::Papers,
             selected: None,
             tab: Tab::Info,
@@ -5796,7 +5809,7 @@ impl Workspace {
 
     /// Show a file of a paper in the viewer: an attachment by its id, or (`None`) the main text. The file on
     /// show keeps its place for when it is come back to, and each file has its own marks.
-    fn show_file(&mut self, paper: &str, file: Option<String>, cx: &mut Context<Self>) {
+    pub(crate) fn show_file(&mut self, paper: &str, file: Option<String>, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
         match file {
             Some(file) => lib.read_file.insert(paper.to_string(), file),
@@ -9743,6 +9756,14 @@ impl Workspace {
                     }
                     None
                 }
+                // 全库查找: `libfind` what the search box holds, `libfind:<words>` those (as the palette's row), `libfind:go;<n>`
+                // the n-th row of the places (a paper, a place), `libfind:close` the list again.
+                "libfind" => Some(Cmd::LibraryFind(match arg.split_once(';') {
+                    Some(("go", n)) => crate::library_find::Do::Go(n.parse().unwrap_or(0)),
+                    _ if arg == "close" => crate::library_find::Do::Close,
+                    _ if arg.is_empty() => crate::library_find::Do::Open,
+                    _ => crate::library_find::Do::Query(arg.to_string()),
+                })),
                 // Ask the library a question (no commas in it: they separate the steps).
                 "ask" => {
                     if let Some(lib) = self.lib.as_ref() { lib.library_chat.input.update(cx, |input, cx| input.set_text(arg, cx)) }

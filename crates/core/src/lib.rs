@@ -58,6 +58,7 @@ pub mod extract;
 pub mod figref;
 pub mod figure;
 pub mod filter;
+pub mod find;
 pub mod floating;
 pub mod fulltext;
 pub mod handles;

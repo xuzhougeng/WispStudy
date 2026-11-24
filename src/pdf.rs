@@ -3034,6 +3034,14 @@ impl PdfView {
         (self.citation.page, self.citation.boxes, self.citation.status) = (Some(page), lines, CitationStatus::Found);
     }
 
+    /// Go to a reading mark the library's search found (`library_find.rs`): its page, `top` points down it, with the
+    /// lines of the text it marks lit as a citation's sentence is; a mark placed on the page is given no lines.
+    pub fn show_mark(&mut self, page: usize, top: f32, lines: Vec<[f32; 4]>, cx: &mut Context<Self>) {
+        self.go_to_place(page, top, cx);
+        self.mark_lines(page.saturating_sub(1), lines);
+        cx.notify();
+    }
+
     /// Go to the n-th paragraph the card lists: the half worked in shows it with the figure's number
     /// marked, and the place left is kept to come back to. One in another file is the owner's to show.
     pub fn go_to_said(&mut self, n: usize, cx: &mut Context<Self>) {
