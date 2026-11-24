@@ -92,6 +92,10 @@ pub fn rebuild(custom: &BTreeMap<String, String>, cx: &mut App) {
     let mut bindings = vec![KeyBinding::new("escape", Dismiss, context), KeyBinding::new("secondary-c", crate::pdf::CopySelection, Some("PdfView")), KeyBinding::new("secondary-c", CopyPicked, context)];
     // A mark chosen on a PDF page is removed with Delete or Backspace; with none chosen the key goes on (`TrashSelected`).
     bindings.extend(["delete", "backspace"].map(|key| KeyBinding::new(key, crate::pdf::RemoveChosen, Some("PdfView"))));
+    // A change of the marks on a PDF is taken back and done again with the text field's keys; a field writing a note
+    // or a text box is deeper and keeps them. Ctrl+Y as well off macOS, where it is the habit; no field has it.
+    bindings.extend([KeyBinding::new("secondary-z", crate::pdf::UndoMark, Some("PdfView")), KeyBinding::new("secondary-shift-z", crate::pdf::RedoMark, Some("PdfView"))]);
+    if !cfg!(target_os = "macos") { bindings.push(KeyBinding::new("ctrl-y", crate::pdf::RedoMark, Some("PdfView && !TextInput"))) }
     // Moving in the list of papers and in an open menu: fixed keys, as the text field's are. A text field
     // with the keyboard hears its own arrows, Enter and Delete first.
     bindings.extend([

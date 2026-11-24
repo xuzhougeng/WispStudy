@@ -364,6 +364,121 @@ impl Store {
             && self.db.execute("DELETE FROM pdf_texts WHERE id = ?1 AND resource_id = ?2", params![id, resource])? == 0 { bail!("PDF 标注不存在。") }
         Ok(())
     }
+
+    /// Put a mark back as `mark` has it: the same id, made and last changed at the same moments, on the same page
+    /// and place, with the same words, note and colours. A mark removed comes back as it was, one changed since
+    /// goes back to this. What undo and redo write (`step_pdf_marks`).
+    pub fn restore_pdf_annotation(&mut self, mark: &Annotation) -> Result<()> {
+        if mark.page == 0 || mark.page > i32::MAX as usize { bail!("PDF 标注需要有效的页码。") }
+        self.check_pdf(&mark.paper_id, &mark.resource_id)?;
+        let (id, paper, resource, page, note, made, changed) = (&mark.id, &mark.paper_id, &mark.resource_id, mark.page as i64, &mark.note, &mark.created_at, &mark.updated_at);
+        if !mark.kind.shape() {
+            if mark.boxes.is_empty() || mark.quote.trim().is_empty() { bail!("PDF 标注的位置无效。") }
+            self.db.execute(
+                "INSERT OR REPLACE INTO pdf_annotations (id, paper_id, resource_id, page, kind, quote, boxes_json, note, color, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                params![id, paper, resource, page, mark.kind.key(), mark.quote, serde_json::to_string(&mark.boxes)?, note, mark.color, made, changed],
+            )?;
+            return Ok(());
+        }
+        let Some(rect) = mark.boxes.first() else { bail!("PDF 标注的位置无效。") };
+        let rect = serde_json::to_string(rect)?;
+        match mark.kind {
+            Kind::Cut => self.db.execute(
+                "INSERT OR REPLACE INTO pdf_cuts (id, paper_id, resource_id, page, rect_json, note, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![id, paper, resource, page, rect, note, made, changed],
+            )?,
+            Kind::Text => {
+                let style = mark.style.clone().unwrap_or_default();
+                self.db.execute(
+                    "INSERT OR REPLACE INTO pdf_texts (id, paper_id, resource_id, page, rect_json, note, fill, border, ink, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                    params![id, paper, resource, page, rect, note, style.fill, style.border, style.ink, made, changed],
+                )?
+            }
+            _ => self.db.execute(
+                "INSERT OR REPLACE INTO pdf_shapes (id, paper_id, resource_id, page, kind, rect_json, note, color, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                params![id, paper, resource, page, mark.kind.key(), rect, note, mark.color, made, changed],
+            )?,
+        };
+        Ok(())
+    }
+
+    /// Take back the last change of a file's marks kept in `history` (`back`), or do again the last one taken back.
+    /// All of a change or none of it is written. `Ok(None)`: there is nothing to take back, or to do again.
+    pub fn step_pdf_marks(&mut self, resource: &str, history: &mut History, back: bool) -> Result<Option<Change>> {
+        let Some(change) = (if back { history.undo.pop() } else { history.redo.pop() }) else { return Ok(None) };
+        self.db.execute_batch("SAVEPOINT mark_step")?;
+        let written = change.0.iter().try_for_each(|(before, after)| {
+            let (to, from) = if back { (before, after) } else { (after, before) };
+            match (to, from) {
+                (Some(mark), _) => self.restore_pdf_annotation(mark),
+                // Made by the change: it goes again (already gone is as good).
+                (None, Some(mark)) => { self.remove_pdf_annotation(resource, &mark.id).ok(); Ok(()) }
+                (None, None) => Ok(()),
+            }
+        });
+        if let Err(error) = written {
+            self.db.execute_batch("ROLLBACK TO mark_step; RELEASE mark_step")?;
+            return Err(error);
+        }
+        self.db.execute_batch("RELEASE mark_step")?;
+        if back { history.redo.push(change.clone()) } else { history.undo.push(change.clone()) }
+        Ok(Some(change))
+    }
+}
+
+/// One change of a file's marks, as undo takes it back: each mark it touched as it was before and after (`None`:
+/// not there). A save of a text box's words and edges together is one change.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Change(pub Vec<(Option<Annotation>, Option<Annotation>)>);
+
+impl Change {
+    /// What a write did, from the file's marks read before and after it. A mark whose only difference is
+    /// `updated_at` (a note saved as it was) did not change.
+    pub fn between(before: &[Annotation], after: &[Annotation]) -> Change {
+        let same = |a: &Annotation, b: &Annotation| Annotation { updated_at: String::new(), ..a.clone() } == Annotation { updated_at: String::new(), ..b.clone() };
+        let mut pairs: Vec<(Option<Annotation>, Option<Annotation>)> = before.iter().filter_map(|old| match after.iter().find(|new| new.id == old.id) {
+            Some(new) if same(old, new) => None,
+            new => Some((Some(old.clone()), new.cloned())),
+        }).collect();
+        pairs.extend(after.iter().filter(|new| !before.iter().any(|old| old.id == new.id)).map(|new| (None, Some(new.clone()))));
+        Change(pairs)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Where to look once the change is taken back (`back`) or done again: the 1-based page and the edges of the
+    /// first mark it touched, where it now stands, or where it stood if it is gone.
+    pub fn place(&self, back: bool) -> Option<(usize, [f32; 4])> {
+        let (before, after) = self.0.first()?;
+        let (now, was) = if back { (before, after) } else { (after, before) };
+        let mark = now.as_ref().or(was.as_ref())?;
+        let first = mark.boxes.first()?;
+        let rect = mark.boxes.iter().fold(*first, |r, b| [r[0].min(b[0]), r[1].min(b[1]), r[2].max(b[2]), r[3].max(b[3])]);
+        Some((mark.page, rect))
+    }
+}
+
+/// The changes of one file's marks that can be taken back, and those taken back that can be done again, the
+/// newest last. Kept in memory only, by the window, while its library is open.
+#[derive(Clone, Debug, Default)]
+pub struct History {
+    undo: Vec<Change>,
+    redo: Vec<Change>,
+}
+
+/// How many changes of a file can be taken back.
+const HISTORY: usize = 100;
+
+impl History {
+    /// A change just written: the next undo takes it back, and what was taken back before can no longer be done again.
+    pub fn record(&mut self, change: Change) {
+        if change.is_empty() { return }
+        self.redo.clear();
+        self.undo.push(change);
+        if self.undo.len() > HISTORY { self.undo.remove(0); }
+    }
 }
 
 /// A shape's place, its corners put in order: a box needs some size, a note is a spot.
@@ -596,6 +711,85 @@ mod tests {
         store.restore_paper(&paper.id).unwrap();
         assert_eq!(store.pdf_annotations("", "").unwrap().len(), 2);
         store.remove_file(&file.id).unwrap();
+        assert!(store.pdf_annotations("", "").unwrap().is_empty());
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn every_change_of_every_kind_of_mark_is_taken_back_and_done_again_as_it_was() {
+        let root = std::env::temp_dir().join(new_id("wisp-annotation-undo"));
+        let source = root.join("source.pdf");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(&source, b"%PDF-1.4 test source").unwrap();
+        let mut store = Store::in_memory(&root).unwrap();
+        let paper = store.add_paper(Paper { title: "Roots".into(), ..Default::default() }).unwrap();
+        let file = store.import_file(&paper.id, &source, "fulltext").unwrap();
+        let mut history = History::default();
+        // Each write as the window makes it: the file's marks read before and after, the difference recorded.
+        let write = |store: &mut Store, history: &mut History, change: &dyn Fn(&mut Store)| {
+            let before = store.pdf_annotations("", &file.id).unwrap();
+            change(store);
+            history.record(Change::between(&before, &store.pdf_annotations("", &file.id).unwrap()));
+        };
+        let id = |store: &Store, kind: Kind| store.pdf_annotations("", &file.id).unwrap().into_iter().find(|a| a.kind == kind).unwrap().id;
+        write(&mut store, &mut history, &|s| { s.add_pdf_annotation(&paper.id, &file.id, 1, Kind::Highlight, "Root growth", &[[10., 20., 80., 30.], [10., 35., 50., 45.]]).unwrap(); });
+        write(&mut store, &mut history, &|s| { s.add_pdf_annotation(&paper.id, &file.id, 1, Kind::Underline, "growth", &[[40., 20., 80., 30.]]).unwrap(); });
+        write(&mut store, &mut history, &|s| { s.add_pdf_shape(&paper.id, &file.id, 2, Kind::Box, [50., 100., 200., 300.], "").unwrap(); });
+        write(&mut store, &mut history, &|s| { s.add_pdf_shape(&paper.id, &file.id, 2, Kind::Note, [40., 60., 0., 0.], "Compare").unwrap(); });
+        write(&mut store, &mut history, &|s| { s.add_pdf_shape(&paper.id, &file.id, 3, Kind::Cut, [20., 20., 120., 90.], "").unwrap(); });
+        write(&mut store, &mut history, &|s| { s.add_pdf_text(&paper.id, &file.id, 3, [100., 120., 300., 200.], "auxin", &TextStyle::default()).unwrap(); });
+        let (highlight, underline, frame, note, cut, text) = (id(&store, Kind::Highlight), id(&store, Kind::Underline), id(&store, Kind::Box), id(&store, Kind::Note), id(&store, Kind::Cut), id(&store, Kind::Text));
+        // A note saved as it was, the same piece marked again: nothing to take back.
+        let undoable = history.undo.len();
+        write(&mut store, &mut history, &|s| s.update_pdf_annotation_note(&file.id, &note, "Compare").unwrap());
+        write(&mut store, &mut history, &|s| { s.add_pdf_shape(&paper.id, &file.id, 3, Kind::Cut, [20., 20., 120., 90.], "").unwrap(); });
+        assert_eq!(history.undo.len(), undoable);
+        // Not recorded, the note keeps the moment it was saved at: the marks as made are read after it.
+        let made = store.pdf_annotations("", &file.id).unwrap();
+        // Every kind of edit, then everything removed.
+        write(&mut store, &mut history, &|s| s.update_pdf_annotation_note(&file.id, &highlight, "Why roots").unwrap());
+        write(&mut store, &mut history, &|s| s.recolor_pdf_annotation(&file.id, &highlight, "green").unwrap());
+        write(&mut store, &mut history, &|s| s.recolor_pdf_annotation(&file.id, &frame, "blue").unwrap());
+        write(&mut store, &mut history, &|s| s.move_pdf_shape(&file.id, &frame, [60., 110., 210., 320.]).unwrap());
+        write(&mut store, &mut history, &|s| s.move_pdf_shape(&file.id, &note, [70., 80., 0., 0.]).unwrap());
+        write(&mut store, &mut history, &|s| s.move_pdf_shape(&file.id, &cut, [30., 30., 130., 100.]).unwrap());
+        write(&mut store, &mut history, &|s| s.restyle_pdf_text(&file.id, &text, &TextStyle::default().with(TextPart::Ink, "blue")).unwrap());
+        // A text box's words and edges written together are one change.
+        write(&mut store, &mut history, &|s| { s.update_pdf_annotation_note(&file.id, &text, "PIN proteins").unwrap(); s.move_pdf_shape(&file.id, &text, [100., 120., 300., 260.]).unwrap() });
+        let edited = store.pdf_annotations("", &file.id).unwrap();
+        for mark in [&highlight, &underline, &frame, &note, &cut] { write(&mut store, &mut history, &|s| s.remove_pdf_annotation(&file.id, mark).unwrap()) }
+        // Written empty, the text box goes.
+        write(&mut store, &mut history, &|s| s.update_pdf_annotation_note(&file.id, &text, " ").unwrap());
+        assert!(store.pdf_annotations("", &file.id).unwrap().is_empty());
+        // Back through the removals: each mark comes back as it was, the same id, times, place, words and colours.
+        for _ in 0..6 { assert!(store.step_pdf_marks(&file.id, &mut history, true).unwrap().is_some()) }
+        assert_eq!(store.pdf_annotations("", &file.id).unwrap(), edited);
+        // Back through the edits to the marks as made, and further to none.
+        for _ in 0..8 { store.step_pdf_marks(&file.id, &mut history, true).unwrap(); }
+        assert_eq!(store.pdf_annotations("", &file.id).unwrap(), made);
+        let back = store.step_pdf_marks(&file.id, &mut history, true).unwrap().unwrap();
+        assert_eq!(back.place(true), Some((3, [100., 120., 300., 200.])));
+        for _ in 0..5 { store.step_pdf_marks(&file.id, &mut history, true).unwrap(); }
+        assert!(store.pdf_annotations("", &file.id).unwrap().is_empty());
+        assert_eq!(store.step_pdf_marks(&file.id, &mut history, true).unwrap(), None);
+        // Done again, all of it: as it was left.
+        for _ in 0..20 { store.step_pdf_marks(&file.id, &mut history, false).unwrap(); }
+        assert!(store.pdf_annotations("", &file.id).unwrap().is_empty());
+        for _ in 0..6 { store.step_pdf_marks(&file.id, &mut history, true).unwrap(); }
+        assert_eq!(store.pdf_annotations("", &file.id).unwrap(), edited);
+        // The first one done again is where it stands now, the highlight's lines as one place.
+        let again = store.step_pdf_marks(&file.id, &mut history, false).unwrap().unwrap();
+        assert_eq!(again.place(false), Some((1, [10., 20., 80., 45.])));
+        store.step_pdf_marks(&file.id, &mut history, true).unwrap();
+        // A new change: what was taken back cannot be done again.
+        write(&mut store, &mut history, &|s| s.recolor_pdf_annotation(&file.id, &highlight, "pink").unwrap());
+        assert_eq!(store.step_pdf_marks(&file.id, &mut history, false).unwrap(), None);
+        // A mark whose file has gone cannot come back; the change is not half written.
+        store.step_pdf_marks(&file.id, &mut history, true).unwrap();
+        write(&mut store, &mut history, &|s| s.remove_pdf_annotation(&file.id, &frame).unwrap());
+        store.remove_file(&file.id).unwrap();
+        assert!(store.step_pdf_marks(&file.id, &mut history, true).is_err());
         assert!(store.pdf_annotations("", "").unwrap().is_empty());
         drop(store);
         std::fs::remove_dir_all(root).unwrap();

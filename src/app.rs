@@ -1824,6 +1824,8 @@ pub struct Library {
     /// Where each file was read at when another took its place or its paper was left (`PdfView::place`):
     /// read from the library's database when it opens, written there by `keep_places` (#194).
     pub file_places: HashMap<String, (usize, f32)>,
+    /// What can be undone and redone of each file's marks, by the file's id (`Workspace::step_marks`): in memory, gone with the library.
+    pub mark_history: HashMap<String, wisp_core::annotation::History>,
     /// The papers read before the one on show, the last one last, and those gone back from (`Workspace::step_history`).
     pub back: Vec<String>,
     pub forward: Vec<String>,
@@ -5080,6 +5082,7 @@ impl Workspace {
             no_smaller: HashSet::new(),
             read_file: HashMap::new(),
             file_places,
+            mark_history: HashMap::new(),
             back: vec![],
             forward: vec![],
             guide,
@@ -5933,6 +5936,7 @@ impl Workspace {
                 if let Some(paper) = self.lib.as_ref().and_then(|lib| lib.pins.iter().find(|pin| pin.view == view).map(|pin| pin.paper.clone())) { self.work_in_pane(&paper, cx) }
             }
             PdfEvent::Copied => self.say(t("已复制"), cx),
+            PdfEvent::StepMarks(back) => self.step_marks(&view, *back, cx),
             PdfEvent::Translate(text, profile) => self.translate_passage(text.clone(), profile.clone(), cx),
             PdfEvent::ReadAloud(..) | PdfEvent::Figure(_) if self.lib.as_ref().is_some_and(|lib| lib.apart(&view).is_some()) => self.say(t("朗读和收进图片库只对正在读的那篇：先在列表里选中它。"), cx),
             PdfEvent::ReadAloud(page, text) => self.read_aloud(Some((*page, text.clone())), cx),
@@ -6033,10 +6037,34 @@ impl Workspace {
         // file, every one of them (a paper pinned beside may be the one on show as well).
         let views: Vec<Entity<PdfView>> = lib.pdf.iter().chain(lib.beside.as_ref().map(|beside| &beside.view)).chain(lib.pins.iter().map(|pin| &pin.view)).chain(lib.windows.iter().map(|w| &w.view)).filter(|view| view.read(cx).resource_id() == resource).cloned().collect();
         if views.is_empty() { return }
+        // The file's marks before and after the write are what its undo takes back (`annotation::Change`).
+        let before = lib.store.pdf_annotations("", resource).unwrap_or_default();
         match change(&mut lib.store).and_then(|()| lib.store.pdf_annotations("", resource)) {
             Ok(annotations) => {
+                lib.mark_history.entry(resource.to_string()).or_default().record(wisp_core::annotation::Change::between(&before, &annotations));
                 for pdf in views { pdf.update(cx, |pdf, cx| pdf.annotations_saved(annotations.clone(), cx)) }
                 self.say(t("PDF 标注已保存"), cx);
+            }
+            Err(error) => self.fail(format!("{error:#}"), cx),
+        }
+    }
+
+    /// ⌘Z (`back`) or ⇧⌘Z in a viewer: the last change of the marks of the file it shows is taken back, or done again.
+    /// Each file has its own: the key never changes a file out of sight. Every viewer of the file shows the marks
+    /// as they now are, and the one the key was pressed in brings the mark into view.
+    fn step_marks(&mut self, view: &Entity<PdfView>, back: bool, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        let resource = view.read(cx).resource_id().to_string();
+        let mut history = lib.mark_history.remove(&resource).unwrap_or_default();
+        let stepped = lib.store.step_pdf_marks(&resource, &mut history, back).and_then(|change| Ok((change, lib.store.pdf_annotations("", &resource)?)));
+        lib.mark_history.insert(resource.clone(), history);
+        match stepped {
+            Ok((None, _)) => self.say(if back { t("没有可以撤销的标注改动") } else { t("没有可以重做的标注改动") }, cx),
+            Ok((Some(change), annotations)) => {
+                let views: Vec<Entity<PdfView>> = lib.pdf.iter().chain(lib.beside.as_ref().map(|beside| &beside.view)).chain(lib.pins.iter().map(|pin| &pin.view)).chain(lib.windows.iter().map(|w| &w.view)).filter(|other| other.read(cx).resource_id() == resource).cloned().collect();
+                for pdf in views { pdf.update(cx, |pdf, cx| pdf.annotations_saved(annotations.clone(), cx)) }
+                if let Some((page, rect)) = change.place(back) { view.update(cx, |pdf, cx| pdf.reveal(page, rect, cx)) }
+                self.say(if back { t("已撤销标注改动") } else { t("已重做标注改动") }, cx);
             }
             Err(error) => self.fail(format!("{error:#}"), cx),
         }
