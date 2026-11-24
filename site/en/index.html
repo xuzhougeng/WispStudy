@@ -14,7 +14,7 @@
 <meta property="og:title" content="Wisp Study: the papers are yours, and so is the judgment">
 <meta property="og:description" content="A local-first literature library: import in bulk, get suggestions from the assistant backed by quotes from the text, and confirm them yourself. Answers come with sources you can open.">
 <meta property="og:url" content="https://xuzhougeng.github.io/WispStudy/en/">
-<meta property="og:image" content="https://xuzhougeng.github.io/WispStudy/img/library.png">
+<meta property="og:image" content="https://xuzhougeng.github.io/WispStudy/img/en/library.png">
 <link rel="icon" href="../app-icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="../app-icon.png">
 <link rel="stylesheet" href="../style.css">
@@ -71,7 +71,7 @@
   </div>
 
   <figure class="shot" id="fig1">
-    <img src="../img/library.png" width="2720" height="1720" alt="The Wisp Study Library page: views and tags on the left, the paper list in the middle, and the selected paper's details and notes on the right." fetchpriority="high">
+    <img src="../img/en/library.png" width="1372" height="870" alt="The Wisp Study Library page: views and tags on the left, the paper list in the middle, and the selected paper's details, tags, custom fields and notes on the right." fetchpriority="high">
     <figcaption><b>Figure 1.</b> The Library page. Views and tags are on the left, the paper list is in the middle, and the selected paper's details and notes are on the right.</figcaption>
   </figure>
 </section>
@@ -81,7 +81,7 @@
   <div class="rail" aria-hidden="true"><span class="no">§1</span><span class="v">Case</span></div>
   <div class="sec-main">
     <h2><span class="nb">A real run:</span> <span class="nb">fifteen minutes,</span> <span class="nb">from empty to 313 papers</span></h2>
-    <p class="sec-lead">The numbers and screenshots below come from a run on macOS on November 10, 2026. The topic was single-cell and single-nucleus transcriptome sequencing in plants. The databases change every day and the model answers differently each time, so your numbers will differ when you follow along. The steps are the same.</p>
+    <p class="sec-lead">The numbers and screenshots below come from a run on macOS on November 10, 2026. The topic was single-cell and single-nucleus transcriptome sequencing in plants. The databases change every day and the model answers differently each time, so your numbers will differ when you follow along. The steps are the same. The screenshots of Figure 3 were taken later, on November 24, 2026, with the English interface and a stand-in model that answers by fixed rules, so the counts in them are those of that later run.</p>
 
     <figure class="flow" id="fig2">
       <ol class="ledger">
@@ -124,8 +124,8 @@
           <h3><i>a</i>Set up a model</h3>
           <p>Wisp Study does not come with a model. In “Settings › AI”, enter a model provider of your own: the Claude API, an OpenAI-compatible chat/completions endpoint, or OpenAI's Responses. There is no save button; changes are kept as you make them. The assistant, bulk screening and translation can each use a different model. This time translation went to a small model that does not think much.</p>
           <figure class="shot">
-            <img src="../img/02-settings-model.jpg" width="1372" height="870" loading="lazy" alt="A model entry expanded in Settings: Name, Protocol, Base URL, Model, API Key, Thinking, Proxy.">
-            <figcaption><b>Figure 3a.</b> A model entry. When “API key missing” in the top right disappears, the model is ready to use.</figcaption>
+            <img src="../img/en/02-settings-model.jpg" width="1372" height="870" loading="lazy" alt="A provider entry in Settings: Name, Protocol, Base URL, API Key, Proxy, and its two models, each with a Thinking level.">
+            <figcaption><b>Figure 3a.</b> A provider entry: its protocol, base URL and API key, and the models it offers. With a key entered, the models are ready to use.</figcaption>
           </figure>
         </article>
 
@@ -133,8 +133,8 @@
           <h3><i>b</i>Create a library</h3>
           <p>Besides a name, write down the topic: what the library collects and which questions it cares about. It is more than a note. The assistant reads it when it drafts queries, judges inclusion and answers questions, so it is worth being specific. Pick an accent color; from then on it is the library's highlight color.</p>
           <figure class="shot">
-            <img src="../img/04-new-library.jpg" width="1372" height="870" loading="lazy" alt="The New library dialog: name, topic and accent color.">
-            <figcaption><b>Figure 3b.</b> The name is “<span lang="zh-CN">植物单细胞转录组</span>”. The topic lists species, organs, developmental trajectories, stress responses and methodological questions.</figcaption>
+            <img src="../img/en/04-new-library.jpg" width="1372" height="870" loading="lazy" alt="The New library dialog: name, topic and accent color.">
+            <figcaption><b>Figure 3b.</b> The name is “Plant single-cell transcriptomics”. The topic lists species, organs, developmental trajectories, stress responses and methodological questions.</figcaption>
           </figure>
         </article>
 
@@ -142,8 +142,8 @@
           <h3><i>c</i>Have the assistant draft queries</h3>
           <p>The assistant drafted three differently aimed queries each for PubMed and Europe PMC, and tried each one out at once: how many papers the database returns, and what the newest few are. The broad query returned over a thousand papers, and its newest results were mixed with fracture healing. The methods query returned almost nothing but plant single-cell studies. Judge by the titles, not by how elegant the query looks.</p>
           <figure class="shot">
-            <img src="../img/07-guide-queries.jpg" width="1098" height="696" loading="lazy" alt="The queries the assistant drafted, each with a one-line note, the full query, and the newest papers found by the trial search.">
-            <figcaption><b>Figure 3c.</b> Six queries, with hits from 205 to 1212 papers. A trial search writes nothing to the library.</figcaption>
+            <img src="../img/en/07-guide-queries.jpg" width="1372" height="870" loading="lazy" alt="The queries the assistant drafted, each with a one-line note, the full query, and the newest papers found by the trial search.">
+            <figcaption><b>Figure 3c.</b> The first two of six queries, with 985 and 550 results in their trial searches. A trial search writes nothing to the library.</figcaption>
           </figure>
         </article>
 
@@ -151,8 +151,8 @@
           <h3><i>d</i>Save and import</h3>
           <p>Two queries were used, each fetching the latest 200 papers. The two databases overlapped by 45 papers; after deduplicating by DOI, PMID and title, 355 papers remained, all “Pending”. This is deliberate: import broadly first, then judge paper by paper. If an import was a mistake, every batch can be undone as a whole.</p>
           <figure class="shot">
-            <img src="../img/09-searches-imported.jpg" width="1372" height="870" loading="lazy" alt="The Search and import page: two saved queries, the result of each one's last run, and the import records below.">
-            <figcaption><b>Figure 3d.</b> PubMed added 200 papers. Europe PMC added 155 and skipped the 45 already there.</figcaption>
+            <img src="../img/en/09-searches-imported.jpg" width="1372" height="870" loading="lazy" alt="The Search and import page: two saved queries, the result of each one's last run, and the import records below.">
+            <figcaption><b>Figure 3d.</b> In this later run PubMed added 550 papers. Europe PMC added 418 and skipped the 496 already there.</figcaption>
           </figure>
         </article>
 
@@ -160,8 +160,8 @@
           <h3><i>e</i>Have the assistant screen</h3>
           <p>Write the screening goal: what kind of papers belong in this library and what kind do not. The assistant reads 8 papers at a time. It reads the full text when there is a PDF; here there were only abstracts. Each paper gets a suggestion, a reason, and one sentence quoted word for word from the text as evidence. You can stop partway, and the papers not yet read wait for the next round.</p>
           <figure class="shot">
-            <img src="../img/11-screen-running.jpg" width="1098" height="696" loading="lazy" alt="Screening at 118 / 355: a progress bar, the 8 papers being read, and below them the papers that already have suggestions.">
-            <figcaption><b>Figure 3e.</b> At 118 / 355. Below the progress bar are the 8 papers being read; those that are done join the queue with their suggestions.</figcaption>
+            <img src="../img/en/11-screen-running.jpg" width="1372" height="870" loading="lazy" alt="Screening at 117 / 968: a progress bar, the 8 papers being read, and below them the papers that already have suggestions.">
+            <figcaption><b>Figure 3e.</b> At 117 / 968. Below the progress bar are the 8 papers being read; those that are done join the queue with their suggestions.</figcaption>
           </figure>
         </article>
 
@@ -169,8 +169,8 @@
           <h3><i>f</i>Confirm the inclusion decisions</h3>
           <p>The assistant never changes a paper's inclusion decision. Only you do. Open a paper, look at its reason and evidence, then accept the suggestion or choose another. Once you have looked at a few papers in a group and trust it, you can accept the whole group; it asks first.</p>
           <figure class="shot">
-            <img src="../img/13-screen-reason.jpg" width="1372" height="870" loading="lazy" alt="An opened paper: the assistant finds that a single-cell proteomics study does not meet the inclusion criteria and suggests “Related”, with the sentence quoted from the abstract and four decision buttons below.">
-            <figcaption><b>Figure 3f.</b> A single-cell proteomics study. It has no transcriptome data, so the assistant suggests “Related” rather than “Included”.</figcaption>
+            <img src="../img/en/13-screen-reason.jpg" width="1372" height="870" loading="lazy" alt="An opened paper: the assistant finds that a proteomics study of guard cells does not meet the inclusion criteria and suggests “Related”, with the sentence quoted from the abstract and four decision buttons below.">
+            <figcaption><b>Figure 3f.</b> A proteomics study of one cell type. It has no transcriptome data, so the assistant suggests “Related” rather than “Included”.</figcaption>
           </figure>
         </article>
 
@@ -178,8 +178,8 @@
           <h3><i>g</i>Read translated abstracts</h3>
           <p>“Show translation” next to the abstract swaps the title and abstract for the translation in place, and “Show original” switches back. Once it is on, other papers you switch to are translated automatically. Translations are saved in the library, so the same text is requested only once.</p>
           <figure class="shot">
-            <img src="../img/16-translate.jpg" width="1372" height="870" loading="lazy" alt="Paper details: the translation sits above the abstract, with the title translated into Chinese.">
-            <figcaption><b>Figure 3g.</b> The translation appears where the abstract is. The target language and the preferred translations of terms can be set in Settings.</figcaption>
+            <img src="../img/en/16-translate.jpg" width="1372" height="870" loading="lazy" alt="Paper details: the title and the abstract are shown in translation, here in Spanish.">
+            <figcaption><b>Figure 3g.</b> The translation appears where the abstract is. The target language and the preferred translations of terms can be set in Settings; here it was set to Spanish.</figcaption>
           </figure>
         </article>
 
@@ -187,7 +187,7 @@
           <h3><i>h</i>Ask the library</h3>
           <p>Ask in “Assistant” on the left. The scope is the 313 papers in the current list: 181 were given as full records, and the 132 that did not fit were given as titles only. The assistant first used its tools to read 5 papers that compare the two technical routes directly, then answered. It also wrote that these papers have no PDF saved, so this time it cites no page numbers: it read only the abstracts.</p>
           <figure class="shot">
-            <img src="../img/17-ask.jpg" width="1372" height="870" loading="lazy" alt="The assistant's answer: an overview, then a table of species and organ coverage with a source starting with P after each cell; the source list is below the answer.">
+            <img src="../img/en/17-ask.jpg" width="1372" height="870" loading="lazy" alt="The assistant's answer: two paragraphs, then a table of species with the organs their titles name, each followed by sources starting with P; the source list is below the answer.">
             <figcaption><b>Figure 3h.</b> The answer is laid out in Markdown, with a source after each conclusion. The first 8 sources are listed below it and the rest are folded.</figcaption>
           </figure>
         </article>

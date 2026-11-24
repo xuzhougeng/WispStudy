@@ -23,7 +23,9 @@ for page in "$root"/site/tutorials/*.html; do
 done
 # The English pages, site/en/: the same pages one folder down. They load the
 # styles, the script and the pictures above from one folder up.
-mkdir -p "$out/en/tutorials"
+mkdir -p "$out/en/tutorials" "$out/img/en"
+# Their own screenshots, of the English interface, where they have them: docs/images/en.
+cp "$root/docs/images/en/library.png" "$root"/docs/images/en/tutorial/*.jpg "$out/img/en/"
 cp "$root/site/en/index.html" "$out/en/"
 for page in "$root"/site/en/tutorials/*.html; do
   case $(basename "$page") in _*) ;; *) cp "$page" "$out/en/tutorials/" ;; esac
