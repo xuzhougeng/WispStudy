@@ -43,6 +43,10 @@
 //! and questions), it answers every choice question with probabilities: for
 //! a screening it is sure of a paper that mentions Arabidopsis, torn about
 //! one that mentions a root, and sure the rest have nothing to do with it.
+//! Sent a file to read (文字识别, `POST /v1/tools/ocr`: a form with a `purpose`), it answers as DeepSeek's OCR
+//! does, line breaks first: a page for every page the file says it has (two at the least), the first with a
+//! title and paragraphs marked with their places; a file whose name contains `fail` gets the failure that
+//! comes with 200.
 //!
 //! Requests are answered side by side, each after the given number of
 //! milliseconds (none by default), so a run of several screening requests
@@ -180,6 +184,23 @@ fn speech(request: &str) -> Option<String> {
     Some(format!("HTTP/1.1 200 OK\r\ncontent-type: application/octet-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{sound}", samples * 2))
 }
 
+/// The answer to a file sent to be read (文字识别, `POST /v1/tools/ocr`); `None` for any other request.
+fn recognition(request: &str) -> Option<String> {
+    // Only the body is at hand: a file to read is a form that names a purpose.
+    if !request.starts_with("--") || !request.contains("name=\"purpose\"") { return None }
+    let name = request.split("filename=\"").nth(1).and_then(|rest| rest.split('"').next()).unwrap_or("");
+    let pages = request.matches("/Type /Page").count().saturating_sub(request.matches("/Type /Pages").count()).max(2);
+    println!("ocr: {name}, {pages} pages, {} bytes", request.len());
+    let body = if name.contains("fail") {
+        "\n\n{\"error\": {\"message\": \"OCR did not finish in time\", \"type\": \"gateway_timeout_error\", \"param\": null, \"code\": \"gateway_timeout_error\"}}".to_string()
+    } else {
+        let first = "<｜ref｜>A scanned paper<｜/ref｜><｜box｜>[[80, 60, 920, 110]]<｜/box｜>\\n<｜ref｜>Introduction<｜/ref｜><｜box｜>[[80, 150, 300, 180]]<｜/box｜>\\n<｜ref｜>Root hairs lengthen under low phosphate, as the mock engine reads off this page. Earlier work measured the same response in seedlings.<｜/ref｜><｜box｜>[[80, 190, 920, 330]]<｜/box｜>\\n<｜ref｜>Methods<｜/ref｜><｜box｜>[[80, 360, 240, 390]]<｜/box｜>\\n<｜ref｜>Seedlings were grown on plates for seven days and imaged every hour.<｜/ref｜><｜box｜>[[80, 400, 920, 470]]<｜/box｜>";
+        let listed: Vec<String> = (0..pages).map(|index| format!("{{\"index\": {index}, \"text\": \"{}\", \"finish_reason\": \"stop\"}}", if index == 0 { first.to_string() } else { format!("Results\\n\\nPage {} of the scan shows that root hairs were longer in every replicate.", index + 1) })).collect();
+        format!("\n\n{{\"id\": \"ocr-mock\", \"object\": \"ocr.result\", \"created\": 0, \"purpose\": \"text_recognition\", \"page_count\": {pages}, \"pages\": [{}], \"usage\": {{\"input_tokens\": 0, \"output_tokens\": 0, \"total_tokens\": 0}}}}", listed.join(", "))
+    };
+    Some(format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()))
+}
+
 /// The answer to a System One request (a state and typed questions); `None` for any other request.
 fn judgement(request: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(request).ok()?;
@@ -232,7 +253,7 @@ fn answer(mut stream: TcpStream, delay: u64) {
             let _ = stream.write_all(&bytes);
             return;
         }
-        if let Some(reply) = judgement(&request).or_else(|| picture(&request)) {
+        if let Some(reply) = recognition(&request).or_else(|| judgement(&request)).or_else(|| picture(&request)) {
             std::thread::sleep(std::time::Duration::from_millis(delay));
             let _ = stream.write_all(reply.as_bytes());
             return;

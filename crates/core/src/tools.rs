@@ -41,7 +41,7 @@ pub struct ToolDef {
 }
 
 /// The tools that change the library.
-const WRITING: [&str; 28] = ["compress_pdf", "create_library", "import_library", "export_library", "import_pdf", "import_references", "import_zotero", "save_search", "remove_search", "run_search", "undo_import", "suggest_screening", "suggest_field", "sync_searches", "find_pdf", "import_url", "organise_papers", "edit_section", "set_outline", "comment_manuscript", "export_note", "save_note_to_notion", "resolve_note_save", "save_cite_style", "restyle_docx", "import_docx_references", "import_manuscript", "make_slides"];
+const WRITING: [&str; 29] = ["compress_pdf", "ocr_pdf", "create_library", "import_library", "export_library", "import_pdf", "import_references", "import_zotero", "save_search", "remove_search", "run_search", "undo_import", "suggest_screening", "suggest_field", "sync_searches", "find_pdf", "import_url", "organise_papers", "edit_section", "set_outline", "comment_manuscript", "export_note", "save_note_to_notion", "resolve_note_save", "save_cite_style", "restyle_docx", "import_docx_references", "import_manuscript", "make_slides"];
 /// Of those, the ones the window's assistant runs only with the person's
 /// consent. Saving a search, suggesting a screening decision or proposing
 /// a field's value changes nothing a person has not yet to act on, so they
@@ -49,7 +49,7 @@ const WRITING: [&str; 28] = ["compress_pdf", "create_library", "import_library",
 /// about everywhere but in the conversation that writes that manuscript,
 /// where the person has handed the pen over. `comment_manuscript` is not among them: a comment changes no
 /// word of the manuscript, it waits for the person like a screening suggestion.
-const CONFIRMING: [&str; 21] = ["compress_pdf", "import_library", "export_library", "import_pdf", "import_references", "import_zotero", "run_search", "undo_import", "remove_search", "find_pdf", "import_url", "organise_papers", "edit_section", "set_outline", "export_note", "save_note_to_notion", "resolve_note_save", "restyle_docx", "import_docx_references", "import_manuscript", "make_slides"];
+const CONFIRMING: [&str; 22] = ["compress_pdf", "ocr_pdf", "import_library", "export_library", "import_pdf", "import_references", "import_zotero", "run_search", "undo_import", "remove_search", "find_pdf", "import_url", "organise_papers", "edit_section", "set_outline", "export_note", "save_note_to_notion", "resolve_note_save", "restyle_docx", "import_docx_references", "import_manuscript", "make_slides"];
 /// The tools that write a manuscript (`compose`).
 pub const MANUSCRIPT: [&str; 2] = ["edit_section", "set_outline"];
 
@@ -340,6 +340,18 @@ pub fn catalog() -> Vec<ToolDef> {
             json!({
                 "resourceId": {"type": "string", "description": "要压缩的 PDF 附件 ID，见 get_paper 的 files。"},
                 "paperId": {"type": "string", "description": "压缩这篇文献的所有 PDF 附件。"},
+            }),
+            &[],
+        ),
+        scoped(
+            "ocr_pdf",
+            "识别 PDF 页面上的文字",
+            "文字识别（OCR）：为读不出文字的 PDF（扫描件、字体没有文字编码的文件；list_papers 的 fulltext 为 textless）读出页面上的文字，按页保存，之后提问、找句子和写作都用得上，并记下是哪个引擎读的。引擎在「设置 › 网络 › 文字识别」选择：DeepSeek OCR 把整个文件上传到 DeepSeek 识别，每个文件最多 1000 页、100 MB，按页计费。只处理没有读出文字的 PDF，已有文字的不动；设了打开密码的读不了。给 resourceId 只读这个附件，给 paperId 读这篇文献的 PDF，都不给时处理文献库里所有读不出文字的 PDF（一次最多 limit 个，结果里的 remaining 是还剩几个）。",
+            json!({
+                "resourceId": {"type": "string", "description": "要识别的 PDF 附件 ID，见 get_paper 的 files。"},
+                "paperId": {"type": "string", "description": "识别这篇文献里读不出文字的 PDF。"},
+                "limit": {"type": "integer", "description": "resourceId 和 paperId 都省略时一次最多处理几个文件，默认 10，最多 50。"},
+                "engine": {"type": "string", "enum": crate::ocr::ENGINES.iter().map(|engine| engine.key).collect::<Vec<_>>(), "description": "指定识别引擎；省略时按设置选择。model（看图模型）只能在桌面应用里用。"},
             }),
             &[],
         ),
@@ -694,6 +706,10 @@ pub fn describe_result(result: &Result<Value, String>) -> String {
                 format!("{} 份稿件", manuscripts.len())
             } else if let Some(sections) = value["sections"].as_array() {
                 format!("读了 {} 节", sections.len())
+            } else if let (Some(files), Some(_)) = (value["files"].as_array(), value["remaining"].as_u64()) {
+                let read = files.iter().filter(|file| file["outcome"] == "read").count();
+                let failed = files.iter().filter(|file| file["outcome"] == "failed").count();
+                if failed == 0 { format!("读出了 {read} 个文件的文字") } else { format!("读出了 {read} 个文件的文字，{failed} 个没有读成") }
             } else if let Some(pages) = value["pages"].as_array() {
                 format!("读了 {} 页", pages.len())
             } else if let Some(sentences) = value["sentences"].as_array() {
@@ -713,6 +729,8 @@ pub struct Reach<'a> {
     pub publish: Option<crate::notes::Publish<'a>>,
     /// Searching the web with the engine chosen in settings (`websearch`).
     pub search: Option<websearch::Search<'a>>,
+    /// Reading the pages of a file that gives no text, with the engine chosen in settings (`ocr`).
+    pub read: Option<crate::ocr::Read<'a>>,
 }
 
 /// Run a tool against the data folder `root`. The error is a sentence for
@@ -748,7 +766,81 @@ pub fn call_in_with(store: &mut Store, info: &LibraryInfo, name: &str, args: &Va
         return reach.publish.ok_or("此运行环境没有提供 Notion MCP；请使用桌面应用或 wisp 命令。")?(store, info, args);
     }
     if name == "web_search" { return web_search(args, reach) }
+    if name == "ocr_pdf" { return ocr_pdf(store, args, reach).map_err(|e| format!("{e:#}")) }
     dispatch(store, info, name, args, fetch, download).map_err(|e| format!("{e:#}"))
+}
+
+/// How many files in a row may fail before `ocr_pdf` stops: by then it is the service or its key, not the files.
+const OCR_GIVE_UP: usize = 3;
+
+/// `ocr_pdf`: the PDFs that gave no text read by an engine of 文字识别, and their text kept page by page.
+fn ocr_pdf(store: &mut Store, args: &Value, reach: Reach) -> Result<Value> {
+    let read = reach.read.ok_or_else(|| anyhow!("此运行环境没有提供文字识别；请使用桌面应用或 wisp 命令。"))?;
+    let (resource, paper, engine) = (text(args, "resourceId")?, text(args, "paperId")?, text(args, "engine")?);
+    let limit = number(args, "limit", 10, 50)?.max(1);
+    let paper = if paper.is_empty() { None } else { Some(store.get_paper(paper)?.id) };
+    // Every file has been tried by now: one without a word on record is one that gave none.
+    extract_missing(store, if resource.is_empty() { paper.as_deref() } else { None })?;
+    let named = !resource.is_empty() || paper.is_some();
+    let files: Vec<PaperFile> = match (resource.is_empty(), &paper) {
+        (false, _) => store.list_files()?.into_iter().filter(|f| f.id == resource).collect(),
+        (true, Some(paper)) => store.paper_files(paper)?,
+        (true, None) => {
+            let kept: std::collections::HashSet<String> = store.list_papers()?.into_iter().map(|p| p.id).collect();
+            store.list_files()?.into_iter().filter(|f| kept.contains(&f.paper_id)).collect()
+        }
+    };
+    if files.is_empty() && !resource.is_empty() { bail!("附件不存在：{resource}") }
+    let structures = store.structures()?;
+    let (mut todo, mut rows) = (vec![], vec![]);
+    for file in files.into_iter().filter(|f| f.kind == "fulltext" && f.format == "pdf") {
+        match store.fulltext_pages(&file.id)? {
+            Some(Err(why)) if crate::fulltext::readable_by_eye(&why) => todo.push(file),
+            // Pages a model read in part are read whole.
+            Some(Ok(_)) if structures.get(&file.id).is_some_and(|info| info.read_in_part()) => todo.push(file),
+            // Of a file asked for by name, why it is left alone.
+            Some(Err(why)) if named => rows.push(json!({"resourceId": file.id, "paperId": file.paper_id, "title": file.title, "outcome": "unreadable", "error": why})),
+            Some(Ok(_)) if !resource.is_empty() => rows.push(json!({"resourceId": file.id, "paperId": file.paper_id, "title": file.title, "outcome": "has_text", "note": "这个文件已经有文字，没有再识别。"})),
+            _ => {}
+        }
+    }
+    if todo.is_empty() && rows.is_empty() {
+        if named { bail!("这里没有读不出文字的 PDF。") }
+        return Ok(json!({"files": [], "remaining": 0, "note": "文献库里没有读不出文字的 PDF。"}));
+    }
+    let mut remaining = todo.len();
+    let mut streak = 0;
+    for file in todo.into_iter().take(if named { usize::MAX } else { limit }) {
+        if streak >= OCR_GIVE_UP { break }
+        remaining -= 1;
+        let made = std::fs::read(store.file_path(&file)).map_err(|e| format!("无法读取文件：{e}")).and_then(|bytes| read(engine, &file.title, &bytes));
+        let row = match made {
+            Ok(reading) if reading.pages.iter().all(|page| page.text.trim().is_empty()) => {
+                streak = 0;
+                json!({"resourceId": file.id, "paperId": file.paper_id, "title": file.title, "outcome": "no_text", "engine": reading.engine.name, "pages": reading.pages.len(), "note": "页面上没有识别出文字。"})
+            }
+            Ok(reading) => {
+                streak = 0;
+                let cut = reading.cut();
+                let count = reading.pages.len();
+                let (texts, raw): (Vec<String>, Vec<String>) = reading.pages.into_iter().map(|page| (page.text, page.raw)).unzip();
+                let with_text = texts.iter().filter(|text| !text.trim().is_empty()).count();
+                store.save_read_pages(&file.id, texts, reading.engine.name, count)?;
+                store.save_ocr_pages(&file.id, reading.engine.key, &raw)?;
+                let mut row = json!({"resourceId": file.id, "paperId": file.paper_id, "title": file.title, "outcome": "read", "engine": reading.engine.name, "pages": count, "pagesWithText": with_text});
+                if !cut.is_empty() { row["cutPages"] = json!(cut); row["note"] = json!("cutPages 里的页面内容太多，没有读完，文字不全。") }
+                row
+            }
+            Err(error) => {
+                streak += 1;
+                json!({"resourceId": file.id, "paperId": file.paper_id, "title": file.title, "outcome": "failed", "error": error})
+            }
+        };
+        rows.push(row);
+    }
+    let mut value = json!({"files": rows, "remaining": remaining});
+    if streak >= OCR_GIVE_UP { value["note"] = json!(format!("连续 {OCR_GIVE_UP} 个文件没有读成，已停下：先看 error 里的原因（Key、余额、服务状态）。")) }
+    Ok(value)
 }
 
 /// `web_search`: the web searched with the engine asked for or the one settings choose. No library is read or written.
@@ -2964,9 +3056,59 @@ pub(crate) mod tests {
             // Only a tool that changes the library has anything to ask the person about.
             assert!(tool.writes || !tool.confirm, "{}", tool.name);
         }
-        assert_eq!(library_catalog().iter().filter(|tool| tool.confirm).map(|tool| tool.name).collect::<Vec<_>>().len(), 20);
+        assert_eq!(library_catalog().iter().filter(|tool| tool.confirm).map(|tool| tool.name).collect::<Vec<_>>().len(), 21);
         // The tools that write a manuscript are asked about outside the conversation that writes it.
         assert!(MANUSCRIPT.iter().all(|name| catalog().iter().any(|tool| tool.name == *name && tool.writes && tool.confirm)));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn pages_without_text_read_through_what_the_front_end_lends() {
+        use crate::ocr::{self, Page, Reading};
+        let (root, atlas) = sample();
+        let dir = libraries::list(&root)[0].dir.clone();
+        let leaf = call(&root, "list_papers", &json!({"screening": "irrelevant"})).unwrap()["papers"][0]["id"].as_str().unwrap().to_string();
+        let scan = root.join("scan of leaf.pdf");
+        std::fs::write(&scan, "not a pdf").unwrap();
+        let file = Store::open(&dir).unwrap().import_file(&leaf, &scan, "fulltext").unwrap();
+        // Without a way to read lent, the tool says so; nothing to read is said too.
+        assert!(call(&root, "ocr_pdf", &json!({})).unwrap_err().contains("没有提供文字识别"));
+        let asked = std::cell::RefCell::new(vec![]);
+        let read = |engine: &str, name: &str, bytes: &[u8]| -> Result<Reading, String> {
+            asked.borrow_mut().push((engine.to_string(), name.to_string(), bytes.len()));
+            if engine == "model" { return Err("这里画不出页面".into()) }
+            let raw = "<｜ref｜>Leaves grow from the shoot apical meristem.<｜/ref｜><｜box｜>[[50, 40, 950, 90]]<｜/box｜>".to_string();
+            Ok(Reading { engine: ocr::engine("deepseek").unwrap(), pages: vec![Page { text: ocr::plain(&raw), raw, cut: false }, Page::default(), Page { text: "Cut".into(), raw: "Cut".into(), cut: true }] })
+        };
+        let reach = Reach { read: Some(&read), ..Default::default() };
+        let lent = |args: Value| call_with(&root, "ocr_pdf", &args, &offline, &no_download, reach);
+        assert!(lent(json!({"paperId": atlas})).unwrap_err().contains("没有读不出文字的 PDF"));
+        // A failure is said of the file, and the file stays as it was.
+        let failed = lent(json!({"engine": "model"})).unwrap();
+        assert_eq!((failed["files"][0]["outcome"].as_str(), failed["files"][0]["error"].as_str(), failed["remaining"].as_u64()), (Some("failed"), Some("这里画不出页面"), Some(0)));
+        assert_eq!(describe_result(&Ok(failed)), "读出了 0 个文件的文字，1 个没有读成");
+        assert_eq!(call(&root, "get_paper", &json!({"id": leaf})).unwrap()["fulltext"], "textless");
+        // Read: the text page by page, who read it, and what the engine answered kept as it came.
+        let done = lent(json!({})).unwrap();
+        let row = &done["files"][0];
+        assert_eq!((row["outcome"].as_str(), row["engine"].as_str(), row["pages"].as_u64(), row["pagesWithText"].as_u64(), row["resourceId"].as_str()), (Some("read"), Some("DeepSeek OCR"), Some(3), Some(2), Some(file.id.as_str())));
+        assert_eq!((row["cutPages"].clone(), done["remaining"].as_u64()), (json!([3]), Some(0)));
+        assert_eq!(asked.borrow().last().unwrap(), &(String::new(), "scan of leaf.pdf".to_string(), 9));
+        assert_eq!(describe_result(&Ok(done)), "读出了 1 个文件的文字");
+        let store = Store::open(&dir).unwrap();
+        assert_eq!(store.fulltext_pages(&file.id).unwrap().unwrap().unwrap(), vec!["Leaves grow from the shoot apical meristem.".to_string(), String::new(), "Cut".to_string()]);
+        let info = &store.structures().unwrap()[&file.id];
+        assert_eq!((info.text_by.as_str(), info.pages_read, info.page_count), ("DeepSeek OCR", 3, 3));
+        let (engine, raw) = store.ocr_pages(&file.id).unwrap().unwrap();
+        assert!(engine == "deepseek" && raw.len() == 3 && raw[0].starts_with("<｜ref｜>"));
+        assert_eq!(call(&root, "get_paper", &json!({"id": leaf})).unwrap()["fulltext"], "stored");
+        assert!(call(&root, "read_fulltext", &json!({"paperId": leaf})).unwrap()["pages"][0]["text"].as_str().unwrap().starts_with("Leaves grow"));
+        // Once read it is left alone: said of a file named, and nothing done for the library.
+        assert_eq!(lent(json!({"resourceId": file.id})).unwrap()["files"][0]["outcome"], "has_text");
+        assert_eq!(lent(json!({})).unwrap()["files"], json!([]));
+        assert_eq!(asked.borrow().len(), 2);
+        assert!(lent(json!({"resourceId": "R-missing"})).unwrap_err().contains("附件不存在"));
+        assert!(super::CONFIRMING.contains(&"ocr_pdf") && super::WRITING.contains(&"ocr_pdf"));
         std::fs::remove_dir_all(root).ok();
     }
 

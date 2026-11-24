@@ -287,6 +287,15 @@ CREATE TABLE IF NOT EXISTS former_files (
     replaced_at TEXT NOT NULL,
     PRIMARY KEY (resource_id, sha256)
 );
+
+-- What an engine of 文字识别 answered for the pages of a file that gave no text (`ocr`), as it came: its marks
+-- of place are in it. The text made of it is in `fulltext_text`, like any other.
+CREATE TABLE IF NOT EXISTS ocr_pages (
+    resource_id TEXT PRIMARY KEY NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+    engine TEXT NOT NULL,
+    pages TEXT NOT NULL,
+    read_at TEXT NOT NULL
+);
 "#;
 
 /// The files known by the fingerprint `?1`: by the bytes they hold, or by those they held before they were made smaller.
@@ -1411,6 +1420,23 @@ impl Store {
         Ok(())
     }
 
+    /// Keep what an engine of 文字识别 answered for each page of a file (`ocr::Page::raw`), beside the text made of it.
+    pub fn save_ocr_pages(&mut self, resource_id: &str, engine: &str, raw: &[String]) -> Result<()> {
+        // The file may have been removed while it was being read.
+        self.db.execute(
+            "INSERT INTO ocr_pages(resource_id, engine, pages, read_at) SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM resources WHERE id = ?1) \
+             ON CONFLICT(resource_id) DO UPDATE SET engine = excluded.engine, pages = excluded.pages, read_at = excluded.read_at",
+            params![resource_id, engine, to_json(raw), now_iso()],
+        )?;
+        Ok(())
+    }
+
+    /// What an engine of 文字识别 answered for each page of a file, and which engine (an `ocr::Engine::key`); none for a file no engine read.
+    pub fn ocr_pages(&self, resource_id: &str) -> Result<Option<(String, Vec<String>)>> {
+        let row: Option<(String, String)> = self.db.query_row("SELECT engine, pages FROM ocr_pages WHERE resource_id = ?1", [resource_id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+        Ok(row.map(|(engine, pages)| (engine, json_strings(&pages))))
+    }
+
     fn save_pages(&mut self, resource_id: &str, pages: &std::result::Result<Vec<String>, String>, text_by: &str) -> Result<()> {
         let (json, error) = match pages {
             Ok(pages) => (to_json(pages), String::new()),
@@ -1778,6 +1804,12 @@ mod tests {
         assert_eq!((info.text_by.as_str(), info.pages_read, info.page_count), ("视觉 · v", 1, 3));
         store.save_read_pages(&scanned.id, vec![page.into(); 3], "视觉 · v", 3).unwrap();
         assert!(!store.structures().unwrap()[&scanned.id].read_in_part());
+        // What an engine answered is kept as it came, and goes with the file.
+        assert!(store.ocr_pages(&scanned.id).unwrap().is_none());
+        store.save_ocr_pages(&scanned.id, "deepseek", &["<｜ref｜>a<｜/ref｜>".to_string(), String::new()]).unwrap();
+        store.save_ocr_pages("R-gone", "deepseek", &["x".to_string()]).unwrap();
+        assert_eq!(store.ocr_pages(&scanned.id).unwrap(), Some(("deepseek".to_string(), vec!["<｜ref｜>a<｜/ref｜>".to_string(), String::new()])));
+        assert!(store.ocr_pages("R-gone").unwrap().is_none());
         // Read again from the file, the text is the file's own.
         store.save_fulltext_pages(&scanned.id, &Ok(vec![page.into()])).unwrap();
         let info = &store.structures().unwrap()[&scanned.id];
@@ -1788,6 +1820,7 @@ mod tests {
         assert!(store.section_sentences("introduction", "").unwrap().iter().all(|s| s.paper_id == q.id));
         store.remove_file(&scanned.id).unwrap();
         assert!(store.section_sentences("introduction", "").unwrap().is_empty());
+        assert!(store.ocr_pages(&scanned.id).unwrap().is_none());
 
         std::fs::remove_dir_all(dir).ok();
     }

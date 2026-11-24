@@ -10,8 +10,8 @@ pub const MAX_TEXT_BYTES: usize = 8 << 20;
 /// says what was found and no more: a file the parsers stumble over is
 /// not thereby a scan, and a scan is not thereby locked.
 pub const LOCKED: &str = "这个 PDF 设了打开密码，读不了文字。去掉密码后重新添加即可。";
-pub const NO_ENCODING: &str = "这个 PDF 的字体没有给出文字编码，页面看得见字，却提取不出来。可以让能看图的模型读页面。";
-pub const NO_TEXT_LAYER: &str = "页面上没有文字层，多半是扫描件或图片。可以让能看图的模型读页面。";
+pub const NO_ENCODING: &str = "这个 PDF 的字体没有给出文字编码，页面看得见字，却提取不出来。可以用文字识别（OCR）读出页面上的文字。";
+pub const NO_TEXT_LAYER: &str = "页面上没有文字层，多半是扫描件或图片。可以用文字识别（OCR）读出页面上的文字。";
 const PARSER: &str = "两种读取方式都解析不了这个 PDF。这是解析的问题，不说明它是扫描件或加了密：在别的阅读器里能选中文字的话，文字是有的。";
 
 /// What kind of failure a kept message tells of, for those who act on it
@@ -22,9 +22,9 @@ const PARSER: &str = "两种读取方式都解析不了这个 PDF。这是解析
 pub fn failure_kind(message: &str) -> &'static str {
     if message == LOCKED || message.starts_with("这个 PDF 加了密") {
         "locked"
-    } else if message == NO_ENCODING {
+    } else if message == NO_ENCODING || message.starts_with("这个 PDF 的字体没有给出文字编码") {
         "encoding"
-    } else if message == NO_TEXT_LAYER || message.starts_with("文件里没有可提取的文字") {
+    } else if message == NO_TEXT_LAYER || message.starts_with("页面上没有文字层") || message.starts_with("文件里没有可提取的文字") {
         "no_text"
     } else if message.starts_with("无法读取文件") {
         "file"
@@ -421,6 +421,7 @@ mod tests {
         assert_eq!((failure_kind(NO_ENCODING), failure_kind(NO_TEXT_LAYER)), ("encoding", "no_text"));
         // What earlier builds kept.
         assert_eq!((failure_kind("文件里没有可提取的文字（可能是扫描件）。"), failure_kind("PDF 结构异常，无法提取文字。")), ("no_text", "parser"));
+        assert_eq!((failure_kind("页面上没有文字层，多半是扫描件或图片。可以让能看图的模型读页面。"), failure_kind("这个 PDF 的字体没有给出文字编码，页面看得见字，却提取不出来。可以让能看图的模型读页面。")), ("no_text", "encoding"));
         std::fs::remove_dir_all(dir).ok();
     }
 
