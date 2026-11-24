@@ -545,6 +545,8 @@
   "Tab 加一个分支，Enter 加同级，空格改字，Delete 删除。": "Tab adds a branch, Enter a node beside this one, Space writes in it, Delete removes it.",
   "在 PDF 里选一段，点「加到导图」，它就挂在选中的节点下面，点页码回到原文。": "Select a passage in the PDF and click \"Add to map\": it hangs under the node chosen, and its page number leads back to the text.",
   "也可以点上面的 ✦ 让模型先起草，再自己改。": "Or click ✦ above for a draft from the model, and change it.",
+  "拖动空白处移动导图，⌘ 或 Ctrl 加滚轮缩放；把节点拖到另一个节点上，它就挂到那里。": "Drag the empty ground to move the map, and use the wheel with ⌘ or Ctrl to zoom; drag a node onto another and it hangs there.",
+  "整张导图放进这一栏": "Fit the whole map in this column",
   "收起思维导图": "Put the mind map away",
   "思维导图：在旁边一栏整理这篇文献的要点，节点可以连回原文": "Mind map: the points of this paper in a column beside it, each node able to lead back to the text",
   "已经有三栏了：先关掉一栏，或在某一栏的标签里选「显示译文」。": "There are three columns already: close one first, or choose \"Show translation\" in a column's label.",
