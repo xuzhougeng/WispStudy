@@ -28,11 +28,13 @@ pub struct Engine {
 }
 
 /// The engines, in the order 自动 tries them. A new engine is a row here and an arm in `request` and `read`.
-pub const ENGINES: [Engine; 2] = [
+pub const ENGINES: [Engine; 3] = [
     // https://api-docs.deepseek.com/zh-cn/guides/search/: the key of DeepSeek's chat API.
     Engine { key: "deepseek", name: "DeepSeek", key_env: "DEEPSEEK_API_KEY", most: 50, longest: 128, site: "https://platform.deepseek.com/api_keys" },
     // https://github.com/jina-ai/reader (s.jina.ai): a key is required.
     Engine { key: "jina", name: "Jina", key_env: "JINA_API_KEY", most: 20, longest: 0, site: "https://jina.ai/api-dashboard" },
+    // https://you.com/docs/api-reference/search/v1-search: 100 results without passages, 50 with them.
+    Engine { key: "you", name: "You.com", key_env: "YDC_API_KEY", most: 50, longest: 0, site: "https://you.com/platform/api-keys" },
 ];
 
 /// `WebSearchSettings::engine` for the first engine that has a key.
@@ -43,6 +45,8 @@ pub const OFF: &str = "off";
 pub const DEFAULT_COUNT: usize = 8;
 /// The most of a page's text one result carries; the rest is cut and says so.
 pub const CONTENT_CHARS: usize = 6000;
+/// The most of a summary made of an engine's passages (You.com's `highlights`).
+const SUMMARY_CHARS: usize = 1200;
 
 /// 设置 › 网络 › 网页搜索.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -165,6 +169,11 @@ pub fn request(ready: &Ready, query: &Query) -> Result<HttpRequest, String> {
             if !query.content { headers.push(("X-Respond-With".into(), "no-content".into())) }
             HttpRequest { url: format!("https://s.jina.ai/?q={}&num={count}", crate::lookup::encode(words)), headers, body: Value::Null, proxy }
         }
+        "you" => {
+            // Without the page's text, the passages that speak to the query (free) make the summary; with it, the page as Markdown.
+            let extraction = if query.content { json!({"extraction_mode": "full_page"}) } else { json!({"extraction_mode": "highlights", "highlights": {"total_max_tokens": 1024}}) };
+            HttpRequest { url: "https://ydc-index.io/v1/search".into(), headers: vec![("X-API-Key".into(), ready.key.clone()), ("Content-Type".into(), "application/json".into())], body: json!({"query": words, "count": count, "extraction": extraction}), proxy }
+        }
         other => return Err(format!("没有这个网页搜索引擎：{other}。")),
     })
 }
@@ -173,7 +182,7 @@ pub fn request(ready: &Ready, query: &Query) -> Result<HttpRequest, String> {
 pub fn read(engine: &Engine, status: u16, body: &str) -> Result<Vec<Hit>, String> {
     let value: Option<Value> = serde_json::from_str(body).ok();
     if !(200..300).contains(&status) {
-        let said = value.as_ref().and_then(|v| v["error"]["message"].as_str().or(v["readableMessage"].as_str()).or(v["message"].as_str())).map(str::trim).filter(|s| !s.is_empty()).map(String::from).unwrap_or_else(|| body.trim().chars().take(300).collect());
+        let said = value.as_ref().and_then(|v| v["error"]["message"].as_str().or(v["readableMessage"].as_str()).or(v["message"].as_str()).or(v["detail"].as_str()).or(v["error"].as_str())).map(str::trim).filter(|s| !s.is_empty()).map(String::from).unwrap_or_else(|| body.trim().chars().take(300).collect());
         let hint = match status {
             401 => "API Key 无效",
             402 => "账户余额不足",
@@ -191,6 +200,7 @@ pub fn read(engine: &Engine, status: u16, body: &str) -> Result<Vec<Hit>, String
     let items = match engine.key {
         "deepseek" => &value["results"],
         "jina" => &value["data"],
+        "you" => &value["results"]["web"],
         _ => &Value::Null,
     };
     // An engine that found nothing may say so with an empty list or none at all.
@@ -201,14 +211,26 @@ pub fn read(engine: &Engine, status: u16, body: &str) -> Result<Vec<Hit>, String
             let summary = match engine.key {
                 // `summary` is the longer one, written for a model to read.
                 "deepseek" => Some(text(item, "summary")).filter(|s| !s.is_empty()).unwrap_or_else(|| text(item, "snippet")),
+                // The passages are about the query; `description` is the page's own, often empty.
+                "you" => Some(passages(&item["contents"]["highlights"])).filter(|s| !s.is_empty()).or_else(|| Some(text(item, "description")).filter(|s| !s.is_empty())).unwrap_or_else(|| passages(&item["snippets"])),
                 _ => text(item, "description"),
             };
             let site = text(item, if engine.key == "deepseek" { "site_name" } else { "siteName" });
-            let date = Some(text(item, "date")).filter(|d| !d.is_empty()).unwrap_or_else(|| text(item, "publishedTime"));
-            Hit { title: text(item, "title"), url: text(item, "url"), summary, site, date, content: clipped(&text(item, "content")) }
+            let date = ["date", "publishedTime", "page_age"].iter().map(|key| text(item, key)).find(|d| !d.is_empty()).unwrap_or_default();
+            let content = if engine.key == "you" { item["contents"]["markdown"].as_str().unwrap_or("").trim().to_string() } else { text(item, "content") };
+            Hit { title: text(item, "title"), url: text(item, "url"), summary, site, date, content: clipped(&content) }
         })
         .filter(|hit| !hit.url.is_empty())
         .collect())
+}
+
+/// A list of passages as one summary, at most `SUMMARY_CHARS`.
+fn passages(list: &Value) -> String {
+    let joined = list.as_array().map(|items| items.iter().filter_map(Value::as_str).map(str::trim).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" … ")).unwrap_or_default();
+    match joined.char_indices().nth(SUMMARY_CHARS) {
+        Some((at, _)) => format!("{}…", &joined[..at]),
+        None => joined,
+    }
 }
 
 /// A page's text cut to `CONTENT_CHARS`, saying so where it was cut.
@@ -247,7 +269,8 @@ mod tests {
         // Asked by name, whatever settings chose; one without a key says where a key goes; an unknown name says which there are.
         assert!(ready(&jina, "DeepSeek", &[]).unwrap_err().contains("DEEPSEEK_API_KEY"));
         assert_eq!(ready(&jina, "deepseek", &[("DEEPSEEK_API_KEY", "dk")]).unwrap().key, "dk");
-        assert!(ready(&jina, "google", &[]).unwrap_err().contains("deepseek、jina"));
+        assert!(ready(&jina, "google", &[]).unwrap_err().contains("deepseek、jina、you"));
+        assert_eq!(ready(&settings_with(AUTO, &[]), "", &[("YDC_API_KEY", "yk")]).unwrap().engine.key, "you");
         assert!(ready(&settings_with(AUTO, &[]), "", &[]).unwrap_err().contains("设置 › 网络"));
         // The engine chosen in settings, even with another's key at hand.
         assert!(ready(&settings_with("deepseek", &[("jina", "jk")]), "", &[]).is_err());
@@ -287,6 +310,14 @@ mod tests {
         let long = Query { query: "词".repeat(129), count: 5, content: false };
         assert!(request(&Ready { engine: engine("deepseek").unwrap(), key: "k".into(), proxy: String::new() }, &long).unwrap_err().contains("128"));
         assert!(request(&Ready { engine: engine("jina").unwrap(), key: "k".into(), proxy: String::new() }, &long).is_ok());
+        // You.com: the key in its own header; passages without the page's text, the page as Markdown with it.
+        let you = Ready { engine: engine("you").unwrap(), key: "yk".into(), proxy: String::new() };
+        let plain = request(&you, &Query { content: false, ..long.clone() }).unwrap();
+        assert_eq!(plain.url, "https://ydc-index.io/v1/search");
+        assert!(plain.headers.contains(&("X-API-Key".into(), "yk".into())) && !plain.headers.iter().any(|(name, _)| name == "Authorization"));
+        assert_eq!(plain.body["extraction"]["extraction_mode"], "highlights");
+        let full = request(&you, &Query { query: "q".into(), count: 99, content: true }).unwrap();
+        assert_eq!(full.body, json!({"query": "q", "count": 50, "extraction": {"extraction_mode": "full_page"}}));
     }
 
     #[test]
@@ -309,5 +340,18 @@ mod tests {
         let refused = read(jina, 401, r#"{"data": null, "code": 401, "name": "AuthenticationRequiredError", "status": 40103, "message": "Authentication is required", "readableMessage": "AuthenticationRequiredError: Authentication is required"}"#).unwrap_err();
         assert!(refused.starts_with("Jina 网页搜索：API Key 无效（HTTP 401）：AuthenticationRequiredError"));
         assert!(read(jina, 200, "<html>").unwrap_err().contains("不是 JSON"));
+        let you = engine("you").unwrap();
+        let body = r###"{"results": {"web": [{"url": "https://arxiv.org/html/2602.15217v1", "title": "Do we have a quantum computer?", "description": "", "page_age": "2026-02-16T21:26:51", "contents": {"highlights": ["# Abstract\nWhile experts agree", "## I Introduction\nThe NISQ era"]}, "favicon_url": "https://you.com/favicon?domain=arxiv.org"},
+            {"url": "https://example.com/full", "title": "Full page", "description": "The page's own words", "contents": {"markdown": "# Full\ntext"}},
+            {"url": "https://example.com/old", "title": "Snippets only", "snippets": ["one", "two"]}],
+            "knowledge": [{"type": "answer", "title": "Overview", "attribution": []}]}, "metadata": {"query": "q"}}"###;
+        let hits = read(you, 200, body).unwrap();
+        assert_eq!(hits.len(), 3);
+        assert_eq!((hits[0].summary.as_str(), hits[0].date.as_str()), ("# Abstract\nWhile experts agree … ## I Introduction\nThe NISQ era", "2026-02-16T21:26:51"));
+        assert_eq!((hits[1].summary.as_str(), hits[1].content.as_str()), ("The page's own words", "# Full\ntext"));
+        assert_eq!(hits[2].summary, "one … two");
+        assert_eq!(read(you, 200, r#"{"results": {}}"#).unwrap(), vec![]);
+        assert_eq!(read(you, 401, r#"{"detail": "Invalid API key"}"#).unwrap_err(), "You.com 网页搜索：API Key 无效（HTTP 401）：Invalid API key");
+        assert!(read(you, 422, r#"{"error": "highlights supports count up to 50, got 80"}"#).unwrap_err().ends_with("got 80"));
     }
 }
