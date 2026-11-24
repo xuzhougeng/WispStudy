@@ -99,7 +99,7 @@ impl Render for Workspace {
             .children(self.render_palette(cx))
             .children(self.render_menu(window, cx))
             .children(if self.settings_view.is_none() { self.podcast_bar(cx) } else { None })
-            .children(self.render_toast())
+            .children(self.render_toast(cx))
             // While an edge is held (the sidebar's, the detail panel's, the one between a conversation and its PDF), a layer over everything hears the pointer
             // wherever it goes: an element only hears the moves made over it.
             .children(self.resizing.map(|edge| {
@@ -220,7 +220,7 @@ impl Workspace {
         )
     }
 
-    fn render_toast(&self) -> Option<AnyElement> {
+    fn render_toast(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let toast = self.toast.as_ref()?;
         let (mark, color) = if toast.error { ("x", Theme::danger()) } else { ("check", Theme::success()) };
         Some(
@@ -245,7 +245,9 @@ impl Workspace {
                         .border_color(Theme::line())
                         .shadow(theme::shadow_panel())
                         .child(ui::icon(mark, 14., color))
-                        .child(div().min_w_0().child(toast.message.clone())),
+                        .child(div().min_w_0().child(toast.message.clone()))
+                        // What was just done, taken back from where it is said.
+                        .when_some(toast.action.clone(), |d, (label, cmd)| d.child(div().id("toast-action").flex_none().ml(px(4.)).px(px(8.)).py(px(2.)).rounded(px(6.)).cursor_pointer().text_color(Theme::accent()).font_weight(FontWeight::MEDIUM).hover(|s| s.bg(Theme::hover())).child(label).on_click(self.on(cmd, cx)))),
                 )
                 .into_any_element(),
         )

@@ -227,6 +227,8 @@ impl Workspace {
                 items.push(item(t("编辑题目、信息与词条…"), Cmd::EditPaper(id.clone())));
                 if p.doi.is_empty() && p.pmid.is_empty() { items.push(item(t("按题目补全…"), Cmd::CompletePaper(id.clone()))) } else { items.push(item(if p.doi.is_empty() { t("按 PMID 补全…") } else { t("按 DOI 补全…") }, Cmd::CompleteById(id.clone()))) }
                 items.push(item(if pdf.is_some() { t("再添加一个文件…") } else { t("添加 PDF 或附件…") }, Cmd::AttachPdf(id.clone())));
+                // A supplement taken in on its own: its file under the paper it belongs to.
+                if self.can_file(std::slice::from_ref(id)) { items.push(item(t("归入已有文献…"), Cmd::AskFileInto(vec![id.clone()]))) }
                 if pdf.is_none() && wisp_core::openaccess::lookable(p) { items.push(item(t("查找开放全文"), Cmd::FindPdfs(Some(id.clone())))) }
                 if !lib.fields.is_empty() { items.push(item(t("让助手填写词条…"), Cmd::Extract(crate::extract::Do::Open(Some(vec![id.clone()]))))) }
 
@@ -255,6 +257,7 @@ impl Workspace {
                     items.push(MenuItem { label: tf!("标为{label}", "Mark as {label}").into(), checked: papers.iter().all(|p| p.reading == value), note: None, cmd: Cmd::ReadPapers(ids.clone(), value.into()) });
                 }
                 items.push(item(t("添加标签…"), Cmd::TagPapers(ids.clone())));
+                if self.can_file(ids) { items.push(item(t("归入已有文献…"), Cmd::AskFileInto(ids.clone()))) }
                 // Those without a PDF that have a number to be looked up by.
                 let lacking: Vec<String> = papers.iter().filter(|p| lib.pdf_file(&p.id).is_none() && wisp_core::openaccess::lookable(p)).map(|p| p.id.clone()).collect();
                 if !lacking.is_empty() { items.push(MenuItem { label: t("查找开放全文").into(), checked: false, note: Some(tf!("{} 篇缺 PDF", "{} missing PDFs", lacking.len()).into()), cmd: Cmd::FindPdfsOf(lacking) }) }
@@ -388,7 +391,7 @@ impl Workspace {
                 Nav::MarkUp => (from, place(&lib.cursor).unwrap_or(from).saturating_sub(1)),
                 _ => (from, (place(&lib.cursor).unwrap_or(from) + 1).min(ids.len() - 1)),
             };
-            if nav != Nav::MarkAll { lib.table_scroll.scroll_to_item(to, if nav == Nav::MarkDown { ScrollStrategy::Bottom } else { ScrollStrategy::Top }) }
+            if nav != Nav::MarkAll { lib.table_scroll.scroll_to_item(lib.row_of(to), if nav == Nav::MarkDown { ScrollStrategy::Bottom } else { ScrollStrategy::Top }) }
             let marked = ids[from.min(to)..=from.max(to)].to_vec();
             let (anchor, cursor) = (ids[from].clone(), ids[to].clone());
             if marked.len() > 1 { self.select(None, window, cx) }
@@ -431,7 +434,7 @@ impl Workspace {
         };
         if Some(to) == at && lib.selected.is_some() { return }
         // Only as far as brings the row into view: at the bottom going down, at the top going up.
-        if listed { lib.table_scroll.scroll_to_item(to, if at.is_some_and(|at| to > at) { ScrollStrategy::Bottom } else { ScrollStrategy::Top }) }
+        if listed { lib.table_scroll.scroll_to_item(lib.row_of(to), if at.is_some_and(|at| to > at) { ScrollStrategy::Bottom } else { ScrollStrategy::Top }) }
         self.select(Some(ids[to].clone()), window, cx);
         if let Some(lib) = self.lib.as_mut() { (lib.anchor, lib.cursor) = (Some(ids[to].clone()), None) }
     }

@@ -446,6 +446,14 @@ pub enum Cmd {
     AskMovePaper(String),
     ChooseMoveTarget(String),
     MovePaper(String, String),
+    /// 归入已有文献: the dialog for the papers whose files are to go under another, the paper chosen in it, the
+    /// filing, and the way back while its toast is up (`filing.rs`).
+    AskFileInto(Vec<String>),
+    ChooseFileTarget(String),
+    FileInto(Vec<String>, String),
+    UndoFiling(Vec<String>),
+    /// The files of a paper shown under its row of the list, or put away again.
+    UnfoldFiles(String),
     TrashPapers(Vec<String>),
     /// Open a paper on one page of the detail panel.
     OpenPaper(String, Tab),
@@ -908,6 +916,16 @@ pub struct Toast {
     pub message: SharedString,
     pub error: bool,
     pub at: Instant,
+    /// What was just done can be taken back: the word on the button and what it runs.
+    pub action: Option<(SharedString, Cmd)>,
+}
+
+/// A row of the list of papers: a paper on show (its place in `Library::papers`) or, under a paper unfolded, one
+/// of its files (its place in `Library::files`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Row {
+    Paper(usize),
+    File(usize),
 }
 
 /// A search the assistant proposed in the guide, with what a trial run of it found.
@@ -1680,6 +1698,8 @@ pub enum Modal {
     WriteFigures,
     /// 移到文献库: the paper, and the library chosen for it (`transfer.rs`).
     MoveTo { paper: String, to: Option<String> },
+    /// 归入已有文献: the papers whose files go under another, what narrows the papers offered, and the one chosen (`filing.rs`).
+    FileInto { papers: Vec<String>, query: Entity<TextInput>, to: Option<String> },
 }
 
 /// A paper kept in a pane of its own beside the paper on show (#194): choosing another paper leaves it
@@ -1728,6 +1748,12 @@ pub struct Library {
     pub filters: Filters,
     /// Indices into `papers` of the rows shown, in order.
     pub shown: Vec<usize>,
+    /// The rows of the list as it is drawn: the papers of `shown`, each unfolded one followed by its files (`lay_rows`).
+    pub rows: Vec<Row>,
+    /// The papers whose files are shown under their rows.
+    pub unfolded: HashSet<String>,
+    /// The papers that have something to unfold: an attachment, or more files than one.
+    pub folding: HashSet<String>,
     /// What the sidebar counts beside its views and tags, under the search and filters set (`filter::counts`).
     pub counts: filter::Counts,
     pub search: Entity<TextInput>,
@@ -2571,7 +2597,33 @@ impl Library {
         let now = time::now_millis();
         self.shown = filter::filter_papers(&self.papers, &self.filters, now);
         self.counts = filter::counts(&self.papers, &self.filters, now);
+        self.lay_rows();
         self.scope_refilter();
+    }
+
+    /// The rows of the list again, after the papers on show, their files or what is unfolded changed. A paper's
+    /// files stand under it in the order of `files`: the main text, then the others as the detail panel and
+    /// `S1`, `S2`, … count them. A paper with its main text and nothing else has nothing to unfold: its row is the file.
+    pub fn lay_rows(&mut self) {
+        let mut held: HashMap<&str, (usize, bool)> = HashMap::new();
+        for file in &self.files {
+            let of = held.entry(file.paper_id.as_str()).or_default();
+            *of = (of.0 + 1, of.1 || file.kind != "fulltext");
+        }
+        self.folding = held.into_iter().filter(|(_, (count, attached))| *count > 1 || *attached).map(|(id, _)| id.to_string()).collect();
+        let mut rows = Vec::with_capacity(self.shown.len());
+        for &at in &self.shown {
+            rows.push(Row::Paper(at));
+            let id = &self.papers[at].id;
+            if self.unfolded.contains(id) && self.folding.contains(id) { rows.extend((0..self.files.len()).filter(|&file| &self.files[file].paper_id == id).map(Row::File)) }
+        }
+        self.rows = rows;
+    }
+
+    /// The row of the list that the `at`-th paper on show stands in.
+    pub fn row_of(&self, at: usize) -> usize {
+        if self.rows.len() == self.shown.len() { return at }
+        self.shown.get(at).and_then(|paper| self.rows.iter().position(|row| *row == Row::Paper(*paper))).unwrap_or(at)
     }
 
     /// Read everything again after a change.
@@ -2629,7 +2681,7 @@ impl Workspace {
         let settings_path = settings_file();
         let mut toast = None;
         let settings = Settings::load(&settings_path).unwrap_or_else(|err| {
-            toast = Some(Toast { message: tf!("{err:#}；本次使用默认设置。", "{err:#}; using default settings for this session.").into(), error: true, at: Instant::now() });
+            toast = Some(Toast { message: tf!("{err:#}；本次使用默认设置。", "{err:#}; using default settings for this session.").into(), error: true, at: Instant::now(), action: None });
             Settings::default()
         });
         crate::i18n::set_language(settings.language);
@@ -2826,21 +2878,26 @@ impl Workspace {
     }
 
     pub fn say(&mut self, message: impl Into<SharedString>, cx: &mut Context<Self>) {
-        self.show_toast(message.into(), false, cx);
+        self.show_toast(message.into(), false, None, cx);
     }
 
     pub fn fail(&mut self, message: impl Into<SharedString>, cx: &mut Context<Self>) {
-        self.show_toast(message.into(), true, cx);
+        self.show_toast(message.into(), true, None, cx);
     }
 
-    fn show_toast(&mut self, message: SharedString, error: bool, cx: &mut Context<Self>) {
+    /// What was done, with a button that takes it back: it stays up long enough to be read and reached.
+    pub fn say_undoable(&mut self, message: impl Into<SharedString>, undo: Cmd, cx: &mut Context<Self>) {
+        self.show_toast(message.into(), false, Some((t("撤销").into(), undo)), cx);
+    }
+
+    fn show_toast(&mut self, message: SharedString, error: bool, action: Option<(SharedString, Cmd)>, cx: &mut Context<Self>) {
         // What failed is often said by core, in Chinese: a sentence the catalog knows is shown in the interface's language.
         let message = if crate::i18n::is_english() { crate::i18n::phrase(&message).into() } else { message };
         let at = Instant::now();
-        self.toast = Some(Toast { message, error, at });
+        // Errors stay longer: they usually need reading twice. One with a way back stays until it can be reached.
+        let seconds = if action.is_some() { 10 } else if error { 7 } else { 3 };
+        self.toast = Some(Toast { message, error, at, action });
         cx.notify();
-        // Errors stay longer: they usually need reading twice.
-        let seconds = if error { 7 } else { 3 };
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(std::time::Duration::from_secs(seconds)).await;
             this.update(cx, |this, cx| {
@@ -3210,6 +3267,19 @@ impl Workspace {
                 self.modal_error.clear();
             }
             Cmd::MovePaper(paper, to) => self.move_paper(paper, to, window, cx),
+            Cmd::AskFileInto(papers) => self.ask_file_into(papers, window, cx),
+            Cmd::ChooseFileTarget(id) => {
+                if let Some(Modal::FileInto { to, .. }) = self.modal.as_mut() { *to = Some(id) }
+                self.modal_error.clear();
+            }
+            Cmd::FileInto(papers, to) => self.file_into(papers, to, window, cx),
+            Cmd::UndoFiling(papers) => self.undo_filing(papers, window, cx),
+            Cmd::UnfoldFiles(id) => {
+                if let Some(lib) = self.lib.as_mut() {
+                    if !lib.unfolded.remove(&id) { lib.unfolded.insert(id); }
+                    lib.lay_rows();
+                }
+            }
             Cmd::NewLibrary => self.library_dialog(None, window, cx),
             Cmd::EditLibrary(id) => self.library_dialog(Some(id), window, cx),
             Cmd::AskRemoveLibrary(id) => {
@@ -5057,6 +5127,9 @@ impl Workspace {
             rounds: vec![],
             filters,
             shown: vec![],
+            rows: vec![],
+            unfolded: HashSet::new(),
+            folding: HashSet::new(),
             counts: filter::Counts::default(),
             search,
             finding: Default::default(),
@@ -8688,6 +8761,13 @@ impl Workspace {
                 }
                 None => self.modal_error = t("选一个文献库。").into(),
             },
+            Modal::FileInto { papers, to, .. } => match to.clone() {
+                Some(to) => {
+                    let papers = papers.clone();
+                    self.run(Cmd::FileInto(papers, to), window, cx)
+                }
+                None => self.choose_only_file_target(cx),
+            },
             Modal::Section { .. } | Modal::History { .. } => self.submit_manuscript_modal(window, cx),
             Modal::Headings(_) => {
                 self.headings_done(true, cx);
@@ -9127,6 +9207,12 @@ impl Workspace {
                 // 移到文献库 for the selected paper: the dialog; `moveto:<n>` chooses the n-th library it offers, `submit` moves.
                 "movepaper" => self.lib.as_ref().and_then(|lib| lib.selected.clone()).map(Cmd::AskMovePaper),
                 "moveto" => self.move_targets().get(arg.parse::<usize>().unwrap_or(0)).map(|info| Cmd::ChooseMoveTarget(info.id.clone())),
+                // 归入已有文献 for the selected paper: the dialog; `fileto:<n>` chooses the n-th paper it offers, `submit` files; `undofiling` is the toast's 撤销.
+                // `files:<n>` shows the files of the n-th paper on show under its row, or puts them away.
+                "fileinto" => self.lib.as_ref().and_then(|lib| lib.selected.clone()).map(|id| Cmd::AskFileInto(vec![id])),
+                "fileto" => self.file_targets(cx).get(arg.parse::<usize>().unwrap_or(0)).map(|id| Cmd::ChooseFileTarget(id.clone())),
+                "undofiling" => self.toast.as_ref().and_then(|toast| toast.action.as_ref()).map(|(_, cmd)| cmd.clone()),
+                "files" => self.lib.as_ref().and_then(|l| l.shown.get(arg.parse::<usize>().unwrap_or(0)).map(|&i| Cmd::UnfoldFiles(l.papers[i].id.clone()))),
                 "importdoc" => {
                     self.import_manuscript_files(vec![PathBuf::from(arg)], cx);
                     None
