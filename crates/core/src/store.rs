@@ -189,6 +189,14 @@ CREATE TABLE IF NOT EXISTS reading_places (
     updated_at TEXT NOT NULL
 );
 
+-- A paper's mind map (`mindmap::MindMap` as JSON): one a paper, made by the
+-- reader or drafted by a model and then the reader's. It goes with its paper.
+CREATE TABLE IF NOT EXISTS mind_maps (
+    paper_id TEXT PRIMARY KEY NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+    body TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- Translations already made, so that a title or an abstract is translated
 -- once. The key is `translation_key`: the source text and the instructions.
 CREATE TABLE IF NOT EXISTS translations (
@@ -286,6 +294,15 @@ CREATE TABLE IF NOT EXISTS former_files (
     size_bytes INTEGER NOT NULL DEFAULT 0,
     replaced_at TEXT NOT NULL,
     PRIMARY KEY (resource_id, sha256)
+);
+
+-- What an engine of 文字识别 answered for the pages of a file that gave no text (`ocr`), as it came: its marks
+-- of place are in it. The text made of it is in `fulltext_text`, like any other.
+CREATE TABLE IF NOT EXISTS ocr_pages (
+    resource_id TEXT PRIMARY KEY NOT NULL REFERENCES resources(id) ON DELETE CASCADE,
+    engine TEXT NOT NULL,
+    pages TEXT NOT NULL,
+    read_at TEXT NOT NULL
 );
 "#;
 
@@ -1256,6 +1273,21 @@ impl Store {
 
     // ---- translations
 
+    /// A paper's mind map, if one was made.
+    pub fn mind_map(&self, paper_id: &str) -> Result<Option<crate::mindmap::MindMap>> {
+        let body: Option<String> = self.db.query_row("SELECT body FROM mind_maps WHERE paper_id = ?1", [paper_id], |r| r.get(0)).optional()?;
+        Ok(match body {
+            Some(body) => Some(serde_json::from_str(&body).context("这篇文献的思维导图读不出来")?),
+            None => None,
+        })
+    }
+
+    /// Keep a paper's mind map, in place of the one kept.
+    pub fn save_mind_map(&mut self, paper_id: &str, map: &crate::mindmap::MindMap) -> Result<()> {
+        self.db.execute("INSERT INTO mind_maps(paper_id, body, updated_at) VALUES (?1, ?2, ?3) ON CONFLICT(paper_id) DO UPDATE SET body = excluded.body, updated_at = excluded.updated_at", params![paper_id, serde_json::to_string(map)?, now_iso()])?;
+        Ok(())
+    }
+
     /// The translation kept under a `translation_key`, if there is one.
     pub fn translation(&self, key: &str) -> Result<Option<String>> {
         Ok(self.db.query_row("SELECT translated_text FROM translations WHERE cache_key = ?1", [key], |r| r.get(0)).optional()?)
@@ -1409,6 +1441,23 @@ impl Store {
         self.save_pages(resource_id, &Ok(pages), model)?;
         self.db.execute("UPDATE structures SET pages_read = ?2, page_count = ?3 WHERE resource_id = ?1", params![resource_id, read as i64, page_count.max(read) as i64])?;
         Ok(())
+    }
+
+    /// Keep what an engine of 文字识别 answered for each page of a file (`ocr::Page::raw`), beside the text made of it.
+    pub fn save_ocr_pages(&mut self, resource_id: &str, engine: &str, raw: &[String]) -> Result<()> {
+        // The file may have been removed while it was being read.
+        self.db.execute(
+            "INSERT INTO ocr_pages(resource_id, engine, pages, read_at) SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM resources WHERE id = ?1) \
+             ON CONFLICT(resource_id) DO UPDATE SET engine = excluded.engine, pages = excluded.pages, read_at = excluded.read_at",
+            params![resource_id, engine, to_json(raw), now_iso()],
+        )?;
+        Ok(())
+    }
+
+    /// What an engine of 文字识别 answered for each page of a file, and which engine (an `ocr::Engine::key`); none for a file no engine read.
+    pub fn ocr_pages(&self, resource_id: &str) -> Result<Option<(String, Vec<String>)>> {
+        let row: Option<(String, String)> = self.db.query_row("SELECT engine, pages FROM ocr_pages WHERE resource_id = ?1", [resource_id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+        Ok(row.map(|(engine, pages)| (engine, json_strings(&pages))))
     }
 
     fn save_pages(&mut self, resource_id: &str, pages: &std::result::Result<Vec<String>, String>, text_by: &str) -> Result<()> {
@@ -1778,6 +1827,12 @@ mod tests {
         assert_eq!((info.text_by.as_str(), info.pages_read, info.page_count), ("视觉 · v", 1, 3));
         store.save_read_pages(&scanned.id, vec![page.into(); 3], "视觉 · v", 3).unwrap();
         assert!(!store.structures().unwrap()[&scanned.id].read_in_part());
+        // What an engine answered is kept as it came, and goes with the file.
+        assert!(store.ocr_pages(&scanned.id).unwrap().is_none());
+        store.save_ocr_pages(&scanned.id, "deepseek", &["<｜ref｜>a<｜/ref｜>".to_string(), String::new()]).unwrap();
+        store.save_ocr_pages("R-gone", "deepseek", &["x".to_string()]).unwrap();
+        assert_eq!(store.ocr_pages(&scanned.id).unwrap(), Some(("deepseek".to_string(), vec!["<｜ref｜>a<｜/ref｜>".to_string(), String::new()])));
+        assert!(store.ocr_pages("R-gone").unwrap().is_none());
         // Read again from the file, the text is the file's own.
         store.save_fulltext_pages(&scanned.id, &Ok(vec![page.into()])).unwrap();
         let info = &store.structures().unwrap()[&scanned.id];
@@ -1788,6 +1843,7 @@ mod tests {
         assert!(store.section_sentences("introduction", "").unwrap().iter().all(|s| s.paper_id == q.id));
         store.remove_file(&scanned.id).unwrap();
         assert!(store.section_sentences("introduction", "").unwrap().is_empty());
+        assert!(store.ocr_pages(&scanned.id).unwrap().is_none());
 
         std::fs::remove_dir_all(dir).ok();
     }
@@ -2131,6 +2187,23 @@ mod tests {
         // A name given counts as the title.
         store.rename_conversation(&roots, "根的笔记").unwrap();
         assert_eq!(found(&store, "根的笔记"), [roots]);
+    }
+
+    #[test]
+    fn a_mind_map_is_kept_with_its_paper() {
+        let mut store = Store::in_memory(Path::new("/tmp/wisp-mind-map")).unwrap();
+        let paper = store.add_paper(Paper { title: "A paper with a map".into(), ..Paper::default() }).unwrap().id;
+        assert_eq!(store.mind_map(&paper).unwrap(), None);
+        let mut map = crate::mindmap::MindMap::new("A paper with a map");
+        let node = map.add_child(1, "方法", Some(crate::mindmap::Anchor { file: "r1".into(), page: 2, quote: "we used".into() })).unwrap();
+        store.save_mind_map(&paper, &map).unwrap();
+        map.add_child(node, "细节", None);
+        store.save_mind_map(&paper, &map).unwrap();
+        assert_eq!(store.mind_map(&paper).unwrap(), Some(map));
+        // A map of a paper that is not there is not kept; one goes with its paper.
+        assert!(store.save_mind_map("P-none", &crate::mindmap::MindMap::new("x")).is_err());
+        store.delete_paper(&paper).unwrap();
+        assert_eq!(store.mind_map(&paper).unwrap(), None);
     }
 
     #[test]

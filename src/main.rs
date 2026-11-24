@@ -29,6 +29,7 @@ mod library;
 mod manuscripts;
 mod write_figures;
 mod markdown;
+mod mindmap;
 mod notes;
 mod open_file;
 mod palette;
