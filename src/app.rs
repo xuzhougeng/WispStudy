@@ -291,6 +291,8 @@ pub enum Cmd {
     OpenLibrary(String),
     /// A library's card was dragged onto another's (moved, onto): it takes that place on the home page.
     MoveLibrary(String, String),
+    /// The home page's libraries as rows (true) or as cards: the switch over them, kept in the settings.
+    HomeList(bool),
     NewLibrary,
     EditLibrary(String),
     AskRemoveLibrary(String),
@@ -501,6 +503,8 @@ pub enum Cmd {
     ToggleSidebar,
     /// Draw the pages of the PDF on show larger, smaller, or at a given size.
     PdfZoom(ZoomTo),
+    /// The page count on the PDF's bar: a page typed is gone to (`Modal::PdfPage`).
+    AskPdfPage,
     /// Show the PDF on show twice, each half scrolled on its own, or once again.
     PdfSplit(Split),
     /// Show a file of the paper (its id) in the other half of the viewer; the file worked in is the viewer split on itself.
@@ -1664,6 +1668,8 @@ pub enum Modal {
     Tag { tag: String, name: Entity<TextInput> },
     /// The two ends of a filter by year or by impact factor (`FilterKey::Year`, `FilterKey::Impact`); either may be left empty.
     Range { key: FilterKey, low: Entity<TextInput>, high: Entity<TextInput> },
+    /// 跳到第几页: the page of the PDF on show to go to, of `count`.
+    PdfPage { page: Entity<TextInput>, count: usize },
     /// Tags for several papers at once.
     TagPapers { ids: Vec<String>, name: Entity<TextInput> },
     /// 清空回收站: the papers in the trash deleted from disk, once the phrase is typed.
@@ -1928,6 +1934,8 @@ pub struct Workspace {
     /// Libraries left while one of their conversations was still answering: kept off screen until the answer is in
     /// (`close_library`, `in_library`), and taken up again as they are when opened.
     pub parked: Vec<Library>,
+    /// While `in_library` has a library left at work in `lib`'s place for a call: what the call does is not on show.
+    pub away: bool,
     /// 设置, shown instead of the home page or the library while it is open.
     pub settings_view: Option<SettingsView>,
     /// 连接器: where the connection of each one tried stands (`custom.rs`).
@@ -2701,7 +2709,7 @@ impl Workspace {
         shortcuts::rebuild(&settings.shortcuts, cx);
         let libraries = libraries::list(&root);
         let home = crate::draft::Home::new(window, cx);
-        let mut this = Workspace { focus, settings, settings_path, root, libraries, lib: None, parked: vec![], stepping: false, main_window: window.window_handle(), settings_view: None, connections: vec![], skills: vec![], update: UpdateState::Idle, update_told: None, session: Session::default(), modal: None, modal_error: String::new(), modal_subscriptions: vec![], figure_at: (0., 0.), figure_drag: None, menu: None, palette: None, toast, home_scroll: ScrollHandle::new(), home, resizing: None, column_drag: None, picked: None, pinning: false, filters_over: [false; 2], filters_drawn: false, star_ask: false };
+        let mut this = Workspace { focus, settings, settings_path, root, libraries, lib: None, parked: vec![], away: false, stepping: false, main_window: window.window_handle(), settings_view: None, connections: vec![], skills: vec![], update: UpdateState::Idle, update_told: None, session: Session::default(), modal: None, modal_error: String::new(), modal_subscriptions: vec![], figure_at: (0., 0.), figure_drag: None, menu: None, palette: None, toast, home_scroll: ScrollHandle::new(), home, resizing: None, column_drag: None, picked: None, pinning: false, filters_over: [false; 2], filters_drawn: false, star_ask: false };
         // A new day of use is counted once at start; on the fifth the home page asks for a star, until answered.
         // A settings file that could not be read is not written over with defaults for it (the toast says so).
         if this.toast.is_none() && wisp_core::settings::note_use(&mut this.settings, &wisp_core::time::today()) { this.save_settings(cx) }
@@ -3921,6 +3929,12 @@ impl Workspace {
                 }
                 self.ensure_pdf(cx);
             }
+            Cmd::HomeList(rows) => {
+                if self.settings.home_list != rows {
+                    self.settings.home_list = rows;
+                    self.save_settings(cx);
+                }
+            }
             Cmd::ToggleSidebar => {
                 // Asking about a paper put the sidebar away for the while: wanting it back is leaving that.
                 if self.asking(window) {
@@ -4081,6 +4095,19 @@ impl Workspace {
             }
             Cmd::FloatChat(on) => self.float_chat(on, window, cx),
             Cmd::FoldChat(fold) => self.fold_chat(fold, window, cx),
+            Cmd::AskPdfPage => {
+                let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) else { return };
+                let (page, count) = { let view = pdf.read(cx); (view.current_page(), view.page_count()) };
+                if count == 0 { return }
+                self.modal_subscriptions.clear();
+                self.modal_error.clear();
+                // The page read at, selected: a number typed takes its place.
+                let at = page.to_string();
+                let page = self.modal_input("页码", &at, false, window, cx);
+                page.update(cx, |input, cx| input.select_range(0..at.len(), cx));
+                page.read(cx).focus(window);
+                self.modal = Some(Modal::PdfPage { page, count });
+            }
             Cmd::PdfZoom(to) => {
                 if let Some(lib) = self.lib.as_mut().filter(|lib| lib.tab == Tab::Pdf || lib.split) && let Some(pdf) = lib.pdf.clone() {
                     // A fit chosen is the one the next paper opens at; a percentage stays with this paper.
@@ -4914,14 +4941,14 @@ impl Workspace {
 
     // ---- libraries
 
-    /// Leave the open library. One whose conversation is still answering is kept, off screen, until the answer is in:
-    /// leaving a conversation does not stop it.
+    /// Leave the open library. One at work (`Library::at_work`: a conversation answering, a run going through its
+    /// papers) is kept, off screen, until that is over: leaving a library does not stop what it is doing.
     pub(crate) fn close_library(&mut self, cx: &mut App) {
         let Some(mut lib) = self.lib.take() else { return };
         lib.keep_places(cx);
         // A paper's own window belongs to its library.
         for open in lib.windows.drain(..) { open.window.update(cx, |_, window, _| window.remove_window()).ok(); }
-        if lib.answering() { self.parked.push(lib) }
+        if lib.at_work() { self.parked.push(lib) }
     }
 
     /// Run `f` with the library `id` as the open one: the open library itself, or one answering off screen (`parked`),
@@ -4931,11 +4958,22 @@ impl Workspace {
         if self.lib.as_ref().is_some_and(|lib| lib.info.id == id) { return Some(f(self, cx)) }
         let at = self.parked.iter().position(|lib| lib.info.id == id)?;
         let parked = self.parked.remove(at);
+        // What it was at before the call: what the call ends is said, since nobody was looking.
+        let (answering, running): (bool, Vec<crate::works::Kind>) = (parked.answering(), parked.running().into_iter().map(|work| work.kind).collect());
         let open = self.lib.replace(parked);
+        let away = std::mem::replace(&mut self.away, true);
         let result = f(self, cx);
+        self.away = away;
         let back = std::mem::replace(&mut self.lib, open);
         if let Some(back) = back.filter(|lib| lib.info.id == id) {
-            if back.answering() { self.parked.insert(at.min(self.parked.len()), back) } else { self.parked_done(back, cx) }
+            let name = back.info.name.clone();
+            if answering && !back.answering() { self.say(tf!("「{name}」里的助手答完了，打开它就能看到", "The assistant has finished in “{name}”; open it to see the answer"), cx) }
+            for work in back.works() {
+                if running.contains(&work.kind) && !work.running { self.say(work.ended(&name), cx) }
+            }
+            if back.at_work() { self.parked.insert(at.min(self.parked.len()), back) } else { self.parked_done(back, cx) }
+            // The marks on the home page and the entries in the sidebar follow what came back.
+            cx.notify();
         }
         Some(result)
     }
@@ -4984,20 +5022,18 @@ impl Workspace {
         true
     }
 
-    /// A conversation left while it was answering has its answer: it was kept with the library as it went, the library
-    /// is let go, and the person is told where it is.
+    /// A library left at work has nothing more going on: what it did was kept with it as it went (the conversation,
+    /// the suggestions, the translations), and it is let go. `in_library` has said what ended.
     fn parked_done(&mut self, lib: Library, cx: &mut Context<Self>) {
-        let name = lib.info.name.clone();
         drop(lib);
         self.libraries = libraries::list(&self.root);
-        self.say(tf!("「{name}」里的助手答完了，打开它就能看到", "The assistant has finished in “{name}”; open it to see the answer"), cx);
         cx.notify();
     }
 
     pub(crate) fn open_library(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(mut info) = self.libraries.iter().find(|l| l.id == id).cloned() else { return };
-        // The library on show, answering: it stays as it is, not opened a second time.
-        if self.lib.as_ref().is_some_and(|lib| lib.info.id == id && lib.answering()) { return }
+        // The library on show, at work: it stays as it is, not opened a second time.
+        if self.lib.as_ref().is_some_and(|lib| lib.info.id == id && lib.at_work()) { return }
         // One answering off screen is taken up as it stands: the answer goes on arriving where it is read.
         if let Some(at) = self.parked.iter().position(|lib| lib.info.id == id) {
             self.write_snapshot("leave");
@@ -8382,8 +8418,9 @@ impl Workspace {
         });
         cx.spawn(async move |this, cx| {
             let (paper, judged) = work.await;
-            this.update(cx, |this, cx| {
-                let Some(lib) = this.lib.as_mut().filter(|l| l.info.id == library && l.screen.run == run) else { return };
+            // The library on show, or one left while this run went on (`in_library`).
+            this.update(cx, |this, cx| this.in_library(&library, cx, |this, cx| {
+                let Some(lib) = this.lib.as_mut().filter(|l| l.screen.run == run) else { return };
                 lib.screen.reading.retain(|reading| *reading != paper.id);
                 lib.screen.done += 1;
                 let saved = judged.and_then(|j| {
@@ -8409,7 +8446,7 @@ impl Workspace {
                     }
                 }
                 cx.notify();
-            })
+            }))
             .ok();
         })
         .detach();
@@ -8641,7 +8678,7 @@ impl Workspace {
         let Some(paper_id) = run.todo.pop() else { return };
         run.working.push(paper_id.clone());
         let title = lib.paper(&paper_id).map(|paper| paper.title.clone()).unwrap_or_default();
-        self.library_tool("find_pdf", serde_json::json!({"paperId": paper_id}), cx, move |this, result, cx| {
+        self.library_tool_on("find_pdf", serde_json::json!({"paperId": paper_id}), true, cx, move |this, result, cx| {
             let Some(lib) = this.lib.as_mut() else { return };
             let Some(run) = lib.fetching.as_mut().filter(|run| run.run == id) else { return };
             run.working.retain(|working| *working != paper_id);
@@ -8668,7 +8705,8 @@ impl Workspace {
                 let _ = lib.reload();
                 lib.texts_changed();
                 if lib.selected.as_deref() == Some(paper_id.as_str()) { lib.close_pdf() }
-                this.ensure_pdf(cx);
+                // No viewer is made for a library that is not on show: it opens the file when it is come back to.
+                if !this.away { this.ensure_pdf(cx) }
             }
             this.fetch_next(id, cx);
         });
@@ -8678,6 +8716,12 @@ impl Workspace {
     /// and with the network, and hand the result back if the same library
     /// is still open.
     pub fn library_tool(&mut self, name: &'static str, args: Value, cx: &mut Context<Self>, done: impl FnOnce(&mut Self, Result<Value, String>, &mut Context<Self>) + 'static) {
+        self.library_tool_on(name, args, false, cx, done)
+    }
+
+    /// The same, for a run that goes on when its library is left (`works.rs`): with `off_screen`, the result is also
+    /// handed back to a library kept at work, in `lib`'s place for the call (`in_library`).
+    pub fn library_tool_on(&mut self, name: &'static str, args: Value, off_screen: bool, cx: &mut Context<Self>, done: impl FnOnce(&mut Self, Result<Value, String>, &mut Context<Self>) + 'static) {
         let Some(lib) = self.lib.as_ref() else { return };
         let info = lib.info.clone();
         let library = info.id.clone();
@@ -8689,8 +8733,12 @@ impl Workspace {
         cx.spawn(async move |this, cx| {
             let result = work.await;
             this.update(cx, |this, cx| {
-                if this.lib.as_ref().is_none_or(|l| l.info.id != library) { return }
-                done(this, result, cx);
+                if off_screen {
+                    this.in_library(&library, cx, |this, cx| done(this, result, cx));
+                } else {
+                    if this.lib.as_ref().is_none_or(|l| l.info.id != library) { return }
+                    done(this, result, cx);
+                }
                 cx.notify();
             })
             .ok();
@@ -8862,6 +8910,16 @@ impl Workspace {
                     return;
                 }
                 if name == tag || self.retag(&tag, Some(&name), cx) { self.run(Cmd::CloseModal, window, cx) }
+            }
+            Modal::PdfPage { page, count } => {
+                let (typed, count) = (text(page, cx), *count);
+                match crate::library::page_typed(&typed, count) {
+                    Ok(page) => {
+                        self.run(Cmd::CloseModal, window, cx);
+                        if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.go_to(page, cx)) }
+                    }
+                    Err(why) => self.modal_error = why,
+                }
             }
             Modal::Range { key, low, high } => {
                 let (key, low, high) = (key.clone(), text(low, cx), text(high, cx));
@@ -9146,6 +9204,8 @@ impl Workspace {
                 }
                 // `assistant` is the home page's corner button; `drafts` 历史 inside a conversation (again: back to it).
                 "assistant" => Some(Cmd::Draft(crate::draft::Do::Begin)),
+                // `homelist` / `homelist:cards`: the home page's libraries as rows, or as cards again.
+                "homelist" => Some(Cmd::HomeList(arg != "cards")),
                 // The home page's invitation to star the project, due in this run; nothing is written until it is answered.
                 "starask" => {
                     self.star_ask = true;
@@ -9805,6 +9865,14 @@ impl Workspace {
                     "triple" => Split::Triple,
                     _ => Split::Off,
                 })),
+                // `pdfpage`: the dialog that goes to a page typed. `pdfpage:12` goes there.
+                "pdfpage" => match arg.parse::<usize>() {
+                    Ok(page) => {
+                        if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.go_to(page, cx)) }
+                        None
+                    }
+                    Err(_) => Some(Cmd::AskPdfPage),
+                },
                 // `zoom:150`, `zoom:page`, `zoom:width`, `zoom:in`, `zoom:out`
                 "zoom" => Some(Cmd::PdfZoom(match arg {
                     "in" => ZoomTo::In,

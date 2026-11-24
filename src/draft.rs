@@ -39,6 +39,29 @@ const STARTS: [(&str, &str, &str, bool); 4] = [
 /// The start whose Word file is read for the works it cites (`import_docx_references`), not taken in as a manuscript to review.
 const COLLECT: usize = 3;
 
+/// What the assistant's page says over its box, one line each time it opens: an invitation in words a
+/// researcher might be thinking in, never the same one twice running.
+const GREETINGS: [&str; 8] = [
+    "今天想弄清楚哪个问题？",
+    "今天想复盘哪个研究方向？",
+    "有什么新的科研想法？说来听听。",
+    "哪篇文献还没读透？一起看看。",
+    "哪两篇文献值得放在一起比一比？",
+    "卡在哪一步了？说说看。",
+    "最近读到的哪个结论，还想再核对一遍？",
+    "从一个问题、一篇 PDF 或一份稿子开始。",
+];
+
+/// The line after `last` for a page opened at `seed` (any number that differs from one opening to the next).
+fn greeting_after(last: Option<usize>, seed: u64) -> usize {
+    let count = GREETINGS.len();
+    match last {
+        // One of the others: a step of 1 to count - 1 from the last never lands on it.
+        Some(last) => (last + 1 + (seed % (count as u64 - 1)) as usize) % count,
+        None => (seed % count as u64) as usize,
+    }
+}
+
 /// The home page's box: what the first question will be, and the files that go with it.
 pub struct Home {
     pub input: Entity<TextInput>,
@@ -54,6 +77,8 @@ pub struct Home {
     /// The assistant's page is on show in place of the home page: the box, the starts and 最近对话 (`render_start_page`).
     /// No library is open meanwhile; what is in the box stays while the app runs.
     pub open: bool,
+    /// The line over the box (`GREETINGS`), chosen when the page was last opened; none before the first time.
+    pub greeting: Option<usize>,
     /// Inside a conversation, 历史 lists the other conversations in its place.
     pub listing: bool,
     /// 稍后 on the card that offers 建成文献库: that conversation, and how many papers it held then. The card is back once more come in.
@@ -62,6 +87,15 @@ pub struct Home {
 }
 
 impl Home {
+    /// The assistant's page comes on show, with another line over its box when it was not on show already.
+    pub fn show(&mut self) {
+        if !self.open {
+            let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_nanos() as u64 / 1000);
+            self.greeting = Some(greeting_after(self.greeting, seed));
+        }
+        self.open = true;
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<Workspace>) -> Home {
         let input = cx.new(|cx| {
             let mut input = TextInput::new(PLACEHOLDER, cx).multiline(1);
@@ -69,7 +103,7 @@ impl Home {
             input
         });
         let heard = cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| if *event == InputEvent::Submit { this.draft_send(window, cx) });
-        Home { input, files: vec![], collect: false, waiting: None, focus: false, open: false, listing: false, later: None, _heard: heard }
+        Home { input, files: vec![], collect: false, waiting: None, focus: false, open: false, greeting: None, listing: false, later: None, _heard: heard }
     }
 }
 
@@ -113,12 +147,12 @@ impl Workspace {
     pub(crate) fn run_draft(&mut self, what: Do, window: &mut Window, cx: &mut Context<Self>) {
         match what {
             Do::Begin => {
-                self.home.open = true;
+                self.home.show();
                 self.home.input.read(cx).focus(window);
             }
             Do::New => {
                 self.run(Cmd::GoHome, window, cx);
-                self.home.open = true;
+                self.home.show();
                 self.home.input.read(cx).focus(window);
             }
             Do::History => self.home.listing = !self.home.listing,
@@ -204,7 +238,7 @@ impl Workspace {
             self.home.input.update(cx, |input, cx| input.set_text(t(words), cx));
         }
         self.home.focus = true;
-        self.home.open = true;
+        self.home.show();
         cx.notify();
     }
 
@@ -350,6 +384,8 @@ impl Workspace {
     pub(crate) fn render_start_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let composer = self.render_home_assistant(window, cx);
         let rows = self.recent_rows(cx);
+        // One line over the box, where the box's own text begins.
+        let greeting = self.home.greeting.and_then(|n| GREETINGS.get(n)).map(|line| div().px(px(4.)).text_size(text_px(22.)).line_height(text_px(30.)).font_weight(FontWeight::MEDIUM).text_color(Theme::text()).child(t(line)));
         let recent = (!rows.is_empty()).then(|| div().flex().flex_col().gap(px(2.)).child(ui::caption(t("最近对话")).pb(px(4.))).child(div().flex().flex_col().ml(px(-8.)).mr(px(-8.)).children(rows)));
         let back = ui::title_strip()
             .when(!ui::custom_titlebar(), |d| d.h(text_px(28.)))
@@ -372,7 +408,7 @@ impl Workspace {
                     .px(px(16.))
                     .pt(px(96.))
                     .pb(px(32.))
-                    .child(crate::chat::reading_column(div().flex().flex_col().gap(px(36.)).child(composer).children(recent), 0.)),
+                    .child(crate::chat::reading_column(div().flex().flex_col().gap(px(36.)).child(div().flex().flex_col().gap(px(20.)).children(greeting).child(composer)).children(recent), 0.)),
             )
             .into_any_element()
     }
@@ -420,13 +456,6 @@ impl Workspace {
             .child(div().flex().items_center().gap(px(8.)).px(px(4.)).text_size(text_px(11.)).text_color(Theme::text_placeholder()).child(div().flex_1().min_w_0().truncate().child(t("Enter 发送，Shift+Enter 换行 · 回答可能有误，请对照原文"))).child(div().flex_none().max_w(relative(0.4)).truncate().child(model)))
             // The starts stand where the box's text begins, not at the card's rounded edge.
             .child(div().flex().flex_wrap().items_center().gap(px(2.)).ml(px(-8.)).children(starts))
-    }
-
-    /// A library left while one of its conversations was answering (`Workspace::parked`): a mark for its row or card that says
-    /// it is still at work, or waits for the person's yes to a tool. None for one not answering off screen.
-    pub(crate) fn off_screen_mark(&self, id: &str) -> Option<Div> {
-        let lib = self.parked.iter().find(|lib| lib.info.id == id)?;
-        Some(Self::at_work_mark(SharedString::from(format!("off-screen-{id}")), lib.waits_for_yes()))
     }
 
     /// 回答中 with a spinner, or 等你同意: said of a conversation at work that is not on show.
@@ -554,7 +583,28 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::starts_one;
+    use super::{GREETINGS, greeting_after, starts_one};
+
+    #[test]
+    fn the_line_over_the_box_is_never_the_one_before() {
+        for seed in 0..40 {
+            assert!(greeting_after(None, seed) < GREETINGS.len());
+            for last in 0..GREETINGS.len() {
+                let next = greeting_after(Some(last), seed);
+                assert!(next < GREETINGS.len() && next != last, "{last} {seed}");
+            }
+        }
+        // Every line is come to.
+        let mut seen: Vec<usize> = (0..GREETINGS.len() as u64).map(|seed| greeting_after(None, seed)).collect();
+        seen.dedup();
+        assert_eq!(seen.len(), GREETINGS.len());
+    }
+
+    #[test]
+    fn every_line_over_the_box_has_english() {
+        let english: std::collections::BTreeMap<String, String> = serde_json::from_str(include_str!("../locales/en.json")).unwrap();
+        for line in GREETINGS { assert!(english.contains_key(line), "{line}") }
+    }
 
     #[test]
     fn a_conversation_starts_from_a_word_file_or_a_pdf() {

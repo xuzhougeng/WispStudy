@@ -229,6 +229,15 @@ pub(crate) fn range_value(key: &FilterKey, low: &str, high: &str) -> Result<Stri
     }
 }
 
+/// The page 跳到第几页 goes to, typed into its box, in a file of `count` pages, or why not. A number past
+/// the last page is the last page: the reader meant the end.
+pub(crate) fn page_typed(text: &str, count: usize) -> Result<usize, String> {
+    match text.trim().parse::<usize>() {
+        Ok(page) if page >= 1 => Ok(page.min(count.max(1))),
+        _ => Err(tf!("页码应为 1 到 {count} 的数字。", "Type a page number from 1 to {count}.")),
+    }
+}
+
 /// A journal's zone in one partition as the window writes it: `1区 Top`, `Zone 1 Top`, `Q2`.
 pub(crate) fn zone_text(j: &wisp_core::journals::Journal, which: &str) -> Option<String> {
     let zone = |z: Option<u8>, top: bool| z.map(|z| format!("{}{}", tf!("{}区", "Zone {}", z), if top { " Top" } else { "" }));
@@ -730,6 +739,8 @@ impl Workspace {
             ))
             .children(self.render_fetching(cx))
             .children(self.render_extract_progress(cx))
+            // What the libraries left at work go on with, after this library's own.
+            .children(self.render_elsewhere(cx))
             .child(
                 div()
                     .flex()
@@ -1680,6 +1691,10 @@ mod tests {
         assert_eq!([year_label("2024"), year_label("last:3"), year_label("2020-2026"), year_label("2020-"), year_label("-2010")], ["2024", "近 3 年", "2020–2026", "2020 年起", "2010 年及以前"]);
         assert_eq!([impact_label("5-"), impact_label("-3"), impact_label("2.5-10")], ["≥ 5", "≤ 3", "2.5–10"]);
         assert_eq!([zone_label("cas:1"), zone_label("cas:2"), zone_label("xr:3"), zone_label("jcr:1"), zone_label("jcr:2")], ["中科院 1区", "中科院 1–2区", "新锐 1–3区", "JCR Q1", "JCR Q1–Q2"]);
+        // 跳到第几页: a page of the file, the last one for a number past it, and nothing that is not a page.
+        use super::page_typed;
+        assert_eq!([page_typed("1", 28), page_typed(" 12 ", 28), page_typed("28", 28), page_typed("400", 28)], [Ok(1), Ok(12), Ok(28), Ok(28)]);
+        assert!(page_typed("0", 28).is_err() && page_typed("", 28).is_err() && page_typed("3.5", 28).is_err() && page_typed("-2", 28).is_err() && page_typed("十二", 28).is_err());
         // The two boxes of 自定义区间…: either end alone, the ends the wrong way round, one year twice, nothing at all.
         let year = |low, high| range_value(&FilterKey::Year, low, high);
         assert_eq!([year("2000", "2026"), year("2020", ""), year("", "2010"), year("2026", "2000"), year("", "")], [Ok("2000-2026".to_string()), Ok("2020-".into()), Ok("-2010".into()), Ok("2000-2026".into()), Ok(String::new())]);

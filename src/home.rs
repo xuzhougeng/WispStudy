@@ -189,6 +189,11 @@ const CORNER_GAP: f32 = 24.;
 const STAR_WIDTH: f32 = 340.;
 const STAR_ROOM: f32 = 120.;
 
+/// In the home page's list, how wide the column of names is and the one that says when a library was opened
+/// (or that it is still answering), before the text's scale.
+const ROW_NAME: f32 = 240.;
+const ROW_OPENED: f32 = 132.;
+
 impl Workspace {
     fn render_menu(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let menu = self.menu.as_ref()?;
@@ -253,11 +258,69 @@ impl Workspace {
         )
     }
 
+    /// The libraries one to a line, for a shelf too long to be looked over as cards: the name, the topic on one line,
+    /// how many papers and when it was opened, in columns that line up. A row does what a card does: a click opens,
+    /// the right button and ⋯ have the menu, and dragged onto another row it takes that place.
+    fn library_rows(&mut self, cx: &mut Context<Self>) -> Div {
+        let rows: Vec<AnyElement> = libraries::shelf(&self.libraries, &self.settings.library_order)
+            .into_iter()
+            .map(|info| {
+                let accent = theme::accent_of(&info.color);
+                let topic = if info.topic.is_empty() { t("还没有写主题描述").to_string() } else { ui::one_line(&info.topic) };
+                div()
+                    .id(SharedString::from(format!("library-{}", info.id)))
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(px(12.))
+                    .w_full()
+                    .h(text_px(46.))
+                    .pl(px(12.))
+                    .pr(px(8.))
+                    .border_b_1()
+                    .border_color(Theme::line())
+                    .cursor_pointer()
+                    .hover(|s| s.bg(Theme::hover()))
+                    .on_click(self.on(Cmd::OpenLibrary(info.id.clone()), cx))
+                    .on_mouse_down(MouseButton::Right, self.on_context(MenuKind::LibraryCard(info.id.clone()), cx))
+                    .on_drag(LibraryDrag { id: info.id.clone(), name: info.name.clone(), color: info.color.clone(), held: Point::default() }, |drag, held, _, cx| cx.new(|_| LibraryDrag { held, ..drag.clone() }))
+                    .drag_over::<LibraryDrag>(move |style, _, _, _| style.bg(accent.soft()))
+                    .on_drop(cx.listener({
+                        let onto = info.id.clone();
+                        move |this, drag: &LibraryDrag, window, cx| this.run(Cmd::MoveLibrary(drag.id.clone(), onto.clone()), window, cx)
+                    }))
+                    .child(div().flex().flex_none().items_center().justify_center().size(px(24.)).rounded(px(7.)).bg(accent.soft()).child(ui::icon("library", 14., accent.strong())))
+                    .child(div().flex_none().w(text_px(ROW_NAME)).truncate().font_weight(FontWeight::SEMIBOLD).child(ui::one_line(&info.name)))
+                    .child(div().flex_1().min_w_0().truncate().text_size(text_px(12.)).text_color(if info.topic.is_empty() { Theme::text_placeholder() } else { Theme::text_secondary() }).child(topic))
+                    .child(div().flex().flex_none().justify_end().w(text_px(84.)).text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tn!("{n} 篇文献", "{n}", info.paper_count, "paper")))
+                    // Left while its assistant was answering, it goes on: said in place of when it was opened.
+                    .child(div().flex().flex_none().justify_end().w(text_px(ROW_OPENED)).text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(match self.off_screen_mark(&info.id) {
+                        Some(mark) => mark.into_any_element(),
+                        None => div().child(tf!("打开于 {}", "Opened {}", time::date_text(&info.opened_at))).into_any_element(),
+                    }))
+                    .child(ui::ghost_button(SharedString::from(format!("library-menu-{}", info.id)), Some("ellipsis"), None).on_click({
+                        let open = self.on_menu(MenuKind::LibraryCard(info.id.clone()), cx);
+                        move |ev, window, cx| {
+                            cx.stop_propagation();
+                            open(ev, window, cx);
+                        }
+                    }))
+                    .into_any_element()
+            })
+            .collect();
+        let new_row = div().id("library-new").flex().flex_none().items_center().gap(px(12.)).w_full().h(text_px(46.)).pl(px(12.)).text_color(Theme::text_secondary()).cursor_pointer().hover(|s| s.bg(Theme::hover())).on_click(self.on(Cmd::NewLibrary, cx)).child(div().flex().flex_none().items_center().justify_center().size(px(24.)).child(ui::icon("plus", 16., Theme::text_secondary()))).child(t("新建文献库"));
+        div().flex().flex_col().w_full().rounded(px(12.)).border_1().border_color(Theme::line()).bg(Theme::bg_body()).overflow_hidden().children(rows).child(new_row)
+    }
+
     fn render_home(&mut self, cx: &mut Context<Self>) -> AnyElement {
         // The conversations not yet made libraries are the assistant's, behind the button in the corner, not among the libraries.
         // In the order the person dragged them to, the rest as they were made (`libraries::shelf`); opening one does not move it.
+        // As rows instead (`Settings::home_list`), the cards are not made.
+        let listed = self.settings.home_list;
+        let rows = listed.then(|| self.library_rows(cx));
         let cards: Vec<AnyElement> = libraries::shelf(&self.libraries, &self.settings.library_order)
             .into_iter()
+            .filter(|_| !listed)
             .map(|info| {
                 let accent = theme::accent_of(&info.color);
                 // Three lines of the card hold about this much; a longer topic ends in 「…」 on a whole character instead of being clipped mid-glyph.
@@ -389,6 +452,11 @@ impl Workspace {
                                     .gap(px(4.))
                                     // Only while a newer release is on offer.
                                     .when_some(new_version, |d, version| d.child(ui::primary_button("home-update", tf!("新版本 {version}", "New version {version}")).h(text_px(28.)).px(px(10.)).rounded_full().text_size(text_px(12.)).on_click(self.on(Cmd::OpenSettings(SettingsPage::About), cx))))
+                                    // How the libraries are laid out, once there is one: the two ways side by side, the one in force lit.
+                                    .when(!empty, |d| {
+                                        let mut way = |id: &'static str, icon: &'static str, rows: bool, name: &'static str| div().id(id).flex().flex_none().items_center().justify_center().size(text_px(28.)).rounded(px(6.)).cursor_pointer().when(listed == rows, |d| d.bg(Theme::pressed())).hover(|s| s.bg(Theme::hover())).child(ui::icon(icon, 15., if listed == rows { Theme::text() } else { Theme::text_tertiary() })).tooltip(ui::tip(t(name))).on_click(self.on(Cmd::HomeList(rows), cx));
+                                        d.child(div().flex().items_center().gap(px(2.)).mr(px(8.)).child(way("home-as-cards", "layout-grid", false, "卡片视图")).child(way("home-as-rows", "list", true, "列表视图")))
+                                    })
                                     .child(ui::ghost_button("home-import", Some("library"), Some(t("导入文献库").into())).on_click(self.on(Cmd::ImportLibrary, cx)))
                                     .child(ui::ghost_button("home-folder", Some("folder-open"), Some(t("数据目录").into())).on_click(self.on(Cmd::RevealFolder, cx)))
                                     .child(ui::ghost_button("home-settings", Some("settings-gear"), Some(t("设置").into())).on_click(self.on(Cmd::OpenSettings(SettingsPage::General), cx))),
@@ -397,7 +465,10 @@ impl Workspace {
                     .when(empty, |d| {
                         d.child(div().p(px(16.)).rounded(px(10.)).bg(Theme::accent_soft()).text_color(Theme::text_secondary()).child(t("还没有文献库。先为一个研究主题新建文献库，再往里添加文献：粘贴 DOI、拖入 PDF，或导入 BibTeX / RIS。")))
                     })
-                    .child(div().flex().flex_wrap().gap(px(16.)).children(cards).child(new_card))
+                    .child(match rows {
+                        Some(rows) => rows,
+                        None => div().flex().flex_wrap().gap(px(16.)).children(cards).child(new_card),
+                    })
                     // Room under the last cards to scroll them clear of the invitation in the corner.
                     .when(self.star_ask, |d| d.pb(px(STAR_ROOM))),
             )

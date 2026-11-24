@@ -309,6 +309,12 @@ impl Workspace {
                     .child(footer(t("改名"), false, self, cx))
             }
 
+            // One short number, and how far the file goes.
+            Modal::PdfPage { page, count } => ui::dialog(320.)
+                .child(ui::dialog_title(t("跳到第几页")))
+                .child(body().child(div().flex().items_center().gap(px(10.)).child(div().w(px(120.)).child(ui::field(page, window, cx))).child(div().text_color(Theme::text_tertiary()).child(tf!("共 {count} 页", "of {count}")))).child(error))
+                .child(footer(t("跳转"), false, self, cx)),
+
             Modal::Range { key, low, high } => {
                 let impact = *key == FilterKey::Impact;
                 let note = if impact { t("只填一格也可以：只填前一格是不低于它，只填后一格是不高于它。影响因子来自随应用附带的 JCR 数据，期刊不在其中的文献不在筛选结果里。") } else { t("只填一格也可以：只填前一格是这一年及以后，只填后一格是这一年及以前。没有年份的文献不在筛选结果里。") };
