@@ -686,6 +686,11 @@ const BAR_INSET: f32 = 8.;
 const BAR_HEIGHT: f32 = 14.;
 const BAR_THUMB_MIN: f32 = 36.;
 
+/// How many small pages 页面总览 puts in a row of a viewer `width` wide: as many as fit with their gaps, one at least.
+fn overview_columns(width: f32) -> usize {
+    (((width - THUMB_GAP) / (THUMB_W + THUMB_GAP)).floor() as usize).max(1)
+}
+
 /// The thumb of the sideways bar in a view `width` wide whose pages can go
 /// `max_x` to the left: its length, and how far along the track it stands.
 fn bar_thumb(width: f32, max_x: f32, scroll_x: f32) -> (f32, f32) {
@@ -710,6 +715,14 @@ const SEARCH_TRIES: usize = 6;
 const SEARCH_HITS: usize = 999;
 /// Page renders kept from a burst of requests; older ones are handed back.
 const KEEP_REQUESTS: usize = 3;
+/// The small pages of the overview drawn of those asked for at once: about what a tall window shows.
+const KEEP_THUMB_REQUESTS: usize = 40;
+/// The small pages kept once drawn; the ones looked at longest ago go first.
+const KEEP_THUMBS: usize = 160;
+/// A small page of the overview: how wide it is drawn, the room for its number under it, and the gap between two.
+const THUMB_W: f32 = 132.;
+const THUMB_LABEL: f32 = 22.;
+const THUMB_GAP: f32 = 18.;
 
 #[derive(Default, Debug, PartialEq)]
 enum CitationStatus {
@@ -801,6 +814,8 @@ pub(crate) fn search_words(quote: &str) -> Vec<String> {
 enum Request {
     /// Render a page at so many device pixels per point.
     Page(usize, f32),
+    /// The same, small, for the overview of all pages (`PdfView::overview`).
+    Thumb(usize, f32),
     /// Look for a quoted sentence, starting at this 0-based page.
     Find(u64, Option<usize>, String),
     /// Look for words typed into the find bar, on every page.
@@ -821,6 +836,10 @@ enum Reply {
     Page(usize, f32, u32, u32, Vec<u8>),
     /// A page whose render was dropped for newer ones: ask again when it is in view.
     Skipped(usize),
+    /// A page drawn small for the overview: its index, its size in pixels and the pixels; none of them when it could not be drawn.
+    Thumb(usize, u32, u32, Vec<u8>),
+    /// A small page not drawn, for newer ones: asked again when its row is in view.
+    ThumbSkipped(usize),
     /// Where the quotation is: the page, one box per line in page points, and whether that is all of it.
     Found(u64, usize, Vec<[f32; 4]>, bool),
     NotFound(u64),
@@ -965,7 +984,7 @@ fn worker(path: PathBuf, requests: mpsc::Receiver<Request>, replies: async_chann
         // Of several quotations asked for in a row, only the last still matters.
         let find = waiting.iter().rev().find_map(|request| match request {
             Request::Find(request, page, quote) => Some((*request, *page, quote.clone())),
-            Request::Page(..) | Request::Marks(_) | Request::Search(..) | Request::Spoken(..) | Request::Figures(_) => None,
+            Request::Page(..) | Request::Thumb(..) | Request::Marks(_) | Request::Search(..) | Request::Spoken(..) | Request::Figures(_) => None,
         });
         // Reading aloud moves on a sentence at a time: only the latest is looked for.
         let spoken = waiting.iter().rev().find_map(|request| match request {
@@ -984,6 +1003,14 @@ fn worker(path: PathBuf, requests: mpsc::Receiver<Request>, replies: async_chann
         }
         for (skipped, _) in wanted.split_off(wanted.len().min(KEEP_REQUESTS)) {
             if replies.send_blocking(Reply::Skipped(skipped)).is_err() { return }
+        }
+        // The overview asks for a screenful at a time and is scrolled past most of it: the latest rows are drawn.
+        let mut small: Vec<(usize, f32)> = vec![];
+        for request in waiting.iter().rev() {
+            if let Request::Thumb(index, scale) = request && !small.iter().any(|(known, _)| known == index) { small.push((*index, *scale)) }
+        }
+        for (skipped, _) in small.split_off(small.len().min(KEEP_THUMB_REQUESTS)) {
+            if replies.send_blocking(Reply::ThumbSkipped(skipped)).is_err() { return }
         }
 
         if let Some((request, start, quote)) = find {
@@ -1024,10 +1051,11 @@ fn worker(path: PathBuf, requests: mpsc::Receiver<Request>, replies: async_chann
             if replies.send_blocking(Reply::Hits(request, hits)).is_err() { return }
         }
 
-        for (index, scale) in wanted {
-            let Some(page) = pages.get(index) else { continue };
+        // A page's pixels at a scale: its size and the bytes, nothing of either when it could not be drawn.
+        let draw = |index: usize, scale: f32| -> Option<(u32, u32, Vec<u8>)> {
+            let page = pages.get(index)?;
             let rendered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| render(page, &cache, &interpreter, &settings, &PixmapSettings { x_scale: scale, y_scale: scale, bg_color: WHITE })));
-            let reply = match rendered {
+            Some(match rendered {
                 Ok(pixmap) => {
                     let (width, height) = (pixmap.width() as u32, pixmap.height() as u32);
                     // Opaque white background, so premultiplied equals straight; GPUI wants BGRA.
@@ -1035,11 +1063,19 @@ fn worker(path: PathBuf, requests: mpsc::Receiver<Request>, replies: async_chann
                     for pixel in bytes.as_chunks_mut::<4>().0 {
                         pixel.swap(0, 2);
                     }
-                    Reply::Page(index, scale, width, height, bytes)
+                    (width, height, bytes)
                 }
-                Err(_) => Reply::Page(index, scale, 0, 0, vec![]),
-            };
-            if replies.send_blocking(reply).is_err() { return }
+                Err(_) => (0, 0, vec![]),
+            })
+        };
+        for (index, scale) in wanted {
+            let Some((width, height, bytes)) = draw(index, scale) else { continue };
+            if replies.send_blocking(Reply::Page(index, scale, width, height, bytes)).is_err() { return }
+        }
+        // The small pages after those read at their size: the overview waits, the page under the eyes does not.
+        for (index, scale) in small {
+            let Some((width, height, bytes)) = draw(index, scale) else { continue };
+            if replies.send_blocking(Reply::Thumb(index, width, height, bytes)).is_err() { return }
         }
 
         // The glyphs of the pages asked for, once the pages themselves are drawn: a page is looked at before it is selected in.
@@ -1082,6 +1118,13 @@ pub struct PdfView {
     /// Most recently shown last.
     recent: VecDeque<usize>,
     pending: HashSet<usize>,
+    /// 页面总览: all pages small, in place of the pages read, to go to one of them. The pictures are its own
+    /// (`thumbs`, the latest looked at last in `thumbs_recent`, those asked for in `thumbs_pending`).
+    overview: bool,
+    overview_scroll: UniformListScrollHandle,
+    thumbs: HashMap<usize, Arc<RenderImage>>,
+    thumbs_recent: VecDeque<usize>,
+    thumbs_pending: HashSet<usize>,
     /// The views of the pages: as many as `views` says are on show, the others kept for when they are.
     panes: [Pane; 3],
     split: Split,
@@ -1289,6 +1332,11 @@ impl PdfView {
             broken: HashSet::new(),
             recent: VecDeque::new(),
             pending: HashSet::new(),
+            overview: false,
+            overview_scroll: UniformListScrollHandle::new(),
+            thumbs: HashMap::new(),
+            thumbs_recent: VecDeque::new(),
+            thumbs_pending: HashSet::new(),
             panes: [Pane::new(), Pane::new(), Pane::new()],
             split: Split::Off,
             facing: None,
@@ -2442,6 +2490,23 @@ impl PdfView {
             Reply::Skipped(index) => {
                 self.pending.remove(&index);
             }
+            Reply::ThumbSkipped(index) => {
+                self.thumbs_pending.remove(&index);
+            }
+            Reply::Thumb(index, width, height, bytes) => {
+                self.thumbs_pending.remove(&index);
+                match image::RgbaImage::from_raw(width, height, bytes).filter(|_| width > 0) {
+                    Some(buffer) => {
+                        if let Some(old) = self.thumbs.insert(index, Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]))) { cx.drop_image(old, None) }
+                        self.thumbs_recent.retain(|i| *i != index);
+                        self.thumbs_recent.push_back(index);
+                        while self.thumbs_recent.len() > KEEP_THUMBS {
+                            if let Some(old) = self.thumbs_recent.pop_front() && let Some(image) = self.thumbs.remove(&old) { cx.drop_image(image, None) }
+                        }
+                    }
+                    None => { self.broken.insert(index); }
+                }
+            }
             Reply::Found(request, index, boxes, whole) => {
                 if !self.citation.finish(request, Some((index, boxes, whole))) { return }
                 // Bring the first line of the quotation a little below the top of the view, and into it sideways.
@@ -2532,6 +2597,72 @@ impl PdfView {
             }
         }
         cx.notify();
+    }
+
+    /// Whether 页面总览 is on show.
+    pub fn overview_open(&self) -> bool {
+        self.overview
+    }
+
+    /// 页面总览 on or off. Opened, it stands at the row of the page being read.
+    pub fn toggle_overview(&mut self, cx: &mut Context<Self>) {
+        if self.sizes.is_empty() { return }
+        self.overview = !self.overview;
+        if self.overview {
+            let row = (self.current_page() - 1) / overview_columns(self.width);
+            self.overview_scroll.scroll_to_item(row, ScrollStrategy::Center);
+        }
+        cx.notify();
+    }
+
+    /// The height every small page has room for: that of the tallest page of the file at `THUMB_W`, within reason,
+    /// so the rows are of one height and a page of another shape stands in the middle of its place.
+    fn thumb_height(&self) -> f32 {
+        self.sizes.iter().map(|(w, h)| THUMB_W * h / w.max(1.)).fold(0., f32::max).clamp(THUMB_W * 0.5, THUMB_W * 1.6)
+    }
+
+    /// The rows `range` of 页面总览, `columns` small pages each: a press on one goes to that page and puts the
+    /// overview away. The page being read has the accent round it.
+    fn overview_rows(&mut self, range: std::ops::Range<usize>, columns: usize, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let (room, current) = (self.thumb_height(), self.current_page());
+        range.map(|row| {
+            let cells = (row * columns..((row + 1) * columns).min(self.sizes.len())).map(|index| {
+                let (w, h) = self.sizes[index];
+                // As wide as its place, or as tall: whichever its shape reaches first.
+                let scale = (THUMB_W / w.max(1.)).min(room / h.max(1.));
+                let (width, height) = (w * scale, h * scale);
+                let image = self.thumbs.get(&index).cloned();
+                match image {
+                    Some(_) => {
+                        self.thumbs_recent.retain(|i| *i != index);
+                        self.thumbs_recent.push_back(index);
+                    }
+                    None => if !self.broken.contains(&index) && self.thumbs_pending.insert(index) { let _ = self.requests.send(Request::Thumb(index, scale * self.device_scale)); },
+                }
+                let here = index + 1 == current;
+                let sheet = div().w(px(width)).h(px(height)).bg(gpui::white()).border_1().border_color(if here { Theme::accent() } else { Theme::line_strong() }).when(here, |d| d.border_2()).overflow_hidden().children(image.map(|image| img(image).w(px(width)).h(px(height))));
+                div().id(("pdf-thumb", index)).group("pdf-thumb").flex().flex_none().flex_col().items_center().w(px(THUMB_W)).cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.overview = false;
+                        this.go_to(index + 1, cx);
+                        cx.emit(PdfEvent::Worked);
+                    }))
+                    .child(div().flex().items_center().justify_center().w(px(THUMB_W)).h(px(room)).child(sheet))
+                    .child(div().h(px(THUMB_LABEL)).flex().items_center().text_size(text_px(12.)).text_color(if here { Theme::accent() } else { Theme::text_tertiary() }).when(here, |d| d.font_weight(FontWeight::MEDIUM)).child((index + 1).to_string()))
+            });
+            // The rows are one block in the middle of the viewer; a last row that is short starts at the block's left, under the first column.
+            div().w_full().h(px(room + THUMB_LABEL + THUMB_GAP)).flex().justify_center().child(div().flex().flex_none().gap(px(THUMB_GAP)).w(px(columns as f32 * THUMB_W + (columns as f32 - 1.) * THUMB_GAP)).children(cells)).into_any_element()
+        }).collect()
+    }
+
+    /// 页面总览 over the whole viewer: every page small, row after row, with the lists' bar at its right.
+    fn overview_layer(&self, cx: &mut Context<Self>) -> Option<Div> {
+        if !self.overview { return None }
+        let columns = overview_columns(self.width);
+        let rows = self.sizes.len().div_ceil(columns);
+        let list = uniform_list("pdf-overview", rows, cx.processor(move |this, range: std::ops::Range<usize>, _, cx| this.overview_rows(range, columns, cx))).track_scroll(self.overview_scroll.clone()).size_full().pt(px(THUMB_GAP));
+        // It takes the viewer's presses and its wheel: nothing of the pages under it is selected or scrolled meanwhile.
+        Some(div().absolute().top_0().left_0().size_full().bg(Theme::bg_sunken()).occlude().on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(list).child(crate::scrollbar::scrollbar("pdf-overview-bar", self.overview_scroll.clone())))
     }
 
     fn touch(&mut self, index: usize) {
@@ -4390,7 +4521,9 @@ impl Render for PdfView {
             // Esc puts a highlight's menu away before it does anything else.
             // Then lets a chosen mark go, then a note's card, then a tool in use.
             .on_action(cx.listener(|this, _: &crate::shortcuts::Dismiss, window, cx| {
-                if this.text_edit.is_some() {
+                if this.overview {
+                    this.overview = false;
+                } else if this.text_edit.is_some() {
                     this.finish_text(true, cx);
                 } else if this.figure_card.take().is_some() || this.view_menu.take().is_some() || this.mark_menu.take().is_some() || this.text_palette.take().is_some() || this.chosen.take().is_some() {
                 } else if this.note_open.is_some() || this.note_draft.is_some() {
@@ -4460,6 +4593,8 @@ impl Render for PdfView {
             // Over the notice and 标注's button: it is looked at and put away again.
             .children(figure_card)
             .children(self.drag_layer(window, cx))
+            // Over all of it: the pages are not read while one of them is looked for.
+            .children(self.overview_layer(cx))
             .into_any_element()
     }
 }
@@ -4660,6 +4795,16 @@ mod tests {
         let low = card_place([100., 0., 300., 290.], 360., 280., (800., 300.));
         let bottom = low.bottom.map(|b| 300. - b).or(low.top).unwrap();
         assert!(low.max_height >= 80. && bottom - CARD_EDGE >= 0. && bottom <= 300. - CARD_EDGE);
+    }
+
+    #[test]
+    fn the_overview_has_as_many_columns_as_fit() {
+        use super::{THUMB_GAP, THUMB_W, overview_columns};
+        // A gap at each side and between two: n small pages need n widths and n + 1 gaps.
+        let needs = |n: f32| n * THUMB_W + (n + 1.) * THUMB_GAP;
+        assert_eq!([overview_columns(needs(1.) - 1.), overview_columns(needs(2.) - 1.), overview_columns(needs(2.)), overview_columns(needs(8.) + 40.)], [1, 1, 2, 8]);
+        // A viewer with no width yet still has a column.
+        assert_eq!(overview_columns(0.), 1);
     }
 
     #[test]
