@@ -17,7 +17,7 @@
 //! `library_status`; given their results, it answers and cites the first
 //! paper the search returned, saying how many pictures came with the
 //! conversation (a question containing 「试试长回答」 adds a dozen
-//! paragraphs, a list and a table; one containing 「试试画图」 adds Mermaid diagrams, the last of them wrong). A question containing 「试试撤销」 makes it call
+//! paragraphs, a list and a table; one containing 「试试画图」 adds Mermaid diagrams (one a timeline wider than the column), the last of them wrong). A question containing 「试试撤销」 makes it call
 //! `undo_import` instead, a tool the window asks the person about first;
 //! one containing 「试试连接器」 makes it call the first tool of a connector
 //! (a name with `__`) that the request offers;
@@ -435,7 +435,7 @@ fn answer(mut stream: TcpStream, delay: u64) {
             }
             // Diagrams, for how an answer draws them: one of authors, one of counts, and one Mermaid cannot read.
             if request.contains("试试画图") {
-                let drawn = "\n\n这些作者之间的合作：\n\n```mermaid\ngraph LR\n  A[\"张伟 (中科院遗传所)\"] -->|共同通讯 3 篇| B[李娜]\n  A --> C[Dolf Weijers]\n  B --> D[王芳]\n  C -->|合作| D\n  subgraph 瓦赫宁根大学\n    C\n    E[Ben Scheres]\n  end\n  E -.-> A\n  D ==> F((单细胞图谱))\n```\n\n按年份：\n\n```mermaid\npie title 文献按年份\n  \"2021\" : 4\n  \"2022\" : 9\n  \"2023\" : 14\n```\n\n写错的一张：\n\n```mermaid\ngraph LR\n  A --> \n  ][ what\n```\n\n图后面的一段文字。";
+                let drawn = "\n\n这些作者之间的合作：\n\n```mermaid\ngraph LR\n  A[\"张伟 (中科院遗传所)\"] -->|共同通讯 3 篇| B[李娜]\n  A --> C[Dolf Weijers]\n  B --> D[王芳]\n  C -->|合作| D\n  subgraph 瓦赫宁根大学\n    C\n    E[Ben Scheres]\n  end\n  E -.-> A\n  D ==> F((单细胞图谱))\n```\n\n按年份：\n\n```mermaid\npie title 文献按年份\n  \"2021\" : 4\n  \"2022\" : 9\n  \"2023\" : 14\n```\n\n师承与任职（比栏宽的一张）：\n\n```mermaid\ntimeline\n  title 师承与任职时间线\n  2010–2014 : 南京大学 学士\n  2014–2019 : OIST 博士 · Satoh 与 Economo\n  2019–2022 : UW 博后 · Eichler 实验室\n  2022–2024 : 中科院遗传所 副研究员\n  2024–2026 : 中科院遗传所 研究员 · 课题组长\n  2026– : 单细胞图谱项目 首席\n```\n\n写错的一张：\n\n```mermaid\ngraph LR\n  A --> \n  ][ what\n```\n\n图后面的一段文字。";
                 events.push_str(&event(&format!(r#"{{"type":"content_block_delta","index":0,"delta":{{"type":"text_delta","text":{}}}}}"#, quoted(drawn).replace('\n', "\\n"))));
             }
             events.push_str(&event(r#"{"type":"message_delta","delta":{"stop_reason":"end_turn"}}"#));
