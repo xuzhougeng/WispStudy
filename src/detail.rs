@@ -470,6 +470,10 @@ impl Workspace {
                             )
                             .when(lib.writing.sorting.reading && !lib.writing.sorting.error.is_empty(), |d| d.child(ui::error_line(&lib.writing.sorting.error)))
                     })
+                    // Pages whose text was read off them and came back empty: those pages again, while any is.
+                    .when_some(match &text { Some(Ok(pages)) if !by_eye && !reading && file.format == "pdf" => Some(wisp_core::ocr::blank_pages(lib.writing.structures.get(&file.id), pages).len()).filter(|n| *n > 0), _ => None }, |d, blank| {
+                        d.child(div().flex().child(ui::secondary_button(("file-read-blank", i), tn!("识别没有文字的 {n} 页", "Recognise the {n} without text", blank, "page")).h(text_px(24.)).px(px(8.)).text_size(text_px(12.)).tooltip(ui::tip(t("只把这些页再送去识别，读出的文字放回原处；只有图的页面多半还是读不出文字。"))).on_click(self.on(Cmd::ReadPages(file.id.clone()), cx))))
+                    })
                     // Pages a model read in part: the rest are read from where it stopped.
                     .when(!by_eye && file.format == "pdf" && lib.writing.structures.get(&file.id).is_some_and(|info| info.read_in_part()), |d| d.child(div().flex().child(small(("file-read-rest", i), t("读完剩下的页面")).on_click(self.on(Cmd::ReadPages(file.id.clone()), cx)))))
                     .into_any_element();

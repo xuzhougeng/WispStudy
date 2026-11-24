@@ -27,6 +27,9 @@ pub enum PdfEvent {
     /// The paper's mind map is asked of the owner, who has it: for a view whose label said 显示导图, or
     /// (`None`) for 导图 on the bar. The owner gives it (`PdfView::set_map`) and has the viewer show it.
     Map(Option<usize>),
+    /// No view shows the map any more (closed, or told to show something else): under 分屏 自由 the owner parts
+    /// a file split on itself into two viewers again, as it does when 译文 is put away.
+    MapGone,
     /// A passage selected on a 1-based page is to be a node of the paper's mind map.
     MapPassage(usize, String),
     /// The pointer went down or turned the wheel in the viewer: beside a viewer of another file of the paper, this is the one worked in from now on.
@@ -872,6 +875,17 @@ mod device {
 /// how many pages the file has. One and a half pixels per point: enough
 /// to read print by, and small enough to send.
 pub fn page_pictures(path: &Path, skip: usize, limit: usize) -> Result<(Vec<Vec<u8>>, usize), String> {
+    pictures_of(path, |index| index >= skip, limit)
+}
+
+/// Pictures of these pages (from 0) of a PDF, in order: pages read again.
+pub fn page_pictures_at(path: &Path, at: &[usize]) -> Result<Vec<Vec<u8>>, String> {
+    let (pictures, _) = pictures_of(path, |index| at.contains(&index), at.len())?;
+    if pictures.len() != at.len() { return Err(t("要读的页面不在这个 PDF 里。").into()) }
+    Ok(pictures)
+}
+
+fn pictures_of(path: &Path, wanted: impl Fn(usize) -> bool, limit: usize) -> Result<(Vec<Vec<u8>>, usize), String> {
     use hayro::hayro_interpret::InterpreterSettings;
     use hayro::hayro_syntax::Pdf;
     use hayro::vello_cpu::color::palette::css::WHITE;
@@ -881,7 +895,7 @@ pub fn page_pictures(path: &Path, skip: usize, limit: usize) -> Result<(Vec<Vec<
     let (cache, interpreter, settings) = (RenderCache::new(), InterpreterSettings::default(), RenderSettings::default());
     let mut out = vec![];
     let count = pdf.pages().len();
-    for page in pdf.pages().iter().skip(skip).take(limit) {
+    for page in pdf.pages().iter().enumerate().filter(|(index, _)| wanted(*index)).map(|(_, page)| page).take(limit) {
         let (w, h) = page.render_dimensions();
         let scale = 1.5_f32.min(2000. / w.max(h).max(1.));
         let pixmap = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| render(page, &cache, &interpreter, &settings, &PixmapSettings { x_scale: scale, y_scale: scale, bg_color: WHITE }))).map_err(|_| t("这个 PDF 的页面画不出来。").to_string())?;
@@ -1906,11 +1920,13 @@ impl PdfView {
         if count < 2 || view >= count { return }
         // The paper itself stays: its last view is not closed for the map.
         if shown[view].shows != Shows::Map && shown.iter().filter(|other| other.shows != Shows::Map).count() < 2 { return }
+        let had_map = self.map_shown();
         self.take_out(view, count);
         let split = if count == 3 { self.stood } else { Split::Off };
         self.resize((0., 0.), |this| this.split = split);
         self.settle();
         self.say_facing(cx);
+        self.say_map(had_map, cx);
         cx.notify();
     }
 
@@ -1963,10 +1979,12 @@ impl PdfView {
             }
             _ => {}
         }
+        let had_map = self.map_shown();
         self.shows[view] = shows;
         self.facing_auto = false;
         self.settle();
         self.say_facing(cx);
+        self.say_map(had_map, cx);
         cx.notify();
     }
 
@@ -1979,6 +1997,11 @@ impl PdfView {
     /// No view shows the translation any more: 译文 is put away.
     fn say_facing(&mut self, cx: &mut Context<Self>) {
         if self.facing.is_some() && !self.shown().iter().any(|view| view.shows == Shows::Theirs) { cx.emit(PdfEvent::Facing(false)) }
+    }
+
+    /// The map was shown and no view shows it now: the owner hears it (`PdfEvent::MapGone`).
+    fn say_map(&mut self, had: bool, cx: &mut Context<Self>) {
+        if had && !self.map_shown() { cx.emit(PdfEvent::MapGone) }
     }
 
     /// The paper's mind map for this viewer, from its owner, who hears of what is done in it.
