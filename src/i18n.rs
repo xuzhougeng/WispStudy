@@ -144,6 +144,14 @@ const PHRASES: &[(&str, &str)] = &[
     ("附件路径无效：{}", "Invalid attachment path: {0}"),
     // Where a paper came from (`Paper::source`), as an import of a file names it (`tools::import_references`).
     ("导入 · {}", "Import · {0}"),
+    // Why a skill was not brought in, shown, taken out or put back (`skill`).
+    ("{} 里没有 SKILL.md。", "{0} holds no SKILL.md."),
+    ("已经有名为 {} 的技能文件夹。", "There is already a skill folder named {0}."),
+    ("无法保存技能：{}", "The skill could not be saved: {0}"),
+    ("无法读取 {}：{}", "{0} could not be read: {1}"),
+    ("{} 不在这项技能的文件夹里。", "{0} is not in this skill’s folder."),
+    ("无法移除技能：{}", "The skill could not be removed: {0}"),
+    ("无法恢复技能：{}", "The skill could not be put back: {0}"),
 ];
 
 /// The values `text` gives the holes of `pattern`, when it is that pattern filled in.
@@ -420,6 +428,8 @@ mod tests {
         // What a record found by its title has in common with the paper.
         // Why a Zotero attachment was not taken in, and where a paper came from.
         assert_eq!(english_of("找不到 PDF，请先在 Zotero 中下载或修复路径：/z/storage/AB12/a.pdf").as_deref(), Some("PDF not found; download it in Zotero or fix its path first: /z/storage/AB12/a.pdf"));
+        // Why a skill was not brought in or shown.
+        assert_eq!((english_of("已经有名为 plain 的技能文件夹。").as_deref(), english_of("无法读取 references/a.md：denied").as_deref()), (Some("There is already a skill folder named plain."), Some("references/a.md could not be read: denied")));
         for source in ["Zotero 本地导入", "PDF 导入", "网址导入", "导入 · refs.bib"] { assert!(english_of(source).is_some_and(|english| !chinese(&english)), "{source}") }
         for note in ["题目一致", "DOI 一致", "题目有 87% 的词相同", "年份 2019", "年份是 2019，不是 2020", "作者里有 Wang", "作者里没有 Wang"] { assert!(english_of(note).is_some_and(|english| !chinese(&english)), "{note}") }
     }

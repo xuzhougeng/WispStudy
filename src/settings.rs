@@ -140,6 +140,8 @@ pub struct SettingsView {
     command: Option<(usize, CommandFields)>,
     /// The connector whose fields 自定义 shows, as an index into `Settings::connectors`.
     pub(crate) connector: Option<(usize, crate::custom::Fields)>,
+    /// The skill whose page 自定义 shows.
+    pub(crate) skill: Option<crate::custom::SkillView>,
     /// The shortcut waiting for its new key. While it waits, every key
     /// binding is cleared, so the keys pressed reach `record_key`.
     recording: Option<String>,
@@ -519,7 +521,7 @@ impl Workspace {
                 }
                 let kept = |keys: &std::collections::BTreeMap<String, String>| keys.get("deepseek").is_some_and(|key| !key.trim().is_empty());
                 let deepseek_fields = [kept(&self.settings.web_search.keys), kept(&self.settings.ocr.keys)];
-                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, contact_email, ncbi_key, reach: None, reach_asked: 0, typed: 0, search_keys, ocr_keys, deepseek_fields, author, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, recording: None, shortcut_error: None, balance: None, storage: None, measuring: false, storage_open: None, _subscriptions: subscriptions });
+                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, contact_email, ncbi_key, reach: None, reach_asked: 0, typed: 0, search_keys, ocr_keys, deepseek_fields, author, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, skill: None, recording: None, shortcut_error: None, balance: None, storage: None, measuring: false, storage_open: None, _subscriptions: subscriptions });
                 self.read_balance_shown(cx);
             }
         }
@@ -1276,7 +1278,7 @@ impl Workspace {
 
     /// The width of the page's column in pixels. A wrapping text field needs
     /// to be told its width, since every width above it is a share of its parent's.
-    fn column_width(&self, window: &Window) -> f32 {
+    pub(crate) fn column_width(&self, window: &Window) -> f32 {
         let page = self.settings_view.as_ref().map(|view| view.page);
         (f32::from(window.viewport_size().width) - SIDEBAR_W - 65.).min(if matches!(page, Some(SettingsPage::Ai | SettingsPage::Customize)) { AI_COLUMN_W } else { COLUMN_W })
     }

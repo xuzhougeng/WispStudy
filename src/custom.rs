@@ -12,9 +12,10 @@ use crate::app::{Cmd, Modal, Workspace};
 use crate::i18n::t;
 use crate::input::{InputEvent, TextInput};
 use crate::settings::{button, group, note, row, switch};
-use crate::theme::{Theme, text_px};
+use crate::theme::{self, Theme, text_px};
 use crate::ui;
 use gpui::{prelude::FluentBuilder, *};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use wisp_core::connector::{Connector, Tool};
@@ -92,6 +93,67 @@ pub enum Do {
     ImportSkill { folder: bool },
     ToggleSkill(String),
     OpenSkills,
+    /// Open the page of the n-th skill.
+    SelectSkill(usize),
+    BackToSkills,
+    /// Show a file of the skill on show, as `skill::files` names it.
+    ShowSkillFile(String),
+    /// Put a folder of its files away, or bring it back.
+    FoldSkillFolder(String),
+    /// A Markdown file as its source, or as the page it makes.
+    SkillSource(bool),
+    CopySkillFile,
+    RevealSkill,
+    /// Take the skill on show out: its folder moves to `removed/`.
+    RemoveSkill,
+    /// Put a skill just taken out back: where its folder went, the name it had, and whether it was switched off.
+    RestoreSkill { removed: PathBuf, folder: String, off: Option<String> },
+}
+
+/// The skill whose page 自定义 shows: its folder and the file of it on show.
+/// What the page draws is read here, when the page opens or a file is chosen, never while drawing.
+pub struct SkillView {
+    /// Its folder: what tells it from the others.
+    dir: PathBuf,
+    files: Vec<skill::Entry>,
+    /// The folders put away in the list of files.
+    folded: Vec<String>,
+    /// The file on show, as `files` names it, and what it holds.
+    file: String,
+    shown: skill::Shown,
+    /// A Markdown file is shown as its source.
+    source: bool,
+    scroll: ScrollHandle,
+    tree_scroll: ScrollHandle,
+}
+
+impl SkillView {
+    fn new(dir: PathBuf) -> SkillView {
+        let mut view = SkillView { dir, files: vec![], folded: vec![], file: String::new(), shown: skill::Shown::Text { text: String::new(), cut: false }, source: false, scroll: ScrollHandle::new(), tree_scroll: ScrollHandle::new() };
+        view.read();
+        view
+    }
+
+    /// Read the folder anew, and the file on show: the first one when that file is gone.
+    fn read(&mut self) {
+        self.files = skill::files(&self.dir);
+        if !self.files.iter().any(|entry| !entry.folder && entry.path == self.file) {
+            self.file = self.files.iter().find(|entry| !entry.folder).map(|entry| entry.path.clone()).unwrap_or_default();
+            self.scroll = ScrollHandle::new();
+        }
+        self.shown = if self.file.is_empty() { skill::Shown::Text { text: String::new(), cut: false } } else { skill::show(&self.dir, &self.file) };
+    }
+
+    fn show(&mut self, file: String) {
+        if !self.files.iter().any(|entry| !entry.folder && entry.path == file) { return }
+        (self.file, self.source, self.scroll) = (file, false, ScrollHandle::new());
+        self.shown = skill::show(&self.dir, &self.file);
+    }
+
+    /// Whether an entry is inside a folder put away.
+    fn hidden(&self, entry: &skill::Entry) -> bool {
+        self.folded.iter().any(|folder| entry.path.strip_prefix(folder.as_str()).is_some_and(|rest| rest.starts_with('/')))
+    }
 }
 
 /// The text fields of the connector on show.
@@ -137,6 +199,15 @@ fn connector_name(connector: &Connector) -> SharedString {
     if connector.name.trim().is_empty() { t("未命名的 MCP").into() } else { connector.name.clone().into() }
 }
 
+fn skill_icon() -> Div {
+    div().flex().flex_none().items_center().justify_center().size(px(38.)).rounded(px(10.)).bg(Theme::bg_sunken()).border_1().border_color(Theme::line()).child(ui::icon("file-text", 20., Theme::text_secondary()))
+}
+
+/// A size as a person reads it.
+fn bytes(size: u64) -> String {
+    if size >= 1_048_576 { format!("{:.1} MB", size as f64 / 1_048_576.) } else if size >= 1024 { format!("{} KB", size.div_ceil(1024)) } else { format!("{size} B") }
+}
+
 fn connector_icon() -> Div {
     div().flex().flex_none().items_center().justify_center().size(px(38.)).rounded(px(10.)).bg(Theme::accent_soft()).child(ui::icon("plug", 20., Theme::accent()))
 }
@@ -160,6 +231,22 @@ impl Workspace {
     /// Read the skills' folder again.
     pub fn load_skills(&mut self) {
         self.skills = skill::list(&self.skills_folder());
+        // The page of a skill follows its folder: read anew, and gone with it.
+        let Some(view) = self.settings_view.as_mut() else { return };
+        let Some(shown) = view.skill.as_mut() else { return };
+        if self.skills.iter().any(|skill| skill.dir == shown.dir) { shown.read() } else { view.skill = None }
+    }
+
+    /// The skill whose page is on show.
+    fn skill_on_show(&mut self) -> Option<&mut SkillView> {
+        self.settings_view.as_mut().and_then(|view| view.skill.as_mut())
+    }
+
+    /// Why a slash does not call a skill, where it does not: a slash takes one word, and a command's name is the command's.
+    fn uncalled(&self, skill: &skill::Skill) -> Option<SharedString> {
+        if !skill::called(skill) { return Some(t("名称里有空格，不能用 / 调用，由助手在需要时读取").into()) }
+        let taken = wisp_core::ai::SLASH.iter().any(|command| command.name == skill.name) || self.settings.commands.iter().any(|command| command.name == skill.name);
+        taken.then(|| tf!("和命令 /{} 同名，不能用 / 调用，由助手在需要时读取", "Named like the command /{}, so a slash does not call it; the assistant reads it when needed", skill.name).into())
     }
 
     fn connection(&self, connector: &Connector) -> Option<&Connection> {
@@ -462,6 +549,76 @@ impl Workspace {
                 let _ = std::fs::create_dir_all(&dir);
                 cx.open_with_system(&dir);
             }
+            Do::SelectSkill(index) => {
+                let Some(dir) = self.skills.get(index).map(|skill| skill.dir.clone()) else { return };
+                if let Some(view) = self.settings_view.as_mut() {
+                    view.skill = Some(SkillView::new(dir));
+                    view.reset_scroll();
+                }
+                cx.notify();
+            }
+            Do::BackToSkills => {
+                if let Some(view) = self.settings_view.as_mut() {
+                    view.skill = None;
+                    view.reset_scroll();
+                }
+                cx.notify();
+            }
+            Do::ShowSkillFile(file) => {
+                if let Some(shown) = self.skill_on_show() { shown.show(file) }
+                cx.notify();
+            }
+            Do::FoldSkillFolder(folder) => {
+                if let Some(shown) = self.skill_on_show() {
+                    if shown.folded.contains(&folder) { shown.folded.retain(|known| *known != folder) } else { shown.folded.push(folder) }
+                }
+                cx.notify();
+            }
+            Do::SkillSource(source) => {
+                if let Some(shown) = self.skill_on_show() { shown.source = source }
+                cx.notify();
+            }
+            Do::CopySkillFile => {
+                let Some(skill::Shown::Text { text, .. }) = self.skill_on_show().map(|shown| shown.shown.clone()) else { return };
+                cx.write_to_clipboard(ClipboardItem::new_string(text));
+                self.say(t("已复制文件内容"), cx);
+            }
+            Do::RevealSkill => {
+                if let Some(dir) = self.skill_on_show().map(|shown| shown.dir.clone()) { cx.reveal_path(&dir) }
+            }
+            Do::RemoveSkill => {
+                let Some(dir) = self.skill_on_show().map(|shown| shown.dir.clone()) else { return };
+                let Some(name) = self.skills.iter().find(|skill| skill.dir == dir).map(|skill| skill.name.clone()) else { return };
+                let folder = dir.file_name().map(|folder| folder.to_string_lossy().into_owned()).unwrap_or_default();
+                match skill::remove(&self.skills_folder(), &dir) {
+                    Err(why) => self.fail(why, cx),
+                    Ok(removed) => {
+                        // Its switch goes with it, so that a skill of that name brought in later is not off unasked.
+                        let off = self.settings.skills_off.contains(&name).then(|| name.clone());
+                        if off.is_some() {
+                            self.settings.skills_off.retain(|known| *known != name);
+                            self.save_settings(cx);
+                        }
+                        self.load_skills();
+                        if let Some(view) = self.settings_view.as_mut() { view.reset_scroll() }
+                        self.say_undoable(tf!("已移除技能「{}」，它的文件夹在技能文件夹的 removed 里", "Removed the skill \"{}\"; its folder is in removed, in the skills folder", name), Cmd::Custom(Do::RestoreSkill { removed, folder, off }), cx);
+                    }
+                }
+                cx.notify();
+            }
+            Do::RestoreSkill { removed, folder, off } => {
+                match skill::restore(&self.skills_folder(), &removed, &folder) {
+                    Err(why) => self.fail(why, cx),
+                    Ok(()) => {
+                        if let Some(name) = off && !self.settings.skills_off.contains(&name) {
+                            self.settings.skills_off.push(name);
+                            self.save_settings(cx);
+                        }
+                        self.load_skills();
+                    }
+                }
+                cx.notify();
+            }
         }
     }
 
@@ -540,9 +697,14 @@ impl Workspace {
         }));
         let body = match view.custom_tab {
             Tab::Connectors => self.connectors_tab(window, cx),
-            Tab::Skills => self.skills_tab(cx),
+            Tab::Skills => self.skills_tab(window, cx),
         };
-        div().flex().flex_col().w_full().gap(px(20.)).child(bar).child(body).into_any_element()
+        // One connector's or one skill's page says where it is by its way back: the tabs are for the lists.
+        let detail = match view.custom_tab {
+            Tab::Connectors => view.connector.as_ref().is_some_and(|(index, _)| *index < self.settings.connectors.len()),
+            Tab::Skills => view.skill.is_some(),
+        };
+        div().flex().flex_col().w_full().gap(px(20.)).when(!detail, |d| d.child(bar)).child(body).into_any_element()
     }
 
     fn connector_status(&self, connector: &Connector) -> (SharedString, Hsla) {
@@ -598,8 +760,7 @@ impl Workspace {
             .when(busy || connector.target.trim().is_empty(), |d| d.opacity(0.45).cursor_default())
             .when(!busy && !connector.target.trim().is_empty(), |d| d.on_click(self.on(Cmd::Custom(Do::Connect(index)), cx)));
         let header = div().flex().flex_col().gap(px(18.))
-            .child(div().flex().items_center().gap(px(8.)).child(back).child(ui::icon("chevron-right", 12., Theme::text_tertiary()))
-                .child(div().text_color(Theme::text_secondary()).child(connector_name(connector))))
+            .child(div().flex().child(back))
             .child(div().flex().items_center().gap(px(14.)).child(connector_icon())
                 .child(div().flex().flex_col().flex_1().min_w_0().gap(px(4.))
                     .child(div().text_size(text_px(22.)).line_height(text_px(28.)).font_weight(FontWeight::SEMIBOLD).child(connector_name(connector)))
@@ -698,37 +859,132 @@ impl Workspace {
             })
     }
 
-    fn skills_tab(&self, cx: &mut Context<Self>) -> AnyElement {
-        let mut skills: Vec<AnyElement> = self
-            .skills
-            .iter()
-            .enumerate()
-            .map(|(i, skill)| {
-                let about: SharedString = if skill.description.is_empty() { t("没有写描述，助手不知道什么时候用它").into() } else { skill.description.clone().into() };
-                row(skill.name.clone(), Some(about), switch(("skill-on", i), !self.settings.skills_off.contains(&skill.name)).on_click(self.on(Cmd::Custom(Do::ToggleSkill(skill.name.clone())), cx))).into_any_element()
-            })
-            .collect();
-        skills.push(
-            div()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap(px(8.))
-                .w_full()
-                .px(px(16.))
-                .py(px(10.))
-                .child(button("skill-import-folder", t("导入技能文件夹…")).on_click(self.on(Cmd::Custom(Do::ImportSkill { folder: true }), cx)))
-                .child(button("skill-import-file", t("导入 Markdown 文件…")).on_click(self.on(Cmd::Custom(Do::ImportSkill { folder: false }), cx)))
-                .child(div().flex_1())
-                .child(button("skill-open", t("打开技能文件夹")).on_click(self.on(Cmd::Custom(Do::OpenSkills), cx)))
-                .into_any_element(),
-        );
-        div()
-            .flex()
-            .flex_col()
-            .w_full()
-            .gap(px(24.))
-            .child(group(None, skills).child(note(t("技能是一个带 SKILL.md 的文件夹，写法和 Claude 的技能相同：开头的 name 和 description 告诉助手它做什么，正文是做法。助手只在请求符合描述时读它；也可以在对话框里输入 / 加技能的名称，直接让助手按它来做。技能只是文字：文件夹里的脚本不会被运行。在文件夹里增删改以后，重新打开这一页就会读到。"))))
+    fn skills_tab(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        if let Some(shown) = self.settings_view.as_ref().and_then(|view| view.skill.as_ref()) && let Some(skill) = self.skills.iter().find(|skill| skill.dir == shown.dir) {
+            return self.skill_detail(skill, shown, window, cx);
+        }
+        let skills: Vec<AnyElement> = self.skills.iter().enumerate().map(|(i, skill)| {
+            let (about, color): (SharedString, Hsla) = if skill.description.is_empty() { (t("没有写描述，助手不知道什么时候用它").into(), Theme::warning()) } else { (ui::one_line(&skill.description).into(), Theme::text_tertiary()) };
+            div().flex().flex_none().items_center().w_full().gap(px(16.)).pr(px(20.))
+                .child(div().id(("skill", i)).flex().items_center().flex_1().min_w_0().gap(px(14.)).p(px(18.))
+                    .cursor_pointer().hover(|s| s.bg(Theme::hover()))
+                    .on_click(self.on(Cmd::Custom(Do::SelectSkill(i)), cx))
+                    .child(skill_icon())
+                    .child(div().flex().flex_col().flex_1().min_w_0().gap(px(3.))
+                        .child(div().font_weight(FontWeight::MEDIUM).truncate().child(skill.name.clone()))
+                        .child(div().text_size(text_px(12.)).text_color(color).truncate().child(about)))
+                    .child(ui::icon("chevron-right", 16., Theme::text_tertiary())))
+                .child(switch(("skill-on", i), !self.settings.skills_off.contains(&skill.name)).on_click(self.on(Cmd::Custom(Do::ToggleSkill(skill.name.clone())), cx)))
+                .into_any_element()
+        }).collect();
+        div().flex().flex_col().flex_none().w_full().gap(px(18.))
+            .child(div().flex().flex_wrap().items_center().gap(px(8.))
+                .child(div().flex_1().font_weight(FontWeight::MEDIUM).child(format!("SKILL ({})", skills.len())))
+                .child(ui::secondary_button("skill-open", t("打开技能文件夹")).on_click(self.on(Cmd::Custom(Do::OpenSkills), cx)))
+                .child(ui::secondary_button("skill-import-file", t("导入 Markdown 文件…")).on_click(self.on(Cmd::Custom(Do::ImportSkill { folder: false }), cx)))
+                .child(ui::primary_button("skill-import-folder", t("导入技能文件夹…")).on_click(self.on(Cmd::Custom(Do::ImportSkill { folder: true }), cx))))
+            .when(skills.is_empty(), |d| d.child(div().flex().flex_col().gap(px(6.)).p(px(24.)).rounded(px(12.)).bg(Theme::bg_sunken())
+                .child(t("还没有技能"))
+                .child(note(t("导入一个带 SKILL.md 的文件夹，或一份写着做法的 Markdown 文件。")))))
+            .when(!skills.is_empty(), |d| d.child(group(None, skills)))
+            .child(note(t("技能是一个带 SKILL.md 的文件夹，写法和 Claude 的技能相同：开头的 name 和 description 告诉助手它做什么，正文是做法。助手只在请求符合描述时读它；也可以在对话框里输入 / 加技能的名称，直接让助手按它来做。技能只是文字：文件夹里的脚本不会被运行。在文件夹里增删改以后，重新打开这一页就会读到。")))
+            .into_any_element()
+    }
+
+    /// One skill's page: what it is called and for, then its folder, a file of it on show.
+    /// The folder's card is as high as the window has room for and scrolls in itself, so the list of
+    /// files and the bar over the file stay where they are while a long file is read.
+    fn skill_detail(&self, skill: &skill::Skill, shown: &SkillView, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let column = self.column_width(window).max(0.);
+        let count = shown.files.iter().filter(|entry| !entry.folder).count();
+        let back = ui::ghost_button("skill-back", Some("arrow-left"), Some("SKILL".into())).on_click(self.on(Cmd::Custom(Do::BackToSkills), cx));
+        let reveal = if cfg!(target_os = "macos") { t("在访达中显示") } else if cfg!(target_os = "windows") { t("在资源管理器中显示") } else { t("在文件管理器中显示") };
+        let called = match self.uncalled(skill) {
+            None => div().font_family(theme::MONO_FONT).child(format!("/{}", skill.name)),
+            Some(why) => div().child(why),
+        };
+        let header = div().flex().flex_none().items_center().gap(px(14.)).child(skill_icon())
+            .child(div().flex().flex_col().flex_1().min_w_0().gap(px(4.))
+                .child(div().text_size(text_px(22.)).line_height(text_px(28.)).font_weight(FontWeight::SEMIBOLD).truncate().child(skill.name.clone()))
+                .child(div().flex().items_center().gap(px(6.)).text_size(text_px(12.)).line_height(text_px(17.)).text_color(Theme::text_tertiary()).child(called.flex_none())
+                    // One file is the skill itself: only more than that is worth a number.
+                    .when(count > 1, |d| d.child("·").child(div().flex_none().child(tn!("{n} 个文件", "{n}", count, "file"))))))
+            .child(div().flex().flex_none().items_center().gap(px(4.))
+                .child(ui::icon_action("skill-reveal", "folder-open", Theme::text_secondary(), reveal).size(px(28.)).on_click(self.on(Cmd::Custom(Do::RevealSkill), cx)))
+                .child(ui::icon_action("skill-remove", "bin", Theme::text_secondary(), t("移除技能")).size(px(28.)).on_click(self.on(Cmd::Custom(Do::RemoveSkill), cx))))
+            .child(switch("skill-detail-on", !self.settings.skills_off.contains(&skill.name)).on_click(self.on(Cmd::Custom(Do::ToggleSkill(skill.name.clone())), cx)));
+        let about = if skill.description.is_empty() {
+            div().text_color(Theme::warning()).child(t("没有写描述，助手不知道什么时候用它。在 SKILL.md 开头的 description 里写上它做什么、什么时候用。"))
+        } else {
+            self.selectable("skill-description", skill.description.clone(), cx).text_color(Theme::text_secondary())
+        };
+        // What stands over the card, and the page's own edges: the rest of the window is the card's.
+        let lines = (ui::text_width(&skill.description, text_px(13.), window) / (column * 0.94).max(1.)).ceil().max(1.);
+        let over = ui::strip_h() + 12. + f32::from(text_px(28.)) + 24. + f32::from(text_px(28.)) + 16. + f32::from(text_px(49.)).max(38.) + 16. + lines * f32::from(text_px(21.)) + 16. + 64.;
+        let height = (f32::from(window.viewport_size().height) - over).max(320.);
+        // A skill that is one file has no list to choose from.
+        let listing = shown.files.len() > 1;
+        let tree_w = if !listing { 0. } else if column >= 600. { 208. } else { 152. };
+        let rows = shown.files.iter().filter(|entry| !shown.hidden(entry)).map(|entry| {
+            let chosen = !entry.folder && entry.path == shown.file;
+            let folded = shown.folded.contains(&entry.path);
+            let cmd = if entry.folder { Do::FoldSkillFolder(entry.path.clone()) } else { Do::ShowSkillFile(entry.path.clone()) };
+            div().id(SharedString::from(format!("skill-entry-{}", entry.path))).flex().flex_none().items_center().gap(px(6.)).w_full().h(text_px(30.)).pl(px(10. + 16. * entry.depth() as f32)).pr(px(8.)).rounded(px(7.)).cursor_pointer()
+                .when(chosen, |d| d.bg(Theme::pressed()).font_weight(FontWeight::MEDIUM))
+                .when(!chosen, |d| d.hover(|s| s.bg(Theme::hover())))
+                .on_click(self.on(Cmd::Custom(cmd), cx))
+                .when(entry.folder, |d| d.child(ui::icon("folder-open", 14., Theme::text_tertiary())))
+                .child(div().flex_1().min_w_0().truncate().child(entry.name().to_string()))
+                .when(entry.folder, |d| d.child(ui::icon(if folded { "chevron-right" } else { "chevron-down" }, 12., Theme::text_tertiary())))
+        });
+        let tree = div().id("skill-files").flex().flex_col().flex_none().w(px(tree_w)).h_full().gap(px(2.)).p(px(8.)).border_r_1().border_color(Theme::line()).bg(Theme::bg_sunken()).overflow_y_scroll().track_scroll(&shown.tree_scroll).children(rows);
+
+        let said = |words: SharedString, color: Hsla| div().text_color(color).child(words).into_any_element();
+        let page = skill::markdown(&shown.file) && !shown.source;
+        let (content, copies): (AnyElement, bool) = match &shown.shown {
+            skill::Shown::Failed(why) => (said(if crate::i18n::is_english() { crate::i18n::phrase(why).into() } else { why.clone().into() }, Theme::danger()), false),
+            skill::Shown::Binary(size) => (said(tf!("这个文件不是文字（{}），不在这里显示。", "This file is not text ({}), so it is not shown here.", bytes(*size)).into(), Theme::text_tertiary()), false),
+            skill::Shown::Text { text, .. } if text.trim().is_empty() => (said(if shown.file.is_empty() { t("这个文件夹里没有文件。") } else { t("这个文件是空的。") }.into(), Theme::text_tertiary()), false),
+            skill::Shown::Text { text, cut } => {
+                // A page is drawn without the lines between its dashes: the name and the description are over the card already.
+                let words = if page { skill::parse(text).2 } else { text.replace('\t', "    ") };
+                let drawn = if words.is_empty() {
+                    div().text_color(Theme::text_tertiary()).child(t("开头只有 name 和 description，还没有写说明。"))
+                } else if page {
+                    crate::markdown::render("skill-file", &words, None, None)
+                } else {
+                    self.selectable(format!("skill-file-{}", shown.file), words, cx).font_family(theme::MONO_FONT).text_size(text_px(12.)).line_height(text_px(19.))
+                };
+                (div().flex().flex_col().flex_none().gap(px(16.)).child(drawn).when(*cut, |d| d.child(note(t("文件较长，这里只显示开头的一部分。")))).into_any_element(), true)
+            }
+        };
+        // How a Markdown file is looked at: the page it makes, or its source.
+        let look = |id: &'static str, icon: &'static str, source: bool, name: &'static str, cx: &mut Context<Self>| {
+            let chosen = shown.source == source;
+            div().id(id).flex().flex_none().items_center().justify_center().w(px(30.)).h(px(22.)).rounded(px(6.)).cursor_pointer()
+                .when(chosen, |d| d.bg(Theme::segment()).shadow(theme::shadow_card()))
+                .on_click(self.on(Cmd::Custom(Do::SkillSource(source)), cx))
+                .child(ui::icon(icon, 14., if chosen { Theme::text() } else { Theme::text_tertiary() }))
+                .tooltip(ui::tip(name))
+        };
+        let bar = div().flex().flex_none().items_center().gap(px(8.)).w_full().h(px(40.)).pl(px(20.)).pr(px(10.)).border_b_1().border_color(Theme::line())
+            .child(div().flex_1().min_w_0().truncate().font_family(theme::MONO_FONT).text_size(text_px(12.)).text_color(Theme::text_secondary()).child(format!("/{}", shown.file)))
+            .when(skill::markdown(&shown.file) && copies, |d| d.child(div().flex().flex_none().gap(px(2.)).p(px(2.)).rounded(px(8.)).bg(Theme::groove())
+                .child(look("skill-look-page", "eye", false, t("预览"), cx))
+                .child(look("skill-look-source", "code", true, t("源码"), cx))))
+            .when(copies, |d| d.child(ui::icon_action("skill-copy", "copy", Theme::text_secondary(), t("复制文件内容")).size(px(26.)).on_click(self.on(Cmd::Custom(Do::CopySkillFile), cx))));
+        // The text's column in pixels: under widths that are shares, wrapped text is measured wider than it is drawn.
+        let text_w = (column - tree_w - 2. - 48.).max(120.);
+        let viewer = div().flex().flex_col().flex_1().min_w_0().h_full()
+            .child(bar)
+            .child(div().id("skill-file").flex().flex_col().flex_1().min_h_0().overflow_y_scroll().track_scroll(&shown.scroll)
+                .child(div().flex().flex_col().flex_none().w(px(text_w + 48.)).px(px(24.)).pt(px(18.)).pb(px(28.)).line_height(text_px(21.)).child(div().flex().flex_col().flex_none().w(px(text_w)).child(content))));
+        let card = div().flex().flex_none().w(px(column)).h(px(height)).rounded(px(12.)).border_1().border_color(Theme::line()).overflow_hidden().when(listing, |d| d.child(tree)).child(viewer);
+        div().flex().flex_col().flex_none().w_full().gap(px(16.))
+            .child(div().flex().flex_none().child(back))
+            .child(header)
+            .child(about.flex_none().w(px(column)).line_height(text_px(21.)))
+            .child(card)
             .into_any_element()
     }
 }

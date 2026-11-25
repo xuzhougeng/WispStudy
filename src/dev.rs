@@ -950,6 +950,7 @@ impl Workspace {
                     "tasks" => Cmd::AiTab(AiTab::Tasks),
                     "commands" => Cmd::AiTab(AiTab::Commands),
                     "customize" => Cmd::OpenSettings(SettingsPage::Customize),
+                    "skills" => Cmd::Custom(crate::custom::Do::Tab(crate::custom::Tab::Skills)),
                     _ => Cmd::OpenSettings(match arg {
                         "appearance" => SettingsPage::Appearance,
                         "shortcuts" => SettingsPage::Shortcuts,
@@ -966,6 +967,22 @@ impl Workspace {
                 "consent" => Some(Cmd::AnswerTools(Talk::Library, match arg { "always" => Consent::Always, "deny" => Consent::Deny, _ => Consent::Once })),
                 // `connector:0` opens the first connector on 设置 › 自定义 (after `settings:customize`).
                 "connector" => Some(Cmd::Custom(crate::custom::Do::SelectConnector(arg.parse().unwrap_or(0)))),
+                // `skill:0` opens the first skill's page on 设置 › 自定义 (after `settings:skills`); `skill:file;<path>` shows a file of it,
+                // `skill:fold;<folder>` puts a folder of its files away or brings it back, `skill:source` / `skill:page` is a Markdown
+                // file as its source / as the page it makes, `skill:remove` takes the skill out and `skill:back` is the list again.
+                "skill" => {
+                    use crate::custom::Do;
+                    let (what, rest) = arg.split_once(';').unwrap_or((arg, ""));
+                    Some(Cmd::Custom(match what {
+                        "file" => Do::ShowSkillFile(rest.to_string()),
+                        "fold" => Do::FoldSkillFolder(rest.to_string()),
+                        "source" => Do::SkillSource(true),
+                        "page" => Do::SkillSource(false),
+                        "remove" => Do::RemoveSkill,
+                        "back" => Do::BackToSkills,
+                        _ => Do::SelectSkill(what.parse().unwrap_or(0)),
+                    }))
+                }
                 // `signin:0` signs in to the first connector in the browser (a scripted run prints the address instead of opening it); `signout:0` signs out.
                 "signin" => Some(Cmd::Custom(crate::custom::Do::SignIn(arg.parse().unwrap_or(0)))),
                 "signout" => Some(Cmd::Custom(crate::custom::Do::SignOut(arg.parse().unwrap_or(0)))),
