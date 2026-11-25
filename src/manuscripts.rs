@@ -748,7 +748,7 @@ impl Workspace {
                     .py(px(6.))
                     .on_click(self.on(Cmd::WriteSection(section.id.clone()), cx))
                     .when(on, |d| d.on_mouse_down(MouseButton::Right, self.on_context(MenuKind::Section(section.id.clone()), cx)))
-                    .child(div().flex_none().w(px(16.)).text_size(text_px(11.)).text_color(if on { Theme::accent() } else { Theme::text_placeholder() }).child((n + 1).to_string()))
+                    .child(div().flex_none().w(px(16.)).text_size(text_px(11.)).text_color(if on { Theme::accent() } else { Theme::text_tertiary() }).child((n + 1).to_string()))
                     .child(
                         div()
                             .flex()
@@ -973,8 +973,8 @@ impl Workspace {
                     // 预览 shows the whole manuscript as it reads, Markdown drawn; lit while it does, a click goes back to writing.
                     .child(preview)
                     .child(fill_button)
-                    // The language is said even in a narrow column: there is no icon that says it.
-                    .child(ui::ghost_button("write-language", Some("chevron-down"), Some(language.to_string().into())).h(text_px(26.)).px(px(7.)).text_size(text_px(12.)).on_click(self.on_menu(MenuKind::WriteLanguage, cx)))
+                    // The language is said even in a narrow column: there is no icon that says it. A menu button reads 文字 ⌄, as 版面 does.
+                    .child(ui::ghost_button("write-language", None, None).h(text_px(26.)).px(px(7.)).gap(px(4.)).text_size(text_px(12.)).child(language.to_string()).child(ui::icon("chevron-down", 11., Theme::text_tertiary())).on_click(self.on_menu(MenuKind::WriteLanguage, cx)))
                     .children(if self.settings.agent_writing && !self.in_draft() { self.render_version_stepper(cx) } else { None })
                     .child(tool("write-history", "history", None).on_click(self.on(Cmd::WriteHistory, cx)))
                     .child(tool("write-export", "export", Some(t("导出").into())).on_click(self.on_menu(MenuKind::ManuscriptExport, cx)))

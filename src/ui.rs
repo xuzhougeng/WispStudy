@@ -224,7 +224,8 @@ pub fn form_row(label: impl Into<SharedString>, content: impl IntoElement) -> Di
     div().flex().flex_col().gap(px(5.)).child(div().text_size(text_px(12.)).text_color(Theme::text_secondary()).child(label.into())).child(content)
 }
 
-/// The floating shell of a menu.
+/// The floating shell of a menu. Its edge is the stronger line: over a white card with a line of its own, the
+/// lighter one would melt into what is under it.
 pub fn popover() -> Div {
     div()
         .occlude()
@@ -236,7 +237,7 @@ pub fn popover() -> Div {
         .rounded(px(10.))
         .bg(Theme::bg_body())
         .border_1()
-        .border_color(Theme::line())
+        .border_color(Theme::line_strong())
         .shadow(theme::shadow_panel())
         .font(theme::ui_font())
         .text_size(text_px(13.))

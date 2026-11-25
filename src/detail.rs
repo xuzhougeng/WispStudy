@@ -105,12 +105,16 @@ impl Workspace {
                 .tooltip(ui::tip(if pdf_first { t("把 PDF 移回右边") } else { t("把 PDF 移到左边") }))
                 .on_click(self.on(Cmd::SwapPanes, cx))
         });
-        // 版面: how the papers on show are read, named by the layout in force. In the header row the panes share,
-        // like the swap, so it stays where it is whatever it changes.
+        // 版面: how the papers on show are read. In the header row the panes share, like the swap, so it stays where
+        // it is whatever it changes. A dim 「版面」 names the menu before the layout in force: beside the tabs a bare
+        // 提问 would read as the tab said twice.
         let layout = {
             let mode = lib.layout_mode();
             ui::ghost_button("layout", None, None).h(text_px(26.)).px(px(6.)).text_size(text_px(12.)).occlude()
-                .child(div().flex().items_center().gap(px(4.)).child(mode.map_or(t("版面"), |mode| t(mode.label()))).child(ui::icon("chevron-down", 11., Theme::text_tertiary())))
+                .child(div().flex().items_center().gap(px(4.))
+                    .child(div().when(mode.is_some(), |d| d.text_color(Theme::text_tertiary())).child(t("版面")))
+                    .children(mode.map(|mode| t(mode.label())))
+                    .child(ui::icon("chevron-down", 11., Theme::text_tertiary())))
                 .tooltip(ui::tip(t("版面：阅读、对照译文、提问、精读")))
                 .on_click(self.on_menu(MenuKind::Layout, cx))
         };
@@ -146,7 +150,7 @@ impl Workspace {
             };
             div().flex().flex_none().items_center().gap(px(6.))
                 .child(ui::ghost_button(id, Some(icon), None).occlude().tooltip(ui::tip(tip)).on_click(self.on(Cmd::ToggleReading, cx)))
-                .child(ui::ghost_button("detail-close", Some("x"), None).occlude().on_click(self.on(Cmd::CloseDetail, cx)))
+                .child(ui::ghost_button("detail-close", Some("x"), None).occlude().tooltip(ui::tip(t("关闭文献"))).on_click(self.on(Cmd::CloseDetail, cx)))
         };
         // Reading mode, and a paper that is asked about, keep one line over the paper: what is read, the three tabs, and the way back.
         let header = if reading || asking {
@@ -460,7 +464,7 @@ impl Workspace {
                             .when(heavy && !shrinking, |d| d.child(small(("file-compress", i), t("压缩")).tooltip(ui::tip(t("把过大的图片缩小，文字、页面和标注不变。原文件移到 removed 文件夹。"))).on_click(self.on(Cmd::CompressFile(file.id.clone()), cx))))
                             .when(file.format == "pdf", |d| d.child(small(("file-read", i), crate::i18n::tc("阅读·打开文件", "阅读")).on_click(self.on(Cmd::ReadFile(file.id.clone()), cx))))
                             .child(ui::ghost_button(("file-open", i), Some("link"), None).tooltip(ui::tip(t("用系统应用打开"))).on_click(self.on(Cmd::OpenFile(file.id.clone()), cx)))
-                            .child(ui::ghost_button(("file-remove", i), Some("x"), None).on_click(self.on(Cmd::RemoveFile(file.id.clone()), cx))),
+                            .child(ui::ghost_button(("file-remove", i), Some("x"), None).tooltip(ui::tip(t("移除附件"))).on_click(self.on(Cmd::RemoveFile(file.id.clone()), cx))),
                     )
                     // A file without text: why, what it means for questions, and the two things to try.
                     .when_some(failure, |d, error| {
@@ -552,9 +556,9 @@ impl Workspace {
                     // One with its number and a gap in what it says can be completed from the record the number names.
                     .when((!p.doi.is_empty() || !p.pmid.is_empty()) && (p.journal.is_empty() || p.authors.is_empty() || p.year.is_none()), |d| d.child(ui::secondary_button("detail-complete-id", if p.doi.is_empty() { t("按 PMID 补全") } else { t("按 DOI 补全") }).on_click(self.on(Cmd::CompleteById(id.clone()), cx))))
                     .when(!link.is_empty(), |d| d.child(ui::secondary_button("detail-link", t("打开网页")).on_click(self.on(Cmd::OpenLink(id.clone()), cx))))
-                    // Into another library, with its files and marks (transfer.rs); a conversation's paper has no other way there.
-                    .when(!self.move_targets().is_empty(), |d| d.child(ui::secondary_button("detail-move", t("移到文献库…")).on_click(self.on(Cmd::AskMovePaper(id.clone()), cx))))
-                    .child(ui::ghost_button("detail-trash", Some("bin"), Some(t("移到回收站").into())).h(text_px(32.)).on_click(self.on(Cmd::TrashPaper(id.clone()), cx))),
+                    // Filing and removing are rarer: under ⋯, by the names and commands of the paper's right-click menu
+                    // (`MenuKind::PaperMore`), so the row stays one line and the PDF and attachments stay in sight.
+                    .child(ui::ghost_button("detail-more", Some("ellipsis"), None).h(text_px(32.)).min_w(text_px(32.)).tooltip(ui::tip(t("更多操作"))).on_click(self.on_menu(MenuKind::PaperMore(id.clone()), cx))),
             )
             .child(section(t("标签")).child(if p.tags.is_empty() {
                 div().text_color(Theme::text_placeholder()).child(t("没有标签"))
@@ -571,7 +575,7 @@ impl Workspace {
             // The paper itself and what comes with it, each with its own way to add one.
             .child(section(t("正文 PDF")).child(div().flex().flex_col().gap(px(6.)).children(main_rows).child(div().flex().child(ui::secondary_button("attach-main", t("添加正文 PDF")).on_click(self.on(Cmd::AttachAs(id.clone(), "fulltext"), cx))))))
             .child(section(t("附件／补充材料")).child(div().flex().flex_col().gap(px(6.)).children(attachment_rows).when(files.iter().all(|f| f.kind == "fulltext"), |d| d.child(div().text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(t("补图、补表、补充方法等文件放在这里；PDF 附件可以在阅读器里打开，提问时会和正文一起读。")))).child(div().flex().child(ui::secondary_button("attach-more", t("添加附件")).on_click(self.on(Cmd::AttachAs(id.clone(), "supplement"), cx))))))
-            .child(div().text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(tf!("来源：{} · 添加于 {}", "Source: {} · Added {}", crate::i18n::phrase(&p.source), time::date_text(&p.added_at))))
+            .child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tf!("来源：{} · 添加于 {}", "Source: {} · Added {}", crate::i18n::phrase(&p.source), time::date_text(&p.added_at))))
             .into_any_element()
     }
 
@@ -873,10 +877,10 @@ impl Workspace {
                 .flex()
                 .flex_none()
                 .items_center()
-                .when(zooms, |d| d.child(step("pdf-zoom-out", "minus").on_click(self.on(Cmd::PdfZoom(ZoomTo::Out), cx))))
+                .when(zooms, |d| d.child(step("pdf-zoom-out", "minus").tooltip(ui::tip(t("缩小"))).on_click(self.on(Cmd::PdfZoom(ZoomTo::Out), cx))))
                 .child(ui::ghost_button("pdf-zoom", None, Some(size.into())).h(text_px(24.)).px(px(6.)).text_size(text_px(12.)).on_click(self.on_menu(MenuKind::PdfZoom, cx)))
                 .when(zooms, |d| {
-                    d.child(step("pdf-zoom-in", "plus").on_click(self.on(Cmd::PdfZoom(ZoomTo::In), cx)))
+                    d.child(step("pdf-zoom-in", "plus").tooltip(ui::tip(t("放大"))).on_click(self.on(Cmd::PdfZoom(ZoomTo::In), cx)))
                         // The whole page in one click from any size; in force it is marked, and a click brings the page's top back.
                         .child(ui::ghost_button("pdf-zoom-page", None, None).h(text_px(24.)).min_w(px(24.)).child(ui::icon("scan", 16., if bar.zoom == Zoom::FitPage { Theme::accent() } else { Theme::text_secondary() })).tooltip(ui::tip(t("适应整页"))).on_click(self.on(Cmd::PdfZoom(ZoomTo::Set(Zoom::FitPage)), cx)))
                 })
@@ -960,7 +964,7 @@ impl Workspace {
         if bar.paned {
             put((ui::ghost_button("pdf-pane-close", Some("x"), None).h(text_px(24.)).min_w(px(24.)).tooltip(ui::tip(t("关掉这一栏"))).on_click(self.on(Cmd::ClosePane(bar.paper_id.clone()), cx)), 24.));
         } else if bar.beside {
-            put((ui::ghost_button("pdf-beside-close", Some("x"), None).h(text_px(24.)).min_w(px(24.)).on_click(self.on(Cmd::BesidePdf(false), cx)), 24.));
+            put((ui::ghost_button("pdf-beside-close", Some("x"), None).h(text_px(24.)).min_w(px(24.)).tooltip(ui::tip(t("收起对照的 PDF"))).on_click(self.on(Cmd::BesidePdf(false), cx)), 24.));
         }
         drop(put);
         parts
