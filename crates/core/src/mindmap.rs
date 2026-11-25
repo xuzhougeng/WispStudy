@@ -461,6 +461,22 @@ pub fn layout(map: &MindMap, size: &dyn Fn(&Node, usize) -> (f32, f32), gap: (f3
     out
 }
 
+/// How large the whole map is drawn to fit `room`, within `range`: `drawn(zoom)` is the size it takes drawn at a
+/// zoom. A node does not grow with the zoom alone (its edge keeps its width, its words wrap anew at the size they
+/// are drawn), so the zoom its own size asks for is checked against the size it gives and made smaller until the
+/// map fits, or the least zoom is reached.
+pub fn fit(room: (f32, f32), range: (f32, f32), drawn: &dyn Fn(f32) -> (f32, f32)) -> f32 {
+    let scale = |size: (f32, f32)| if size.0 > 0. && size.1 > 0. { (room.0 / size.0).min(room.1 / size.1) } else { 1. };
+    let mut zoom = scale(drawn(1.)).clamp(range.0, range.1);
+    for _ in 0..8 {
+        let k = scale(drawn(zoom));
+        if k >= 1. || zoom <= range.0 { break }
+        // A hair under what the ratio says: what does not scale with the zoom comes inside too.
+        zoom = (zoom * k * 0.99).max(range.0);
+    }
+    zoom
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -612,5 +628,22 @@ mod tests {
         map.fold(a);
         let drawn = layout(&map, &size, (30., 10.));
         assert_eq!((drawn.nodes.len(), drawn.size, drawn.nodes[1].folded), (3, (120., 50.), true));
+    }
+
+    #[test]
+    fn the_whole_map_fits_though_its_nodes_do_not_scale() {
+        let (map, _) = sample();
+        // Each node keeps two points of edge at any zoom and wraps onto a second line below 0.6.
+        let drawn = |zoom: f32| layout(&map, &|node: &Node, _| (node.text.chars().count() as f32 * 10. * zoom + 2., if zoom < 0.6 { 40. } else { 20. } * zoom + 2.), (30. * zoom, 10. * zoom)).size;
+        let room = (100., 50.);
+        let zoom = fit(room, (0.3, 1.25), &drawn);
+        let size = drawn(zoom);
+        assert!(size.0 <= room.0 && size.1 <= room.1, "{zoom} {size:?}");
+        // Not much smaller than it has to be: a tenth more would not fit.
+        let more = drawn(zoom * 1.1);
+        assert!(more.0 > room.0 || more.1 > room.1, "{zoom} {more:?}");
+        // A small map is drawn at the largest zoom allowed, a huge one at the least.
+        assert_eq!(fit((1e6, 1e6), (0.3, 1.25), &drawn), 1.25);
+        assert_eq!(fit((1., 1.), (0.3, 1.25), &drawn), 0.3);
     }
 }

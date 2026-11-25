@@ -507,18 +507,19 @@ impl Render for MindMapView {
         if std::mem::take(&mut self.refocus) && self.editing.is_none() { window.focus(&self.focus) }
         let view = self.view.get().size;
         let (wide, high) = (f32::from(view.width), f32::from(view.height));
-        // The whole map in the view, in its middle: measured at its own size, then drawn at the size that fits.
-        if wide > 0. && std::mem::take(&mut self.fit) {
-            let whole = mindmap::layout(&self.map, &|node, depth| Self::size(node, depth, 1., window), GAP);
-            let room = (wide - 2. * EDGE, high - HEAD - EDGE - 30.);
-            if whole.size.0 > 0. && whole.size.1 > 0. {
-                self.zoom = (room.0 / whole.size.0).min(room.1 / whole.size.1).clamp(ZOOM.0, 1.25);
-                self.pan = ((wide - whole.size.0 * self.zoom) / 2. - EDGE, ((room.1 - whole.size.1 * self.zoom) / 2.).max(0.));
-            }
+        // The whole map in the view, in its middle, above the zoom bar: drawn at the size that fits, which is
+        // measured at the size it is drawn (a node's words wrap anew when smaller).
+        let room = (wide - 2. * EDGE, high - HEAD - EDGE - 30.);
+        let fitting = wide > 0. && std::mem::take(&mut self.fit);
+        if fitting {
+            let map = &self.map;
+            let drawn = |zoom: f32| mindmap::layout(map, &|node, depth| Self::size(node, depth, zoom, window), (GAP.0 * zoom, GAP.1 * zoom)).size;
+            self.zoom = mindmap::fit(room, (ZOOM.0, 1.25), &drawn);
         }
         let zoom = self.zoom;
         let gap = (GAP.0 * zoom, GAP.1 * zoom);
         let drawn = mindmap::layout(&self.map, &|node, depth| Self::size(node, depth, zoom, window), gap);
+        if fitting { self.pan = ((wide - drawn.size.0) / 2. - EDGE, ((room.1 - drawn.size.1) / 2.).max(0.)) }
         if wide > 0. {
             // The node chosen comes into view: after a key, a new node, a passage sent from the pages.
             if std::mem::take(&mut self.reveal) && let Some(node) = self.chosen.and_then(|id| drawn.nodes.iter().find(|node| node.id == id)) {
@@ -603,9 +604,12 @@ impl Render for MindMapView {
                 .child(words)
                 .children(page.filter(|_| !editing))
                 // Held, the root moves the map and any other node is taken to be carried; a click is still a click.
-                .on_mouse_down(MouseButton::Left, cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                // The press gives the map the keyboard, as one on its ground does, so Esc puts down what is held.
+                .on_mouse_down(MouseButton::Left, cx.listener(move |this, event: &MouseDownEvent, window, cx| {
                     cx.stop_propagation();
                     if this.editing == Some(id) { return }
+                    if this.editing.is_some() { this.finish(true, cx) }
+                    window.focus(&this.focus);
                     if root { return this.press_ground(event.position) }
                     this.grab = Some(Grab::Node { id, from: event.position, at: event.position, moving: false, drop: None });
                 }))
