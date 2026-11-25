@@ -6,7 +6,19 @@ use crate::i18n::t;
 use gpui::*;
 use std::collections::BTreeMap;
 
-actions!(workspace, [Dismiss, ShowPalette, FocusSearch, AddPaper, ImportPdf, AskLibrary, ToggleDetail, ToggleSidebar, ToggleReading, ShowSettings, ShowHome, NewLibrary, ZoomIn, ZoomOut, ZoomFit, CopyPicked, FindCandidates, MoveUp, MoveDown, MoveLeft, MoveRight, MovePageUp, MovePageDown, MoveFirst, MoveLast, OpenSelected, TrashSelected, MarkUp, MarkDown, MarkAll, DecideIncluded, DecideRelated, DecideUncertain, DecideIrrelevant, DecidePending, TakeSuggestion, StarScreened, TranslateScreened, UndoDecision, AskAssistant, TickSuggestion, PaperBack, PaperForward]);
+actions!(workspace, [ShowPalette, FocusSearch, AddPaper, ImportPdf, AskLibrary, ToggleDetail, ToggleSidebar, ToggleReading, ShowSettings, ShowHome, NewLibrary, ZoomIn, ZoomOut, ZoomFit, CopyPicked, FindCandidates, MoveUp, MoveDown, MoveLeft, MoveRight, MovePageUp, MovePageDown, MoveFirst, MoveLast, OpenSelected, TrashSelected, MarkUp, MarkDown, MarkAll, DecideIncluded, DecideRelated, DecideUncertain, DecideIrrelevant, DecidePending, TakeSuggestion, StarScreened, TranslateScreened, UndoDecision, AskAssistant, TickSuggestion, PaperBack, PaperForward]);
+
+/// Esc: puts away what is open, one thing a press (`Workspace::dismiss`; a PDF, a mind map and a text field hear it
+/// first). `leave` says the press, with nothing left to put away in a library, goes back to 所有文献库: Esc carries it
+/// while the shortcut `leave` is Esc, its own key carries it once changed.
+#[derive(Clone, PartialEq, Default, Debug, Action)]
+#[action(namespace = workspace, no_json)]
+pub struct Dismiss {
+    pub leave: bool,
+}
+
+/// The key of the shortcut `leave` by default, the one key a shortcut may have bare.
+const ESCAPE: &str = "escape";
 
 /// The keys of 筛选, fixed like the arrow keys: what each does is in `Workspace::screen_key`. Bare letters
 /// and digits, so they are heard only while no text field has the keyboard.
@@ -24,10 +36,11 @@ pub struct Shortcut {
 pub const GROUPS: [&str; 2] = ["应用", "文献库"];
 
 /// What each one does is in `Workspace::shortcut` (commands.rs).
-pub const SHORTCUTS: [Shortcut; 17] = [
+pub const SHORTCUTS: [Shortcut; 18] = [
     Shortcut { id: "palette", label: "命令面板", group: 0, default: "secondary-k" },
     Shortcut { id: "settings", label: "打开设置", group: 0, default: "secondary-," },
     Shortcut { id: "home", label: "回到所有文献库", group: 0, default: "secondary-shift-h" },
+    Shortcut { id: "leave", label: "一层层退出，最后回到所有文献库", group: 0, default: ESCAPE },
     Shortcut { id: "new-library", label: "新建文献库", group: 0, default: "secondary-shift-n" },
     Shortcut { id: "search", label: "搜索：文献库里搜文献，写作里搜稿件，PDF 里搜原文", group: 1, default: "secondary-f" },
     Shortcut { id: "add", label: "通过 DOI / PMID 添加文献", group: 1, default: "secondary-n" },
@@ -74,6 +87,8 @@ pub fn is_default(id: &str, key: &str) -> bool {
 pub fn refusal(id: &str, key: &str, custom: &BTreeMap<String, String>) -> Option<String> {
     let Ok(stroke) = Keystroke::parse(key) else { return Some(t("没有认出这个按键。").into()) };
     let m = stroke.modifiers;
+    // Going back out of a library is Esc's own last step, so Esc is the one bare key it may have back.
+    if id == "leave" && same(ESCAPE, key) { return None }
     let function_key = stroke.key.len() > 1 && stroke.key.starts_with('f') && stroke.key[1..].parse::<u8>().is_ok();
     if !(m.control || m.alt || m.platform || function_key) {
         return Some(if cfg!(target_os = "macos") { t("快捷键需要带上 ⌘、⌃ 或 ⌥，或者使用 F1–F12。").into() } else { t("快捷键需要带上 Ctrl 或 Alt，或者使用 F1–F12。").into() });
@@ -89,7 +104,11 @@ pub fn rebuild(custom: &BTreeMap<String, String>, cx: &mut App) {
     crate::input::bind_keys(cx);
     let context = Some("Workspace");
     // Copying what is selected in a PDF or in an answer: the text fields have the same key for their own selection.
-    let mut bindings = vec![KeyBinding::new("escape", Dismiss, context), KeyBinding::new("secondary-c", crate::pdf::CopySelection, Some("PdfView")), KeyBinding::new("secondary-c", CopyPicked, context)];
+    // Esc goes back out of the library at its last step while `leave` is Esc; a key of its own for `leave` does all
+    // Esc does, layer by layer, and that last step too (it is Esc's action, so a PDF or a field hears it first as well).
+    let leave = key_of("leave", custom);
+    let esc_leaves = same(&leave, ESCAPE);
+    let mut bindings = vec![KeyBinding::new(ESCAPE, Dismiss { leave: esc_leaves }, context), KeyBinding::new("secondary-c", crate::pdf::CopySelection, Some("PdfView")), KeyBinding::new("secondary-c", CopyPicked, context)];
     // A mark chosen on a PDF page is removed with Delete or Backspace; with none chosen the key goes on (`TrashSelected`).
     bindings.extend(["delete", "backspace"].map(|key| KeyBinding::new(key, crate::pdf::RemoveChosen, Some("PdfView"))));
     // A change of the marks on a PDF is taken back and done again with the text field's keys; a field writing a note
@@ -128,6 +147,8 @@ pub fn rebuild(custom: &BTreeMap<String, String>, cx: &mut App) {
         // A key from a hand-edited settings.json may not parse; `KeyBinding::new` would panic on it.
         if key.is_empty() || Keystroke::parse(&key).is_err() { continue }
         bindings.push(match shortcut.id {
+            "leave" if esc_leaves => continue,
+            "leave" => KeyBinding::new(&key, Dismiss { leave: true }, context),
             "palette" => KeyBinding::new(&key, ShowPalette, context),
             "settings" => KeyBinding::new(&key, ShowSettings, context),
             "home" => KeyBinding::new(&key, ShowHome, context),
@@ -165,7 +186,7 @@ pub fn pretty(key: &str) -> String {
     let Ok(stroke) = Keystroke::parse(key) else { return key.to_string() };
     let m = stroke.modifiers;
     let name = match stroke.key.as_str() {
-        "escape" => "Esc".to_string(),
+        ESCAPE => "Esc".to_string(),
         "space" => "Space".to_string(),
         "enter" => "Enter".to_string(),
         "backspace" => if cfg!(target_os = "macos") { "⌫" } else { "Backspace" }.to_string(),
@@ -213,6 +234,9 @@ mod tests {
         assert!(refusal("search", "secondary-c", &custom).unwrap().contains("文本编辑"));
         assert!(refusal("search", "secondary-n", &custom).unwrap().contains("通过 DOI / PMID 添加文献"));
         assert_eq!(refusal("search", "f3", &custom), None);
+        // Esc is refused everywhere but as the key that leaves a library, whose default it is.
+        assert!(refusal("search", "escape", &custom).is_some() && refusal("leave", "escape", &custom).is_none());
+        assert!(refusal("leave", "f2", &custom).is_none() && refusal("leave", "q", &custom).is_some());
         // Its own key is no conflict; a removed shortcut frees its key.
         assert_eq!(refusal("search", "secondary-f", &custom), None);
         custom.insert("add".to_string(), String::new());

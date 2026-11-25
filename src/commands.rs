@@ -2318,7 +2318,7 @@ impl Workspace {
         if let Some(lib) = self.lib.as_mut().filter(|lib| lib.info.draft && lib.page != Page::Ask) { lib.page = Page::Ask }
     }
 
-    pub fn dismiss(&mut self, _: &Dismiss, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn dismiss(&mut self, action: &Dismiss, window: &mut Window, cx: &mut Context<Self>) {
         if self.menu.take().is_some() {
         } else if self.palette.is_some() {
             self.close_palette(window, cx);
@@ -2370,8 +2370,29 @@ impl Workspace {
         } else if self.lib.as_ref().is_some_and(|l| l.page == Page::Screen && l.screen.mode != ScreenMode::Batch) {
             // Out of a round or the confirmation, back to the queue.
             self.run(Cmd::ScreenMode(ScreenMode::Batch), window, cx);
+        } else if action.leave && self.lib.is_some() {
+            self.leave_by_key(window, cx);
         }
         cx.notify();
+    }
+
+    /// Esc with nothing left to put away in the library: back to 所有文献库, the way its ← goes (design.md rule 52).
+    /// Not in one press from where words are typed: a field with the keyboard gives it back to the page first (what is
+    /// in it stays), words in the search box go next (the list in full), and a conversation's box holding words not
+    /// yet sent keeps the library open, since leaving would lose them.
+    fn leave_by_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if window.context_stack().iter().any(|context| context.contains("TextInput")) { return window.focus(&self.focus) }
+        let Some(lib) = self.lib.as_mut() else { return };
+        if lib.page == Page::Papers && !lib.search.read(cx).text().is_empty() {
+            // `set_text` says nothing to the box's subscription: the list is given back here.
+            lib.search.update(cx, |input, cx| input.set_text("", cx));
+            lib.filters.search.clear();
+            return lib.refilter();
+        }
+        if [Talk::Library, Talk::Paper, Talk::Write].into_iter().any(|talk| !lib.chat(talk).input.read(cx).text().trim().is_empty()) {
+            return self.say(t("助手的输入框里还有没发出的字：发出或删掉之后，Esc 才回到所有文献库"), cx);
+        }
+        self.run(Cmd::GoHome, window, cx);
     }
 
     /// A keyboard shortcut (shortcuts.rs) was pressed.
