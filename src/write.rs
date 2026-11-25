@@ -30,7 +30,7 @@ const STACK_UNDER: f32 = 680.;
 const DRAWER_SHARE: f32 = 0.46;
 
 /// What the empty manuscript says: to the person who writes it, and beside the conversation in which the assistant does.
-pub(crate) const PLACEHOLDER: &str = "在这里写。写好一段，按「查找候选句」的快捷键，右边就列出文献库里的文献在同一部分相近的写法；中文或别的语言也可以，先写下想表达的意思。";
+pub(crate) const PLACEHOLDER: &str = "在这里写，中文或别的语言都可以，先写下想表达的意思。写好一段，选中它：旁边出现「找句子」「配引用」「润色」这些工具。";
 const PLACEHOLDER_AGENT: &str = "这一节还是空的。在左边告诉助手要写什么，它会写在这里；也可以自己动笔。";
 
 /// How long a text is, as a writer counts it: a Chinese, Japanese or Korean
@@ -124,7 +124,7 @@ impl Workspace {
         let picked = if agent && editing { text_length(writing.editor.read(cx).selected()).0 } else { 0 };
         // What the assistant changed in this section in answer to the last question: each change to go to or take back, in either mode.
         let told = writing.revise.run.as_ref().filter(|run| editing && run.section == writing.section_id);
-        // The row under it all: what there is to say of the text, and where the person writes, the tools for the caret's paragraph.
+        // The line under it all: what there is to say of the text. The tools are beside what is selected, nowhere else.
         let status = if writing.reading {
             let whole: String = writing.current().map_or(String::new(), |m| m.sections.iter().map(|s| s.body.as_str()).collect::<Vec<_>>().join("\n"));
             tf!("全文 {} · 点一节的名称，回到那一节写", "Manuscript: {} · Click a section name to edit it", length_label(&whole))
@@ -143,7 +143,7 @@ impl Workspace {
         // room is left beside the sheet, not inside its frame, and the boxes under it keep its edges.
         let sheet = f32::from(theme::manuscript_width()) + 2. * SHEET_MARGIN + 2. + 32.;
         let inner = width.min(sheet);
-        let foot = self.render_write_foot(inner, !agent && editing, !agent && editing && writing.editor.read(cx).selection().is_empty(), status, window, cx);
+        let foot = self.render_write_foot(!agent && editing, status);
         let seek = self.render_seek(window, cx);
         let lib = self.lib.as_ref().unwrap();
         let writing = &lib.writing;

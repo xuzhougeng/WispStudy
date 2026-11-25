@@ -79,8 +79,9 @@ struct Row {
     x: Pixels,
     line_height: Pixels,
     decor: Decor,
-    /// The picture this line is (`![caption](address)`), drawn over its words at this size: the room for it is above `top`.
-    picture: Option<(Arc<RenderImage>, Size<Pixels>)>,
+    /// The picture this line is (`![caption](address)`), drawn over its words at this size, this far from the
+    /// text's left edge (in the middle of the column): the room for it is above `top`.
+    picture: Option<(Arc<RenderImage>, Size<Pixels>, Pixels)>,
 }
 
 impl Row {
@@ -330,11 +331,21 @@ impl TextInput {
         self.folds = folds;
     }
 
+    /// The stretches drawn as other words that are still a citation in its brackets where they stand.
+    fn cites(&self) -> impl Iterator<Item = Range<usize>> + '_ {
+        let on = self.markdown && !self.masked;
+        self.folds.iter().map(|(range, _)| range.clone()).filter(move |range| on && self.text.get(range.clone()).is_some_and(|written| written.starts_with('[') && written.ends_with(']')))
+    }
+
     /// The stretch drawn as other words that ends (`before`) or begins at `o`, while it is drawn so.
     fn fold_beside(&self, o: usize, before: bool) -> Option<Range<usize>> {
-        if !self.markdown || self.masked { return None }
-        let text = &self.text;
-        self.folds.iter().map(|(range, _)| range.clone()).find(|range| (if before { range.end == o } else { range.start == o }) && text.get(range.clone()).is_some_and(|written| written.starts_with('[') && written.ends_with(']')))
+        self.cites().find(|range| if before { range.end == o } else { range.start == o })
+    }
+
+    /// A selection takes a citation whole or lies inside it: an end standing in one that the selection is not
+    /// within goes out to that citation's edge, so what is selected is what is drawn as selected.
+    fn whole_cites(&self, sel: Range<usize>) -> Range<usize> {
+        widened(self.cites(), sel)
     }
 
     /// The pictures the text's picture lines show, by their addresses. The owner gives them anew as they are read;
@@ -459,11 +470,10 @@ impl TextInput {
 
     fn select_to(&mut self, o: usize, cx: &mut Context<Self>) {
         self.selection_toolbar_dismissed = false;
-        if self.reversed { self.sel.start = o } else { self.sel.end = o }
-        if self.sel.end < self.sel.start {
-            self.reversed = !self.reversed;
-            self.sel = self.sel.end..self.sel.start;
-        }
+        let (was, anchor) = if self.reversed { (self.sel.start, self.sel.end) } else { (self.sel.end, self.sel.start) };
+        let (anchor, o) = stepped(self.cites(), was, anchor, o);
+        self.reversed = o < anchor;
+        self.sel = anchor.min(o)..anchor.max(o);
         cx.notify();
     }
 
@@ -538,7 +548,7 @@ impl TextInput {
     }
 
     fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
-        // Beside a citation drawn as a reader reads it, the first press selects it whole, written out, and the next takes it away.
+        // Beside a citation drawn as a reader reads it, the first press selects it whole, as it is drawn, and the next takes it away.
         if self.sel.is_empty() && let Some(range) = self.fold_beside(self.cursor(), true) {
             (self.sel, self.reversed, self.typing) = (range, true, false);
             return cx.notify();
@@ -733,7 +743,7 @@ impl TextInput {
     /// The display offset closest to a point relative to the text origin.
     fn index_in(&self, l: &Layout, p: Point<Pixels>) -> usize {
         // A picture over a line is that line's: a click on it goes to its caption, not to the paragraph before it.
-        let over = |row: &Row| row.picture.as_ref().map_or(px(0.), |(_, drawn)| drawn.height + px(crate::write_figures::SHOT_GAP));
+        let over = |row: &Row| row.picture.as_ref().map_or(px(0.), |(_, drawn, _)| drawn.height + px(crate::write_figures::SHOT_GAP));
         let Some(row) = l.rows.iter().rev().find(|row| row.top - over(row) <= p.y).or(l.rows.first()) else { return 0 };
         let local = point((p.x - row.x).max(px(0.)), (p.y - row.top).max(px(0.)).min(row.height() - px(1.)));
         row.start + match row.line.closest_index_for_position(local, row.line_height) {
@@ -790,7 +800,7 @@ impl TextInput {
             self.reversed = false;
             return cx.notify();
         }
-        let range = selection::around(&self.text, i, unit);
+        let range = self.whole_cites(selection::around(&self.text, i, unit));
         self.grain = Some((unit, range.clone()));
         self.typing = false;
         self.selection_toolbar_dismissed = false;
@@ -812,6 +822,7 @@ impl TextInput {
             let i = self.index_for_mouse(ev.position);
             let Some((unit, first)) = &self.grain else { return self.select_to(i, cx) };
             let (sel, reversed) = selection::extend(&self.text, first, i, *unit);
+            let sel = self.whole_cites(sel);
             if (&sel, reversed) != (&self.sel, self.reversed) {
                 (self.sel, self.reversed) = (sel, reversed);
                 cx.notify();
@@ -978,13 +989,10 @@ impl SelectionGeometry {
     fn toolbar_origin(self, toolbar: Size<Pixels>) -> Point<Pixels> {
         let inset = px(6.);
         let gap = px(8.);
-        // Above the first selected line; below the last when the top has no room.
-        let above = self.first.top() - gap - toolbar.height;
-        let (line, y) = if above >= self.viewport.top() + inset {
-            (self.first, above)
-        } else {
-            (self.last, self.last.bottom() + gap)
-        };
+        // Under the last selected line, where a selection is let go of; over the first when there is no room
+        // under it; with room at neither end (a selection taller than the view), at the foot of the view.
+        let (above, below) = (self.first.top() - gap - toolbar.height, self.last.bottom() + gap);
+        let (line, y) = if below + toolbar.height <= self.viewport.bottom() - inset || above < self.viewport.top() + inset { (self.last, below) } else { (self.first, above) };
         let left = self.viewport.left() + inset;
         let top = self.viewport.top() + inset;
         point(
@@ -1139,9 +1147,36 @@ const QUOTE_INDENT: f32 = 16.;
 const CODE_INDENT: f32 = 10.;
 
 /// Whether a stretch drawn as other words is written out: the caret is inside it (at an edge it stays as it is
-/// drawn, so typing next to it moves nothing), or some of it is selected.
+/// drawn, so typing next to it moves nothing), or what is selected is all inside it, a part of it being changed.
+/// A selection that reaches past it leaves it as it is drawn: selecting a paragraph moves none of its words.
 fn opens(range: &Range<usize>, reveal: &Range<usize>) -> bool {
-    if reveal.is_empty() { range.start < reveal.start && reveal.start < range.end } else { reveal.start < range.end && range.start < reveal.end }
+    range.start < reveal.start && reveal.end < range.end
+}
+
+/// A selection from `anchor` whose other end goes from `was` to `o`, among citations drawn as a reader reads them.
+/// A citation is one thing to a selection that is not all inside it: the end that moves steps over it, the way it
+/// was going, and the end that stays takes it in.
+fn stepped(cites: impl Iterator<Item = Range<usize>>, was: usize, mut anchor: usize, mut o: usize) -> (usize, usize) {
+    for cite in cites {
+        let within = |at: usize| cite.start < at && at < cite.end;
+        match (within(anchor), within(o)) {
+            (false, true) => o = if o < was { cite.start } else { cite.end },
+            (true, false) => anchor = if o < anchor { cite.end } else { cite.start },
+            _ => {}
+        }
+    }
+    (anchor, o)
+}
+
+/// `sel` with each end that stands in a citation the selection is not within moved out to that citation's edge.
+fn widened(cites: impl Iterator<Item = Range<usize>>, mut sel: Range<usize>) -> Range<usize> {
+    if sel.is_empty() { return sel }
+    for cite in cites {
+        if opens(&cite, &sel) { continue }
+        if cite.start < sel.start && sel.start < cite.end { sel.start = cite.start }
+        if cite.start < sel.end && sel.end < cite.end { sel.end = cite.end }
+    }
+    sel
 }
 
 /// Markdown drawn as it says, a paragraph at a time: headings larger,
@@ -1167,7 +1202,7 @@ fn shape_markdown(input: &TextInput, style: &TextStyle, window: &mut Window, wra
         for piece in &line.pieces {
             let written = &text[piece.range.clone()];
             let hidden = piece.part == Part::Syntax && !revealed;
-            // A citation as a reader will read it, unless the caret is in it or some of it is selected.
+            // A citation as a reader will read it, unless the caret or all of what is selected is inside it.
             let folded = piece.cite.then(|| input.folds.iter().find(|(range, _)| *range == piece.range)).flatten().filter(|(range, _)| !(focused && opens(range, &reveal))).map(|(_, label)| label.as_str());
             let drawn: &str = if let Some(label) = folded { label } else if piece.part == Part::Bullet && !revealed { "•" } else if hidden { "" } else { written };
             let from = start + shown.len();
@@ -1248,13 +1283,13 @@ fn shape_markdown(input: &TextInput, style: &TextStyle, window: &mut Window, wra
         if empty(n) && !line.code { line_height *= paragraph_factor }
         top += gap * paragraph_factor;
         let len = shown.len();
-        // A picture's line has its picture over it, whole in the column: the room is made above the words.
+        // A picture's line has its picture over it, whole in the column and in the middle of it: the room is made above the words.
         let picture = line.picture.as_ref().and_then(|address| input.pictures.get(&text[address.clone()])).zip(wrap).map(|(image, wrap)| {
             let natural = image.size(0);
             let (w, h) = crate::write_figures::shot_size((natural.width.0 as f32, natural.height.0 as f32), f32::from(wrap - x), window.scale_factor().min(2.));
-            (image.clone(), gpui::size(px(w), px(h)))
+            (image.clone(), gpui::size(px(w), px(h)), x + ((wrap - x - px(w)) / 2.).max(px(0.)).floor())
         });
-        if let Some((_, drawn)) = &picture { top += drawn.height + px(crate::write_figures::SHOT_GAP) }
+        if let Some((_, drawn, _)) = &picture { top += drawn.height + px(crate::write_figures::SHOT_GAP) }
         let wrap = wrap.map(|w| (w - x).max(px(40.)));
         let shaped = window.text_system().shape_text(shown.into(), size, &runs, wrap, None).unwrap_or_default();
         let Some(shaped) = shaped.into_iter().next() else { continue };
@@ -1393,7 +1428,7 @@ impl Element for InputElement {
                 }
             })
             .collect();
-        let pictures = probe.rows.iter().filter_map(|row| row.picture.as_ref().map(|(image, drawn)| (Bounds::new(origin + point(row.x, row.top - drawn.height - px(crate::write_figures::SHOT_GAP)), *drawn), image.clone()))).collect();
+        let pictures = probe.rows.iter().filter_map(|row| row.picture.as_ref().map(|(image, drawn, left)| (Bounds::new(origin + point(*left, row.top - drawn.height - px(crate::write_figures::SHOT_GAP)), *drawn), image.clone()))).collect();
         let viewport = bounds.intersect(&window.content_mask().bounds);
         let visible: Vec<_> = selection.iter().map(|quad| quad.bounds.intersect(&viewport)).filter(|bounds| !bounds.is_empty()).collect();
         let geometry = visible.first().zip(visible.last()).map(|(&first, &last)| SelectionGeometry { first, last, viewport });
@@ -1457,7 +1492,7 @@ impl Element for InputElement {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: that would bring in gpui's own `test` attribute.
-    use super::{DisplayMap, Seg};
+    use super::{DisplayMap, Seg, opens, stepped, widened};
 
     /// `a **b**` drawn as `a b`, then a line break and `- c` drawn as `• c`.
     fn map() -> DisplayMap {
@@ -1473,5 +1508,41 @@ mod tests {
         // A click beside the bold word lands outside its stars; one after the bullet, after the marker.
         assert_eq!([0, 2, 3, 4, 7, 9].map(|d| map.to_source(d)), [0, 2, 5, 8, 9, 11]);
         assert_eq!(DisplayMap::default().to_source(5), 5);
+    }
+
+    /// `ab [@Key p.2] cd`: the citation is bytes 3..13.
+    const CITE: std::ops::Range<usize> = 3..13;
+
+    #[test]
+    fn a_selection_leaves_a_citation_as_it_is_drawn() {
+        // The caret inside it writes it out; at its edges it does not.
+        assert!(opens(&CITE, &(5..5)));
+        assert!(!opens(&CITE, &(3..3)) && !opens(&CITE, &(13..13)));
+        // A part of it selected, short of its brackets, is someone changing it.
+        assert!(opens(&CITE, &(9..12)));
+        // A selection that goes through it, takes it whole or reaches one of its edges is not.
+        assert!(!opens(&CITE, &(0..16)) && !opens(&CITE, &CITE) && !opens(&CITE, &(0..8)) && !opens(&CITE, &(3..8)) && !opens(&CITE, &(8..13)));
+    }
+
+    #[test]
+    fn a_selection_takes_a_citation_whole() {
+        let cites = || std::iter::once(CITE);
+        // Shift and an arrow from outside: one press goes over the whole of it, either way.
+        assert_eq!(stepped(cites(), 3, 0, 4), (0, 13));
+        assert_eq!(stepped(cites(), 13, 16, 12), (16, 3));
+        // From its own edge too, and the next press the other way lets go of it again.
+        assert_eq!(stepped(cites(), 13, 13, 12), (13, 3));
+        assert_eq!(stepped(cites(), 3, 13, 4), (13, 13));
+        // Inside it, written out, the selection moves by letters.
+        assert_eq!(stepped(cites(), 9, 8, 10), (8, 10));
+        // Leaving it with a selection begun inside takes all of it.
+        assert_eq!(stepped(cites(), 12, 8, 13), (3, 13));
+        assert_eq!(stepped(cites(), 4, 8, 1), (13, 1));
+        // A word or a sentence taken by clicks that ends in it reaches its edge; one inside it stays.
+        assert_eq!(widened(cites(), 0..8), 0..13);
+        assert_eq!(widened(cites(), 8..16), 3..16);
+        assert_eq!(widened(cites(), 3..8), 3..13);
+        assert_eq!(widened(cites(), 5..9), 5..9);
+        assert_eq!(widened(cites(), 8..8), 8..8);
     }
 }

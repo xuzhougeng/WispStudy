@@ -645,7 +645,7 @@ impl Workspace {
     }
 
     /// The items of the writing page's menus.
-    pub(crate) fn manuscript_menu(&self, kind: &MenuKind) -> (Vec<MenuItem>, Vec<usize>) {
+    pub(crate) fn manuscript_menu(&self, kind: &MenuKind, cx: &App) -> (Vec<MenuItem>, Vec<usize>) {
         let item = |label: String, checked: bool, cmd: Cmd| MenuItem { label: label.into(), checked, note: None, cmd };
         let Some(writing) = self.lib.as_ref().map(|l| &l.writing) else { return (vec![], vec![]) };
         let (mut items, mut breaks) = (vec![], vec![]);
@@ -674,7 +674,15 @@ impl Workspace {
                 if at > 0 { items.push(item(t("前移").into(), false, Cmd::MoveSection(id.clone(), -1))) }
                 if at + 1 < m.sections.len() { items.push(item(t("后移").into(), false, Cmd::MoveSection(id.clone(), 1))) }
                 items.push(item(t("历史版本…").into(), false, Cmd::WriteHistory));
+                // The cuts of a section are made where the caret is: in the section being written, while it is the text on show.
+                let cuts = *id == writing.section_id && !writing.reading && !writing.editor.read(cx).text().trim().is_empty();
+                if cuts || at > 0 { breaks.push(items.len()) }
+                if cuts {
+                    items.push(item(t("把光标所在的一段设为标题").into(), false, Cmd::SplitSection(true)));
+                    items.push(item(t("从光标所在的一段拆成新节").into(), false, Cmd::SplitSection(false)));
+                }
                 if at > 0 { items.push(item(t("并入上一节").into(), false, Cmd::MergeSection(id.clone()))) }
+                if m.sections.len() > 1 { breaks.push(items.len()) }
                 if m.sections.len() > 1 { items.push(item(t("删除这一节…").into(), false, Cmd::AskRemoveSection(id.clone()))) }
             }
             MenuKind::ManuscriptExport => {
