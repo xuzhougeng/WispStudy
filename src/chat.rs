@@ -8,7 +8,7 @@
 //! library's past conversations in place of the one in hand.
 
 use crate::i18n::t;
-use crate::app::{Chat, ChatImage, ChatItem, Cmd, Consent, MenuKind, ScopeDo, Talk, Workspace};
+use crate::app::{Chat, ChatImage, ChatItem, Cmd, Consent, MenuKind, Place, ScopeDo, Talk, Workspace};
 use crate::input::TextInput;
 use crate::settings::SettingsPage;
 use crate::theme::{self, Theme, text_px};
@@ -689,6 +689,8 @@ impl Workspace {
 
     pub fn render_chat(&mut self, talk: Talk, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if let Some(lib) = self.lib.as_mut() { lib.check_quotes(talk) }
+        // The box draws its mentions folded: given anew when its text changed.
+        self.fold_mentions(Place::Chat(talk), cx);
         // A drag that ended anywhere but in the conversation says nothing: the flag is put right here.
         if !cx.has_active_drag() { self.pinning = false }
         let profile = self.settings.profile_for_or_default(wisp_core::settings::Task::Chat);
@@ -829,6 +831,8 @@ impl Workspace {
         let materials = (listable && chat.materials_open).then(|| self.render_materials(chat, window, cx));
         // The first question can still be kept to a few papers: dragged from the panel into the conversation.
         let pinnable = listable && chat.ctx.is_none() && !draft;
+        // Once it was asked, a paper dragged in is named in the next question instead (`mention_paper`).
+        let mentionable = listable && !pinnable;
         div()
             .relative()
             .flex()
@@ -876,6 +880,7 @@ impl Workspace {
             .child(div().relative().flex().flex_col().flex_1().min_h_0()
             // A paper dragged out of the panel is let go anywhere in the conversation.
             .when(pinnable, |d| d.on_drop(cx.listener(|this, drag: &PaperDrag, window, cx| this.run(Cmd::Scope(ScopeDo::Pin(drag.id.clone())), window, cx))))
+            .when(mentionable, |d| d.on_drop(cx.listener(move |this, drag: &PaperDrag, window, cx| this.run(Cmd::MentionPaper(talk, drag.id.clone()), window, cx))))
             // A press beside the panel puts it away, as with any floating thing; what it searched for stays.
             .when(materials.is_some(), |d| d.on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
                 if let Some(lib) = this.lib.as_mut() { lib.library_chat.materials_open = false }
@@ -1020,10 +1025,12 @@ impl Workspace {
         let searching = lib.scope_hits.is_some();
         // Before the material is built a paper can be picked for the first question.
         let pinnable = chat.ctx.is_none() && !draft;
+        // After it a paper can be named in the next question: dragged in, or taken with its plus.
+        let mentionable = !pinnable;
         let note = if draft {
             t("这次对话收进的文献。把对话建成文献库时，它们就是文献库的文献；点一篇在右边打开。").to_string()
         } else if chat.ctx.is_some() {
-            t("这次对话开始时交给模型的材料。助手还能用工具查到库里的其他文献；在这里点开一篇不会改变范围。").to_string()
+            t("这次对话开始时交给模型的材料。助手还能用工具查到库里的其他文献；在这里点开一篇不会改变范围。把一篇拖进对话或点它的 +，就在问题里提到它。").to_string()
         } else if !lib.asked.is_empty() {
             tf!("第一个问题只读选定的 {} 篇。再拖进对话可以添加，在输入框上方可以移除。", "The first question reads only the {} picked papers. Drag more into the conversation to add them; remove them above the question box.", lib.asked.len())
         } else if searching {
@@ -1064,7 +1071,8 @@ impl Workspace {
                 .when(selected, |d| d.bg(Theme::accent_soft()))
                 .when(!selected, |d| d.hover(|s| s.bg(Theme::hover())))
                 .on_click(self.on(Cmd::Select(paper.id.clone()), cx))
-                .when(pinnable, |d| {
+                // Before the first question a row keeps it to the papers dragged in; after it, a row dragged in is named in the next question.
+                .when(pinnable || mentionable, |d| {
                     let workspace = workspace.clone();
                     d.on_drag(PaperDrag { id: paper.id.clone(), title: paper.title.clone(), held: Point::default() }, move |drag, held, _, cx| {
                         workspace.update(cx, |this, cx| {
@@ -1100,6 +1108,27 @@ impl Workspace {
                                 this.run(Cmd::Scope(if pinned { ScopeDo::Unpin(id.clone()) } else { ScopeDo::Pin(id.clone()) }), window, cx)
                             }))
                             .child(ui::icon(if pinned { "check" } else { "plus" }, 13., if pinned { Theme::accent() } else { Theme::text_tertiary() })),
+                    )
+                })
+                // After it the plus names the paper in the question being written, as dragging the row in does.
+                .when(mentionable, |d| {
+                    let id = paper.id.clone();
+                    d.child(
+                        div()
+                            .id(SharedString::from(format!("material-mention-{}", paper.id)))
+                            .flex()
+                            .flex_none()
+                            .items_center()
+                            .justify_center()
+                            .size(px(22.))
+                            .rounded(px(6.))
+                            .hover(|s| s.bg(Theme::pressed()))
+                            .tooltip(|_, cx| cx.new(|_| crate::write_assist::Tip(t("在问题里提到这一篇（也可以把这一行拖进对话）").to_string())).into())
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.run(Cmd::MentionPaper(Talk::Library, id.clone()), window, cx)
+                            }))
+                            .child(ui::icon("plus", 13., Theme::text_tertiary())),
                     )
                 })
         }).collect();
@@ -1180,6 +1209,9 @@ impl Workspace {
             if chat.compacted.as_ref().is_some_and(|compacted| compacted.at == i) { items.push(self.render_compacted(talk, chat, cx)) }
             let content = match &chat.messages[i] {
                 ChatItem::User { text, images, files, .. } => {
+                    // The things named with @ read as their short names, in the accent; 复制 copies the question so.
+                    let (shown, marks) = self.mention_shown(talk, text);
+                    let text = &shown;
                     // What can be done with a question shows under it while the pointer is over it: quiet otherwise, and nothing while an answer is on its way.
                     let group = SharedString::from(format!("asked-row-{side}-{i}"));
                     items.push(
@@ -1191,7 +1223,7 @@ impl Workspace {
                             .gap(px(6.))
                             .when(!images.is_empty(), |d| d.child(div().flex().flex_wrap().justify_end().gap(px(6.)).max_w(relative(0.85)).children(images.iter().map(|picture| thumbnail(picture, 96.)))))
                             .when(!files.is_empty(), |d| d.child(div().flex().flex_wrap().justify_end().gap(px(6.)).max_w(relative(0.85)).children(files.iter().map(|file| document_chip(file)))))
-                            .when(!text.is_empty(), |d| d.child(self.selectable(format!("asked-{side}-{i}"), text.clone(), cx).max_w(relative(0.85)).px(px(14.)).py(px(9.)).rounded(px(16.)).bg(Theme::groove()).line_height(theme::body_line(21.))))
+                            .when(!text.is_empty(), |d| d.child(self.selectable_marked(format!("asked-{side}-{i}"), text.clone(), marks.clone(), cx).max_w(relative(0.85)).px(px(14.)).py(px(9.)).rounded(px(16.)).bg(Theme::groove()).line_height(theme::body_line(21.))))
                             .when(!chat.busy, |d| {
                                 d.child(
                                     div()
@@ -1812,7 +1844,7 @@ impl Workspace {
                             .py(px(7.))
                             .cursor_pointer()
                             .on_click(self.on(Cmd::OpenChat(talk, conversation.id.clone()), cx))
-                            .child(div().truncate().child(ui::one_line(&conversation.title)))
+                            .child(div().truncate().child(ui::one_line(&self.mention_plain(Place::Chat(talk), &conversation.title))))
                             .child(
                                 div()
                                     .flex()
@@ -1836,15 +1868,20 @@ impl Workspace {
         let side = talk.side();
         let focused = chat.input.focus_handle(cx).is_focused(window);
         let commands = if focused { chat.slash_list(&self.settings.commands, &self.skills_on(), cx) } else { vec![] };
+        // The lists over the box keep to the conversation's column.
+        // A list over the box stands where the box's text begins and stays inside the conversation's column, however narrow (beside a paper, 助手写).
+        let pad = reading_pad(chat.drawn_width);
+        let room = if chat.drawn_width > 0. { chat.drawn_width - 2. * pad } else { 0. };
+        let mentioning = self.render_mentions(Place::Chat(talk), pad, room, window, cx);
+        let mentioning_none = mentioning.is_none();
         let ready = !chat.input.read(cx).text().trim().is_empty() || !chat.attachments.is_empty() || !chat.quotes.is_empty() || !chat.documents.is_empty();
         let lib = self.lib.as_ref().unwrap();
         // The papers the first question is kept to, while it is still to come; and a paper on its way in.
         let open = talk == Talk::Library && chat.ctx.is_none() && chat.messages.is_empty() && chat.history.is_none();
         let kept: Vec<&wisp_core::model::Paper> = if open { lib.asked.iter().take(PINNED_SHOWN).filter_map(|id| lib.paper(id)).collect() } else { vec![] };
         let dropping = open && self.pinning && cx.has_active_drag();
-        // The slash popup stands where the box's text begins and stays inside the conversation's column, however narrow (beside a paper, 助手写).
-        let pad = reading_pad(chat.drawn_width);
-        let widest = if chat.drawn_width > 0. { (chat.drawn_width - 2. * pad).clamp(200., 560.) } else { 560. };
+        // Once the first question was asked a paper held over the conversation is named in the question instead.
+        let naming = talk == Talk::Library && !open && chat.history.is_none() && self.pinning && cx.has_active_drag();
         let round = |id: String, icon_name: &'static str, lit: bool| {
             div().id(SharedString::from(id)).flex().flex_none().items_center().justify_center().size(px(30.)).rounded(px(15.)).bg(if lit { Theme::accent() } else { Theme::groove() }).cursor_pointer().hover(|s| s.opacity(0.88)).child(ui::icon(icon_name, 15., if lit { Theme::on_accent() } else { Theme::text_tertiary() }))
         };
@@ -1857,38 +1894,26 @@ impl Workspace {
             .px(px(16.))
             .pb(px(10.))
             .pt(px(6.))
-            .when(!commands.is_empty(), |d| {
-                d.child(
-                    ui::popover()
-                        .absolute()
-                        .left(px(pad))
-                        .bottom_full()
-                        .min_w(px(widest.min(340.)))
-                        .max_w(px(widest))
-                        .children(commands.iter().enumerate().map(|(n, command)| {
-                            let about = if command.custom { ui::one_line(&command.about) } else { t(&command.about).to_string() };
-                            let hint = t(&command.hint).to_string();
-                            div()
-                                .id(SharedString::from(format!("slash-{side}-{}", command.name)))
-                                .flex()
-                                .items_center()
-                                .gap(px(10.))
-                                .h(text_px(32.))
-                                .px(px(8.))
-                                .rounded(px(6.))
-                                .cursor_pointer()
-                                .when(n == chat.slash, |d| d.bg(Theme::hover()))
-                                .hover(|s| s.bg(Theme::hover()))
-                                .on_click(self.on(Cmd::PickSlash(talk, n), cx))
-                                .child(div().flex_none().font_weight(FontWeight::MEDIUM).text_color(Theme::accent()).child(format!("/{}", command.name)))
-                                // What the command does is said whole (up to a cap, for one a person wrote at length); the example of what to write after it gives way.
-                                .child(div().id(SharedString::from(format!("slash-hint-{side}-{}", command.name))).flex_1().min_w_0().truncate().text_color(Theme::text_placeholder()).when(!hint.is_empty(), |d| d.tooltip(ui::tip(hint.clone()))).child(hint))
-                                .child(div().id(SharedString::from(format!("slash-about-{side}-{}", command.name))).min_w_0().max_w(px(320.)).truncate().text_right().text_color(Theme::text_secondary()).when(command.custom, |d| d.tooltip(ui::tip(about.clone()))).child(about))
-                                // One the person wrote, or a skill of theirs, says so: what it asks is theirs, not the app's.
-                                .when(command.custom, |d| d.child(div().flex_none().px(px(6.)).rounded(px(5.)).bg(Theme::groove()).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(if command.skill { t("技能") } else { t("自定义") })))
-                        }))
-                        .child(div().px(px(8.)).pt(px(5.)).pb(px(2.)).mt(px(3.)).border_t_1().border_color(Theme::line()).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(t("↑↓ 选择 · Enter 或 Tab 确认 · Esc 关闭"))),
-                )
+            // What the `@` being typed can name, in the place of the commands: one list over the box at a time.
+            .when_some(mentioning, |d, popup| d.child(popup))
+            .when(mentioning_none && !commands.is_empty(), |d| {
+                d.child(choices(
+                    pad,
+                    room,
+                    commands.iter().enumerate().map(|(n, command)| {
+                        let about = if command.custom { ui::one_line(&command.about) } else { t(&command.about).to_string() };
+                        let hint = t(&command.hint).to_string();
+                        choice_row(SharedString::from(format!("slash-{side}-{}", command.name)), n == chat.slash)
+                            .on_click(self.on(Cmd::PickSlash(talk, n), cx))
+                            .child(div().flex_none().font_weight(FontWeight::MEDIUM).text_color(Theme::accent()).child(format!("/{}", command.name)))
+                            // What the command does is said whole (up to a cap, for one a person wrote at length); the example of what to write after it gives way.
+                            .child(div().id(SharedString::from(format!("slash-hint-{side}-{}", command.name))).flex_1().min_w_0().truncate().text_color(Theme::text_placeholder()).when(!hint.is_empty(), |d| d.tooltip(ui::tip(hint.clone()))).child(hint))
+                            .child(div().id(SharedString::from(format!("slash-about-{side}-{}", command.name))).min_w_0().max_w(px(320.)).truncate().text_right().text_color(Theme::text_secondary()).when(command.custom, |d| d.tooltip(ui::tip(about.clone()))).child(about))
+                            // One the person wrote, or a skill of theirs, says so: what it asks is theirs, not the app's.
+                            .when(command.custom, |d| d.child(div().flex_none().px(px(6.)).rounded(px(5.)).bg(Theme::groove()).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(if command.skill { t("技能") } else { t("自定义") })))
+                            .into_any_element()
+                    }),
+                ))
             })
             .child(
                 div()
@@ -1898,11 +1923,12 @@ impl Workspace {
                     .p(px(8.))
                     .rounded(px(16.))
                     .border_1()
-                    .border_color(if focused || dropping { Theme::accent() } else { Theme::line_strong() })
-                    .bg(if dropping { Theme::accent_soft() } else { Theme::bg_body() })
+                    .border_color(if focused || dropping || naming { Theme::accent() } else { Theme::line_strong() })
+                    .bg(if dropping || naming { Theme::accent_soft() } else { Theme::bg_body() })
                     .shadow(theme::shadow_card())
                     // A paper held over the conversation: what letting go of it does.
                     .when(dropping, |d| d.child(div().flex().items_center().gap(px(6.)).px(px(4.)).pt(px(2.)).text_size(text_px(12.)).text_color(Theme::accent()).child(ui::icon("plus", 13., Theme::accent())).child(t("松开，第一个问题只读拖进来的文献"))))
+                    .when(naming, |d| d.child(div().flex().items_center().gap(px(6.)).px(px(4.)).pt(px(2.)).text_size(text_px(12.)).text_color(Theme::accent()).child(ui::icon("plus", 13., Theme::accent())).child(t("松开，在问题里提到这篇"))))
                     // The papers the first question is kept to: each can be let go again, and without any the list on show is back.
                     .when(!kept.is_empty(), |d| {
                         let more = lib.asked.len().saturating_sub(kept.len());
@@ -2040,6 +2066,26 @@ impl Workspace {
     }
 }
 
+/// A list to choose from over a question box, as the slash commands and what `@` names are offered: its rows (each a
+/// `choice_row`), and a line under them saying the keys. `left` is where the box's text begins, `room` how wide it may
+/// be there (a narrow column, the paper's conversation beside its PDF), 0 for no bound.
+pub(crate) fn choices(left: f32, room: f32, rows: impl IntoIterator<Item = AnyElement>) -> Div {
+    let room = if room > 0. { room.clamp(200., 560.) } else { 560. };
+    ui::popover()
+        .absolute()
+        .left(px(left))
+        .bottom_full()
+        .min_w(px(room.min(340.)))
+        .max_w(px(room))
+        .children(rows)
+        .child(div().px(px(8.)).pt(px(5.)).pb(px(2.)).mt(px(3.)).border_t_1().border_color(Theme::line()).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(t("↑↓ 选择 · Enter 或 Tab 确认 · Esc 关闭")))
+}
+
+/// A row of such a list: lit while it is the one Enter or Tab takes.
+pub(crate) fn choice_row(id: SharedString, picked: bool) -> Stateful<Div> {
+    div().id(id).flex().items_center().gap(px(10.)).h(text_px(32.)).px(px(8.)).rounded(px(6.)).cursor_pointer().when(picked, |d| d.bg(Theme::hover())).hover(|s| s.bg(Theme::hover()))
+}
+
 /// The window's words for a button of the assistant's card that came without its own.
 fn offer_label(action: &wisp_core::offer::Action) -> &'static str {
     match (action.kind.as_str(), action.arg.as_str()) {
@@ -2057,11 +2103,15 @@ fn offer_label(action: &wisp_core::offer::Action) -> &'static str {
 /// What the empty question box of a paper's conversation says: one paper, or the papers kept side by side
 /// (`Library::talk_papers`). Both are keys of `locales/en.json`.
 pub(crate) fn paper_placeholder(papers: usize) -> &'static str {
-    if papers > 1 { "就这几篇文献提问，输入 / 选择命令" } else { PAPER_PLACEHOLDER }
+    if papers > 1 { "就这几篇文献提问，输入 / 选择命令，@ 指图表或文献" } else { PAPER_PLACEHOLDER }
 }
 
 /// The box of a paper's conversation as it is made, before a paper is on show.
-pub(crate) const PAPER_PLACEHOLDER: &str = "就这篇文献提问，输入 / 选择命令";
+pub(crate) const PAPER_PLACEHOLDER: &str = "就这篇文献提问，输入 / 选择命令，@ 指图表或文献";
+/// The box of the library's conversation (助手).
+pub(crate) const LIBRARY_PLACEHOLDER: &str = "交代一件事或提一个问题，输入 / 选择命令，@ 指文献、标签或稿件的一节，可以粘贴图片";
+/// The box of the conversation that writes the manuscript (助手写).
+pub(crate) const WRITE_PLACEHOLDER: &str = "告诉助手写什么、改什么，@ 指稿件的一节或文献";
 
 #[cfg(test)]
 mod tests {

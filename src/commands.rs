@@ -427,6 +427,17 @@ pub enum Cmd {
     AskRenameChat(Talk, String),
     /// Take the n-th of the slash commands on offer.
     PickSlash(Talk, usize),
+    /// Take the n-th of what the `@` being typed in a box is offered (`mention.rs`).
+    PickMention(crate::mention::Place, usize),
+    /// A paper of the panel over the library's conversation dropped on it, or taken with its plus, after the first
+    /// question: its mention at the box's caret (`Workspace::mention_paper`).
+    MentionPaper(Talk, String),
+    /// A tag's mention clicked in a sent question: the list of its papers.
+    MentionTag(String),
+    /// A section's mention clicked in a sent question: 写作 there (manuscript id, section id).
+    MentionSection(String, String),
+    /// A figure's mention clicked in a sent question (its token's value): the figure in the paper's PDF.
+    MentionFigure(String),
     /// Choose pictures to go with the next question.
     AttachImages(Talk),
     RemoveAttachment(Talk, usize),
@@ -1814,6 +1825,17 @@ impl Workspace {
                 }
                 self.run(Cmd::CloseModal, window, cx);
             }
+            Cmd::PickMention(place, at) => {
+                self.pick_mention(place, at, cx);
+                match place {
+                    crate::mention::Place::Chat(talk) => if let Some(lib) = self.lib.as_ref() { lib.chat(talk).input.read(cx).focus(window) },
+                    crate::mention::Place::Home => self.home.input.read(cx).focus(window),
+                }
+            }
+            Cmd::MentionPaper(talk, id) => self.mention_paper(talk, &id, window, cx),
+            Cmd::MentionTag(tag) => self.mention_tag(tag),
+            Cmd::MentionSection(manuscript, section) => self.mention_section(manuscript, section, window, cx),
+            Cmd::MentionFigure(value) => self.mention_figure(value, window, cx),
             Cmd::PickSlash(paper, at) => {
                 self.pick_slash(paper, at, cx);
                 if let Some(lib) = self.lib.as_ref() { lib.chat(paper).input.read(cx).focus(window) }

@@ -137,6 +137,8 @@ pub struct Chat {
     pub slash: usize,
     /// The list of commands was closed with Escape; typing opens it again.
     pub(crate) slash_closed: bool,
+    /// What the `@` being typed in the box is offered, and how its mentions are drawn (`mention.rs`): the box's, like `input`.
+    pub mentions: crate::mention::Mentions,
     /// The past conversations, while their list is on show.
     pub history: Option<Vec<ConversationInfo>>,
     /// The search over that list, the place's like the box; and the conversations holding what is typed in it
@@ -232,6 +234,7 @@ static CHAT_KEYS: AtomicU64 = AtomicU64::new(1);
 pub(crate) fn exchange(place: &mut Chat, other: &mut Chat) {
     std::mem::swap(place, other);
     std::mem::swap(&mut place.input, &mut other.input);
+    std::mem::swap(&mut place.mentions, &mut other.mentions);
     std::mem::swap(&mut place.history_find, &mut other.history_find);
 }
 
@@ -285,6 +288,7 @@ impl Chat {
             documents: vec![],
             slash: 0,
             slash_closed: false,
+            mentions: Default::default(),
             history: None,
             history_find: cx.new(|cx| TextInput::new("找对话：标题、文献、说过的话", cx)),
             history_hits: None,
@@ -430,6 +434,7 @@ impl Chat {
         self.documents.clear();
         self.slash = 0;
         self.slash_closed = false;
+        self.mentions = Default::default();
         self.history = None;
         self.pending = None;
         self.allow_changes = false;

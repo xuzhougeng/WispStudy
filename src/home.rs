@@ -137,7 +137,7 @@ impl Render for Workspace {
                     .occlude()
                     .cursor_text()
                     .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| this.pick_drag(event, cx)))
-                    .on_mouse_up(MouseButton::Left, cx.listener(|this, event, _, cx| this.pick_release(event, cx)))
+                    .on_mouse_up(MouseButton::Left, cx.listener(|this, event, window, cx| this.pick_release(event, window, cx)))
             }))
             // The same while the floating conversation is held by its title bar, its corner or its button (floating.rs).
             .children(self.render_float_layer(cx))

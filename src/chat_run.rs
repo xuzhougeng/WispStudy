@@ -20,6 +20,69 @@ use wisp_core::store::{Conversation, Store};
 use wisp_core::manuscript::Manuscript;
 use wisp_core::{compact, time, tools, usage};
 
+/// A question as the model is sent it: each token of `prompt` that names something the place knows written as the
+/// model reads it, and the note of what they are after it (`wisp_core::mention`): a paper of `papers` (by `keys`), a
+/// library of `shelf`, a tag of `tags` (when `offers.tags`) with its papers, a section of `manuscripts`. A paper not yet
+/// among `sources` (a paper named, the first papers of a tag named) is added under the next label, as the tools' finds
+/// are. `prompt` as it is when nothing is named.
+/// A figure of `figures` (by its token's value, `Workspace::question_figures`) is named by its paper's label and page.
+#[allow(clippy::too_many_arguments)]
+fn mention_note(prompt: &str, keys: &wisp_core::mention::Keys, papers: &[Paper], tags: &[(String, usize)], manuscripts: &[Manuscript], shelf: &[LibraryInfo], offers: crate::mention::Offers, figures: &[(String, wisp_core::mention::FigureSeen)], sources: Option<&mut Vec<ai::Source>>) -> String {
+    use wisp_core::mention::{self, Named, Thing};
+    let Some(sources) = sources else { return prompt.to_string() };
+    let tokens = mention::tokens(prompt);
+    if tokens.is_empty() { return prompt.to_string() }
+    // The papers of a tag, as the list counts them: those judged irrelevant apart.
+    let tagged = |name: &str| -> Vec<&Paper> {
+        if !offers.tags || !tags.iter().any(|(known, _)| known == name) { return vec![] }
+        papers.iter().filter(|paper| paper.screening != "irrelevant" && paper.tags.iter().any(|tag| tag == name)).collect()
+    };
+    let own = |sources: &[ai::Source], id: &str| sources.iter().any(|source| source.paper_id == id && source.library.is_empty());
+    // The paper of a figure named is the conversation's: a source already, unless it was taken up from 历史.
+    let figure_paper = |value: &str| wisp_core::mention::figure_named(value).map(|named| named.paper);
+    let figured: Vec<String> = figures.iter().filter_map(|(value, _)| figure_paper(value)).collect();
+    let mut named_ids: Vec<&str> = tokens.iter().filter_map(|token| keys.paper(&token.named)).chain(figured.iter().map(String::as_str)).collect();
+    for token in &tokens {
+        if let Named::Other { kind: mention::TAG, value } = token.named { named_ids.extend(tagged(&mention::decode(value)).into_iter().take(10).map(|paper| paper.id.as_str())) }
+    }
+    let mut missing: Vec<Paper> = vec![];
+    for id in named_ids {
+        if own(sources, id) || missing.iter().any(|paper| paper.id == id) { continue }
+        if let Some(paper) = papers.iter().find(|paper| paper.id == id) { missing.push(paper.clone()) }
+    }
+    if !missing.is_empty() {
+        let mut ctx = ai::Context { sources: std::mem::take(sources), ..Default::default() };
+        ctx.add_sources(&missing);
+        *sources = ctx.sources;
+    }
+    let sources: &[ai::Source] = sources;
+    let label = |id: &str| sources.iter().find(|source| source.paper_id == id && source.library.is_empty()).map(|source| source.label.clone());
+    let find = |named: &Named| -> Option<Thing> {
+        match named {
+            Named::Other { kind: mention::LIBRARY, value } => shelf.iter().find(|info| info.id == *value).map(Thing::Library),
+            Named::Other { kind: mention::TAG, value } => {
+                let name = mention::decode(value);
+                let papers = tagged(&name);
+                if papers.is_empty() { return None }
+                Some(Thing::Tag { papers: papers.into_iter().map(|paper| (label(&paper.id).unwrap_or_default(), paper)).collect(), name })
+            }
+            Named::Other { kind: mention::SECTION, value } => manuscripts.iter().find_map(|manuscript| manuscript.section(value).map(|section| Thing::Section { manuscript, section })),
+            Named::Other { kind: mention::FIGURE, value } => {
+                let value = mention::decode(value);
+                let (_, seen) = figures.iter().find(|(known, _)| *known == value)?;
+                Some(Thing::Figure(mention::FigureSeen { label: label(&figure_paper(&value)?)?, ..seen.clone() }))
+            }
+            named => {
+                let id = keys.paper(named)?;
+                let paper = papers.iter().find(|paper| paper.id == id)?;
+                Some(Thing::Paper { paper, label: label(id)? })
+            }
+        }
+    };
+    let (text, named) = mention::resolve(prompt, find, crate::i18n::is_english());
+    if named.is_empty() { prompt.to_string() } else { format!("{text}\n\n{}", mention::note(&named)) }
+}
+
 /// The steps one question may take. Each is a request to the model; all but
 /// the last end in tool calls. With the results before the last one the
 /// model is told to answer from what it has (`ai::LAST_STEP_NOTE`).
@@ -83,6 +146,8 @@ impl Workspace {
 
     /// A key or a paste in a conversation's box.
     pub(crate) fn chat_input(&mut self, talk: Talk, event: InputEvent, cx: &mut Context<Self>) {
+        // While what the `@` being typed can name is on offer, the keys are that list's.
+        if self.mention_key(crate::mention::Place::Chat(talk), event, cx) { return }
         let skills = self.skills_on();
         let Some(lib) = self.lib.as_mut() else { return };
         let chat = lib.chat_mut(talk);
@@ -106,7 +171,7 @@ impl Workspace {
             _ => {}
         }
         // While the list is on show the arrow keys and Tab are its keys.
-        let choosing = !chat.slash_list(&self.settings.commands, &skills, cx).is_empty();
+        let choosing = !chat.slash_list(&self.settings.commands, &skills, cx).is_empty() || chat.mentions.open(chat.input.read(cx));
         chat.input.update(cx, |input, _| input.choosing = choosing);
         cx.notify();
     }
@@ -208,11 +273,37 @@ impl Workspace {
         let draft = talk == Talk::Library && self.in_draft();
         let shelf: Vec<LibraryInfo> = self.libraries.iter().filter(|info| draft && !info.draft).cloned().collect();
         let skills = self.skills_on();
+        // What `@` names here besides papers: the same as the box offered.
+        let offers = self.offers(crate::mention::Place::Chat(talk));
         let reviewing = self.lib.as_ref().filter(|_| draft).and_then(|lib| {
             let handed: Vec<(&Manuscript, Option<String>)> = lib.writing.manuscripts.iter().filter(|m| m.sections.iter().any(|s| !s.body.trim().is_empty())).map(|m| (m, lib.store.manuscript_source(&m.id).ok().flatten().filter(|source| source.kind == "docx").map(|source| lib.store.source_file(&source).display().to_string()))).collect();
             ai::manuscript_review_note(&handed)
         });
+        // The figures named in a paper's conversation: what the model is told of each, and their pictures. One still
+        // read or cut out holds the question back until it is (`mention::figures_ready` sends it then).
+        if self.lib.as_ref().is_none_or(|lib| lib.chat(talk).busy) { return false }
+        let figures = {
+            let Some(lib) = self.lib.as_ref() else { return false };
+            let chat = lib.chat(talk);
+            let (text, have) = match &again {
+                Some((text, images, _)) => (text.clone(), images.clone()),
+                None => (chat.input.read(cx).text().to_string(), chat.attachments.clone()),
+            };
+            match self.question_figures(talk, &text, &have, again.is_some(), cx) {
+                Some(figures) => figures,
+                None => {
+                    if let Some(lib) = self.lib.as_mut() {
+                        let chat = lib.chat_mut(talk);
+                        chat.mentions.waiting = true;
+                        chat.note = t("正在截取问题里点到的图，截好就发送…").into();
+                    }
+                    cx.notify();
+                    return false;
+                }
+            }
+        };
         let Some(lib) = self.lib.as_mut() else { return false };
+        lib.chat_mut(talk).mentions.waiting = false;
         // The papers the paper's conversation is about: the one on show and those kept beside it.
         let about = lib.talk_papers();
         // The libraries' names in a question say nothing of the language it is asked in.
@@ -310,7 +401,10 @@ impl Workspace {
                 Scope::Paper(id) => lib.store.attachment_pages(id).unwrap_or_default(),
                 Scope::Papers(_) | Scope::Library => vec![],
             };
-            let mut ctx = ai::build_context(&lib.info.name, &lib.info.topic, &papers, &lib.fields, &fulltext, &attachments, &scope, &prompt, &chat.known);
+            // The papers named with @ are among those given their whole record when room is short: their titles count as the question's words.
+            let named: Vec<&str> = wisp_core::mention::tokens(&prompt).iter().filter_map(|token| lib.keys.paper(&token.named)).filter_map(|id| lib.papers.iter().find(|paper| paper.id == id)).map(|paper| paper.title.as_str()).collect();
+            let ranked = if named.is_empty() { prompt.clone() } else { format!("{prompt}\n{}", named.join("\n")) };
+            let mut ctx = ai::build_context(&lib.info.name, &lib.info.topic, &papers, &lib.fields, &fulltext, &attachments, &scope, &ranked, &chat.known);
             // The tools reach every paper of the library, so every paper can be cited.
             ctx.add_sources(&lib.papers);
             // What an earlier part of the conversation read in other libraries is among them: `build_context` keeps every known source.
@@ -355,6 +449,9 @@ impl Workspace {
             chat.wire = wire;
             chat.protocol = Some(profile.protocol);
         }
+        // The things named with @: each token written as the model reads it (its label and short name), and a note of them
+        // after the question. A paper not yet a source of the conversation gets the next label; the context itself is not touched.
+        let prompt = mention_note(&prompt, &lib.keys, &lib.papers, &lib.tags, &lib.writing.manuscripts, &shelf, offers, &figures.seen, chat.ctx.as_mut().map(|ctx| &mut ctx.sources));
         // The passages selected in a PDF go first, written as the answers cite: the labels are known by now.
         // A question asked again has them in its words already; the box's stay for the box.
         let quotes = if asked_again { vec![] } else { std::mem::take(&mut chat.quotes) };
@@ -384,9 +481,10 @@ impl Workspace {
         let prompt = if words.is_empty() { prompt } else { format!("{prompt}\n\n{}", wisp_core::restyle::note(&words)) };
         let prompt = if decks.is_empty() { prompt } else { format!("{prompt}\n\n{}", wisp_core::slideref::note(&decks)) };
         let prompt = match reply { Some(reply) => format!("{prompt}\n\n{reply}"), None => prompt };
+        // The pictures of the figures it names go after those it has; a question asked again has them already.
         let images = match again {
             Some(images) => images,
-            None => std::mem::take(&mut chat.attachments),
+            None => std::mem::take(&mut chat.attachments).into_iter().chain(figures.pictures).collect(),
         };
         let documents = if asked_again { vec![] } else { std::mem::take(&mut chat.documents) };
         chat.wire.push(ai::user_message_with(profile.protocol, &prompt, &wire_images(&images)));
@@ -413,7 +511,7 @@ impl Workspace {
                 chat.wire.pop();
                 let popped = chat.messages.pop();
                 if !asked_again {
-                    if let Some(ChatItem::User { images, .. }) = popped { chat.attachments = images }
+                    if let Some(ChatItem::User { images, text, .. }) = popped { chat.attachments = crate::mention::box_pictures(&mut lib.figure_cuts, &text, images) }
                     chat.quotes = quotes;
                     chat.documents = documents;
                 }
@@ -458,8 +556,10 @@ impl Workspace {
         // What was being typed meanwhile is not lost: it follows the words taken back.
         let shown = if draft.trim().is_empty() { text } else { format!("{text}\n\n{}", draft.trim()) };
         chat.input.update(cx, |input, cx| input.set_text(&shown, cx));
-        chat.attachments = images.into_iter().chain(attachments.iter().cloned()).collect();
-        chat.retracted = Some(Retracted { tail, draft, attachments });
+        chat.retracted = Some(Retracted { tail, draft, attachments: attachments.clone() });
+        // A figure's picture stays with the figure's token: put with the question again when it is sent.
+        let images = crate::mention::box_pictures(&mut lib.figure_cuts, &shown, images);
+        chat.attachments = images.into_iter().chain(attachments).collect();
         chat.input.read(cx).focus(window);
         self.save_chat(talk, cx);
         cx.notify();
@@ -1035,12 +1135,14 @@ impl Workspace {
 
     /// Keep the conversation in the library's history, as it stands.
     pub(crate) fn save_chat(&mut self, talk: Talk, cx: &mut Context<Self>) {
+        // Listed with what its first question names with @ by their short names, as its bubble shows them.
+        let title = self.lib.as_ref().map(|lib| lib.chat(talk).transcript().title_by(|text| self.mention_plain(crate::mention::Place::Chat(talk), text))).unwrap_or_default();
         let Some(lib) = self.lib.as_mut() else { return };
         // What the conversation is about is what it is kept under: nothing for the library's, the paper, the manuscript.
         let Some(paper_id) = lib.talk_about(talk) else { return };
         let chat = chat_of!(lib, talk);
         if !chat.messages.iter().any(|item| matches!(item, ChatItem::User { .. })) { return }
-        let mut conversation = Conversation { id: chat.id.clone(), paper_id, transcript: chat.transcript(), created_at: chat.created_at.clone(), ..Default::default() };
+        let mut conversation = Conversation { id: chat.id.clone(), paper_id, transcript: chat.transcript(), created_at: chat.created_at.clone(), title, ..Default::default() };
         let mut kept = vec![];
         let result = lib.store.save_conversation(&mut conversation).and_then(|()| {
             for item in &chat.messages {
@@ -1063,6 +1165,8 @@ impl Workspace {
     /// library as it is now, under the labels the old answers use.
     pub(crate) fn open_chat(&mut self, talk: Talk, id: &str, cx: &mut Context<Self>) {
         self.open_chat_said(talk, id, cx);
+        // The figures its questions name are drawn by their numbers and lead to them once the paper's figures are read.
+        if talk == Talk::Paper { self.want_figures(cx) }
         if talk == Talk::Library && let Some(Err(err)) = self.lib.as_mut().map(|lib| lib.load_review()) { self.fail(tf!("无法读取综述记录：{err:#}", "Cannot read review record: {err:#}"), cx) }
     }
 

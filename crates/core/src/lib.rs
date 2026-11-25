@@ -37,6 +37,7 @@
 //! - `storage`  存储空间: what each library takes on the disk, and what in it takes the space
 //! - `tools`    what an agent can do with a library: the one table behind the command line, MCP and the assistant
 //! - `mcp`      the Model Context Protocol replies for those tools
+//! - `mention`  @ in the assistant's question box: tokens naming a paper or a library, what the popup offers, what the model is told
 //! - `offer`    a card of buttons the assistant puts under its answer, run only when the person presses one
 //! - `connector` the person's own MCP servers the assistant may call; `oauth` signing in to one in the browser
 //! - `update`   which release is the newest, and whether it is newer than this build
@@ -74,6 +75,7 @@ pub mod lookup;
 pub mod manuscript;
 pub mod markdown;
 pub mod mcp;
+pub mod mention;
 pub mod mermaid;
 pub mod mindmap;
 pub mod offer;
