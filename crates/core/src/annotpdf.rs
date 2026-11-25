@@ -6,9 +6,12 @@
 //!
 //! Each annotation carries its own appearance (`/AP /N`), drawn as the window draws the mark, since several
 //! readers do not make one up: a highlight's colour is multiplied into the page (`/BM /Multiply`), so the
-//! words under it stay black. A text box's words are drawn in Helvetica where they are Latin and in
-//! `STSong-Light` (`UniGB-UCS2-H`, one of the CJK fonts every PDF reader is to know without the file
-//! embedding it) where they are not; a reader without that font still has the words in `/Contents`.
+//! words under it stay black. A text box's words are drawn in fonts no file needs to embed: Helvetica
+//! (WinAnsi), Symbol (Greek, arrows, mathematics) and ZapfDingbats (✓, ①) for what they hold, and
+//! `STSong-Light` (`UniGB-UCS2-H`, one of the CJK fonts every PDF reader is to know) for Chinese script.
+//! macOS draws that font's ideographs and full-width punctuation right and its other letters (→, α, •, kana)
+//! as unrelated ideographs, whatever the CMap, so a letter goes to it only when it is of that script or no
+//! base font has it even taken apart (`set`). A reader without a font still has the words in `/Contents`.
 //!
 //! The marks are kept in points from the top left of the page as hayro draws it (`pdftext::Mark`). Where
 //! that page lies in the PDF's own space (the crop box, or the media box, with its origin, inherited from
@@ -120,6 +123,8 @@ fn places(data: &[u8]) -> Result<Vec<Place>> {
 struct Shared {
     multiply: Option<ObjectId>,
     latin: Option<ObjectId>,
+    symbol: Option<ObjectId>,
+    dingbats: Option<ObjectId>,
     cjk: Option<ObjectId>,
 }
 
@@ -130,6 +135,9 @@ impl Shared {
 
     fn fonts(&mut self, doc: &mut Document) -> Dictionary {
         let latin = *self.latin.get_or_insert_with(|| doc.add_object(dictionary! {"Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica", "Encoding" => "WinAnsiEncoding"}));
+        // Symbol and ZapfDingbats are read in their own encodings.
+        let symbol = *self.symbol.get_or_insert_with(|| doc.add_object(dictionary! {"Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Symbol"}));
+        let dingbats = *self.dingbats.get_or_insert_with(|| doc.add_object(dictionary! {"Type" => "Font", "Subtype" => "Type1", "BaseFont" => "ZapfDingbats"}));
         let cjk = *self.cjk.get_or_insert_with(|| {
             let descriptor = dictionary! {
                 "Type" => "FontDescriptor", "FontName" => "STSong-Light", "Flags" => 6,
@@ -143,7 +151,7 @@ impl Shared {
             };
             doc.add_object(dictionary! {"Type" => "Font", "Subtype" => "Type0", "BaseFont" => "STSong-Light", "Encoding" => "UniGB-UCS2-H", "DescendantFonts" => vec![cid.into()]})
         });
-        dictionary! {"Helv" => latin, "STSong" => cjk}
+        dictionary! {"Helv" => latin, "Symbol" => symbol, "ZaDb" => dingbats, "STSong" => cjk}
     }
 }
 
@@ -226,9 +234,9 @@ fn annotation(doc: &mut Document, shared: &mut Shared, mark: &Annotation, page: 
                     // The baseline where the window's line of this height puts it.
                     let base = y0 + edge + TEXT_PAD + i as f32 * leading + (leading - TEXT_PT) / 2. + 0.8 * TEXT_PT;
                     let mut x = x0 + edge + TEXT_PAD;
-                    for (latin, run) in runs(line) {
-                        let _ = write!(draw, "/{} {} Tf 1 0 0 -1 {} {} Tm {} Tj ", if latin { "Helv" } else { "STSong" }, n(TEXT_PT), n(x), n(base), if latin { literal(&run) } else { ucs2(&run) });
-                        x += run.chars().map(advance).sum::<f32>() * TEXT_PT;
+                    for (font, run, wide) in runs(line) {
+                        let _ = write!(draw, "/{} {} Tf 1 0 0 -1 {} {} Tm {} Tj ", font.name(), n(TEXT_PT), n(x), n(base), run);
+                        x += wide * TEXT_PT;
                     }
                 }
                 draw.push_str("ET");
@@ -354,24 +362,137 @@ fn text_ink(key: &str) -> Rgb {
     }
 }
 
-/// Whether Helvetica sets a letter (printable ASCII and Latin-1, which WinAnsi holds at the same codes);
-/// every other one goes to the CJK font.
-fn latin(c: char) -> bool {
-    matches!(c, ' '..='~' | '\u{a0}'..='\u{ff}')
+/// The fonts a text box's words are set in: three of the fourteen every reader carries, for the letters they
+/// hold, and `STSong-Light` for Chinese and Japanese script. macOS draws only that script and the full-width
+/// forms right in the CJK font (an arrow, a Greek letter or a bullet comes out as some ideograph), so a letter
+/// goes to it only when it is of that script or no base font has it, even taken apart (`set`).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Font { Helv, Symbol, Dingbats, Song }
+
+impl Font {
+    fn name(self) -> &'static str {
+        match self { Font::Helv => "Helv", Font::Symbol => "Symbol", Font::Dingbats => "ZaDb", Font::Song => "STSong" }
+    }
 }
 
-/// How wide a letter is, in ems: Helvetica's widths for ASCII, a full em for the rest.
-fn advance(c: char) -> f32 {
-    const HELVETICA: [u16; 95] = [
-        278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
-        1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556,
-        333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
-    ];
+/// A letter as it is drawn: its font, its code there (a byte in a base font, UCS-2 in `STSong`, which is
+/// `UniGB-UCS2-H`) and its width in ems.
+#[derive(Clone, Copy, PartialEq, Debug)]
+struct Glyph { font: Font, code: u16, wide: f32 }
+
+/// Helvetica's widths for ASCII, in thousandths of an em.
+const HELVETICA: [u16; 95] = [
+    278, 278, 355, 556, 556, 889, 667, 191, 333, 333, 389, 584, 278, 333, 278, 278, 556, 556, 556, 556, 556, 556, 556, 556, 556, 556, 278, 278, 584, 584, 584, 556,
+    1015, 667, 667, 722, 722, 667, 611, 778, 722, 278, 500, 667, 556, 833, 722, 778, 667, 778, 722, 667, 611, 722, 667, 944, 667, 667, 611, 278, 278, 278, 469, 556,
+    333, 556, 556, 500, 556, 556, 278, 556, 556, 222, 222, 500, 222, 833, 556, 556, 556, 556, 333, 500, 278, 556, 500, 722, 500, 500, 500, 334, 260, 334, 584,
+];
+/// What WinAnsi holds beyond Latin-1, at 0x80 to 0x9F, with Helvetica's widths.
+const WINANSI: [(char, u8, u16); 27] = [
+    ('€', 0x80, 556), ('‚', 0x82, 222), ('ƒ', 0x83, 556), ('„', 0x84, 333), ('…', 0x85, 1000), ('†', 0x86, 556), ('‡', 0x87, 556), ('ˆ', 0x88, 333), ('‰', 0x89, 1000),
+    ('Š', 0x8A, 667), ('‹', 0x8B, 333), ('Œ', 0x8C, 1000), ('Ž', 0x8E, 611), ('‘', 0x91, 222), ('’', 0x92, 222), ('“', 0x93, 333), ('”', 0x94, 333), ('•', 0x95, 350),
+    ('–', 0x96, 556), ('—', 0x97, 1000), ('˜', 0x98, 333), ('™', 0x99, 1000), ('š', 0x9A, 500), ('›', 0x9B, 333), ('œ', 0x9C, 944), ('ž', 0x9E, 500), ('Ÿ', 0x9F, 667),
+];
+/// The Greek letters, as Symbol has them under Latin ones, and that font's widths of those.
+const GREEK: [(&str, &str); 2] = [("ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩΩ∆ϑϕϖ", "ABGDEZHQIKLMNXOPRSTUFCYWWDJjv"), ("αβγδεζηθικλμνξοπρςστυφχψω", "abgdezhqiklmnxoprVstufcyw")];
+const SYMBOL_LETTERS: [u16; 52] = [
+    722, 667, 722, 612, 611, 763, 603, 722, 333, 631, 722, 686, 889, 722, 722, 768, 741, 556, 592, 611, 690, 439, 768, 645, 795, 611,
+    631, 549, 549, 494, 439, 521, 411, 603, 329, 603, 549, 549, 576, 521, 549, 549, 521, 549, 603, 439, 576, 713, 686, 493, 686, 494,
+];
+/// Symbol's arrows, the signs of mathematics and the rest it holds that Helvetica does not.
+const SYMBOL: [(char, u8, u16); 65] = [
+    ('∀', 0x22, 713), ('∃', 0x24, 549), ('∋', 0x27, 439), ('∗', 0x2A, 500), ('−', 0x2D, 549), ('≅', 0x40, 549), ('∴', 0x5C, 863), ('⊥', 0x5E, 658), ('∼', 0x7E, 549),
+    ('ϒ', 0xA1, 620), ('′', 0xA2, 247), ('≤', 0xA3, 549), ('⁄', 0xA4, 167), ('∞', 0xA5, 713), ('♣', 0xA7, 753), ('♦', 0xA8, 753), ('♥', 0xA9, 753), ('♠', 0xAA, 753),
+    ('↔', 0xAB, 1042), ('←', 0xAC, 987), ('↑', 0xAD, 603), ('→', 0xAE, 987), ('↓', 0xAF, 603), ('″', 0xB2, 411), ('≥', 0xB3, 549), ('∝', 0xB5, 713), ('∂', 0xB6, 494),
+    ('≠', 0xB9, 549), ('≡', 0xBA, 549), ('≈', 0xBB, 549), ('↵', 0xBF, 658), ('ℵ', 0xC0, 823), ('ℑ', 0xC1, 686), ('ℜ', 0xC2, 795), ('℘', 0xC3, 987), ('⊗', 0xC4, 768),
+    ('⊕', 0xC5, 768), ('∅', 0xC6, 823), ('∩', 0xC7, 768), ('∪', 0xC8, 768), ('⊃', 0xC9, 713), ('⊇', 0xCA, 713), ('⊄', 0xCB, 713), ('⊂', 0xCC, 713), ('⊆', 0xCD, 713),
+    ('∈', 0xCE, 713), ('∉', 0xCF, 713), ('∠', 0xD0, 768), ('∇', 0xD1, 713), ('∏', 0xD5, 823), ('√', 0xD6, 549), ('⋅', 0xD7, 250), ('∧', 0xD9, 603), ('∨', 0xDA, 603),
+    ('⇔', 0xDB, 1042), ('⇐', 0xDC, 987), ('⇑', 0xDD, 603), ('⇒', 0xDE, 987), ('⇓', 0xDF, 603), ('◊', 0xE0, 494), ('〈', 0xE1, 329), ('∑', 0xE5, 713), ('〉', 0xF1, 329),
+    ('∫', 0xF2, 274), ('ϕ', 0x6A, 603),
+];
+/// The marks of ZapfDingbats a note is likely to hold: ticks and crosses, stars and shapes; ① to ⑩ follow at 0xAC.
+const DINGBATS: [(char, u8, u16); 10] = [
+    ('✓', 0x33, 755), ('✔', 0x34, 846), ('✗', 0x37, 744), ('✘', 0x38, 723), ('★', 0x48, 816), ('●', 0x6C, 791), ('■', 0x6E, 761), ('▲', 0x73, 892), ('▼', 0x74, 892), ('◆', 0x75, 788),
+];
+
+/// A letter in a base font, if one has it.
+fn base(c: char) -> Option<Glyph> {
+    let glyph = |font, code: u8, wide: u16| Some(Glyph { font, code: code as u16, wide: wide as f32 / 1000. });
     match c {
-        ' '..='~' => HELVETICA[c as usize - 32] as f32 / 1000.,
-        _ if latin(c) => 0.556,
-        _ => 1.,
+        ' '..='~' => return glyph(Font::Helv, c as u8, HELVETICA[c as usize - 32]),
+        '\u{a0}'..='\u{ff}' => return glyph(Font::Helv, c as u8, 556),
+        '①'..='⑩' => return glyph(Font::Dingbats, 0xAC + (c as u32 - '①' as u32) as u8, 788),
+        _ => {}
     }
+    if let Some(&(_, code, wide)) = WINANSI.iter().find(|w| w.0 == c) { return glyph(Font::Helv, code, wide) }
+    for (greek, latin) in GREEK {
+        if let Some(i) = greek.chars().position(|g| g == c) {
+            let letter = latin.as_bytes()[i];
+            let at = if letter.is_ascii_uppercase() { letter - b'A' } else { 26 + letter - b'a' };
+            return glyph(Font::Symbol, letter, SYMBOL_LETTERS[at as usize]);
+        }
+    }
+    if let Some(&(_, code, wide)) = SYMBOL.iter().find(|w| w.0 == c) { return glyph(Font::Symbol, code, wide) }
+    DINGBATS.iter().find(|w| w.0 == c).and_then(|&(_, code, wide)| glyph(Font::Dingbats, code, wide))
+}
+
+/// Whether a letter is of the script the CJK font is for: ideographs and their radicals, kana and bopomofo,
+/// CJK punctuation and the full-width forms.
+fn cjk(c: char) -> bool {
+    matches!(c, '\u{2e80}'..='\u{2fdf}' | '\u{3000}'..='\u{312f}' | '\u{31a0}'..='\u{31ff}' | '\u{3400}'..='\u{4dbf}' | '\u{4e00}'..='\u{9fff}' | '\u{f900}'..='\u{faff}' | '\u{fe30}'..='\u{fe4f}' | '\u{ff00}'..='\u{ffef}')
+}
+
+/// Quotation marks, the dash and the ellipsis Chinese is written with too: set in the font of the words they
+/// stand by, full width among Chinese and narrow among Latin.
+fn shared(c: char) -> bool {
+    matches!(c, '“' | '”' | '‘' | '’' | '—' | '…')
+}
+
+/// A line as it is drawn, letter by letter. A letter no font has is taken apart (`ā` is `a`, `₂` is `2`, `℃` is
+/// `°C`) when its parts are in a base font, else left to the CJK font, which other readers may have it in;
+/// letters beyond the Basic Multilingual Plane, which neither encoding writes, are left out.
+fn set(line: &str) -> Vec<Glyph> {
+    use unicode_normalization::UnicodeNormalization as _;
+    let song = |c: char| Glyph { font: Font::Song, code: c as u16, wide: 1. };
+    let chars: Vec<char> = line.chars().collect();
+    let alone: Vec<Option<Vec<Glyph>>> = chars.iter().map(|&c| {
+        if shared(c) { return None }
+        if let Some(glyph) = base(c) { return Some(vec![glyph]) }
+        if cjk(c) { return Some(vec![song(c)]) }
+        let parts: Option<Vec<Glyph>> = c.nfkd().filter(|&p| !unicode_normalization::char::is_combining_mark(p)).map(base).collect();
+        Some(match parts {
+            Some(parts) if !parts.is_empty() => parts,
+            _ if (c as u32) < 0x10000 => vec![song(c)],
+            _ => vec![],
+        })
+    }).collect();
+    // Of a shared mark, the nearest letter that is neither a space nor shared: an opening quotation mark
+    // looks after itself first, the others before.
+    let among = |i: usize, ahead: bool| -> bool {
+        let font = |j: usize| alone[j].as_ref().and_then(|g| g.first()).filter(|g| !(g.font == Font::Helv && g.code == 32)).map(|g| g.font);
+        let before = (0..i).rev().find_map(font);
+        let after = (i + 1..chars.len()).find_map(font);
+        (if ahead { after.or(before) } else { before.or(after) }) == Some(Font::Song)
+    };
+    let mut out = vec![];
+    for (i, glyphs) in alone.iter().enumerate() {
+        match glyphs {
+            Some(glyphs) => out.extend_from_slice(glyphs),
+            None if among(i, matches!(chars[i], '“' | '‘')) => out.push(song(chars[i])),
+            None => out.extend(base(chars[i])),
+        }
+    }
+    out
+}
+
+/// How wide a letter is, in ems, as `wrap` counts it: a shared mark at the wider of its two.
+fn advance(c: char) -> f32 {
+    if shared(c) { return 1. }
+    set(&c.to_string()).iter().map(|g| g.wide).sum()
+}
+
+/// Whether a letter is part of a word a line breaks around, not one it may break after.
+fn word(c: char) -> bool {
+    !cjk(c) && !shared(c)
 }
 
 /// The lines a text box's words take in a width of points: its own lines, each broken at the last space that
@@ -387,7 +508,7 @@ fn wrap(text: &str, width: f32) -> Vec<String> {
         let mut pieces: Vec<String> = vec![];
         for c in paragraph.chars().map(|c| if c == '\t' { ' ' } else { c }) {
             match pieces.last_mut() {
-                Some(last) if latin(c) && last.chars().last().is_some_and(|l| latin(l) && (l != ' ' || c == ' ')) => last.push(c),
+                Some(last) if word(c) && last.chars().last().is_some_and(|l| word(l) && (l != ' ' || c == ' ')) => last.push(c),
                 _ => pieces.push(c.to_string()),
             }
         }
@@ -419,37 +540,37 @@ fn wrap(text: &str, width: f32) -> Vec<String> {
     lines
 }
 
-/// A line cut where its font changes: `true` for a run Helvetica sets. Letters neither font can write
-/// (beyond the Basic Multilingual Plane) are left out.
-fn runs(line: &str) -> Vec<(bool, String)> {
-    let mut out: Vec<(bool, String)> = vec![];
-    for c in line.chars().filter(|&c| (c as u32) < 0x10000) {
+/// A line's letters in runs of one font, each as the string `Tj` shows (the codes of a base font as a literal
+/// string, those of the CJK font as a hex string) and its width in ems.
+fn runs(line: &str) -> Vec<(Font, String, f32)> {
+    let mut out: Vec<(Font, Vec<u16>, f32)> = vec![];
+    for glyph in set(line) {
         match out.last_mut() {
-            Some((kind, run)) if *kind == latin(c) => run.push(c),
-            _ => out.push((latin(c), c.to_string())),
+            Some((font, codes, wide)) if *font == glyph.font => { codes.push(glyph.code); *wide += glyph.wide }
+            _ => out.push((glyph.font, vec![glyph.code], glyph.wide)),
         }
     }
-    out
+    out.into_iter().map(|(font, codes, wide)| (font, if font == Font::Song { hex(&codes) } else { literal(&codes) }, wide)).collect()
 }
 
-/// A run for Helvetica as a literal string, its letters in WinAnsi.
-fn literal(run: &str) -> String {
+/// Bytes of a base font as a literal string.
+fn literal(codes: &[u16]) -> String {
     let mut out = String::from("(");
-    for c in run.chars() {
-        match c {
-            '(' | ')' | '\\' => { out.push('\\'); out.push(c) }
-            ' '..='~' => out.push(c),
-            _ => { let _ = write!(out, "\\{:03o}", c as u32); }
+    for &code in codes {
+        match code as u8 {
+            c @ (b'(' | b')' | b'\\') => { out.push('\\'); out.push(c as char) }
+            c @ b' '..=b'~' => out.push(c as char),
+            c => { let _ = write!(out, "\\{c:03o}"); }
         }
     }
     out.push(')');
     out
 }
 
-/// A run for the CJK font as a hex string of UCS-2 codes (`UniGB-UCS2-H`).
-fn ucs2(run: &str) -> String {
+/// UCS-2 codes for the CJK font as a hex string.
+fn hex(codes: &[u16]) -> String {
     let mut out = String::from("<");
-    for unit in run.encode_utf16() { let _ = write!(out, "{unit:04X}"); }
+    for code in codes { let _ = write!(out, "{code:04X}"); }
     out.push('>');
     out
 }
@@ -713,7 +834,31 @@ mod tests {
         assert_eq!(wrap("一二三四五六七八九十", 100.), ["一二三四五六七八九", "十"]);
         let lines = wrap("Roots grow toward water and away from light", 100.);
         assert!(lines.len() > 1 && lines.iter().all(|l| l.chars().map(advance).sum::<f32>() * TEXT_PT <= 100.), "{lines:?}");
-        assert_eq!(runs("文本 box"), [(false, "文本".to_string()), (true, " box".to_string())]);
-        assert_eq!(literal("a(b)\\"), "(a\\(b\\)\\\\)");
+        // A Greek word is a word too, broken at its spaces.
+        assert_eq!(wrap("αβγ δεζ", 30.), ["αβγ", "δεζ"]);
+    }
+
+    /// Each letter goes to a font that draws it everywhere: the CJK font only for that script, since macOS
+    /// draws the symbols of GB2312 in it as other ideographs (→ as 於).
+    #[test]
+    fn letters_go_to_a_font_that_draws_them() {
+        let fonts = |line: &str| runs(line).into_iter().map(|(font, run, _)| (font, run)).collect::<Vec<_>>();
+        let pair = |font: Font, run: &str| (font, run.to_string());
+        assert_eq!(fonts("文本 box"), [pair(Font::Song, "<6587672C>"), pair(Font::Helv, "( box)")]);
+        assert_eq!(fonts("BR → x"), [pair(Font::Helv, "(BR )"), pair(Font::Symbol, "(\\256)"), pair(Font::Helv, "( x)")]);
+        assert_eq!(fonts("αΔ≤"), [pair(Font::Symbol, "(aD\\243)")]);
+        assert_eq!(fonts("• € ™"), [pair(Font::Helv, "(\\225 \\200 \\231)")]);
+        assert_eq!(fonts("✓①"), [pair(Font::Dingbats, "(3\\254)")]);
+        // Taken apart: a letter with a mark, a subscript, a sign made of two.
+        assert_eq!(fonts("ā CO₂ 4℃"), [pair(Font::Helv, "(a CO2 4\\260C)")]);
+        // Quotation marks and the dash stand with the words beside them.
+        assert_eq!(fonts("说“好”"), [pair(Font::Song, "<8BF4201C597D201D>")]);
+        assert_eq!(fonts("说“ok”—"), [pair(Font::Song, "<8BF4>"), pair(Font::Helv, "(\\223ok\\224\\227)")]);
+        // Full-width punctuation stays in the CJK font, which draws it right; beyond the BMP nothing does.
+        assert_eq!(fonts("！（）😀"), [pair(Font::Song, "<FF01FF08FF09>")]);
+        assert_eq!(literal(&[b'a' as u16, b'(' as u16, b')' as u16, b'\\' as u16]), "(a\\(\\)\\\\)");
+        // What is drawn is as wide as the fonts say: Helvetica's `B` and `R`, Symbol's arrow.
+        let wide: f32 = runs("BR→").iter().map(|r| r.2).sum();
+        assert!((wide - (0.667 + 0.722 + 0.987)).abs() < 1e-4, "{wide}");
     }
 }
