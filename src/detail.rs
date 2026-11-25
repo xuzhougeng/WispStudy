@@ -131,6 +131,8 @@ impl Workspace {
                 .hover(|s| s.text_color(Theme::text()))
                 .on_click(this.on(Cmd::SetTab(value), cx))
                 .child(label)
+                // 新手引导 points at the three of them as one place (tour.rs).
+                .children(this.tour_spot(id))
         };
         // The paper's own two buttons, the last of its header in the panel and in reading mode alike, as a window's
         // are: the paper takes the window or gives it back, then the paper is closed. The way out of reading mode is

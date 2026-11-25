@@ -2003,6 +2003,8 @@ impl Workspace {
             .child(group(
                 None,
                 vec![
+                    // Begun by itself only at a first start; from here whenever it is wanted again (tour.rs).
+                    row(t("新手引导"), Some(t("一步一步指给你看：建文献库、放进文献、阅读和提问。").into()), button("about-tour", t("开始")).on_click(self.on(Cmd::Tour(crate::tour::Do::Begin), cx))).into_any_element(),
                     row(t("项目主页"), Some(format!("github.com/xuzhougeng/WispStudy · {}", t("用得顺手的话，欢迎在 GitHub 上点个 star")).into()), open("about-project", t("打开"), update::PROJECT_URL.to_string(), self, cx)).into_any_element(),
                     row(t("开源许可"), Some(t("Wisp Study 以 MIT 协议发布；随附的第三方组件见 THIRD_PARTY.md。").into()), open("about-license", t("查看"), format!("{}/blob/main/THIRD_PARTY.md", update::PROJECT_URL), self, cx)).into_any_element(),
                 ],

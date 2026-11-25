@@ -95,6 +95,8 @@ impl Render for Workspace {
             .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| this.drop_paths(paths.paths().to_vec(), window, cx)))
 
             .child(page)
+            // 新手引导: the step on show, over the page and under whatever is opened over it (tour.rs).
+            .children(self.render_tour(cx))
             .children(self.render_modal(window, cx))
             .children(self.render_palette(cx))
             .children(self.render_menu(window, cx))
@@ -262,6 +264,8 @@ impl Workspace {
     /// how many papers and when it was opened, in columns that line up. A row does what a card does: a click opens,
     /// the right button and ⋯ have the menu, and dragged onto another row it takes that place.
     fn library_rows(&mut self, cx: &mut Context<Self>) -> Div {
+        // The first library is where 新手引导 points once there is one.
+        let first = libraries::shelf(&self.libraries, &self.settings.library_order).first().map(|info| info.id.clone());
         let rows: Vec<AnyElement> = libraries::shelf(&self.libraries, &self.settings.library_order)
             .into_iter()
             .map(|info| {
@@ -305,10 +309,11 @@ impl Workspace {
                             open(ev, window, cx);
                         }
                     }))
+                    .children(self.tour_spot("home-library").filter(|_| first.as_deref() == Some(info.id.as_str())))
                     .into_any_element()
             })
             .collect();
-        let new_row = div().id("library-new").flex().flex_none().items_center().gap(px(12.)).w_full().h(text_px(46.)).pl(px(12.)).text_color(Theme::text_secondary()).cursor_pointer().hover(|s| s.bg(Theme::hover())).on_click(self.on(Cmd::NewLibrary, cx)).child(div().flex().flex_none().items_center().justify_center().size(px(24.)).child(ui::icon("plus", 16., Theme::text_secondary()))).child(t("新建文献库"));
+        let new_row = div().id("library-new").flex().flex_none().items_center().gap(px(12.)).w_full().h(text_px(46.)).pl(px(12.)).text_color(Theme::text_secondary()).cursor_pointer().hover(|s| s.bg(Theme::hover())).on_click(self.on(Cmd::NewLibrary, cx)).child(div().flex().flex_none().items_center().justify_center().size(px(24.)).child(ui::icon("plus", 16., Theme::text_secondary()))).child(t("新建文献库")).children(self.tour_spot("library-new"));
         div().flex().flex_col().w_full().rounded(px(12.)).border_1().border_color(Theme::line()).bg(Theme::bg_body()).overflow_hidden().children(rows).child(new_row)
     }
 
@@ -318,6 +323,7 @@ impl Workspace {
         // As rows instead (`Settings::home_list`), the cards are not made.
         let listed = self.settings.home_list;
         let rows = listed.then(|| self.library_rows(cx));
+        let first = libraries::shelf(&self.libraries, &self.settings.library_order).first().map(|info| info.id.clone());
         let cards: Vec<AnyElement> = libraries::shelf(&self.libraries, &self.settings.library_order)
             .into_iter()
             .filter(|_| !listed)
@@ -389,6 +395,7 @@ impl Workspace {
                                     }),
                             ),
                     )
+                    .children(self.tour_spot("home-library").filter(|_| first.as_deref() == Some(info.id.as_str())))
                     .into_any_element()
             })
             .collect();
@@ -410,7 +417,8 @@ impl Workspace {
             .hover(|s| s.bg(Theme::hover()))
             .on_click(self.on(Cmd::NewLibrary, cx))
             .child(ui::icon("plus", 20., Theme::text_secondary()))
-            .child(t("新建文献库"));
+            .child(t("新建文献库"))
+            .children(self.tour_spot("library-new"));
         let empty = self.libraries.iter().all(|info| info.draft);
         let new_version = match &self.update {
             UpdateState::Available(release, _) | UpdateState::Downloading(release) | UpdateState::Ready(release, ..) => Some(release.version.clone()),
@@ -462,7 +470,8 @@ impl Workspace {
                                     .child(ui::ghost_button("home-settings", Some("settings-gear"), Some(t("设置").into())).on_click(self.on(Cmd::OpenSettings(SettingsPage::General), cx))),
                             ),
                     )
-                    .when(empty, |d| {
+                    // Said by the card of 新手引导 while that is on: one thing is said once.
+                    .when(empty && !self.tour.on, |d| {
                         d.child(div().p(px(16.)).rounded(px(10.)).bg(Theme::accent_soft()).text_color(Theme::text_secondary()).child(t("还没有文献库。先为一个研究主题新建文献库，再往里添加文献：粘贴 DOI、拖入 PDF，或导入 BibTeX / RIS。")))
                     })
                     .child(match rows {

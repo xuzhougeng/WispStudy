@@ -65,6 +65,7 @@ mod select;
 mod settings;
 mod shortcuts;
 mod theme;
+mod tour;
 mod transfer;
 mod translate;
 mod ui;

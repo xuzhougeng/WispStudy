@@ -476,6 +476,8 @@ pub struct Workspace {
     pub filters_drawn: bool,
     /// The home page invites the person, once, to star the project (`settings::star_due` at start, or the debug step `starask`).
     pub star_ask: bool,
+    /// 新手引导, while it walks a first window through the app (`tour.rs`).
+    pub tour: crate::tour::Tour,
 }
 
 impl Library {
@@ -773,11 +775,14 @@ impl Workspace {
         shortcuts::rebuild(&settings.shortcuts, cx);
         let libraries = libraries::list(&root);
         let home = crate::draft::Home::new(window, cx);
-        let mut this = Workspace { focus, settings, settings_path, root, libraries, lib: None, parked: vec![], away: false, stepping: false, main_window: window.window_handle(), settings_view: None, connections: vec![], skills: vec![], update: UpdateState::Idle, update_told: None, session: Session::default(), modal: None, modal_error: String::new(), modal_subscriptions: vec![], figure_at: (0., 0.), figure_drag: None, menu: None, palette: None, toast, home_scroll: ScrollHandle::new(), home, resizing: None, column_drag: None, picked: None, pinning: false, filters_over: [false; 2], filters_drawn: false, star_ask: false };
+        let mut this = Workspace { focus, settings, settings_path, root, libraries, lib: None, parked: vec![], away: false, stepping: false, main_window: window.window_handle(), settings_view: None, connections: vec![], skills: vec![], update: UpdateState::Idle, update_told: None, session: Session::default(), modal: None, modal_error: String::new(), modal_subscriptions: vec![], figure_at: (0., 0.), figure_drag: None, menu: None, palette: None, toast, home_scroll: ScrollHandle::new(), home, resizing: None, column_drag: None, picked: None, pinning: false, filters_over: [false; 2], filters_drawn: false, star_ask: false, tour: Default::default() };
         // A new day of use is counted once at start; on the fifth the home page asks for a star, until answered.
         // A settings file that could not be read is not written over with defaults for it (the toast says so).
         if this.toast.is_none() && wisp_core::settings::note_use(&mut this.settings, &wisp_core::time::today()) { this.save_settings(cx) }
         this.star_ask = wisp_core::settings::star_due(&this.settings);
+        // A first start is walked through the app; what the person does from then on moves the steps (`tour.rs`).
+        this.tour_start();
+        cx.observe_self(|this, cx| this.tour_follow(cx)).detach();
         // The library's window closed: the papers' own windows go with it (their viewers are this one's).
         cx.on_release(|this: &mut Workspace, cx| {
             if let Some(lib) = this.lib.as_mut() { for open in lib.windows.drain(..) { open.window.update(cx, |_, window, _| window.remove_window()).ok(); } }
