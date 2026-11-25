@@ -93,6 +93,123 @@ fn copy_folder(from: &Path, to: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// A file or a folder of a skill, as its page lists it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Entry {
+    /// Where it is under the skill's folder, the names apart by `/`.
+    pub path: String,
+    pub folder: bool,
+}
+
+impl Entry {
+    pub fn name(&self) -> &str {
+        self.path.rsplit('/').next().unwrap_or(&self.path)
+    }
+
+    /// How deep it lies: 0 in the skill's folder itself.
+    pub fn depth(&self) -> usize {
+        self.path.matches('/').count()
+    }
+}
+
+/// The most entries a skill's page lists, and how deep it looks: a folder
+/// that holds more (a checkout, a link that leads back into itself) is not read to its end.
+const MOST: usize = 400;
+const DEEPEST: usize = 8;
+
+/// What a skill's folder holds, each folder followed by what is in it:
+/// `SKILL.md` first, then the folders, then the other files, by name.
+/// Hidden files are left out.
+pub fn files(dir: &Path) -> Vec<Entry> {
+    fn walk(dir: &Path, under: &str, depth: usize, found: &mut Vec<Entry>) {
+        let mut here: Vec<(bool, String)> = std::fs::read_dir(dir).into_iter().flatten().flatten().filter_map(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            // A link is what it leads to.
+            let kind = std::fs::metadata(entry.path()).ok()?;
+            (!name.starts_with('.')).then_some((kind.is_dir(), name))
+        }).collect();
+        let rank = |(folder, name): &(bool, String)| (!(depth == 0 && name == FILE), !*folder, name.to_lowercase());
+        here.sort_by_key(rank);
+        for (folder, name) in here {
+            if found.len() >= MOST { return }
+            let path = format!("{under}{name}");
+            found.push(Entry { path: path.clone(), folder });
+            if folder && depth < DEEPEST { walk(&dir.join(&name), &format!("{path}/"), depth + 1, found) }
+        }
+    }
+    let mut found = vec![];
+    walk(dir, "", 0, &mut found);
+    found
+}
+
+/// What a skill's page shows of one of its files.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Shown {
+    /// Its text; `cut` when that is only its beginning.
+    Text { text: String, cut: bool },
+    /// Not text: how many bytes it holds.
+    Binary(u64),
+    Failed(String),
+}
+
+/// As much of a file as the page shows.
+const SHOWN_BYTES: usize = 200_000;
+
+/// Whether a file is Markdown by its name: drawn as a page, with its source one click away.
+pub fn markdown(path: &str) -> bool {
+    let name = path.to_lowercase();
+    name.ends_with(".md") || name.ends_with(".markdown")
+}
+
+/// The file at `path` (as `files` names it) of the skill in `dir`, read for its page.
+pub fn show(dir: &Path, path: &str) -> Shown {
+    use std::io::Read;
+    if path.split('/').any(|name| name.is_empty() || name == "..") { return Shown::Failed(format!("{path} 不在这项技能的文件夹里。")) }
+    let failed = |err: std::io::Error| Shown::Failed(format!("无法读取 {path}：{err}"));
+    let file = match std::fs::File::open(dir.join(path)) {
+        Ok(file) => file,
+        Err(err) => return failed(err),
+    };
+    let size = file.metadata().map_or(0, |known| known.len());
+    let mut bytes = vec![];
+    if let Err(err) = file.take(SHOWN_BYTES as u64 + 1).read_to_end(&mut bytes) { return failed(err) }
+    let cut = bytes.len() > SHOWN_BYTES;
+    bytes.truncate(SHOWN_BYTES);
+    if bytes.contains(&0) { return Shown::Binary(size) }
+    let text = match String::from_utf8(bytes) {
+        Ok(text) => text,
+        // Cut in the middle of a character: what stands before it is the text.
+        Err(err) if cut && err.utf8_error().error_len().is_none() => {
+            let whole = err.utf8_error().valid_up_to();
+            String::from_utf8_lossy(&err.as_bytes()[..whole]).into_owned()
+        }
+        Err(_) => return Shown::Binary(size),
+    };
+    Shown::Text { text: text.trim_start_matches('\u{feff}').replace("\r\n", "\n"), cut }
+}
+
+/// Where the skills taken out of `folder` are kept.
+const REMOVED: &str = "removed";
+
+/// Take the skill in `dir` out of `folder`: its folder moves to `removed/`
+/// there, under a name nothing has yet. Nothing is deleted; where it went is returned.
+pub fn remove(folder: &Path, dir: &Path) -> Result<PathBuf, String> {
+    let name = dir.file_name().map(|name| name.to_string_lossy().into_owned()).ok_or("这个路径没有名字。")?;
+    let kept = folder.join(REMOVED);
+    let failed = |err: std::io::Error| format!("无法移除技能：{err}");
+    std::fs::create_dir_all(&kept).map_err(failed)?;
+    let to = (1..).map(|n| if n == 1 { kept.join(&name) } else { kept.join(format!("{name}-{n}")) }).find(|to| !to.exists()).unwrap_or_else(|| kept.join(&name));
+    std::fs::rename(dir, &to).map_err(failed)?;
+    Ok(to)
+}
+
+/// Put a skill taken out back among those of `folder`, under the folder name it had.
+pub fn restore(folder: &Path, removed: &Path, name: &str) -> Result<(), String> {
+    let to = folder.join(name);
+    if to.exists() { return Err(format!("已经有名为 {name} 的技能文件夹。")) }
+    std::fs::rename(removed, to).map_err(|err| format!("无法恢复技能：{err}"))
+}
+
 /// The tool that reads a skill, its description listing those on offer; none without skills.
 pub fn tool(skills: &[Skill]) -> Option<Tool> {
     if skills.is_empty() { return None }
@@ -154,6 +271,39 @@ mod tests {
         assert!(tool.description.contains("- review-notes：整理读书笔记") && tool.input_schema["properties"]["name"]["enum"][0] == "plain");
         assert_eq!(read(&skills, "review-notes"), Ok("按题目分组。".into()));
         assert!(read(&skills, "none").is_err() && super::tool(&[]).is_none() && list(&root.join("nowhere")).is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_skills_folder_is_listed_shown_and_taken_out() {
+        let root = std::env::temp_dir().join(format!("wisp-skill-files-{}", crate::model::new_id("T")));
+        let dir = root.join("skills/deep");
+        std::fs::create_dir_all(dir.join("references/more")).unwrap();
+        for (path, text) in [("SKILL.md", "---\nname: deep\n---\n做法。"), ("references/writer.md", "\u{feff}# 写\r\n第二行"), ("references/more/z.txt", "z"), ("a-script.py", "print(1)"), (".DS_Store", "x")] {
+            std::fs::write(dir.join(path), text).unwrap();
+        }
+        std::fs::write(dir.join("logo.png"), [0x89, b'P', b'N', b'G', 0, 1, 2]).unwrap();
+        let listed = files(&dir);
+        assert_eq!(listed.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(), ["SKILL.md", "references", "references/more", "references/more/z.txt", "references/writer.md", "a-script.py", "logo.png"]);
+        assert_eq!(listed.iter().map(|entry| (entry.name(), entry.depth(), entry.folder)).nth(3), Some(("z.txt", 2, false)));
+        assert!(listed[1].folder && !listed[0].folder);
+        assert_eq!(show(&dir, "references/writer.md"), Shown::Text { text: "# 写\n第二行".into(), cut: false });
+        assert_eq!(show(&dir, "logo.png"), Shown::Binary(7));
+        assert!(matches!(show(&dir, "../deep/SKILL.md"), Shown::Failed(_)) && matches!(show(&dir, "none.md"), Shown::Failed(_)));
+        // A long file is shown from its start, and never cut inside a character.
+        std::fs::write(dir.join("long.md"), "字".repeat(SHOWN_BYTES / 3 + 10)).unwrap();
+        let Shown::Text { text, cut } = show(&dir, "long.md") else { panic!("a long text is still text") };
+        assert!(cut && text.chars().all(|c| c == '字') && text.len() == SHOWN_BYTES / 3 * 3);
+        assert!(markdown("references/Writer.MD") && !markdown("a-script.py"));
+        // Taken out, it is no skill any more, and nothing is lost; put back, it is one again.
+        let folder = root.join("skills");
+        let kept = remove(&folder, &dir).unwrap();
+        assert!(list(&folder).is_empty() && kept.join("references/writer.md").is_file() && kept == folder.join("removed/deep"));
+        assert_eq!(restore(&folder, &kept, "deep"), Ok(()));
+        assert_eq!(list(&folder).len(), 1);
+        std::fs::create_dir_all(folder.join("removed/deep")).unwrap();
+        assert_eq!(remove(&folder, &dir), Ok(folder.join("removed/deep-2")));
+        assert!(restore(&folder, &folder.join("removed/deep"), "removed").is_err());
         std::fs::remove_dir_all(root).unwrap();
     }
 }
