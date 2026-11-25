@@ -231,10 +231,35 @@ struct ManuscriptFile {
     draft: crate::manuscript::Draft,
     kind: &'static str,
     bytes: Option<Vec<u8>>,
+    /// The pictures a Markdown file shows from files beside it, read (`manuscript::read_pictures`): they come
+    /// into the figure library with it.
+    pictures: Vec<crate::manuscript::Picture>,
+}
+
+/// The manuscript a folder holds: the one Word or Markdown file in it, or, with none there, in the folders
+/// right under it. A readme is not one. With several, the caller is told which, to name one.
+fn manuscript_in(folder: &Path) -> Result<PathBuf> {
+    let listed = |folder: &Path| -> Vec<PathBuf> {
+        let mut paths: Vec<PathBuf> = std::fs::read_dir(folder).into_iter().flatten().flatten().map(|entry| entry.path()).filter(|path| !path.file_name().is_some_and(|name| name.to_string_lossy().starts_with(['.', '~']))).collect();
+        paths.sort();
+        paths
+    };
+    let drafts = |paths: &[PathBuf]| -> Vec<PathBuf> {
+        paths.iter().filter(|path| path.is_file() && path.extension().is_some_and(|e| ["docx", "md", "markdown"].iter().any(|known| e.eq_ignore_ascii_case(known))) && !path.file_stem().is_some_and(|stem| stem.eq_ignore_ascii_case("readme"))).cloned().collect()
+    };
+    let here = listed(folder);
+    let mut found = drafts(&here);
+    if found.is_empty() { found = here.iter().filter(|path| path.is_dir()).flat_map(|under| drafts(&listed(under))).collect() }
+    match found.len() {
+        0 => bail!("文件夹 {} 里没有稿件文件（.docx、.md）。", folder.display()),
+        1 => Ok(found.remove(0)),
+        n => bail!("文件夹 {} 里有 {n} 个可以作稿件的文件，请用 path 指明是哪一个：{}{}", folder.display(), found.iter().take(12).map(|path| path.strip_prefix(folder).unwrap_or(path).display().to_string()).collect::<Vec<_>>().join("、"), if n > 12 { "…" } else { "" }),
+    }
 }
 
 fn manuscript_file(args: &Value) -> Result<ManuscriptFile> {
     let path = input_path(args)?;
+    let path = if path.is_dir() { manuscript_in(&path)? } else { path };
     let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
     let extension = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
     match extension.as_str() {
@@ -245,9 +270,12 @@ fn manuscript_file(args: &Value) -> Result<ManuscriptFile> {
     let bytes = std::fs::read(&path).with_context(|| format!("无法读取 {}", path.display()))?;
     if extension == "docx" {
         let read = crate::docx::read(&bytes)?;
-        return Ok(ManuscriptFile { draft: crate::manuscript::from_word(&read, &name), name, kind: "docx", bytes: Some(bytes) });
+        return Ok(ManuscriptFile { draft: crate::manuscript::from_word(&read, &name), name, kind: "docx", bytes: Some(bytes), pictures: vec![] });
     }
-    Ok(ManuscriptFile { draft: crate::manuscript::from_markdown(&String::from_utf8_lossy(&bytes), &name), name, kind: "markdown", bytes: None })
+    let draft = crate::manuscript::from_markdown(&String::from_utf8_lossy(&bytes), &name);
+    // No picture is written anew here: a kind that is not kept stays a line of the file's.
+    let pictures = crate::manuscript::read_pictures(&draft, path.parent().unwrap_or(Path::new("")), &|_| None);
+    Ok(ManuscriptFile { draft, name, kind: "markdown", bytes: None, pictures })
 }
 
 impl ManuscriptFile {
@@ -257,9 +285,24 @@ impl ManuscriptFile {
     }
 
     /// What the file holds besides its sections, as the window says it after taking one in.
-    fn besides(&self) -> Vec<String> {
+    fn besides(&self, store: &Store) -> Vec<String> {
         let draft = &self.draft;
         let mut lines = vec![];
+        let coming = self.pictures.iter().filter(|picture| picture.bytes.is_ok()).count();
+        if coming > 0 { lines.push(format!("文件旁边的 {coming} 张图一起收进图片库，稿件里还在原处。")) }
+        // Each reason once, with the pictures it is said of. One the library's own export wrote is here already.
+        let mut left: Vec<(crate::manuscript::Left, Vec<&str>)> = vec![];
+        for picture in &self.pictures {
+            let Err(why) = picture.bytes else { continue };
+            if why == crate::manuscript::Left::Missing && crate::manuscript::library_picture(&picture.address) && store.root().join(&picture.address).is_file() { continue }
+            match left.iter_mut().find(|(known, _)| *known == why) {
+                Some((_, addresses)) => addresses.push(&picture.address),
+                None => left.push((why, vec![&picture.address])),
+            }
+        }
+        for (why, addresses) in left {
+            lines.push(format!("{} 张图没有带进来（{}）：{}{}", addresses.len(), why.said(), addresses.iter().take(6).copied().collect::<Vec<_>>().join("、"), if addresses.len() > 6 { "…" } else { "" }));
+        }
         if !draft.comments.is_empty() { lines.push(format!("文件里的 {} 条批注一起带进来。", draft.comments.len())) }
         let kept: Vec<String> = [(draft.tables, "个表格"), (draft.pictures, "张图")].iter().filter(|(count, _)| *count > 0).map(|(count, what)| format!("{count} {what}")).collect();
         if !kept.is_empty() { lines.push(format!("{}留在 Word 文件里，导出时还在原处。", kept.join("、"))) }
@@ -278,7 +321,8 @@ impl ManuscriptFile {
                     let kept = store.source_file(&source);
                     source.kind == self.kind && std::fs::metadata(&kept).is_ok_and(|kept| kept.len() == bytes.len() as u64) && std::fs::read(&kept).is_ok_and(|kept| kept == *bytes)
                 }
-                None => source.kind == self.kind && source.name == self.name && manuscript.sections.len() == self.draft.sections.len() && manuscript.sections.iter().zip(&self.draft.sections).all(|(kept, read)| kept.body == read.paragraphs.join("\n\n")),
+                // Its pictures are shown from the figure library since: the addresses are not compared.
+                None => source.kind == self.kind && source.name == self.name && manuscript.sections.len() == self.draft.sections.len() && manuscript.sections.iter().zip(&self.draft.sections).all(|(kept, read)| crate::manuscript::without_addresses(&kept.body) == crate::manuscript::without_addresses(&read.paragraphs.join("\n\n"))),
             };
             if same { return Ok(Some(manuscript)) }
         }
@@ -300,7 +344,7 @@ pub(super) fn preview_manuscript(store: &Store, args: &Value) -> Result<Vec<Stri
     let names: Vec<&str> = file.draft.sections.iter().map(|section| section.name.as_str()).collect();
     let (shown, more) = (names.iter().take(12).copied().collect::<Vec<_>>().join("、"), names.len().saturating_sub(12));
     let mut lines = vec![format!("把「{}」导入写作页，成为一份新稿件；原文件不会改动。", file.name), format!("{} 节：{shown}{}", names.len(), if more > 0 { "…" } else { "" })];
-    lines.extend(file.besides());
+    lines.extend(file.besides(store));
     Ok(lines)
 }
 
@@ -308,10 +352,13 @@ pub(super) fn preview_manuscript(store: &Store, args: &Value) -> Result<Vec<Stri
 /// 导入 makes one: sections at the file's headings, its comments, a Word file's copy to export from. The file is
 /// not changed, and one that already is a manuscript is not taken in again.
 pub(super) fn import_manuscript(store: &mut Store, args: &Value) -> Result<Value> {
-    let file = manuscript_file(args)?;
+    let mut file = manuscript_file(args)?;
     if let Some(manuscript) = file.already(store)? {
         return Ok(json!({"already": true, "file": file.name, "manuscript": manuscript_json(&manuscript), "next": "这个文件已经是写作页的稿件，没有再导入一份。告诉用户它在写作页；要读它用 read_manuscript，要留审阅意见用 comment_manuscript。"}));
     }
+    let notes = file.besides(store);
+    // The pictures first: the manuscript is written with their addresses in the figure library.
+    let brought = store.bring_pictures(&mut file.draft, std::mem::take(&mut file.pictures))?;
     let made = store.import_manuscript(&file.draft, file.kind, &file.name, file.bytes.as_deref())?;
     // The empty manuscript 写作 opened the library with gives way to the real one.
     let retired = store.retire_blank_manuscripts(&made.id)?;
@@ -320,10 +367,11 @@ pub(super) fn import_manuscript(store: &mut Store, args: &Value) -> Result<Value
         "file": file.name,
         "manuscript": manuscript_json(&made),
         "comments": draft.comments.len(), "tables": draft.tables, "pictures": draft.pictures, "trackedChanges": draft.tracked,
+        "figures": {"added": brought.added, "known": brought.known, "left": brought.left.iter().map(|(address, why)| json!({"address": address, "reason": why.said()})).collect::<Vec<_>>()},
         "guessedHeadings": file.guessed(),
         "retiredBlank": retired.len(),
-        "notes": file.besides(),
-        "next": "稿件已在写作页，原文件没有改动。告诉用户题目、分了几节和 notes 里的情况；正文里的引用还是文件里写的文字，没有变成文献库的引用。之后它是写作页的稿件：读它用 read_manuscript，留审阅意见用 comment_manuscript，改它用 edit_section。",
+        "notes": notes,
+        "next": "稿件已在写作页，原文件没有改动。告诉用户题目、分了几节和 notes 里的情况；figures.added 和 figures.known 是收进图片库（或原来就在）并显示在稿件里的图，figures.left 里的图没有带进来，照 reason 告诉用户（可以转成 PNG 后在写作页的资料库里上传）。正文里的引用还是文件里写的文字，没有变成文献库的引用。之后它是写作页的稿件：读它用 read_manuscript，留审阅意见用 comment_manuscript，改它用 edit_section。",
     }))
 }
 

@@ -2055,5 +2055,9 @@
   "助手、翻译和筛选都要先配置一个模型。": "The assistant, translation and screening all need a model set up first.",
   "做完这一步，引导自己接着走。": "Do this step and the tour moves on by itself.",
   "引导走完了。想再看一遍，在「设置 › 关于」里。": "That was the tour. To see it again, go to Settings › About.",
-  "引导已结束。想再看一遍，在「设置 › 关于」里。": "Tour closed. To see it again, go to Settings › About."
+  "引导已结束。想再看一遍，在「设置 › 关于」里。": "Tour closed. To see it again, go to Settings › About.",
+  "是网上的图片，没有下载": "a picture on the web, not downloaded",
+  "没有找到这个文件": "file not found",
+  "不是 PNG、JPEG 或 WebP 图片": "not a PNG, JPEG or WebP picture",
+  "图片太大了": "the picture is too large"
 }

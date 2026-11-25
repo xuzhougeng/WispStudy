@@ -69,6 +69,7 @@ const PHRASES: &[(&str, &str)] = &[
     ("已写入「{}」", "Wrote “{0}”"),
     ("「{}」不用改", "“{0}” needs no change"),
     ("「{}」已经是稿件《{}》", "“{0}” is already the manuscript “{1}”"),
+    ("已导入「{}」：{n} 节，{n} 张图", "Imported “{0}”: {1} {1|section|sections}, {2} {2|picture|pictures}"),
     ("已导入「{}」：{n} 节", "Imported “{0}”: {1} {1|section|sections}"),
     ("大纲现有 {n} 节", "The outline now has {0} {0|section|sections}"),
     ("{n} 份稿件", "{0} {0|manuscript|manuscripts}"),
@@ -89,6 +90,8 @@ const PHRASES: &[(&str, &str)] = &[
     ("{n} 节：{}", "{0} {0|section|sections}: {1}"),
     ("文件里的 {n} 条批注一起带进来。", "The file’s {0} {0|comment|comments} come with it."),
     ("{}留在 Word 文件里，导出时还在原处。", "{0:t} stay in the Word file and are in place again on export."),
+    ("文件旁边的 {n} 张图一起收进图片库，稿件里还在原处。", "The {0} {0|picture|pictures} beside the file {0|comes|come} into Figures and {0|stays|stay} in place in the manuscript."),
+    ("{n} 张图没有带进来（{}）：{}", "{0} {0|picture|pictures} not brought in ({1:t}): {2}"),
     ("{n} 个表格、{n} 张图", "{0} {0|table|tables} and {1} {1|picture|pictures}"),
     ("{n} 个表格", "{0} {0|table|tables}"),
     ("{n} 张图", "{0} {0|picture|pictures}"),
@@ -381,6 +384,9 @@ mod tests {
         assert_eq!(english_of("《Roots》的大纲改为：A、B").as_deref(), Some("The outline of “Roots” becomes: A、B"));
         assert_eq!(english_of("《Roots》的正文语言改为：英文").as_deref(), Some("The language of “Roots” becomes: English"));
         assert_eq!(english_of("1 个表格、2 张图留在 Word 文件里，导出时还在原处。").as_deref(), Some("1 table and 2 pictures stay in the Word file and are in place again on export."));
+        assert_eq!(english_of("文件旁边的 1 张图一起收进图片库，稿件里还在原处。").as_deref(), Some("The 1 picture beside the file comes into Figures and stays in place in the manuscript."));
+        assert_eq!(english_of("2 张图没有带进来（不是 PNG、JPEG 或 WebP 图片）：figures/a.svg、b.pdf").as_deref(), Some("2 pictures not brought in (not a PNG, JPEG or WebP picture): figures/a.svg、b.pdf"));
+        assert_eq!(english_of("已导入「draft.md」：3 节，2 张图").as_deref(), Some("Imported “draft.md”: 3 sections, 2 pictures"));
         assert_eq!(english_of("仅在已手动核对 Notion 后确认：笔记已成功写入。").as_deref(), Some("Confirm only after checking Notion yourself: the note was saved."));
     }
 

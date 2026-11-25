@@ -28,7 +28,7 @@ use anyhow::{Context, Result, bail};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The tables, made with the library's own (`store::SCHEMA`). An older build
 /// does not know them and reads the rest of the database as before.
@@ -251,6 +251,8 @@ pub struct PictureLine {
     /// Its caption as written, Markdown and citations included; empty when it has none.
     pub caption: String,
     pub address: String,
+    /// Where the address is, in bytes of the text.
+    pub place: Range<usize>,
 }
 
 /// The pictures of a section's text, in order. Fenced code is not looked into.
@@ -260,7 +262,7 @@ pub fn picture_lines(body: &str) -> Vec<PictureLine> {
         .filter_map(|line| {
             let address = line.picture.clone()?;
             let (caption, _) = markdown::picture_line(&body[line.range.clone()])?;
-            Some(PictureLine { caption: body[line.range.start + caption.start..line.range.start + caption.end].to_string(), address: body[address].to_string(), line: line.range })
+            Some(PictureLine { caption: body[line.range.start + caption.start..line.range.start + caption.end].to_string(), address: body[address.clone()].to_string(), place: address, line: line.range })
         })
         .collect()
 }
@@ -824,8 +826,13 @@ pub fn from_markdown(text: &str, file_name: &str) -> Draft {
             joining = false;
             continue;
         }
+        // What Pandoc is told of a picture after it (`{width=80%}`) is not the manuscript's: the line is the picture's alone.
+        let trimmed = match trimmed.rfind("){") {
+            Some(at) if trimmed.starts_with("![") && trimmed.ends_with('}') && markdown::picture_line(&trimmed[..=at]).is_some() => &trimmed[..=at],
+            _ => trimmed,
+        };
         let digits = trimmed.chars().take_while(char::is_ascii_digit).count();
-        let own = trimmed.starts_with(['|', '>']) || ["- ", "* ", "+ "].iter().any(|mark| trimmed.starts_with(mark)) || (digits > 0 && (trimmed[digits..].starts_with(". ") || trimmed[digits..].starts_with(") ")));
+        let own = markdown::picture_line(trimmed).is_some() || trimmed.starts_with(['|', '>']) || ["- ", "* ", "+ "].iter().any(|mark| trimmed.starts_with(mark)) || (digits > 0 && (trimmed[digits..].starts_with(". ") || trimmed[digits..].starts_with(") ")));
         match lines.last_mut().filter(|_| joining && !own) {
             Some(last) => {
                 // Chinese is written without spaces between the lines of a paragraph.
@@ -850,6 +857,117 @@ pub fn from_markdown(text: &str, file_name: &str) -> Draft {
     let (mut draft, _) = outline(lines, file_name, true);
     draft.titled = false;
     draft
+}
+
+// ---- the pictures a file shows from files of its own
+
+/// Why a picture a file shows did not come along with it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Left {
+    /// The address is a link: nothing is fetched.
+    Link,
+    Missing,
+    Unread,
+    /// Not a picture that is kept here.
+    Kind,
+    Large,
+}
+
+impl Left {
+    pub fn said(self) -> &'static str {
+        match self {
+            Left::Link => "是网上的图片，没有下载",
+            Left::Missing => "没有找到这个文件",
+            Left::Unread => "文件读不了",
+            Left::Kind => "不是 PNG、JPEG 或 WebP 图片",
+            Left::Large => "图片太大了",
+        }
+    }
+}
+
+/// A picture a file shows from a file of its own: `![caption](fig1.png)` in a Markdown file, the address read
+/// from the folder the file is in.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Beside {
+    /// The address as the file writes it.
+    pub address: String,
+    /// The caption of the first line that shows it, in plain words.
+    pub caption: String,
+    /// The file meant, or why there is none to read.
+    pub file: Result<PathBuf, Left>,
+}
+
+/// The file an address names for a file in `folder`: beside it, or where the address says in full. A link is
+/// not followed, and nothing is read.
+fn file_beside(address: &str, folder: &Path) -> Result<PathBuf, Left> {
+    if address.contains("://") || address.starts_with("data:") { return Err(Left::Link) }
+    let written = crate::webpage::percent_decoded(address);
+    let path = folder.join(written.strip_prefix("./").unwrap_or(&written));
+    if path.is_file() { Ok(path) } else { Err(Left::Missing) }
+}
+
+/// The pictures a draft shows, each address once and in the order they stand, with the files they name beside
+/// the file the draft was read from. One that already is a figure of the library (`figures/G….png`, the file
+/// not beside the draft) is found there by `Store::bring_pictures`.
+pub fn pictures_beside(draft: &Draft, folder: &Path) -> Vec<Beside> {
+    let mut found: Vec<Beside> = vec![];
+    for picture in draft.sections.iter().flat_map(|section| &section.paragraphs).flat_map(|paragraph| picture_lines(paragraph)) {
+        if found.iter().any(|known| known.address == picture.address) { continue }
+        found.push(Beside { file: file_beside(&picture.address, folder), caption: markdown::plain(&picture.caption).trim().to_string(), address: picture.address });
+    }
+    found
+}
+
+/// A picture of a file, read: what `Store::bring_pictures` keeps.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Picture {
+    pub address: String,
+    pub caption: String,
+    /// The name of the file it is.
+    pub name: String,
+    pub bytes: Result<Vec<u8>, Left>,
+}
+
+/// The pictures a draft shows, read from beside its file. A PNG or a JPEG is kept as it is; `anew` writes any
+/// other kind as one of those where it can (the window does, a tool does not), and a WebP it leaves is kept so.
+pub fn read_pictures(draft: &Draft, folder: &Path, anew: &dyn Fn(&[u8]) -> Option<Vec<u8>>) -> Vec<Picture> {
+    pictures_beside(draft, folder)
+        .into_iter()
+        .map(|beside| {
+            let name = beside.file.as_ref().ok().and_then(|path| path.file_name()).map(|name| name.to_string_lossy().to_string()).unwrap_or_default();
+            let bytes = beside.file.and_then(|path| std::fs::read(path).map_err(|_| Left::Unread)).and_then(|bytes| match crate::figure::picture_kind(&bytes) {
+                Some("png" | "jpg") => Ok(bytes),
+                kind => anew(&bytes).or(kind.map(|_| bytes)).ok_or(Left::Kind),
+            });
+            Picture { address: beside.address, caption: beside.caption, name, bytes: bytes.and_then(|bytes| if bytes.len() > crate::figure::MAX_BYTES { Err(Left::Large) } else { Ok(bytes) }) }
+        })
+        .collect()
+}
+
+/// What became of the pictures a file shows.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Brought {
+    /// Kept as new figures of the library.
+    pub added: usize,
+    /// The library held them already, to the byte.
+    pub known: usize,
+    /// Those that stay as the file writes them, and why.
+    pub left: Vec<(String, Left)>,
+}
+
+impl Brought {
+    /// How many of the file's pictures the manuscript shows from the library.
+    pub fn shown(&self) -> usize {
+        self.added + self.known
+    }
+}
+
+/// A text with the addresses of its pictures taken out: what two readings of a file have alike when the
+/// pictures of one were brought into the library since.
+pub fn without_addresses(body: &str) -> String {
+    let mut out = body.to_string();
+    for picture in picture_lines(body).into_iter().rev() { out.replace_range(picture.place, "") }
+    out
 }
 
 /// The file a manuscript was started from.
@@ -1023,6 +1141,45 @@ impl Store {
             return Err(err.into());
         }
         self.manuscript(&id)?.ok_or_else(|| anyhow::anyhow!("新稿件保存后未找到"))
+    }
+
+    /// Keep the pictures a file shows (`read_pictures`) as figures of the library, the person's own (`UPLOADED`),
+    /// and write the draft's lines to show them from there: `![caption](figures/G….png)`. One the library holds
+    /// already, to the byte, is not kept twice. A picture that did not come leaves its line as the file has it.
+    /// Done before `import_manuscript`; a figure kept stays one should that fail.
+    pub fn bring_pictures(&mut self, draft: &mut Draft, pictures: Vec<Picture>) -> Result<Brought> {
+        let mut brought = Brought::default();
+        let mut now: Vec<(String, String)> = vec![];
+        for picture in pictures {
+            let bytes = match picture.bytes {
+                Ok(bytes) => bytes,
+                // A line the library's own export wrote, read where no picture lies beside it: the figure is here.
+                Err(Left::Missing) if library_picture(&picture.address) && self.root().join(picture.address.replace('/', std::path::MAIN_SEPARATOR_STR)).is_file() => continue,
+                Err(why) => {
+                    brought.left.push((picture.address, why));
+                    continue;
+                }
+            };
+            let held = match self.figure_holding(&bytes)? {
+                Some(held) => {
+                    brought.known += 1;
+                    held.local_path
+                }
+                None => {
+                    let mut figure = crate::figure::Figure { origin: crate::figure::UPLOADED.into(), file_name: picture.name, legend: picture.caption, ..Default::default() };
+                    self.add_figure(&mut figure, &bytes)?;
+                    brought.added += 1;
+                    figure.local_path
+                }
+            };
+            now.push((picture.address, held));
+        }
+        for paragraph in draft.sections.iter_mut().flat_map(|section| &mut section.paragraphs) {
+            for line in picture_lines(paragraph).into_iter().rev() {
+                if let Some((_, held)) = now.iter().find(|(address, _)| *address == line.address) { paragraph.replace_range(line.place, held) }
+            }
+        }
+        Ok(brought)
     }
 
     /// The file a manuscript was started from, when it was.
@@ -2013,6 +2170,63 @@ mod tests {
         let again = from_word(&docx::read(&out.bytes).unwrap(), "Roots.docx");
         assert_eq!(again.sections.iter().map(|s| s.paragraphs.join("\n\n")).collect::<Vec<_>>(), ["Roots grow down.\n\nThey take up water.", "We grew plants."]);
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_markdown_file_brings_its_pictures_into_the_figure_library() {
+        let root = std::env::temp_dir().join(format!("wisp-manuscript-beside-{}", new_id("T")));
+        let (library, project) = (root.join("library"), root.join("project"));
+        std::fs::create_dir_all(&library).unwrap();
+        std::fs::create_dir_all(project.join("figures")).unwrap();
+        // A PNG's first bytes, saying how wide it is.
+        let png = |width: u32| {
+            let mut png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR".to_vec();
+            png.extend(width.to_be_bytes());
+            png.extend(100u32.to_be_bytes());
+            png.extend([8, 2, 0, 0, 0]);
+            png
+        };
+        std::fs::write(project.join("figures/fig1.png"), png(300)).unwrap();
+        std::fs::write(project.join("figures/fig 2.png"), png(400)).unwrap();
+        std::fs::write(project.join("figures/fig3.svg"), "<svg/>").unwrap();
+        let text = "# Salt and roots\n\n## Results\n\nRoots are shorter under salt.\n![Root length under **salt**](figures/fig1.png)\n**Figure 1.** Root length.\n\n![](./figures/fig%202.png){width=80%}\n\n![again](figures/fig1.png)\n\n![vector](figures/fig3.svg)\n\n![gone](figures/none.png)\n\n![web](https://example.org/a.png)\n";
+        let mut draft = from_markdown(text, "draft.md");
+        // A picture is a paragraph of its own whatever stands right over and under it, and without what Pandoc is told of it.
+        assert_eq!((draft.sections[0].name.as_str(), &draft.sections[0].paragraphs[..4]), ("Results", &["Roots are shorter under salt.".to_string(), "![Root length under **salt**](figures/fig1.png)".into(), "**Figure 1.** Root length.".into(), "![](./figures/fig%202.png)".into()][..]));
+        let pictures = read_pictures(&draft, &project, &|_| None);
+        let read: Vec<(&str, &str, Result<usize, Left>)> = pictures.iter().map(|picture| (picture.address.as_str(), picture.name.as_str(), picture.bytes.as_ref().map(Vec::len).map_err(|why| *why))).collect();
+        assert_eq!(read, [("figures/fig1.png", "fig1.png", Ok(29)), ("./figures/fig%202.png", "fig 2.png", Ok(29)), ("figures/fig3.svg", "fig3.svg", Err(Left::Kind)), ("figures/none.png", "", Err(Left::Missing)), ("https://example.org/a.png", "", Err(Left::Link))]);
+        // A kind that is not kept comes where the caller writes it anew.
+        assert_eq!(read_pictures(&draft, &project, &|bytes| (bytes == b"<svg/>").then(|| png(500)))[2].bytes, Ok(png(500)));
+
+        let mut store = Store::in_memory(&library).unwrap();
+        let brought = store.bring_pictures(&mut draft, pictures).unwrap();
+        assert_eq!((brought.added, brought.known, brought.shown(), brought.left.clone()), (2, 0, 2, vec![("figures/fig3.svg".to_string(), Left::Kind), ("figures/none.png".to_string(), Left::Missing), ("https://example.org/a.png".to_string(), Left::Link)]));
+        let figures = store.list_figures().unwrap();
+        let (first, second) = (figures.iter().find(|figure| figure.file_name == "fig1.png").unwrap(), figures.iter().find(|figure| figure.file_name == "fig 2.png").unwrap());
+        assert!(first.uploaded() && first.legend == "Root length under salt" && (first.width, first.height) == (300, 100) && second.legend.is_empty(), "{figures:?}");
+        assert_eq!(std::fs::read(store.figure_path(second)).unwrap(), png(400));
+        // The lines show them from the library, captions as written; what did not come stays as the file has it.
+        let body = draft.sections[0].paragraphs.join("\n\n");
+        assert!(body.contains(&format!("![Root length under **salt**]({})", first.local_path)), "{body}");
+        assert_eq!(picture_lines(&body).into_iter().map(|picture| picture.address).collect::<Vec<_>>(), [first.local_path.as_str(), second.local_path.as_str(), first.local_path.as_str(), "figures/fig3.svg", "figures/none.png", "https://example.org/a.png"]);
+        let made = store.import_manuscript(&draft, "markdown", "draft.md", None).unwrap();
+        assert_eq!(pictures_used(&made)[..2], [first.local_path.clone(), second.local_path.clone()]);
+
+        // Read again, the file is the manuscript but for the addresses, and its pictures are the ones held.
+        let mut again = from_markdown(text, "draft.md");
+        assert_eq!(without_addresses(&made.sections[0].body), without_addresses(&again.sections[0].paragraphs.join("\n\n")));
+        assert_ne!(made.sections[0].body, again.sections[0].paragraphs.join("\n\n"));
+        let pictures = read_pictures(&again, &project, &|_| None);
+        let brought = store.bring_pictures(&mut again, pictures).unwrap();
+        assert_eq!((brought.added, brought.known, store.list_figures().unwrap().len()), (0, 2, 2));
+        assert_eq!(again.sections[0].paragraphs, draft.sections[0].paragraphs);
+        // A line the library's own export wrote, its picture not beside the file: the figure is here, and nothing is said of it.
+        let mut own = from_markdown(&format!("## Results\n\n![kept]({})\n", first.local_path), "export.md");
+        let pictures = read_pictures(&own, &root, &|_| None);
+        assert_eq!(pictures[0].bytes, Err(Left::Missing));
+        assert_eq!(store.bring_pictures(&mut own, pictures).unwrap(), Brought::default());
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]
