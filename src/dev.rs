@@ -111,6 +111,16 @@ impl Workspace {
                     "close" => Some(Cmd::Bell(crate::bell::Do::Close)),
                     n => n.parse::<usize>().ok().and_then(|n| self.bell.done.get(n)).map(|done| Cmd::Bell(crate::bell::Do::Go(done.id))),
                 },
+                // 教程: `tutorials` opens them as the book on the home page does, `tutorials:<page>` or `tutorials:<page>#<section>` shows one (`index` is the shelf), `tutorials:close` leaves them.
+                "tutorials" => match arg {
+                    "" => Some(Cmd::Tutorial(crate::tutorial::Do::Open)),
+                    "close" => Some(Cmd::Tutorial(crate::tutorial::Do::Close)),
+                    page => {
+                        let (page, section) = page.split_once('#').map_or((page, None), |(page, section)| (page, Some(section.to_string())));
+                        if self.tutorials.is_none() { self.run(Cmd::Tutorial(crate::tutorial::Do::Open), window, cx) }
+                        Some(Cmd::Tutorial(crate::tutorial::Do::Show(page.to_string(), section)))
+                    }
+                },
                 "starask" => {
                     self.star_ask = true;
                     cx.notify();

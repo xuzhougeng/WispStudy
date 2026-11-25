@@ -49,20 +49,26 @@ fn index_at(layout: &TextLayout, text: &str, position: Point<Pixels>) -> usize {
     floor(text, index)
 }
 
-/// What a selectable text draws over its words: the stretches marked in the accent, the selection's ground over all.
-/// Cut at every edge of both, since the runs a text is drawn in may not overlap.
-fn highlights(selected: Option<Range<usize>>, marks: impl Iterator<Item = Range<usize>>) -> Vec<(Range<usize>, HighlightStyle)> {
+/// What a selectable text draws over its words: its own styles (bold, code) under all, the stretches marked in
+/// the accent over them, the selection's ground over both. Cut at every edge, since the runs a text is drawn
+/// in may not overlap.
+fn highlights(selected: Option<Range<usize>>, marks: impl Iterator<Item = Range<usize>>, styles: &[(Range<usize>, HighlightStyle)]) -> Vec<(Range<usize>, HighlightStyle)> {
     let marks: Vec<Range<usize>> = marks.filter(|range| !range.is_empty()).collect();
-    let mut edges: Vec<usize> = marks.iter().flat_map(|range| [range.start, range.end]).chain(selected.iter().flat_map(|range| [range.start, range.end])).collect();
+    let mut edges: Vec<usize> = marks.iter().chain(styles.iter().map(|(range, _)| range)).flat_map(|range| [range.start, range.end]).chain(selected.iter().flat_map(|range| [range.start, range.end])).collect();
     edges.sort();
     edges.dedup();
+    let within = |range: &Range<usize>, piece: &Range<usize>| range.start <= piece.start && piece.end <= range.end;
     edges
         .windows(2)
         .filter_map(|pair| {
             let piece = pair[0]..pair[1];
-            let marked = marks.iter().any(|range| range.start <= piece.start && piece.end <= range.end);
-            let picked = selected.as_ref().is_some_and(|range| range.start <= piece.start && piece.end <= range.end);
-            (marked || picked).then(|| (piece, HighlightStyle { color: marked.then(Theme::accent), font_weight: marked.then_some(FontWeight::MEDIUM), background_color: picked.then(Theme::selection), ..Default::default() }))
+            let mut style = styles.iter().find(|(range, _)| within(range, &piece)).map(|(_, style)| *style).unwrap_or_default();
+            if marks.iter().any(|range| within(range, &piece)) {
+                style.color = Some(Theme::accent());
+                style.font_weight = style.font_weight.or(Some(FontWeight::MEDIUM));
+            }
+            if selected.as_ref().is_some_and(|range| within(range, &piece)) { style.background_color = Some(Theme::selection()) }
+            (style != HighlightStyle::default()).then_some((piece, style))
         })
         .collect()
 }
@@ -77,23 +83,28 @@ pub use wisp_core::selection::word_at;
 impl Workspace {
     /// `text` drawn so that it can be selected. `key` tells this text from the others on show.
     pub fn selectable(&self, key: impl Into<SharedString>, text: impl Into<SharedString>, cx: &mut Context<Self>) -> Div {
-        self.selectable_text(key.into(), text.into(), None, vec![], cx)
+        self.selectable_text(key.into(), text.into(), None, vec![], &[], cx)
     }
 
     /// `selectable` with stretches drawn in the accent (the things a question names with @), each leading where its
     /// command goes when it is clicked, not dragged.
     pub fn selectable_marked(&self, key: impl Into<SharedString>, text: impl Into<SharedString>, marks: Vec<(Range<usize>, Option<Cmd>)>, cx: &mut Context<Self>) -> Div {
-        self.selectable_text(key.into(), text.into(), None, marks, cx)
+        self.selectable_text(key.into(), text.into(), None, marks, &[], cx)
+    }
+
+    /// `selectable_marked` with styles of its own under the marks: the bold, code and links of a tutorial's text.
+    pub fn selectable_styled(&self, key: impl Into<SharedString>, text: impl Into<SharedString>, styles: &[(Range<usize>, HighlightStyle)], marks: Vec<(Range<usize>, Option<Cmd>)>, cx: &mut Context<Self>) -> Div {
+        self.selectable_text(key.into(), text.into(), None, marks, styles, cx)
     }
 
     /// A single click opens the link; dragging and right clicking still select and copy.
     pub fn selectable_link(&self, key: impl Into<SharedString>, text: impl Into<SharedString>, url: String, cx: &mut Context<Self>) -> Div {
-        self.selectable_text(key.into(), text.into(), Some(url), vec![], cx).cursor_pointer().text_color(Theme::accent()).hover(|s| s.underline())
+        self.selectable_text(key.into(), text.into(), Some(url), vec![], &[], cx).cursor_pointer().text_color(Theme::accent()).hover(|s| s.underline())
     }
 
-    fn selectable_text(&self, key: SharedString, text: SharedString, url: Option<String>, marks: Vec<(Range<usize>, Option<Cmd>)>, cx: &mut Context<Self>) -> Div {
+    fn selectable_text(&self, key: SharedString, text: SharedString, url: Option<String>, marks: Vec<(Range<usize>, Option<Cmd>)>, styles: &[(Range<usize>, HighlightStyle)], cx: &mut Context<Self>) -> Div {
         let selected = self.picked.as_ref().filter(|picked| picked.key == key && picked.text == text).map(Picked::range).filter(|range| !range.is_empty());
-        let styled = StyledText::new(text.clone()).with_highlights(highlights(selected, marks.iter().map(|(range, _)| range.clone())));
+        let styled = StyledText::new(text.clone()).with_highlights(highlights(selected, marks.iter().map(|(range, _)| range.clone()), styles));
         let layout = styled.layout().clone();
         // Over a mention that leads somewhere the pointer is a hand, as over a link.
         let clickable: Vec<Range<usize>> = marks.iter().filter(|(_, go)| go.is_some()).map(|(range, _)| range.clone()).collect();

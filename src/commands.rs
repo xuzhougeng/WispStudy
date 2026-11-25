@@ -114,6 +114,8 @@ pub enum Cmd {
     Tour(crate::tour::Do),
     /// 铃铛 on the home page: its list, and a row of it (`bell.rs`).
     Bell(crate::bell::Do),
+    /// 教程: the book beside the bell, and the tutorials it opens (`tutorial.rs`).
+    Tutorial(crate::tutorial::Do),
     /// The line that offers a contact email where a search starts (`Workspace::contact_hint`), closed for good.
     DismissContactHint,
     NoteOpen(Option<Talk>, bool),
@@ -806,6 +808,7 @@ impl Workspace {
             }
             Cmd::Tour(what) => self.tour_do(what, window, cx),
             Cmd::Bell(what) => self.bell_do(what, window, cx),
+            Cmd::Tutorial(what) => self.tutorial_do(what, window, cx),
             Cmd::DismissContactHint => {
                 self.settings.contact_hint_dismissed = true;
                 self.save_settings(cx);
@@ -2340,6 +2343,8 @@ impl Workspace {
         } else if self.dismiss_font_picker(window, cx) || self.settings_up(cx) {
         } else if self.settings_view.is_some() {
             self.close_settings(window, cx);
+        } else if self.tutorials.is_some() && self.lib.is_none() {
+            self.run(Cmd::Tutorial(crate::tutorial::Do::Close), window, cx);
         } else if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()).filter(|pdf| pdf.read(cx).overview_open()) {
             // 页面总览 was opened from the bar, so the viewer need not have the keyboard: it is put away before the paper is.
             pdf.update(cx, |pdf, cx| pdf.toggle_overview(cx));

@@ -70,6 +70,7 @@ mod settings;
 mod shortcuts;
 mod theme;
 mod tour;
+mod tutorial;
 mod transfer;
 mod translate;
 mod ui;

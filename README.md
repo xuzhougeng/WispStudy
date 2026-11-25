@@ -37,7 +37,7 @@
 </p>
 
 > [!NOTE]
-> Wisp Study is at an early stage and changes fast. The interface comes in English and Chinese; switch in “Settings › General › Interface language” (设置 › 通用 › 界面语言). It takes effect at once and is saved. If this is your first time, follow the [tutorials](https://xuzhougeng.github.io/WispStudy/en/tutorials/) and build a library from nothing; the later ones each cover one research task: close reading, asking, extracting, writing a review, writing a paper, revising. If you run into a problem or have an idea, [open an issue](https://github.com/xuzhougeng/WispStudy/issues), or better, send a pull request.
+> Wisp Study is at an early stage and changes fast. The interface comes in English and Chinese; switch in “Settings › General › Interface language” (设置 › 通用 › 界面语言). It takes effect at once and is saved. If this is your first time, follow the [tutorials](https://xuzhougeng.github.io/WispStudy/en/tutorials/) (also in the app: the book at the top right of the home page) and build a library from nothing; the later ones each cover one research task: close reading, asking, extracting, writing a review, writing a paper, revising. If you run into a problem or have an idea, [open an issue](https://github.com/xuzhougeng/WispStudy/issues), or better, send a pull request.
 
 ## Why Wisp Study
 

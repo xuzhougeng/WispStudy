@@ -455,6 +455,8 @@ pub struct Workspace {
     pub away: bool,
     /// 铃铛: what those libraries finished while off screen, for the home page (`bell.rs`).
     pub(crate) bell: crate::bell::Bell,
+    /// 教程, while they are open over the home page (`tutorial.rs`).
+    pub(crate) tutorials: Option<crate::tutorial::Tutorials>,
     /// 设置, shown instead of the home page or the library while it is open.
     pub settings_view: Option<SettingsView>,
     /// 连接器: where the connection of each one tried stands (`custom.rs`).
@@ -803,7 +805,7 @@ impl Workspace {
         shortcuts::rebuild(&settings.shortcuts, cx);
         let libraries = libraries::list(&root);
         let home = crate::draft::Home::new(window, cx);
-        let mut this = Workspace { focus, settings, settings_path, root, libraries, lib: None, parked: vec![], away: false, bell: Default::default(), stepping: false, main_window: window.window_handle(), settings_view: None, connections: vec![], skills: vec![], update: UpdateState::Idle, update_told: None, session: Session::default(), modal: None, modal_error: String::new(), modal_subscriptions: vec![], figure_at: (0., 0.), figure_drag: None, menu: None, palette: None, toast, home_scroll: ScrollHandle::new(), home, resizing: None, column_drag: None, picked: None, pinning: false, mark_over: None, filters_over: [false; 2], filters_drawn: false, star_ask: false, tour: Default::default() };
+        let mut this = Workspace { focus, settings, settings_path, root, libraries, lib: None, parked: vec![], away: false, bell: Default::default(), tutorials: None, stepping: false, main_window: window.window_handle(), settings_view: None, connections: vec![], skills: vec![], update: UpdateState::Idle, update_told: None, session: Session::default(), modal: None, modal_error: String::new(), modal_subscriptions: vec![], figure_at: (0., 0.), figure_drag: None, menu: None, palette: None, toast, home_scroll: ScrollHandle::new(), home, resizing: None, column_drag: None, picked: None, pinning: false, mark_over: None, filters_over: [false; 2], filters_drawn: false, star_ask: false, tour: Default::default() };
         // A new day of use is counted once at start; on the fifth the home page asks for a star, until answered.
         // A settings file that could not be read is not written over with defaults for it (the toast says so).
         if this.toast.is_none() && wisp_core::settings::note_use(&mut this.settings, &wisp_core::time::today()) { this.save_settings(cx) }

@@ -31,7 +31,7 @@ impl Rich {
         rich
     }
 
-    fn push(&mut self, text: &str, marks: Marks) {
+    pub fn push(&mut self, text: &str, marks: Marks) {
         if text.is_empty() { return }
         self.text.push_str(text);
         match self.runs.last_mut() {

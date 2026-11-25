@@ -37,7 +37,7 @@
 </p>
 
 > [!NOTE]
-> Wisp Study 还在早期，变化很快。支持中文和英文界面，在「设置 › 通用 › 界面语言」中切换（Settings › General › Interface language），立即生效并自动保存。第一次用，可以跟着[教程](https://xuzhougeng.github.io/WispStudy/tutorials/)从零建一个文献库；之后的几篇各讲一个科研场景：精读、提问、提取、写综述、写论文、改稿。遇到问题或有想法，欢迎[提 issue](https://github.com/xuzhougeng/WispStudy/issues)，更欢迎直接发 pull request。
+> Wisp Study 还在早期，变化很快。支持中文和英文界面，在「设置 › 通用 › 界面语言」中切换（Settings › General › Interface language），立即生效并自动保存。第一次用，可以跟着[教程](https://xuzhougeng.github.io/WispStudy/tutorials/)（应用里也有：首页右上角的书本）从零建一个文献库；之后的几篇各讲一个科研场景：精读、提问、提取、写综述、写论文、改稿。遇到问题或有想法，欢迎[提 issue](https://github.com/xuzhougeng/WispStudy/issues)，更欢迎直接发 pull request。
 
 ## 为什么是 Wisp Study
 
