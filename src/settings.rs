@@ -1083,7 +1083,6 @@ impl Workspace {
     pub fn render_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(view) = &self.settings_view else { return div().into_any_element() };
         let page = view.page;
-        let wide = matches!(page, SettingsPage::Ai | SettingsPage::Customize);
         let nav = |id: &'static str, icon: &'static str, label: &'static str, active: bool, cmd: Cmd, this: &Self, cx: &mut Context<Self>| {
             div()
                 .id(id)
@@ -1131,6 +1130,10 @@ impl Workspace {
             SettingsPage::Storage => self.storage_page(cx),
             SettingsPage::About => self.about_page(cx),
         };
+        // The page's column in pixels, not as a share under a `max_w`: Taffy measures wrapped text at the
+        // frame's full width but draws it at the narrower column, so the page came out taller than measured
+        // and its last rows could not be scrolled to.
+        let column = self.column_width(window).max(0.);
         let changed = page == SettingsPage::Shortcuts && !self.settings.shortcuts.is_empty();
         let heading = div()
             .flex()
@@ -1163,7 +1166,7 @@ impl Workspace {
                     // natural height: shrinking it hides the overflow of long tool lists.
                     // Every page stands in one frame, as wide as the widest page and centred; a narrower page
                     // keeps to its left, so the left edge does not move from page to page.
-                    .child(div().flex().flex_col().flex_none().items_center().w_full().px(px(32.)).pt(px(12.)).pb(px(64.)).child(div().flex().flex_col().flex_none().w_full().max_w(px(AI_COLUMN_W)).child(div().flex().flex_col().flex_none().w_full().max_w(px(if wide { AI_COLUMN_W } else { COLUMN_W })).gap(px(24.)).child(heading).child(body)))),
+                    .child(div().flex().flex_col().flex_none().items_center().w_full().px(px(32.)).pt(px(12.)).pb(px(64.)).child(div().flex().flex_col().flex_none().w_full().max_w(px(AI_COLUMN_W)).child(div().flex().flex_col().flex_none().w(px(column)).gap(px(24.)).child(heading).child(body)))),
             );
         div().flex().size_full().min_h_0().overflow_hidden().child(sidebar).child(content).into_any_element()
     }
