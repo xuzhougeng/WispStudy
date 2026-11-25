@@ -614,6 +614,13 @@ pub enum Cmd {
     RevealCiteStyle(String),
     RemoveCiteStyle(String),
     RestoreCiteStyle { file: String, xml: String, default: bool },
+    /// 调整 on the list of styles: the sliders by a style's name show what of it can be changed here, or put it
+    /// away; a detail is set (none: 还原, the style's own again); what is set is kept as a style of the person's
+    /// own; and the sparkle takes the style to the assistant.
+    AdjustCiteStyles,
+    TuneCiteStyle(Option<crate::cite_styles::Knob>),
+    KeepCiteStyle,
+    AskCiteStyle(String),
     /// The section's earlier versions.
     WriteHistory,
     HistoryPick(usize),
@@ -1156,6 +1163,12 @@ impl Workspace {
             Cmd::RevealCiteStyle(style) => self.reveal_cite_style(&style, cx),
             Cmd::RemoveCiteStyle(style) => self.remove_cite_style(style, cx),
             Cmd::RestoreCiteStyle { file, xml, default } => self.restore_cite_style(&file, &xml, default, cx),
+            Cmd::AdjustCiteStyles => self.adjust_cite_styles(cx),
+            Cmd::TuneCiteStyle(knob) => self.tune_cite_style(knob, cx),
+            Cmd::KeepCiteStyle => {
+                self.keep_cite_style(cx);
+            }
+            Cmd::AskCiteStyle(style) => self.ask_cite_style(&style, window, cx),
             Cmd::WriteCopyReferences => self.copy_references(cx),
             Cmd::WriteSide(side) => {
                 // The page on show asked for again folds the panel under a narrow manuscript, or opens it; another page opens it.

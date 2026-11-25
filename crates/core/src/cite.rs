@@ -849,15 +849,16 @@ pub struct Sample {
     pub list: Vec<Rich>,
 }
 
-/// `style` tried on three works that tell styles apart: one of many authors (where a style writes `et al.`), one
-/// of two, and a Chinese one, each with its volume, issue and pages; cited alone and as a group. The sentence is
+/// `style` tried on three works that tell styles apart: one of seven authors, one of two, the first with two
+/// given names, and a Chinese one of three (where styles differ in when they write `et al.` and in what
+/// follows an initial), each with its volume, issue and pages; cited alone and as a group. The sentence is
 /// in English: what is shown is the style, and the locale of a manuscript in Chinese changes only its `等`.
 pub fn sample(style: &Style) -> Sample {
     let paper = |id: &str, authors: &str, year: i32, title: &str, journal: &str, placed: (&str, &str, &str)| Paper { id: id.into(), authors: authors.into(), year: Some(year), title: title.into(), journal: journal.into(), volume: placed.0.into(), issue: placed.1.into(), pages: placed.2.into(), added_at: id.into(), ..Default::default() };
     let papers = [
         paper("1", "Zhang, Wei; Li, Qiang; Wang, Fang; Smith, John; Müller, Anna; Tanaka, Hiroshi; Garcia, Maria", 2024, "A single-cell atlas of root development", "Nature Plants", ("10", "3", "357-362")),
-        paper("2", "Smith, John; Jones, Mary", 2019, "Auxin transport shapes the root tip", "The Plant Cell", ("31", "4", "1021-1033")),
-        paper("3", "王芳; 李强", 2021, "水稻根系发育的单细胞转录组研究", "中国科学：生命科学", ("51", "8", "912-925")),
+        paper("2", "Smith, John A.; Jones, Mary", 2019, "Auxin transport shapes the root tip", "The Plant Cell", ("31", "4", "1021-1033")),
+        paper("3", "王芳; 李强; 张伟", 2021, "水稻根系发育的单细胞转录组研究", "中国科学：生命科学", ("51", "8", "912-925")),
     ];
     let index = Index::new(&papers, [], &BTreeMap::new());
     let key = |id: &str| index.key(id).unwrap_or_default().to_string();
@@ -1258,7 +1259,7 @@ mod tests {
     #[test]
     fn a_style_is_shown_on_works_of_its_own() {
         let shown = sample(&Style::AuthorYear);
-        assert_eq!(shown.sentence.text, "Root hairs take up most of the water (Zhang et al., 2024), as later work confirmed (Smith & Jones, 2019; 王芳和李强, 2021).");
+        assert_eq!(shown.sentence.text, "Root hairs take up most of the water (Zhang et al., 2024), as later work confirmed (Smith & Jones, 2019; 王芳等, 2021).");
         assert_eq!(shown.list.len(), 3);
         let shown = sample(&Style::Numeric);
         assert_eq!(shown.sentence.text, "Root hairs take up most of the water [1], as later work confirmed [2, 3].");

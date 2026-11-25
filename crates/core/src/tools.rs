@@ -455,7 +455,7 @@ pub fn catalog() -> Vec<ToolDef> {
         scoped(
             "try_cite_style",
             "试排引用样式",
-            "用文献库里的文献试排一个引用样式，不保存：返回正文里的引用（单篇、多篇）和参考文献条目各是什么样子，italic、bold、superscript 标出斜体、粗体、上标的文字。改 CSL 时每改一次都先试排，把结果给用户看。CSL 写错时返回错误所在。只读。文献记录里没有卷、期、页码，试排结果里也不会有。",
+            "用文献库里的文献试排一个引用样式，不保存：返回正文里的引用（单篇、多篇）和参考文献条目各是什么样子，italic、bold、superscript 标出斜体、粗体、上标的文字。改 CSL 时每改一次都先试排，把结果给用户看。CSL 写错时返回错误所在。只读。条目里的卷、期、页码取自文献记录，记录里没有的那一项不会出现。",
             json!({
                 "csl": {"type": "string", "description": "要试的 CSL 定义（完整的 XML）。与 style 二选一。"},
                 "style": {"type": "string", "description": "已有样式的 key。与 csl 二选一。"},
@@ -2124,6 +2124,8 @@ fn cite_preview(store: &mut Store, style: &crate::csl::Loaded, args: &Value) -> 
     } else {
         papers.retain(|paper| asked.contains(&paper.id.as_str()));
     }
+    // Ids that name no paper here are said to be that: the library is not empty, and without them the latest papers are taken.
+    if papers.is_empty() && !asked.is_empty() { bail!("paperIds 里的文献不在这个文献库里。省略 paperIds，就用文献库里最近的几篇试排。") }
     if papers.is_empty() { bail!("文献库里没有可以用来试排的文献（需要有作者和年份）。") }
     let all: Vec<&Paper> = papers.iter().collect();
     let groups: Vec<Vec<&Paper>> = [vec![all[0]], all.clone()].into_iter().take(if all.len() > 1 { 2 } else { 1 }).collect();
@@ -3645,6 +3647,7 @@ pub(crate) mod tests {
         assert_eq!((tried["citations"][0]["text"].as_str(), tried["citations"][0].get("superscript")), (Some("[1]"), None), "{tried}");
         assert!(crate::csl::added(&root).iter().all(|style| !style.key.starts_with("file:")));
         assert!(call(&root, "try_cite_style", &json!({"csl": "<style>"})).unwrap_err().contains("CSL"));
+        assert!(call(&root, "try_cite_style", &json!({"style": "csl:nature", "paperIds": ["P-nowhere"]})).unwrap_err().contains("省略 paperIds"));
         let saved = call(&root, "save_cite_style", &json!({"name": "nature-brackets", "csl": mine})).unwrap();
         assert_eq!((saved["style"].as_str(), saved["name"].as_str(), saved["citations"][0]["text"].as_str()), (Some("file:nature-brackets.csl"), Some("Nature, in brackets"), Some("[1]")));
         assert!(crate::csl::added(&root).iter().any(|style| style.key == "file:nature-brackets.csl"));
