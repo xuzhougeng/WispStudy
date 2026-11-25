@@ -106,6 +106,7 @@ pub mod structure;
 pub mod time;
 pub mod transfer;
 pub mod tools;
+pub mod tour;
 pub mod translation;
 pub mod update;
 pub mod usage;

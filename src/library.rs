@@ -602,6 +602,8 @@ impl Workspace {
                 .child(ui::icon(icon, 16., if active { Theme::accent() } else { Theme::text_secondary() }))
                 .child(div().flex_1().min_w_0().truncate().child(label))
                 .when_some(count, |d, n| d.child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(n.to_string())))
+                // 新手引导 points at some of these rows, by their ids (tour.rs).
+                .children(this.tour_spot(id))
         };
         let on_papers = lib.page == Page::Papers;
         // The numbers follow the search and the filters set over the list (`Library::counts`): each view says
@@ -706,7 +708,7 @@ impl Workspace {
                     .on_click(self.on(Cmd::EditLibrary(lib.info.id.clone()), cx))
                     .child(div().flex().items_center().gap(px(8.)).child(div().size(px(10.)).flex_none().rounded(px(3.)).bg(Theme::accent())).child(div().flex_1().min_w_0().truncate().text_size(text_px(15.)).font_weight(FontWeight::SEMIBOLD).child(lib.info.name.clone())))
             )
-            .child(ui::primary_button("add-paper", t("添加文献")).w_full().on_click(self.on_menu(MenuKind::Add, cx)))
+            .child(ui::primary_button("add-paper", t("添加文献")).w_full().on_click(self.on_menu(MenuKind::Add, cx)).children(self.tour_spot("add-paper")))
             .child(div().flex().flex_col().gap(px(1.)).children(view_rows))
             // The assistant, then a review's path in its order: 检索, 筛选, 提取 (the number is how many proposals wait), 写作.
             .child(div().flex().flex_col().gap(px(1.)).child(nav("page-ask", "sparkle", t("助手"), None, lib.page == Page::Ask, Cmd::SetPage(Page::Ask), self, cx)).child(nav("page-sources", "search", t("检索与导入"), (!lib.searches.is_empty()).then_some(lib.searches.len()), matches!(lib.page, Page::Sources | Page::Guide), Cmd::SetPage(Page::Sources), self, cx)).child(nav("page-screen", "list-todo", t("筛选"), Some(lib.papers.iter().filter(|p| p.screening == "pending").count()).filter(|n| *n > 0), lib.page == Page::Screen, Cmd::SetPage(Page::Screen), self, cx)).child(nav("page-extract", "scan-text", t("提取"), Some(lib.extract_rows().len()).filter(|n| *n > 0), lib.page == Page::Extract, Cmd::SetPage(Page::Extract), self, cx)).child(nav("page-write", "pen-line", t("写作"), None, lib.page == Page::Write, Cmd::SetPage(Page::Write), self, cx)))
@@ -1344,6 +1346,7 @@ impl Workspace {
                         }))
                         .children(cells)
                         .when_some(fold, |d, fold| d.relative().child(fold))
+                        .children(self.tour_spot("paper-row").filter(|_| row == 0))
                         .into_any_element(),
                 )
             })

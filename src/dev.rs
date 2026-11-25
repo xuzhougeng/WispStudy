@@ -108,6 +108,12 @@ impl Workspace {
                     cx.notify();
                     return;
                 }
+                // 新手引导, which a scripted window does not begin by itself: `tour` begins it, `tour:next` is 下一步, `tour:end` its ×.
+                "tour" => Some(Cmd::Tour(match arg {
+                    "next" => crate::tour::Do::Next,
+                    "end" => crate::tour::Do::End,
+                    _ => crate::tour::Do::Begin,
+                })),
                 "drafts" => Some(Cmd::Draft(crate::draft::Do::History)),
                 "newdraft" => Some(Cmd::Draft(crate::draft::Do::New)),
                 // `draftmanuscript:off` closes the manuscript beside a conversation (its ×), `draftmanuscript:on` brings it back (稿件 in the header).

@@ -110,6 +110,8 @@ pub enum Cmd {
     OpenUrl(String),
     /// The home page's invitation to star the project, answered: true opens the project's page first; either way it is not made again.
     AnswerStar(bool),
+    /// 新手引导: begun, moved on, or closed (`tour.rs`).
+    Tour(crate::tour::Do),
     /// The line that offers a contact email where a search starts (`Workspace::contact_hint`), closed for good.
     DismissContactHint,
     NoteOpen(Option<Talk>, bool),
@@ -775,6 +777,7 @@ impl Workspace {
                 self.settings.star_answered = true;
                 self.save_settings(cx);
             }
+            Cmd::Tour(what) => self.tour_do(what, window, cx),
             Cmd::DismissContactHint => {
                 self.settings.contact_hint_dismissed = true;
                 self.save_settings(cx);

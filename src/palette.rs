@@ -158,6 +158,7 @@ impl Workspace {
             if info.draft { made("message-square", tf!("打开对话：{}", "Open conversation: {}", info.name), "打开对话 open conversation", "", Cmd::Draft(crate::draft::Do::Open(info.id.clone()))) } else { made("library", tf!("打开文献库：{}", "Open library: {}", info.name), "打开文献库 open library", "", Cmd::OpenLibrary(info.id.clone())) }
         }
         for (label, also, value) in [("跟随系统", "system", ""), ("浅色", "light", "light"), ("深色", "dark", "dark")] { made("palette", tf!("外观：{}", "Appearance: {}", t(label)), &format!("外观 主题 {label} appearance theme {also}"), "", Cmd::SetAppearance(value.into())) }
+        made("info", t("新手引导").to_string(), "新手引导 教程 上手 tour getting started onboarding", "", Cmd::Tour(crate::tour::Do::Begin));
         for page in SettingsPage::ALL { made(page.icon(), tf!("设置 › {}", "Settings › {}", page.title()), "设置 settings", if page == SettingsPage::General { "settings" } else { "" }, Cmd::OpenSettings(page)) }
         // The words looked for through the whole library: full texts, marks, notes (`library_find.rs`).
         if !query.trim().is_empty() && self.lib.as_ref().is_some_and(|lib| !lib.info.draft) { made("file-text", tf!("在全文和标注里找「{}」", "Find “{}” in full texts and marks", query.trim()), "全文 标注 查找 find full text marks", "", Cmd::LibraryFind(crate::library_find::Do::Query(query.trim().to_string()))) }
