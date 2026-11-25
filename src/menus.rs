@@ -59,6 +59,8 @@ pub enum MenuKind {
     /// of the selected paper, a tag of the sidebar, a past conversation (of the paper or the library), a
     /// text that can be selected (the whole of it), an answer (of which conversation, and its text).
     Paper(String),
+    /// The ⋯ of the 信息 tab's row of actions: the paper's filing and removing, as its right-click menu names them.
+    PaperMore(String),
     /// Several papers marked in the list.
     Papers(Vec<String>),
     Trashed(String),
@@ -275,7 +277,7 @@ impl Workspace {
         };
         let filter = matches!(kind, MenuKind::Filter(_));
         match kind {
-            MenuKind::Paper(_) | MenuKind::Papers(_) | MenuKind::Trashed(_) | MenuKind::TrashedMany(_) | MenuKind::File(_) | MenuKind::Tag(_) | MenuKind::Conversation(..) | MenuKind::Text(_) | MenuKind::Answer(..) => (items, breaks) = self.context_menu(&kind),
+            MenuKind::Paper(_) | MenuKind::PaperMore(_) | MenuKind::Papers(_) | MenuKind::Trashed(_) | MenuKind::TrashedMany(_) | MenuKind::File(_) | MenuKind::Tag(_) | MenuKind::Conversation(..) | MenuKind::Text(_) | MenuKind::Answer(..) => (items, breaks) = self.context_menu(&kind),
             MenuKind::Figure(id) => (items, breaks) = self.figure_menu(&id),
             MenuKind::Add => {
                 items.push(item(t("通过 DOI / PMID / 网址添加…"), Cmd::AddById));

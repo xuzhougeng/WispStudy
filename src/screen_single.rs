@@ -137,6 +137,18 @@ impl Workspace {
         cx.notify();
     }
 
+    /// 筛选 is come back to on 逐篇 with a paper open (the sidebar, the palette): the paper beside the round is the
+    /// round's. One of its papers opened meanwhile is where the round goes, as a round opens on the paper that was
+    /// open; any other gives way to the round's paper, and to none past its last one.
+    pub(crate) fn round_arrived(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        if lib.page != Page::Screen || lib.screen.mode != ScreenMode::Single { return }
+        let Some(open) = lib.selected.clone() else { return };
+        if lib.screen.round.current() == Some(open.as_str()) { return }
+        if let Some(at) = lib.screen.round.ids.iter().position(|id| *id == open) { lib.screen.round.go(at) }
+        self.round_moved(window, cx);
+    }
+
     /// The round shows another paper: from its top, in view in the rail, and beside the page when a paper was open there.
     fn round_moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };

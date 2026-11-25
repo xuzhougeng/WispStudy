@@ -1178,6 +1178,8 @@ impl Workspace {
         let Some(lib) = &self.lib else { return vec![] };
         let columns = Self::columns(&self.settings, lib, width);
         let title_room = Self::title_room(&columns, width);
+        // The 文献 cell's second line leaves out what a column on show for this width already says (一事一言).
+        let (year_column, journal_column) = (columns.iter().any(|c| matches!(c.kind, ColumnKind::Year)), columns.iter().any(|c| matches!(c.kind, ColumnKind::Journal)));
         // How wide words come out, to know which a cell cuts: those are said in full under the pointer.
         let style = window.text_style();
         let (base, small) = (style.font_size.to_pixels(window.rem_size()), text_px(12.));
@@ -1256,16 +1258,18 @@ impl Workspace {
                                 .into_any_element(),
                             ColumnKind::Title => {
                                 let title = self.listed_title(lib, p);
-                                let mut meta = vec![];
+                                // In full for the hover card; the line drawn leaves out what has a column beside it.
                                 let authors = crate::i18n::short_authors(p);
-                                if !authors.is_empty() { meta.push(authors) }
-                                if let Some(year) = p.year { meta.push(year.to_string()) }
-                                if !p.journal.is_empty() { meta.push(p.journal.clone()) }
-                                let meta = meta.join(" · ");
+                                let year = p.year.map(|year| year.to_string());
+                                let journal = (!p.journal.is_empty()).then(|| p.journal.clone());
+                                let meta = [Some(authors.clone()).filter(|a| !a.is_empty()), year.clone(), journal.clone()].into_iter().flatten().collect::<Vec<_>>().join(" · ");
+                                let line = [Some(authors).filter(|a| !a.is_empty()), year.filter(|_| !year_column), journal.filter(|_| !journal_column)].into_iter().flatten().collect::<Vec<_>>().join(" · ");
+                                // Only a record that lacks them says so, not one whose year and journal stand in their columns.
+                                let line = if meta.is_empty() { t("作者、年份待补").to_string() } else { line };
                                 let weight = if p.reading == "unread" { FontWeight::MEDIUM } else { FontWeight::NORMAL };
                                 let preprint = p.publication_status == "preprint";
                                 let beside = p.tags.iter().take(2).map(|tag| 6. + wide(&format!("#{tag}"), small, FontWeight::NORMAL)).sum::<f32>() + if preprint { 6. + wide(t("预印本"), small, FontWeight::NORMAL) } else { 0. };
-                                let cut = p.tags.len() > 2 || wide(title, base, weight) > title_room + 0.5 || wide(&meta, small, FontWeight::NORMAL) + beside > title_room + 0.5;
+                                let cut = p.tags.len() > 2 || wide(title, base, weight) > title_room + 0.5 || wide(&line, small, FontWeight::NORMAL) + beside > title_room + 0.5;
                                 let tip = cut.then(|| {
                                     let (title, meta, tags) = (title.clone(), meta.clone(), p.tags.clone());
                                     move |_: &mut Window, cx: &mut App| AnyView::from(cx.new(|_| PaperTip { title: title.clone(), meta: meta.clone(), tags: tags.clone() }))
@@ -1285,7 +1289,7 @@ impl Workspace {
                                                 .text_size(text_px(12.))
                                                 .line_height(text_px(18.))
                                                 .text_color(Theme::text_tertiary())
-                                                .child(div().min_w_0().truncate().child(if meta.is_empty() { t("作者、年份待补").to_string() } else { meta.clone() }))
+                                                .child(div().min_w_0().truncate().child(line))
                                                 .when(preprint, |d| d.child(div().flex_none().text_color(theme::status_colors("preprint").0).child(t("预印本"))))
                                                 .children(p.tags.iter().take(2).map(|t| div().flex_none().text_color(Theme::accent()).child(format!("#{t}")))),
                                         ),
@@ -1429,7 +1433,7 @@ impl Workspace {
         let filtered = lib.filters.active() > 0 || !lib.search.read(cx).text().trim().is_empty();
         lib.search.update(cx, |input, _| input.set_placeholder("搜索…"));
         let body = if shown == 0 {
-            div().flex_1().px(px(8.)).pt(px(8.)).text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_placeholder()).child(t("没有匹配的文献。换个搜索词，或按 Esc 回到完整列表调整筛选。")).into_any_element()
+            div().flex_1().px(px(8.)).pt(px(8.)).text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_tertiary()).child(t("没有匹配的文献。换个搜索词，或按 Esc 回到完整列表调整筛选。")).into_any_element()
         } else {
             div().relative().flex().flex_col().flex_1().min_h_0()
                 .child(uniform_list("ask-papers", shown, cx.processor(move |this, range: Range<usize>, _, cx| this.render_ask_rows(range, cx))).track_scroll(lib.table_scroll.clone()).flex_1())
@@ -1475,7 +1479,7 @@ impl Workspace {
                     .child(div().flex_none().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(if filtered || shown != total { tf!("{shown} / {total} 篇", "{shown} / {total} papers") } else { tf!("{total} 篇", "{total} papers") })),
             )
             .child(body)
-            .child(div().flex_none().px(px(8.)).truncate().text_size(text_px(11.)).text_color(Theme::text_placeholder()).child(tf!("↑↓ 切换文献 · {} 回到完整列表", "↑↓ Switch paper · {} Back to full list", crate::shortcuts::pretty("escape"))))
+            .child(div().flex_none().px(px(8.)).truncate().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(tf!("↑↓ 切换文献 · {} 回到完整列表", "↑↓ Switch paper · {} Back to full list", crate::shortcuts::pretty("escape"))))
             .into_any_element()
     }
 
@@ -1530,7 +1534,7 @@ impl Workspace {
                                         .child(div().min_w_0().truncate().child(if meta.is_empty() { t("作者、年份待补").to_string() } else { meta.join(" · ") }))
                                         .when(p.starred, |d| d.child(ui::icon("star", 11., Theme::star())))
                                         // Asked about without its PDF, the answer has only the record to go by.
-                                        .when(lib.pdf_file(&p.id).is_none(), |d| d.child(div().flex_none().text_color(Theme::text_placeholder()).child(t("无 PDF")))),
+                                        .when(lib.pdf_file(&p.id).is_none(), |d| d.child(div().flex_none().text_color(Theme::text_tertiary()).child(t("无 PDF")))),
                                 ),
                         )
                         .into_any_element(),

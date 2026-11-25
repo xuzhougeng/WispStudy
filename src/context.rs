@@ -243,6 +243,14 @@ impl Workspace {
                 if !self.move_targets().is_empty() { items.push(item(t("移到文献库…"), Cmd::AskMovePaper(id.clone()))) }
                 items.push(MenuItem { label: t("移到回收站").into(), checked: false, note: Some(crate::shortcuts::pretty("secondary-backspace").into()), cmd: Cmd::TrashPaper(id.clone()) });
             }
+            // The 信息 tab's ⋯ (detail.rs): the paper's filing and removing, by the names and notes of the menu above.
+            MenuKind::PaperMore(id) => {
+                if lib.paper(id).is_none() { return (items, breaks) }
+                if self.can_file(std::slice::from_ref(id)) { items.push(item(t("归入已有文献…"), Cmd::AskFileInto(vec![id.clone()]))) }
+                if !self.move_targets().is_empty() { items.push(item(t("移到文献库…"), Cmd::AskMovePaper(id.clone()))) }
+                if !items.is_empty() { breaks.push(items.len()) }
+                items.push(MenuItem { label: t("移到回收站").into(), checked: false, note: Some(crate::shortcuts::pretty("secondary-backspace").into()), cmd: Cmd::TrashPaper(id.clone()) });
+            }
             MenuKind::Papers(ids) => {
                 let papers: Vec<&wisp_core::model::Paper> = ids.iter().filter_map(|id| lib.paper(id)).collect();
                 if papers.is_empty() { return (items, breaks) }

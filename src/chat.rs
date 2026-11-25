@@ -1116,7 +1116,7 @@ impl Workspace {
             .flex_col()
             .rounded(px(12.))
             .border_1()
-            .border_color(Theme::line())
+            .border_color(Theme::line_strong())
             .bg(Theme::bg_body())
             .shadow(theme::shadow_panel())
             .child(
@@ -1234,7 +1234,7 @@ impl Workspace {
                         .text_color(Theme::text_tertiary())
                         .child(ui::spinner(SharedString::from(format!("thinking-{side}")), 14., Theme::accent()))
                         .child(if chat.steps > 1 { t("正在整理查到的内容…") } else { t("正在阅读文献并思考…") })
-                        .child(div().text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(elapsed(chat)))
+                        .child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(elapsed(chat)))
                         .into_any_element(),
                 );
                 i += 1;
@@ -1428,11 +1428,11 @@ impl Workspace {
         if chat.compacted.as_ref().is_some_and(|compacted| compacted.at >= chat.messages.len()) { items.push(self.render_compacted(talk, chat, cx)) }
         // The summary is being written: the answer waits for it.
         if chat.compacting {
-            items.push(div().flex().items_center().gap(px(8.)).h(text_px(18.)).child(ui::spinner(SharedString::from(format!("compacting-{side}")), 13., Theme::accent())).child(div().text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(t("对话太长，正在把较早的部分压缩成摘要…"))).into_any_element());
+            items.push(div().flex().items_center().gap(px(8.)).h(text_px(18.)).child(ui::spinner(SharedString::from(format!("compacting-{side}")), 13., Theme::accent())).child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(t("对话太长，正在把较早的部分压缩成摘要…"))).into_any_element());
         }
         // Text has arrived and more is on its way (a tool call being written, the next piece): the mark keeps turning under it.
         if chat.busy && !chat.compacting && chat.pending.is_none() && matches!(chat.messages.last(), Some(ChatItem::Answer(text)) if !text.is_empty()) {
-            items.push(div().flex().items_center().gap(px(8.)).h(text_px(18.)).child(ui::spinner(SharedString::from(format!("working-{side}")), 13., Theme::accent())).child(div().text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(elapsed(chat))).into_any_element());
+            items.push(div().flex().items_center().gap(px(8.)).h(text_px(18.)).child(ui::spinner(SharedString::from(format!("working-{side}")), 13., Theme::accent())).child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(elapsed(chat))).into_any_element());
         }
         if let Some(pending) = &chat.pending {
             let button = |name: &str, label: &'static str, consent: Consent, this: &Self, cx: &mut Context<Self>| {
@@ -1709,7 +1709,7 @@ impl Workspace {
                     .text_color(Theme::text_secondary())
                     .child(ui::spinner(SharedString::from(format!("tool-{side}-{}", first + n)), 13., Theme::accent()))
                     .child(div().min_w_0().truncate().child(crate::i18n::tool_call(call)))
-                    .child(div().flex_none().text_color(Theme::text_placeholder()).child(elapsed(chat)))
+                    .child(div().flex_none().text_color(Theme::text_tertiary()).child(elapsed(chat)))
             }))
             .into_any_element()
     }
@@ -1842,6 +1842,9 @@ impl Workspace {
         let open = talk == Talk::Library && chat.ctx.is_none() && chat.messages.is_empty() && chat.history.is_none();
         let kept: Vec<&wisp_core::model::Paper> = if open { lib.asked.iter().take(PINNED_SHOWN).filter_map(|id| lib.paper(id)).collect() } else { vec![] };
         let dropping = open && self.pinning && cx.has_active_drag();
+        // The slash popup stands where the box's text begins and stays inside the conversation's column, however narrow (beside a paper, 助手写).
+        let pad = reading_pad(chat.drawn_width);
+        let widest = if chat.drawn_width > 0. { (chat.drawn_width - 2. * pad).clamp(200., 560.) } else { 560. };
         let round = |id: String, icon_name: &'static str, lit: bool| {
             div().id(SharedString::from(id)).flex().flex_none().items_center().justify_center().size(px(30.)).rounded(px(15.)).bg(if lit { Theme::accent() } else { Theme::groove() }).cursor_pointer().hover(|s| s.opacity(0.88)).child(ui::icon(icon_name, 15., if lit { Theme::on_accent() } else { Theme::text_tertiary() }))
         };
@@ -1858,11 +1861,13 @@ impl Workspace {
                 d.child(
                     ui::popover()
                         .absolute()
-                        .left(px(reading_pad(chat.drawn_width)))
+                        .left(px(pad))
                         .bottom_full()
-                        .min_w(px(340.))
-                        .max_w(px(520.))
+                        .min_w(px(widest.min(340.)))
+                        .max_w(px(widest))
                         .children(commands.iter().enumerate().map(|(n, command)| {
+                            let about = if command.custom { ui::one_line(&command.about) } else { t(&command.about).to_string() };
+                            let hint = t(&command.hint).to_string();
                             div()
                                 .id(SharedString::from(format!("slash-{side}-{}", command.name)))
                                 .flex()
@@ -1876,12 +1881,13 @@ impl Workspace {
                                 .hover(|s| s.bg(Theme::hover()))
                                 .on_click(self.on(Cmd::PickSlash(talk, n), cx))
                                 .child(div().flex_none().font_weight(FontWeight::MEDIUM).text_color(Theme::accent()).child(format!("/{}", command.name)))
-                                .when(!command.hint.is_empty(), |d| d.child(div().flex_none().text_color(Theme::text_placeholder()).child(t(&command.hint).to_string())))
-                                .child(div().flex_1().min_w_0().truncate().text_right().text_color(Theme::text_secondary()).child(if command.custom { command.about.clone() } else { t(&command.about).to_string() }))
+                                // What the command does is said whole (up to a cap, for one a person wrote at length); the example of what to write after it gives way.
+                                .child(div().id(SharedString::from(format!("slash-hint-{side}-{}", command.name))).flex_1().min_w_0().truncate().text_color(Theme::text_placeholder()).when(!hint.is_empty(), |d| d.tooltip(ui::tip(hint.clone()))).child(hint))
+                                .child(div().id(SharedString::from(format!("slash-about-{side}-{}", command.name))).min_w_0().max_w(px(320.)).truncate().text_right().text_color(Theme::text_secondary()).when(command.custom, |d| d.tooltip(ui::tip(about.clone()))).child(about))
                                 // One the person wrote, or a skill of theirs, says so: what it asks is theirs, not the app's.
                                 .when(command.custom, |d| d.child(div().flex_none().px(px(6.)).rounded(px(5.)).bg(Theme::groove()).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(if command.skill { t("技能") } else { t("自定义") })))
                         }))
-                        .child(div().px(px(8.)).pt(px(5.)).pb(px(2.)).mt(px(3.)).border_t_1().border_color(Theme::line()).text_size(text_px(11.)).text_color(Theme::text_placeholder()).child(t("↑↓ 选择 · Enter 或 Tab 确认 · Esc 关闭"))),
+                        .child(div().px(px(8.)).pt(px(5.)).pb(px(2.)).mt(px(3.)).border_t_1().border_color(Theme::line()).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(t("↑↓ 选择 · Enter 或 Tab 确认 · Esc 关闭"))),
                 )
             })
             .child(
@@ -2010,23 +2016,27 @@ impl Workspace {
                             .child(if chat.busy { round(format!("chat-stop-{side}"), "square", true).on_click(self.on(Cmd::StopChat(talk), cx)) } else { round(format!("chat-send-{side}"), "send", ready).on_click(self.on(Cmd::Ask(talk), cx)) }),
                     ),
             )
-            .child(div().flex().gap(px(8.)).px(px(4.)).text_size(text_px(11.)).text_color(Theme::text_placeholder()).child(div().flex_1().min_w_0().truncate().child(if talk == Talk::Paper { t("Enter 发送 · 回答可能有误，请对照原文") } else { t("Enter 发送，Shift+Enter 换行 · 回答可能有误，请对照原文") })).child(
-                // The model that answers, picked here as in 设置 › AI › 任务 (助手's model): no trip to the settings to try another.
-                div()
-                    .id(SharedString::from(format!("chat-model-{side}")))
-                    .flex()
-                    .flex_none()
-                    .max_w(relative(0.4))
-                    .items_center()
-                    .gap(px(2.))
-                    .px(px(4.))
-                    .rounded(px(4.))
-                    .cursor_pointer()
-                    .hover(|s| s.bg(Theme::hover()).text_color(Theme::text_secondary()))
-                    .on_click(self.on_menu(MenuKind::TaskModel(wisp_core::settings::Task::Chat), cx))
-                    .child(div().min_w_0().truncate().child(model.to_string()))
-                    .child(ui::icon("chevron-down", 10., Theme::text_placeholder())),
-            ))
+            .child(div().flex().gap(px(8.)).px(px(4.)).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(div().flex_1().min_w_0().truncate().child(if talk == Talk::Paper { t("Enter 发送 · 回答可能有误，请对照原文") } else { t("Enter 发送，Shift+Enter 换行 · 回答可能有误，请对照原文") })).child(self.model_button(SharedString::from(format!("chat-model-{side}")), model, cx)))
+    }
+
+    /// The model that answers, under a conversation's box (a library's and the home page's): picked here as in
+    /// 设置 › AI › 任务 (助手's model), so another can be tried without a trip to the settings.
+    pub(crate) fn model_button(&self, id: SharedString, model: &str, cx: &mut Context<Self>) -> Stateful<Div> {
+        div()
+            .id(id)
+            .flex()
+            .flex_none()
+            .max_w(relative(0.4))
+            .items_center()
+            .gap(px(2.))
+            .px(px(4.))
+            .rounded(px(4.))
+            .text_color(Theme::text_tertiary())
+            .cursor_pointer()
+            .hover(|s| s.bg(Theme::hover()).text_color(Theme::text_secondary()))
+            .on_click(self.on_menu(MenuKind::TaskModel(wisp_core::settings::Task::Chat), cx))
+            .child(div().min_w_0().truncate().child(model.to_string()))
+            .child(ui::icon("chevron-down", 10., Theme::text_tertiary()))
     }
 }
 

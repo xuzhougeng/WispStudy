@@ -448,6 +448,7 @@ impl Workspace {
                     .child(div().flex().flex_1().min_w_0().py(px(5.)).max_h(px(170.)).overflow_hidden().text_size(text_px(13.)).line_height(text_px(20.)).text_color(Theme::text()).child(input.clone()))
                     .child(send),
             );
+        let model_button = self.model_button("home-model".into(), &model, cx);
         let shelved = self.libraries.iter().any(|info| !info.draft);
         let starts = STARTS.iter().enumerate().filter(|(n, _)| *n != ACROSS || shelved).map(|(n, (icon, label, ..))| {
             div().id(("home-start", n)).flex().flex_none().items_center().gap(px(6.)).h(text_px(28.)).px(px(8.)).rounded(px(6.)).text_size(text_px(12.)).text_color(Theme::text_secondary()).cursor_pointer().hover(|s| s.bg(Theme::hover()).text_color(Theme::text())).active(|s| s.bg(Theme::pressed())).on_click(self.on(Cmd::Draft(Do::Start(n)), cx)).child(ui::icon(icon, 13., Theme::text_tertiary())).child(t(label))
@@ -457,7 +458,7 @@ impl Workspace {
             .flex_col()
             .gap(px(6.))
             .child(card)
-            .child(div().flex().items_center().gap(px(8.)).px(px(4.)).text_size(text_px(11.)).text_color(Theme::text_placeholder()).child(div().flex_1().min_w_0().truncate().child(t("Enter 发送，Shift+Enter 换行 · 回答可能有误，请对照原文"))).child(div().flex_none().max_w(relative(0.4)).truncate().child(model)))
+            .child(div().flex().items_center().gap(px(8.)).px(px(4.)).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(div().flex_1().min_w_0().truncate().child(t("Enter 发送，Shift+Enter 换行 · 回答可能有误，请对照原文"))).child(model_button))
             // The starts stand where the box's text begins, not at the card's rounded edge.
             .child(div().flex().flex_wrap().items_center().gap(px(2.)).ml(px(-8.)).children(starts))
     }

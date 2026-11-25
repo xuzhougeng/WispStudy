@@ -1025,7 +1025,8 @@ impl Workspace {
         let (manuscript, section_id) = Writing::latest(&manuscripts);
         let opened = manuscripts.iter().find(|m| m.id == manuscript);
         let draft = opened.and_then(|m| m.section(&section_id)).map(|s| s.body.clone()).unwrap_or_default();
-        let title = cx.new(|cx| TextInput::new(wisp_core::manuscript::UNTITLED, cx).with_text(&opened.map(|m| m.title.clone()).unwrap_or_default()));
+        // The empty field invites the title: 未命名稿件 is the outline's name for the manuscript, not what is typed here.
+        let title = cx.new(|cx| TextInput::new("输入稿件题目…", cx).with_text(&opened.map(|m| m.title.clone()).unwrap_or_default()));
         subscriptions.push(cx.subscribe(&title, |this, input, event: &InputEvent, cx| {
             if *event == InputEvent::Changed { this.write_title_typed(input.read(cx).text().to_string(), cx) }
         }));

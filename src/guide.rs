@@ -117,10 +117,21 @@ impl Workspace {
                 .on_click(self.on(Cmd::GuideToggleSource(key.to_string()), cx))
         }));
 
+        // The way to the saved searches is named by where it goes, with how many there are once there are any.
+        let saved = lib.searches.len();
+        let to_saved = if saved > 0 { tf!("已保存的检索式（{saved}）", "Saved searches ({saved})") } else { t("已保存的检索式").into() };
         div()
             .flex()
             .flex_col()
             .size_full()
+            .child(
+                ui::column_head()
+                    .gap(px(8.))
+                    .child(div().min_w_0().truncate().text_size(text_px(ui::HEAD_TITLE)).font_weight(FontWeight::SEMIBOLD).child(t("从检索文献开始")))
+                    .child(ui::hint("guide-hint", t("写下主题或关键词，助手为所选的数据库各拟几条取向不同的检索式，并立刻试检索。看命中的文献对不对，选出靠谱的再导入：宁可先宽一些，导入之后再逐篇判断。")))
+                    .child(div().flex_1())
+                    .child(ui::ghost_button("guide-to-searches", None, Some(to_saved.into())).on_click(self.on(Cmd::SetPage(Page::Sources), cx))),
+            )
             .child(
                 div()
                     .flex()
@@ -128,10 +139,8 @@ impl Workspace {
                     .flex_none()
                     .gap(px(10.))
                     .px(px(16.))
-                    .pt(px(16.))
+                    .pt(px(12.))
                     .pb(px(12.))
-                    .child(div().text_size(text_px(16.)).font_weight(FontWeight::SEMIBOLD).child(t("从检索文献开始")))
-                    .child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(t("写下主题或关键词，助手为所选的数据库各拟几条取向不同的检索式，并立刻试检索。看命中的文献对不对，选出靠谱的再导入：宁可先宽一些，导入之后再逐篇判断。")))
                     .child(ui::field(&guide.keywords, window, cx))
                     .child(
                         div()
