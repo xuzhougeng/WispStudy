@@ -37,7 +37,7 @@ cargo clippy --all-targets              # expected to be warning-free
 | What each step of the roadmap built and left out | `docs/dev/roadmap.md` |
 | Vendored patches | `vendor/PATCHES.md` |
 
-User-facing docs (Chinese) are `docs/FEATURES.md`, `TUTORIAL.md`, `CLI.md`, `DATA.md`, `DEVELOPMENT.md`, `ZOTERO.md`.
+User-facing docs (Chinese) are `docs/FEATURES.md`, `TUTORIAL.md`, `CLI.md`, `DATA.md`, `DEVELOPMENT.md`, `ZOTERO.md`. The README comes in two: `README.md` is English (what GitHub shows) and `README.zh-CN.md` is the same page in Chinese; a change to one goes into the other.
 
 ## Architecture
 

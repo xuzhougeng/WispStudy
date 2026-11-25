@@ -1,66 +1,71 @@
 <p align="center">
-  <img src="assets/branding/app-icon.png" width="96" alt="Wisp Study 的应用图标">
+  <img src="assets/branding/app-icon.png" width="96" alt="The Wisp Study app icon">
 </p>
 
 <h1 align="center">Wisp Study</h1>
 
 <p align="center">
-  <b>本地优先的文献库：收集、筛选、阅读，向你的文献提问。</b><br>
-  用 Rust + GPUI 原生绘制。文献和 PDF 留在你的电脑上，每个文献库就是一个文件夹。
+  <b>English</b> · <a href="README.zh-CN.md">简体中文</a>
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey" alt="Windows 和 macOS">
-  <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20GPUI-dea584?logo=rust" alt="用 Rust 和 GPUI 构建">
-  <a href="LICENSE"><img src="https://img.shields.io/github/license/xuzhougeng/WispStudy?color=green" alt="MIT 许可"></a>
+  <b>A local-first literature library: collect, screen and read papers, and ask your library questions.</b><br>
+  Drawn natively with Rust + GPUI. Your papers and PDFs stay on your computer, and each library is one folder.
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS-lightgrey" alt="Windows and macOS">
+  <img src="https://img.shields.io/badge/built%20with-Rust%20%2B%20GPUI-dea584?logo=rust" alt="Built with Rust and GPUI">
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/xuzhougeng/WispStudy?color=green" alt="MIT license"></a>
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Alpha">
 </p>
 
 <p align="center">
-  <a href="https://xuzhougeng.github.io/WispStudy/"><b>主页</b></a> ·
-  <a href="#安装"><b>安装</b></a> ·
-  <a href="#功能">功能</a> ·
-  <a href="https://xuzhougeng.github.io/WispStudy/tutorials/">教程</a> ·
-  <a href="docs/ZOTERO.md">Zotero 导入</a> ·
-  <a href="docs/CLI.md">命令行与 MCP</a> ·
-  <a href="docs/DATA.md">数据与隐私</a> ·
-  <a href="docs/DEVELOPMENT.md">开发</a>
+  <a href="https://xuzhougeng.github.io/WispStudy/en/"><b>Home page</b></a> ·
+  <a href="#install"><b>Install</b></a> ·
+  <a href="#features">Features</a> ·
+  <a href="#faq">FAQ</a> ·
+  <a href="https://xuzhougeng.github.io/WispStudy/en/tutorials/">Tutorials</a> ·
+  <a href="docs/ZOTERO.md">Zotero import</a> ·
+  <a href="docs/CLI.md">Command line and MCP</a> ·
+  <a href="docs/DATA.md">Data and privacy</a> ·
+  <a href="docs/DEVELOPMENT.md">Development</a>
 </p>
 
 <p align="center">
-  <img src="docs/images/library.png" width="100%" alt="Wisp Study 的文献库页面：左侧是视图和标签，中间是文献列表，右侧是所选文献的详情和笔记。">
+  <img src="docs/images/en/library.png" width="100%" alt="The Library page of Wisp Study: views and tags on the left, the paper list in the middle, the selected paper's details and notes on the right.">
 </p>
 
 > [!NOTE]
-> Wisp Study 还在早期，变化很快。支持中文和英文界面，在「设置 › 通用 › 界面语言」中切换（Settings › General › Interface language），立即生效并自动保存。第一次用，可以跟着[教程](https://xuzhougeng.github.io/WispStudy/tutorials/)从零建一个文献库；之后的几篇各讲一个科研场景：精读、提问、提取、写综述、写论文、改稿。遇到问题或有想法，欢迎[提 issue](https://github.com/xuzhougeng/WispStudy/issues)，更欢迎直接发 pull request。
+> Wisp Study is at an early stage and changes fast. The interface comes in English and Chinese; switch in “Settings › General › Interface language” (设置 › 通用 › 界面语言). It takes effect at once and is saved. If this is your first time, follow the [tutorials](https://xuzhougeng.github.io/WispStudy/en/tutorials/) and build a library from nothing; the later ones each cover one research task: close reading, asking, extracting, writing a review, writing a paper, revising. If you run into a problem or have an idea, [open an issue](https://github.com/xuzhougeng/WispStudy/issues), or better, send a pull request.
 
-## 为什么是 Wisp Study
+## Why Wisp Study
 
-**🔒 本地优先，文献是你自己的。** 不需要账号，没有云端。每个文献库是数据目录下的一个独立文件夹，数据库、PDF、自定义词条都在里面，可以单独备份或整个拷走。删除只是移动到 `removed/`，什么都不会真的丢。哪些数据会离开本机，逐条写在[数据与隐私](docs/DATA.md)里。
+**🔒 Local-first: the papers are yours.** No account, no cloud. Each library is its own folder under the data directory, holding its database, PDFs and custom fields, so it can be backed up alone or copied away whole. Removing something only moves it to `removed/`; nothing is really lost. What leaves your computer is listed item by item in [Data and privacy](docs/DATA.md).
 
-**🐋 先广泛导入，再让助手帮你筛。** 为 PubMed、Europe PMC、Crossref、arXiv 保存检索式，成批导入；助手逐篇阅读，给出建议、理由和一句逐字引自原文的依据。建议只是建议：每一篇收不收，由你确认。
+**🐋 Import broadly first, then let the assistant help you screen.** Save search queries for PubMed, Europe PMC, Crossref and arXiv and import in bulk. The assistant reads every paper and gives a suggestion, a reason, and one sentence quoted word for word from the text as evidence. A suggestion is only a suggestion: whether a paper is included is yours to confirm.
 
-**💬 回答带出处，出处能点开。** 向整个文献库或单篇文献提问，材料不够时助手自己去检索全文、按页翻阅。回答里的 `[P3 p.5]` 可以点击，打开 PDF 跳到那一页，所引的原句在页面上高亮。
+**💬 Answers carry sources, and the sources open.** Ask the whole library or a single paper. When the material is not enough, the assistant searches the full texts and reads them page by page on its own. A `[P3 p.5]` in an answer can be clicked: the PDF opens at that page with the quoted sentence highlighted.
 
-**⚡ 原生界面，不是网页。** 整个界面由 Rust 和 [GPUI](https://www.gpui.rs/) 在 GPU 上绘制，没有 WebView，没有 Electron。PDF 用纯 Rust 的 [hayro](https://github.com/LaurenzV/hayro) 渲染，不依赖系统 PDF 库。
+**⚡ A native interface, not a web page.** The whole interface is drawn on the GPU by Rust and [GPUI](https://www.gpui.rs/): no WebView, no Electron. PDFs are rendered by [hayro](https://github.com/LaurenzV/hayro), in pure Rust, with no system PDF library.
 
-## 安装
+## Install
 
-从[发布页](https://github.com/xuzhougeng/WispStudy/releases/latest)下载：
+Download from the [release page](https://github.com/xuzhougeng/WispStudy/releases/latest):
 
-| 平台 | 文件 | 说明 |
+| Platform | File | Notes |
 |---|---|---|
-| **macOS**，Apple 芯片 | `WispStudy-v<版本>-macos-arm64.dmg` | Developer ID 签名并经 Apple 公证。打开后把 Wisp Study 拖进「应用程序」 |
-| **macOS**，Intel | `WispStudy-v<版本>-macos-x64.dmg` | 同上 |
-| **Windows** 10 / 11（x64），安装版 | `WispStudy-v<版本>-windows-x64-setup.exe` | 装在当前用户名下（`%LOCALAPPDATA%\Programs\Wisp Study`），不需要管理员权限，带 Authenticode 签名 |
-| **Windows** 10 / 11（x64），便携版 | `WispStudy-v<版本>-windows-x64.zip` | 解压后运行 `WispStudy.exe`，不写注册表，带 Authenticode 签名 |
-| **Linux**（x64） | `WispStudy-v<版本>-linux-x64.tar.gz` | 解压后运行 `wisp-study`；没有签名，也没有在真机上测试过 |
+| **macOS**, Apple silicon | `WispStudy-v<version>-macos-arm64.dmg` | Signed with a Developer ID and notarized by Apple. Open it and drag Wisp Study into Applications |
+| **macOS**, Intel | `WispStudy-v<version>-macos-x64.dmg` | As above |
+| **Windows** 10 / 11 (x64), installer | `WispStudy-v<version>-windows-x64-setup.exe` | Installs for the current user (`%LOCALAPPDATA%\Programs\Wisp Study`), needs no administrator rights, Authenticode-signed |
+| **Windows** 10 / 11 (x64), portable | `WispStudy-v<version>-windows-x64.zip` | Unzip and run `WispStudy.exe`; writes nothing to the registry, Authenticode-signed |
+| **Linux** (x64) | `WispStudy-v<version>-linux-x64.tar.gz` | Unpack and run `wisp-study`; unsigned, and not tested on a real machine |
 
-Wisp Study 原名 Wisp Paper。旧版的自动更新找不到改名后的版本，请从发布页下载新版安装：Windows 安装版会原地替换旧版；macOS 装好 `Wisp Study.app` 后可删去旧的 `Wisp Paper.app`。文献库和设置原地保留，不用迁移。
+Wisp Study used to be called Wisp Paper. The old version's automatic update cannot find the renamed releases, so download the new version from the release page: the Windows installer replaces the old version in place; on macOS, once `Wisp Study.app` is installed you can delete the old `Wisp Paper.app`. Libraries and settings stay where they are, with nothing to migrate.
 
-命令行工具 `wisp` 随包附带：Windows 和 Linux 在主程序旁边，macOS 在 `Wisp Study.app/Contents/MacOS/wisp`。
+The command-line tool `wisp` ships in the package: next to the main program on Windows and Linux, at `Wisp Study.app/Contents/MacOS/wisp` on macOS.
 
-从源码构建需要 Rust（版本见 `rust-toolchain.toml`，rustup 会自动安装）；Windows 上还需要 MSVC 构建工具。
+Building from source needs Rust (the version is in `rust-toolchain.toml`; rustup installs it for you); on Windows it also needs the MSVC build tools.
 
 ```sh
 git clone https://github.com/xuzhougeng/WispStudy
@@ -68,80 +73,124 @@ cd WispStudy
 cargo run --release
 ```
 
-想先看看效果，可以生成一个带示例数据的目录，不碰你真正的文献库：
+To have a look first, generate a folder of demo data that does not touch your real library:
 
 ```sh
 cargo run -p wisp_core --example seed -- /tmp/wisp-demo some.pdf
 WISP_STUDY_HOME=/tmp/wisp-demo cargo run
 ```
 
-### 在 Windows 上编译 exe
+### Building the exe on Windows
 
-exe 要在 Windows 上编译，macOS 和 Linux 上交叉编译不出来。先装好两样（只需一次）：
+The exe has to be built on Windows; it cannot be cross-compiled from macOS or Linux. Install two things first (once):
 
 ```powershell
 winget install Microsoft.VisualStudio.2022.BuildTools --override "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended --passive"
 winget install Rustlang.Rustup
 ```
 
-第一条装的是 MSVC 构建工具（「使用 C++ 的桌面开发」，含 Windows SDK）。在仓库里第一次运行 `cargo` 时，rustup 会装上 `rust-toolchain.toml` 指定的版本。
+The first installs the MSVC build tools (“Desktop development with C++”, Windows SDK included). The first time `cargo` runs in the repository, rustup installs the version named in `rust-toolchain.toml`.
 
-只要 exe，在仓库根目录运行：
+For the exe alone, run in the repository root:
 
 ```powershell
 cargo build --release -p wisp_study -p wisp_cli
 ```
 
-产物是 `target\release\wisp_study.exe`（应用，不带控制台窗口）和 `target\release\wisp.exe`（命令行，`wisp mcp` 是 MCP 服务）。图标和 `assets/` 已编进 exe，不用另外带文件。
+This produces `target\release\wisp_study.exe` (the app, with no console window) and `target\release\wisp.exe` (the command line; `wisp mcp` is the MCP server). The icon and `assets/` are compiled into the exe, so no other files need to go with it.
 
-要打成和发布页一样的包，运行 `scripts/package-windows.ps1`：
+To make the same packages as the release page, run `scripts/package-windows.ps1`:
 
 ```powershell
-pwsh -File scripts/package-windows.ps1 -NoInstaller   # 只出便携版 dist\WispStudy-v<版本>-windows-x64.zip
-winget install JRSoftware.InnoSetup                   # 要安装版时先装 Inno Setup 6
-pwsh -File scripts/package-windows.ps1                # 便携版加 dist\WispStudy-v<版本>-windows-x64-setup.exe
+pwsh -File scripts/package-windows.ps1 -NoInstaller   # the portable zip only: dist\WispStudy-v<version>-windows-x64.zip
+winget install JRSoftware.InnoSetup                   # for the installer, install Inno Setup 6 first
+pwsh -File scripts/package-windows.ps1                # the zip plus dist\WispStudy-v<version>-windows-x64-setup.exe
 ```
 
-`-Sign` 用 SSL.com eSigner 签名，要先设好 `ESIGNER_*` 变量，平时用在发布流程里，本地试用不需要。手动试运行前可以先设 `$env:WISP_STUDY_HOME="C:\tmp\wisp-test"`，这样不会碰到 `Documents\WispStudy` 里的文献库。
+`-Sign` signs with SSL.com eSigner and needs the `ESIGNER_*` variables set; it is for the release workflow, not for trying things locally. Before a manual run you can set `$env:WISP_STUDY_HOME="C:\tmp\wisp-test"` so that the library in `Documents\WispStudy` is not touched.
 
-提问、建库向导、筛选、翻译和写作页的模型分节需要模型服务，在「设置 › AI」里配置：Claude API、OpenAI 兼容的 chat/completions，或 OpenAI 的 Responses 接口。可以放进多个模型，提问、批量筛选、翻译、整理全文各用哪一个、各自思考到什么程度分别指定。
+Asking, the library wizard, screening, translation and the model's sectioning on the Writing page need a model provider, set up in “Settings › AI”: the Claude API, an OpenAI-compatible chat/completions endpoint, or OpenAI's Responses. You can add several models and say which one asking, bulk screening, translation and tidying full text each use, and how hard each thinks.
 
-## 功能
+## Features
 
-- **文献库**：多个独立的文献库，各有名称、主题描述和标识色。
-- **收集**：粘贴 DOI 或 PMID，拖入 PDF，导入 BibTeX / RIS，或手动录入；也可以[从 Zotero 本地数据库导入](docs/ZOTERO.md)文献信息、标签、笔记及已下载的 PDF。按 DOI、PMID、题目去重。成批导入有进度和结果汇总。
-- **整理**：搜索、筛选、排序；阅读状态、收录判断、收藏、标签、笔记；每个库自己定义的词条；回收站；导出 BibTeX 和 CSV。
-- **笔记保存**：「我的笔记」可保存到已登录的 Notion MCP，或导出为 Markdown 和图片附件。问答页可选择历史问题，预览后保存；原笔记和对话保留。助手也能调用相同工具，见 [笔记导出](docs/CLI.md#笔记保存与导出)。
-- **检索与导入**：保存检索式，先试检索再导入，每次导入可以整批撤销；可以定时自动更新。
-- **建库向导**：写下主题，助手为各个数据库拟几条检索式并逐条试检索，你挑靠谱的。
-- **筛选**：助手几篇同时读，给出收录建议和原文依据，你来确认；也可以按建议整组采纳。
-- **翻译**：题目和摘要一键译成中文，译过的保存在文献库里。
-- **写作**：分部分写稿（摘要、导言、方法、结果、讨论），旁边列出库里文献在同一部分的句子：还没动笔时是各篇的开头，写起来之后是与正在写的这一段最相近的句子，中文也能找。句子可以插入引用、复制，或在 PDF 里定位到原句。入库的 PDF 按版面读出文字、按标题分节；没有标题可依的（如 Nature 的导言）可以让模型判断，扫描件可以让模型读页面。稿件可以从零写，也可以导入已有的 Word / Markdown 文件，或接着改助手写的综述；助手像 Word 的审阅那样留批注、提修改，由你采纳；导出的 Word 写回原文件，带批注，改动可以记为修订。写作有两种方式，在大纲上方切换：「自己写」是你动笔、助手在旁边帮；「助手写」是左边大纲、中间和助手对话、右边稿件，由助手查文献、动笔，你看着它写、随时亲手改，每一节都能翻回早先的版本。
-- **提问**：对文献库或单篇文献提问，回答按 Markdown 排版；助手引的原句会和原文逐字比对，结果标在出处上，点击出处在 PDF 里高亮。单篇提问时对话和 PDF 并排，PDF 上选中的原文或框出的截图可以直接带进问题；回答里的文字可以选中、复制、引用。输入 `/` 选择命令（检索全文、配引用、分阶段写综述、比较文献、逐条核对），可以粘贴图片，对话保存为历史、可以接着问，回答可以存为这篇文献的笔记。
-- **PDF**：在详情面板里直接看，面板宽度可以拖动；缩放、适应宽度或整页；选字、复制、截图；下划线、高亮和附加笔记。标注作为独立 metadata 保存并叠加显示，助手也能读取原文、笔记和位置。读不出文字的 PDF 会说明原因，可以让能看图的模型读页面。
-- **图片库**：在 PDF 上框出一张图或一个表，收藏进「收藏」下的图片库；图号和图注从页面上读出来，也可以让模型看图写图注、标签和解读。按标签和关键词找图，一键回到原文的那一页。
-- **查找开放全文**：为没有 PDF 的文献批量查找开放获取的全文，下载后附到原条目；不绕过付费墙。
-- **命令行与 MCP**：`wisp` 不开窗口就能新建文献库，导入本地 PDF / 文件夹、BibTeX / RIS 和 Zotero，并读写同一个数据目录；`wisp mcp` 把同一组工具交给外部的 AI 客户端。见 [docs/CLI.md](docs/CLI.md) 和 [SKILL.md](SKILL.md)。
-- **设置**：浅色 / 深色，可改键的快捷键，全局代理和每个模型服务单独的代理。改动即时保存。
+- **Libraries**: several independent libraries, each with a name, a topic and an accent color.
+- **Collect**: paste a DOI or PMID, drop in PDFs, import BibTeX / RIS, or enter a record by hand; you can also [import from a local Zotero database](docs/ZOTERO.md) its records, tags, notes and downloaded PDFs. Deduplicated by DOI, PMID and title. Bulk imports show progress and a summary of the result.
+- **Organise**: search, filter, sort; reading status, inclusion decision, favorites, tags, notes; fields each library defines for itself; a trash; export to BibTeX and CSV.
+- **Saving notes**: “My notes” can be saved to a signed-in Notion MCP, or exported as Markdown with image attachments. On the Ask page you can pick earlier questions, preview them and save; the original notes and conversations stay. The assistant can call the same tools, see [exporting notes](docs/CLI.md#笔记保存与导出).
+- **Search and import**: save search queries, try a search before importing, undo any import as a whole; scheduled updates are available.
+- **Library wizard**: write down a topic, and the assistant drafts a few queries for each database and tries each one out; you pick the sound ones.
+- **Screening**: the assistant reads several papers at once and gives inclusion suggestions with evidence from the text, and you confirm; a whole group can also be accepted as suggested.
+- **Translation**: titles and abstracts translated in one click; translations are saved in the library.
+- **Writing**: write a manuscript part by part (abstract, introduction, methods, results, discussion) with the sentences the library's papers wrote in that same part listed beside it: the openings of each paper before you start, and once you are writing, the sentences closest to the paragraph at hand; this works for Chinese text too. A sentence can be inserted as a citation, copied, or located in its PDF. PDFs in the library are read by layout and split into sections by their headings; where there are no headings to go by (a Nature introduction, say) a model can decide, and a model can read the pages of a scan. A manuscript can start from nothing, from an existing Word / Markdown file, or from a review the assistant wrote; the assistant leaves comments and proposes changes like Word's review, for you to accept; the exported Word file is written back into the original, with comments, and changes can be recorded as tracked changes. There are two ways of writing, switched above the outline: in “I write” you write and the assistant helps beside you; in “Assistant writes” the outline is on the left, the conversation with the assistant in the middle and the manuscript on the right: the assistant looks up the papers and writes, you watch it write and edit by hand at any time, and every section can be turned back to an earlier version.
+- **Asking**: ask the library or a single paper; answers are laid out in Markdown. The sentences the assistant quotes are compared word for word with the original and the result is marked on the source; clicking a source highlights it in the PDF. When asking about one paper, the conversation and the PDF sit side by side, and text selected on the PDF or a region cut out as a picture goes straight into the question; text in an answer can be selected, copied and quoted. Type `/` for commands (search the full texts, find citations, write a review in stages, compare papers, check claim by claim); pictures can be pasted; conversations are kept as history and can be continued, and an answer can be saved as a note on the paper.
+- **PDF**: read right in the detail panel, whose width can be dragged; zoom, fit width or fit page; select text, copy, take a screenshot; underline, highlight and attach notes. Annotations are saved as separate metadata and drawn over the page, and the assistant can read the text, the notes and where they are. A PDF that gives no text says why, and a model that can see can read its pages.
+- **Figures**: frame a figure or a table on a PDF and save it to Figures, under Favorites; the figure number and caption are read off the page, or a model can look at the picture and write a caption, tags and a reading of it. Find figures by tag and keyword, and go back to the page they came from in one click.
+- **Find open full text**: look up open-access full texts in bulk for papers that have no PDF, and attach the downloads to their records; paywalls are not bypassed.
+- **Command line and MCP**: without opening a window, `wisp` creates libraries, imports local PDFs / folders, BibTeX / RIS and Zotero, and reads and writes the same data folder; `wisp mcp` hands the same set of tools to an outside AI client. See [docs/CLI.md](docs/CLI.md) and [SKILL.md](SKILL.md).
+- **Settings**: light / dark, rebindable shortcuts, a global proxy and one per model provider. Changes are saved as you make them.
 
-每一项的细节在 [docs/FEATURES.md](docs/FEATURES.md)。
+The detail of each is in [docs/FEATURES.md](docs/FEATURES.md) (in Chinese).
 
-## 文档
+## FAQ
+
+### Can one paper be in several libraries? If I take notes in library A, can I see them in library B?
+
+It can be in both, but the notes are not shared. Each library is an independent folder and deduplication happens within a library, so the same paper can be imported into A and into B. Each side holds a record of its own: notes, annotations, tags, reading status and the inclusion decision belong to the library they were made in and are not synchronised.
+
+This is deliberate. A library stands for one topic, and the same paper is read differently under different topics: the notes you took on it in A may be of no use in B, and B may not even need its full text, just the abstract. So most of the time one paper belongs in one library.
+
+If you cannot decide how to split, start with one library. For example a “Learning” library just for reading papers and picking things up: its topics can be a mix, told apart by tags. When one direction grows into a project of its own, create a new library and use “Move to library…” in a paper's right-click menu to move the relevant papers over; the PDF, the annotations and the conversations about the paper go with it.
+
+### Why are there no groups (folders, collections) inside a library?
+
+The library itself is the group. Inside it, use tags.
+
+A folder asks a paper to live in exactly one place, and papers rarely divide that cleanly: does a paper that studies root hair development with single-cell sequencing go under “single-cell” or under “root hair”? The ugly duckling theorem (Watanabe, 1969) says just this: without prior assumptions, any two objects are in theory equally similar, and how to classify them depends entirely on which features you choose to weigh.
+
+Tags do not ask for a single home. A paper can carry several; in the sidebar, hold `⌘` / `Ctrl` to select more than one tag and keep only the papers that carry all of them, or hold `⌥` / `Alt` and click a tag to exclude it. On import from Zotero, collection paths become tags as well.
+
+### Can two libraries be linked?
+
+No, and this is deliberate too. From the start, a library was designed as an independent whole, with its own topic, inclusion criteria, tags and custom fields. Two libraries serve different goals and are best kept apart, so that one does not contaminate the other.
+
+When a question does span several libraries, give it to the assistant on the home page: it can read every library on the shelf. Say “compare what libraries ‘A’ and ‘B’ have on …”, and it lists papers, searches the full texts and reads the originals in each; every source in its answer says which library it comes from, and a click opens that paper in that library. The libraries are read-only from there: it changes none of them.
+
+### Will a large library burn tokens and give worse answers? How should I set up my libraries?
+
+What one question costs depends on the current list, not on the whole library, and it has a ceiling. When you ask the library, the scope is the papers shown in the list (as set by the view, tags, search and filters): the ones most relevant to the question are given as full records (title, abstract, notes), those that do not fit are given as titles only, and of the full texts only the few dozen pages most relevant to the question are sent. So the cost does not grow without limit as the library grows, though a long list does cost more than a short one. When the material is not enough, the assistant goes on to search the full texts and read pages itself.
+
+Saving tokens and getting better answers are the same thing: narrow the scope first, then ask.
+
+- Click a tag, switch to a view or search for a word, then ask: the model is given only that part of the library.
+- If you care about one paper, ask in that paper's “Ask”: the model reads its full text.
+- When the list is long, put words the papers themselves would use into the question (English terms for papers in English): which papers get a full record is ranked by how often those words appear in the title, abstract, tags and notes.
+- To check, open “Papers” at the top of the conversation: it says for each paper whether the model was given the full record or only the title, and how many pages of full text. Sources in an answer can be opened, and the sentences the assistant quotes are compared word for word with the original. With a DeepSeek model, the line below an answer also says how many tokens the question used and roughly what it cost.
+
+Some advice on setting up libraries:
+
+- **One library, one goal**: a project, a review, a field you want to learn. Whether to split depends on whether the goals and inclusion criteria differ, not on the number of papers.
+- **Write the topic well.** The assistant reads it when it drafts queries, screens and answers.
+- **Import broadly first, then screen.** Under one screening goal each paper is read only once, the irrelevant ones go to the trash, and what remains is the scope of every later question. A clean library matters more than a small one.
+- **Give the bulk work to a cheap model.** Which model screening, translation and tidying full text each use is set separately in “Settings › AI”; keep the strong one for asking.
+
+## Documentation
+
+Apart from the tutorials, the documents below are in Chinese.
 
 | | |
 |---|---|
-| [教程](https://xuzhougeng.github.io/WispStudy/tutorials/) | 十六篇按科研场景写的教程，带截图：建库、先聊后建库、迁移、只读一个 PDF、精读、思维导图、对照着读、听论文、组会幻灯片、提问、按影响因子和分区挑文献、提取、写综述、写论文、改稿、跟进新文献 |
-| [建库案例](docs/TUTORIAL.md) | 从零建一个「植物单细胞转录组」文献库的原始记录（v0.2.0） |
-| [功能详解](docs/FEATURES.md) | 每个页面能做什么 |
-| [数据与隐私](docs/DATA.md) | 文件放在哪里，哪些数据会离开本机 |
-| [命令行与 MCP](docs/CLI.md) | `wisp` 的用法、工具一览、MCP 配置 |
-| [智能体技能说明](SKILL.md) | 供外部智能体使用的 `SKILL.md`：支持范围、建库与导入流程、命令示例 |
-| [开发](docs/DEVELOPMENT.md) | 构建、测试、代码结构 |
+| [Tutorials](https://xuzhougeng.github.io/WispStudy/en/tutorials/) | Sixteen tutorials written around research tasks, with screenshots: building a library, talking first and building later, migrating, reading just one PDF, close reading, mind maps, reading side by side, listening to a paper, group-meeting slides, asking, picking papers by impact factor and quartile, extracting, writing a review, writing a paper, revising, keeping up with new papers |
+| [A library, start to finish](docs/TUTORIAL.md) | The original record of building a “plant single-cell transcriptomics” library from nothing (v0.2.0) |
+| [Features in detail](docs/FEATURES.md) | What each page can do |
+| [Data and privacy](docs/DATA.md) | Where the files are, and what leaves your computer |
+| [Command line and MCP](docs/CLI.md) | How to use `wisp`, the list of tools, MCP configuration |
+| [Agent skill](SKILL.md) | The `SKILL.md` for outside agents: what is supported, the steps of building a library and importing, command examples |
+| [Development](docs/DEVELOPMENT.md) | Building, testing, code structure |
 
-## 致谢
+## Acknowledgements
 
-文献部分移植自 [BiblioCell](https://github.com/xuzhougeng/BiblioCell)（它的数据集和网页版没有移植），应用结构和回答里的 Markdown 读法参考 [quiet-md](https://github.com/s1dashu/quiet-md)。
+The literature side is ported from [BiblioCell](https://github.com/xuzhougeng/BiblioCell) (its datasets and web version are not ported); the app's structure and the way Markdown in answers is read follow [quiet-md](https://github.com/s1dashu/quiet-md).
 
-## 许可
+## License
 
-代码以 [MIT](LICENSE) 许可发布。随附的第三方代码和素材见 [THIRD_PARTY.md](THIRD_PARTY.md)。
+The code is released under the [MIT](LICENSE) license. Bundled third-party code and assets are listed in [THIRD_PARTY.md](THIRD_PARTY.md).
