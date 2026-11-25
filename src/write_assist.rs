@@ -12,7 +12,7 @@
 //!   draft, and Undo takes that back.
 
 use crate::i18n::t;
-use crate::app::{Cmd, Workspace, Writing};
+use crate::app::{Cmd, MenuItem, MenuKind, Workspace, Writing};
 use crate::settings::SettingsPage;
 use crate::theme::{Theme, text_px};
 use crate::ui;
@@ -50,6 +50,20 @@ pub struct Card {
     pub keys: Vec<(String, String)>,
     /// 配引用: what was found in the library, in place of a result to compare (write_cite.rs).
     pub cite: Option<crate::write_cite::Found>,
+}
+
+/// One of the manuscript's tools: a button under it or beside what is selected.
+struct Tool {
+    id: ElementId,
+    icon: Option<&'static str>,
+    /// The icon that stands for it alone where the row has no room for names; without one it is in the row's ⋯ by then.
+    bare: Option<&'static str>,
+    name: String,
+    tip: String,
+    able: bool,
+    cmd: Cmd,
+    /// Which group of the row it is in: 1 looking in the library, 2 a new version of the words, 3 notes, 4 cutting the section.
+    group: u8,
 }
 
 /// What an action works on: the selection, or the paragraph the caret is in; where it stands and what it says.
@@ -260,41 +274,20 @@ impl Workspace {
         cx.notify();
     }
 
-    /// The actions for the selection (a popover beside it) and for the caret's paragraph (under the manuscript),
-    /// in groups a line apart: what looks in the library and changes nothing, what proposes a new version of the words, and the person's own notes and cuts.
-    pub fn render_assist_bar(&self, floating: bool, cx: &mut Context<Self>) -> Div {
+    /// The tools for a paragraph of the manuscript, in groups: what looks in the library and changes nothing, what
+    /// proposes a new version of the words, the person's own notes, and the cuts of a section. Beside what is
+    /// selected (`floating`) only those that are about words.
+    fn assist_tools(&self, floating: bool) -> Vec<Tool> {
         let lib = self.lib.as_ref().unwrap();
-        let writing = &lib.writing;
         let language = self.manuscript_language();
-        let busy = writing.assist.card.as_ref().is_some_and(|card| card.busy);
+        let busy = lib.writing.assist.card.as_ref().is_some_and(|card| card.busy);
         let configured = self.settings.profile_for_or_default(Task::Chat).missing().is_none();
-        let height = if floating { 30. } else { 24. };
-        let button = |id: ElementId, icon: Option<&'static str>, name: String, tip: String, able: bool, cmd: Cmd, cx: &mut Context<Self>| {
-            ui::ghost_button(id, icon, Some(name.into()))
-                .h(px(height))
-                .px(px(7.))
-                .text_size(text_px(12.))
-                .when(!able, |d| d.opacity(0.45).cursor_default())
-                .when(able, |d| d.on_click(self.on(cmd, cx)))
-                .when(!tip.is_empty(), |d| d.tooltip(move |_, cx| cx.new(|_| Tip(tip.clone())).into()))
-                .into_any_element()
-        };
-        let rule = || div().flex_none().w(px(1.)).h(px(14.)).mx(px(4.)).bg(Theme::line()).into_any_element();
+        let tool = |id: ElementId, icon: Option<&'static str>, name: String, tip: String, able: bool, cmd: Cmd, group: u8| Tool { id, icon, bare: icon, name, tip, able, cmd, group };
         let key = self.find_key();
-        let mut items = vec![];
-        // Under the manuscript only: whether a citation the pointer is on shows its card. Following it with a click works either way.
-        if !floating {
-            let shown = !self.settings.citation_cards_hidden;
-            let tip = if shown { tf!("引用卡片：开。指针停在引用上时显示文献和它依据的原句；点击关掉。{}+点击引用仍会打开文献。", "Citation cards: on. Pointing at a citation shows the paper and the sentence it rests on; click to turn off. {}+click on a citation still opens the paper.", crate::write_source::follow_key()) } else { tf!("引用卡片：关。点击后指针停在引用上时显示文献和它依据的原句。{}+点击引用仍会打开文献。", "Citation cards: off. Click to show the paper and the sentence it rests on when pointing at a citation. {}+click on a citation still opens the paper.", crate::write_source::follow_key()) };
-            items.push(button("write-citation-cards".into(), Some(if shown { "eye" } else { "eye-off" }), t("引用卡片").into(), tip, true, Cmd::CitationCards(!shown), cx));
-            items.push(rule());
-        }
+        let mut tools = vec![];
         // Looking in the library: nothing of the text changes.
-        items.extend([
-            button("write-bar-find".into(), Some("scan-text"), t("找句子").into(), tf!("在文献库里找与这段相近的句子，列在右边供参考和引用（{key}）。不改你的文字。", "Find sentences in the library similar to this text, listed at the right for reference and citing ({key}). Your text is not changed."), true, Cmd::WriteFind, cx),
-            button("write-bar-cite".into(), Some("library"), crate::i18n::assist_title(&Assist::Cite, &language), t("在文献库里逐句找可以引用的文献，列出每篇和它自己的原句。勾选后只把引用加到句末，不改你的文字。").into(), !busy, Cmd::WriteAssist(Assist::Cite), cx),
-            rule(),
-        ]);
+        tools.push(tool("write-bar-find".into(), Some("scan-text"), t("找句子").into(), tf!("在文献库里找与这段相近的句子，列在右边供参考和引用（{key}）。不改你的文字。", "Find sentences in the library similar to this text, listed at the right for reference and citing ({key}). Your text is not changed."), true, Cmd::WriteFind, 1));
+        tools.push(tool("write-bar-cite".into(), Some("library"), crate::i18n::assist_title(&Assist::Cite, &language), t("在文献库里逐句找可以引用的文献，列出每篇和它自己的原句。勾选后只把引用加到句末，不改你的文字。").into(), !busy, Cmd::WriteAssist(Assist::Cite), 1));
         // A new version of the words, for the person to take or leave.
         if configured {
             let mut actions = vec![Assist::Polish, Assist::Translate, Assist::Rewrite];
@@ -307,29 +300,102 @@ impl Workspace {
                     Assist::Own(name) => self.settings.commands.iter().find(|command| command.name == *name).map(|command| command.about.clone()).unwrap_or_default(),
                     Assist::Cite => String::new(),
                 };
-                items.push(button(("write-assist", n).into(), (n == 0).then_some("sparkle"), crate::i18n::assist_title(&assist, &language), tip, !busy, Cmd::WriteAssist(assist), cx));
+                // The sparkle leads the group; where the bar keeps icons only, translating has one of its own and the rest are in its ⋯.
+                let bare = match &assist { Assist::Polish => Some("sparkle"), Assist::Translate => Some("languages"), _ => None };
+                tools.push(Tool { bare, ..tool(("write-assist", n).into(), (n == 0).then_some("sparkle"), crate::i18n::assist_title(&assist, &language), tip, !busy, Cmd::WriteAssist(assist), 2) });
             }
         } else {
-            items.push(button("write-assist-settings".into(), Some("settings-gear"), t("配置模型").into(), t("配置模型后可以润色、翻译、仿写，也可以让助手按你的话修改这一节").into(), true, Cmd::OpenSettings(SettingsPage::Ai), cx));
+            tools.push(tool("write-assist-settings".into(), Some("settings-gear"), t("配置模型").into(), t("配置模型后可以润色、翻译、仿写这一段").into(), true, Cmd::OpenSettings(SettingsPage::Ai), 2));
         }
-        items.push(rule());
-        items.push(button("write-comment".into(), Some("message-square"), t("批注").into(), t("给这段文字写一条批注").into(), true, Cmd::Comment(crate::comments::Do::Write), cx));
+        tools.push(tool("write-comment".into(), Some("message-square"), t("批注").into(), t("给这段文字写一条批注").into(), true, Cmd::Comment(crate::comments::Do::Write), 3));
         // The caret's paragraph as a heading: the section is cut there.
         if !floating {
-            items.push(button("write-split-heading".into(), Some("heading"), t("设为标题").into(), t("这一段成为新一节的名称，后面的文字归入新的一节").into(), true, Cmd::SplitSection(true), cx));
-            items.push(button("write-split".into(), Some("scissors"), t("从这里拆成新节").into(), t("从这一段起拆成新的一节，再给它起名").into(), true, Cmd::SplitSection(false), cx));
+            tools.push(Tool { bare: None, ..tool("write-split-heading".into(), Some("heading"), t("设为标题").into(), t("这一段成为新一节的名称，后面的文字归入新的一节").into(), true, Cmd::SplitSection(true), 4) });
+            tools.push(Tool { bare: None, ..tool("write-split".into(), Some("scissors"), t("从这里拆成新节").into(), t("从这一段起拆成新的一节，再给它起名").into(), true, Cmd::SplitSection(false), 4) });
         }
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .flex_wrap()
-            .gap(px(2.))
-            .when(floating, |d| d.p(px(4.)).text_color(Theme::text()))
-            .when(!floating, |d| d.px(px(16.)).pb(px(6.)))
+        tools
+    }
+
+    /// A row of those tools, a line between its groups; `named` is with their names, else each is its icon and says its name on hover.
+    fn tool_buttons(&self, tools: Vec<Tool>, named: bool, height: f32, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let mut items = vec![];
+        let mut group = tools.first().map_or(0, |tool| tool.group);
+        for tool in tools {
+            if tool.group != group { items.push(div().flex_none().w(px(1.)).h(px(14.)).mx(px(4.)).bg(Theme::line()).into_any_element()) }
+            group = tool.group;
+            let Tool { id, icon, bare, name, tip, able, cmd, .. } = tool;
+            let tip = if named || tip.is_empty() { tip } else { tf!("{name}：{tip}", "{name}: {tip}") };
+            let tip = if tip.is_empty() && !named { name.clone() } else { tip };
+            items.push(
+                ui::ghost_button(id, if named { icon } else { bare }, named.then(|| name.into()))
+                    .h(px(height))
+                    .px(px(7.))
+                    .text_size(text_px(12.))
+                    .when(!able, |d| d.opacity(0.45).cursor_default())
+                    .when(able, |d| d.on_click(self.on(cmd, cx)))
+                    .when(!tip.is_empty(), |d| d.tooltip(move |_, cx| cx.new(|_| Tip(tip.clone())).into()))
+                    .into_any_element(),
+            );
+        }
+        items
+    }
+
+    /// The actions for what is selected in the manuscript, in a popover beside it.
+    pub fn render_assist_bar(&self, cx: &mut Context<Self>) -> Div {
+        let items = self.tool_buttons(self.assist_tools(true), true, 30., cx);
+        div().flex().flex_none().items_center().flex_wrap().gap(px(2.)).p(px(4.)).text_color(Theme::text()).children(items)
+    }
+
+    /// The row the manuscript stands on, one line whatever its width: the tools for the caret's paragraph when
+    /// `tools` (the person is writing and nothing is selected), and what there is to say of the text, `status`.
+    /// Where the row is too narrow for all of it, the cuts of a section go into a ⋯ at its end, then the tools
+    /// without an icon of their own go there too, then every tool left is its icon alone; the status stands at
+    /// the end of the row whenever what is left of it has the room.
+    pub(crate) fn render_write_foot(&self, width: f32, writing: bool, tools: bool, status: String, window: &Window, cx: &mut Context<Self>) -> Div {
+        let row = div().flex().flex_none().items_center().gap(px(2.)).h(text_px(34.)).pb(px(4.)).overflow_hidden();
+        let said = |status: String| div().flex_none().whitespace_nowrap().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(status);
+        // Beside the conversation that writes, or reading: only what there is to say, from the text's left edge.
+        if !writing { return row.px(px(18.)).child(div().flex_1().min_w_0().truncate().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(status)) }
+        // With words selected the tools are beside them: the row keeps its place and says the rest.
+        if !tools { return row.px(px(16.)).child(div().flex_1()).child(said(status)) }
+        let all = self.assist_tools(false);
+        let wide = |text: &str, size: f32| ui::text_width(text, text_px(size), window);
+        // What a row of buttons takes: each button, the gaps between them and the lines between groups.
+        let taken = |tools: &[&Tool], named: bool| -> f32 {
+            let groups = tools.iter().map(|tool| tool.group).collect::<std::collections::BTreeSet<_>>().len();
+            tools.iter().map(|tool| if named { 14. + tool.icon.map_or(0., |_| 21.) + wide(&tool.name, 12.) } else { 30. }).sum::<f32>() + 2. * tools.len() as f32 + 11. * groups.saturating_sub(1) as f32
+        };
+        let (room, about, more, said_wide) = (width - 32., 20., 32., 12. + wide(&status, 11.));
+        let everything: Vec<&Tool> = all.iter().collect();
+        let uncut: Vec<&Tool> = all.iter().filter(|tool| tool.group != 4).collect();
+        let bare: Vec<&Tool> = all.iter().filter(|tool| tool.bare.is_some()).collect();
+        // What the tools take at each level; the status stands at the end of whichever is chosen when it has room there.
+        let (level, taken) = match (taken(&everything, true) + about, taken(&uncut, true) + more + about, taken(&bare, true) + more + about) {
+            (whole, ..) if whole + said_wide <= room => (0, whole),
+            (_, folded, _) if folded <= room => (1, folded),
+            (.., fewer) if fewer <= room => (2, fewer),
+            _ => (3, taken(&bare, false) + more + about),
+        };
+        let shown: Vec<Tool> = all.into_iter().filter(|tool| match level { 0 => true, 1 => tool.group != 4, _ => tool.bare.is_some() }).collect();
+        let items = self.tool_buttons(shown, level < 3, 24., cx);
+        row.px(px(16.))
             .children(items)
-            // What the bar under the manuscript works on, and what its groups are, said on hover instead of in front of it.
-            .when(!floating, |d| d.child(ui::hint("write-assist-about", t("这些按钮对光标所在的段落；选中文字时它们出现在选区旁，对选中的文字。「找句子」「配引用」只在文献库里查找，不改文字；「润色」「翻译」「仿写」给出改后的文字，由你决定是否替换。"))))
+            .when(level >= 1, |d| d.child(ui::ghost_button("write-more", Some("ellipsis"), None).h(px(24.)).min_w(px(28.)).tooltip(ui::tip(t("更多"))).on_click(self.on_menu(MenuKind::WriteMore(level >= 2), cx))))
+            // What the row works on, and what its groups are, said on hover instead of in front of it.
+            .child(ui::hint("write-assist-about", t("这些按钮对光标所在的段落；选中文字时它们出现在选区旁，对选中的文字。「找句子」「配引用」只在文献库里查找，不改文字；「润色」「翻译」「仿写」给出改后的文字，由你决定是否替换。")))
+            .when(taken + said_wide <= room, |d| d.child(div().flex_1()).child(said(status)))
+    }
+
+    /// The ⋯ at the end of that row: the tools it has no room for, by their names; `bare` when the row keeps only those with an icon of their own.
+    pub(crate) fn write_more_menu(&self, bare: bool) -> (Vec<MenuItem>, Vec<usize>) {
+        let (mut items, mut breaks) = (vec![], vec![]);
+        let mut group = None;
+        for tool in self.assist_tools(false).into_iter().filter(|tool| tool.able && if bare { tool.bare.is_none() } else { tool.group == 4 }) {
+            if group.is_some_and(|group| group != tool.group) { breaks.push(items.len()) }
+            group = Some(tool.group);
+            items.push(MenuItem { label: tool.name.into(), checked: false, note: None, cmd: tool.cmd });
+        }
+        (items, breaks)
     }
 
     /// What the last action came to, over the candidates; `None` without one for this part.

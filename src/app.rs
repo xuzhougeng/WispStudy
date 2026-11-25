@@ -213,7 +213,7 @@ pub struct Writing {
     pub scroll: ScrollHandle,
     /// The model's work on a paragraph (`write_assist.rs`).
     pub assist: crate::write_assist::Assisting,
-    /// The assistant's changes to the section, asked for in the box under the manuscript (`revise.rs`).
+    /// What the assistant that writes changed in the section on show, lit and listed (`revise.rs`).
     pub revise: crate::revise::Revising,
     /// The comments on the manuscript, and the assistant's review (`comments.rs`).
     pub comments: crate::comments::Commenting,
@@ -1056,9 +1056,8 @@ impl Workspace {
         subscriptions.push(cx.subscribe(&find, |this, _, event: &InputEvent, cx| if *event == InputEvent::Submit { this.write_find(true, cx) }));
         let (comments, heard) = crate::comments::Commenting::new(store.comments(&manuscript).unwrap_or_default(), store.manuscript_source(&manuscript).ok().flatten(), cx);
         subscriptions.extend(heard);
-        let revise = crate::revise::Revising::new(&mut subscriptions, cx);
         let seek = crate::write_seek::Seek::new(&mut subscriptions, cx);
-        let writing = Writing { manuscripts, manuscript, section_id, reading: false, title, typed: 0, editor, find, search: Default::default(), structures: BTreeMap::new(), sorting: Sorting::default(), scroll: ScrollHandle::new(), assist: Default::default(), revise, comments, editor_scroll: ScrollHandle::new(), side: Side::default(), side_open: false, agent: Default::default(), seek, away: false };
+        let writing = Writing { manuscripts, manuscript, section_id, reading: false, title, typed: 0, editor, find, search: Default::default(), structures: BTreeMap::new(), sorting: Sorting::default(), scroll: ScrollHandle::new(), assist: Default::default(), revise: Default::default(), comments, editor_scroll: ScrollHandle::new(), side: Side::default(), side_open: false, agent: Default::default(), seek, away: false };
         let citing = crate::cite::Citing::new(&store, &writing.manuscript, &mut subscriptions, cx);
         let gallery = crate::figures::Gallery::new(&mut subscriptions, cx);
         let write_figures = crate::write_figures::Shelf::new(&mut subscriptions, cx);

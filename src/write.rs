@@ -77,7 +77,8 @@ impl Workspace {
 
     /// The manuscript: its bar, the section being written (or the whole of it to read, or an earlier version of
     /// the section), and what stands under it. `width` is the column's own. Beside the conversation that writes
-    /// (`agent`) the actions on a paragraph and the box of 改稿 are left out: what is to change is said there.
+    /// (`agent`) the tools for a paragraph are left out: what is to change is said there, and where the person
+    /// writes nothing is said to an assistant at all (the tools give back something to take or leave).
     pub(crate) fn render_manuscript_column(&mut self, width: f32, agent: bool, stacked: bool, window: &mut Window, cx: &mut Context<Self>) -> Div {
         self.comment_reveal(window, cx);
         self.seek_reveal(window, cx);
@@ -89,8 +90,8 @@ impl Workspace {
         let noted: Vec<(std::ops::Range<usize>, Hsla)> = marks.iter().map(|(range, tint, _)| (range.clone(), *tint)).collect();
         let tops = writing.editor.read(cx).mark_tops().to_vec();
         let markers = self.render_comment_markers(&marks, tops.get(..marks.len()).unwrap_or(&[]), cx);
-        // What the assistant is changing and has changed (revise.rs): tinted after the comments' words, a bar in the left margin on its lines.
-        // The tints move for a moment after each change and while one is being written: frames are asked for until they rest.
+        // What the assistant has changed (revise.rs): tinted after the comments' words, a bar in the left margin on its lines.
+        // The tints move for a moment after each change: frames are asked for until they rest.
         let (changed, bars, moving) = self.revise_marks(&text, std::time::Instant::now());
         if moving { window.request_animation_frame() }
         let bars = self.render_revise_bars(&bars, cx);
@@ -121,12 +122,28 @@ impl Workspace {
         let editing = !writing.reading && version.is_none();
         // What is selected goes with the next thing said to the assistant.
         let picked = if agent && editing { text_length(writing.editor.read(cx).selected()).0 } else { 0 };
-        // What the assistant changed in this section in answer to the last question: each change to go to or take back.
-        let told = writing.revise.run.as_ref().filter(|run| agent && editing && run.section == writing.section_id);
+        // What the assistant changed in this section in answer to the last question: each change to go to or take back, in either mode.
+        let told = writing.revise.run.as_ref().filter(|run| editing && run.section == writing.section_id);
+        // The row under it all: what there is to say of the text, and where the person writes, the tools for the caret's paragraph.
+        let status = if writing.reading {
+            let whole: String = writing.current().map_or(String::new(), |m| m.sections.iter().map(|s| s.body.as_str()).collect::<Vec<_>>().join("\n"));
+            tf!("全文 {} · 点一节的名称，回到那一节写", "Manuscript: {} · Click a section name to edit it", length_label(&whole))
+        } else if version.is_some() {
+            t("这是早先的一版，不能在这里改；恢复它，或回到现在的文字").to_string()
+        } else if picked > 0 {
+            tf!("{length} · 已选中 {picked} 字：对助手说的话会针对它", "{length} · {picked} selected: what you say to the assistant is about it")
+        } else if characters == 0 {
+            if agent { t("这一节还没有写：让助手写，或自己动笔") } else { t("随写随存") }.to_string()
+        } else if agent {
+            tf!("{length} · 已保存 · 可以直接在这里改", "{length} · Saved · You can edit here")
+        } else {
+            tf!("{length} · 已保存", "{length} · Saved")
+        };
         // Under the bar everything is as wide as a sheet of the reading width, centred: in a wide window the
         // room is left beside the sheet, not inside its frame, and the boxes under it keep its edges.
         let sheet = f32::from(theme::manuscript_width()) + 2. * SHEET_MARGIN + 2. + 32.;
         let inner = width.min(sheet);
+        let foot = self.render_write_foot(inner, !agent && editing, !agent && editing && writing.editor.read(cx).selection().is_empty(), status, window, cx);
         let seek = self.render_seek(window, cx);
         let lib = self.lib.as_ref().unwrap();
         let writing = &lib.writing;
@@ -152,32 +169,16 @@ impl Workspace {
                         // No frame of its own: the column's lines already say where the manuscript is. One line under it, where the text scrolls away.
                         .border_b_1()
                         .border_color(Theme::line())
-                        .child(if agent { page.child(writing.editor.clone()) } else { page.child(crate::input::with_selection_toolbar(&writing.editor, self.render_assist_bar(true, cx))) }.children(markers).children(bars))
+                        .child(if agent { page.child(writing.editor.clone()) } else { page.child(crate::input::with_selection_toolbar(&writing.editor, self.render_assist_bar(cx))) }.children(markers).children(bars))
                         .into_any_element()
                 }),
             )
-            .when(!agent && editing && writing.editor.read(cx).selection().is_empty(), |d| d.child(self.render_assist_bar(false, cx)))
             // The citation the pointer is on: what it names and rests on, in a card under its line.
             .children(if editing { self.render_citation_hint(cx) } else { None })
             // With the caret in a citation: the paper it names and the passage of that paper its sentence rests on.
             .children(if editing { self.render_source_strip(inner - 32., cx) } else { None })
-            // Under the manuscript, the box where the assistant is told what to change in this section.
-            .when(!agent && editing, |d| d.child(self.render_revise(inner - 32., window, cx)))
-            .when_some(told, |d, run| d.child(div().flex().flex_col().flex_none().mx(px(16.)).mb(px(8.)).px(px(10.)).pt(px(8.)).pb(px(2.)).rounded(px(10.)).border_1().border_color(Theme::line()).bg(Theme::bg_body()).child(self.render_revise_run(run, cx).border_b_0())))
-            .child(div().flex().flex_none().px(px(18.)).pb(px(12.)).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(div().flex_1().min_w_0().child(if writing.reading {
-                let whole: String = writing.current().map_or(String::new(), |m| m.sections.iter().map(|s| s.body.as_str()).collect::<Vec<_>>().join("\n"));
-                tf!("全文 {} · 点一节的名称，回到那一节写", "Manuscript: {} · Click a section name to edit it", length_label(&whole))
-            } else if version.is_some() {
-                t("这是早先的一版，不能在这里改；恢复它，或回到现在的文字").to_string()
-            } else if picked > 0 {
-                tf!("{length} · 已选中 {picked} 字：对助手说的话会针对它", "{length} · {picked} selected: what you say to the assistant is about it")
-            } else if characters == 0 {
-                if agent { t("这一节还没有写：让助手写，或自己动笔") } else { t("随写随存") }.to_string()
-            } else if agent {
-                tf!("{length} · 已保存 · 可以直接在这里改", "{length} · Saved · You can edit here")
-            } else {
-                tf!("{length} · 已保存", "{length} · Saved")
-            })));
+            .when_some(told, |d, run| d.child(self.render_revise_run(run, cx)))
+            .child(foot);
         div()
             .flex()
             .flex_col()

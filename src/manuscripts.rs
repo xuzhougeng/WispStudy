@@ -902,6 +902,24 @@ impl Workspace {
             .on_click(self.on(Cmd::WriteReading(!reading), cx))
             .tooltip(move |_, cx| cx.new(|_| crate::write_assist::Tip(preview_tip.to_string())).into())
             .child(ui::icon("eye", 14., if reading { Theme::accent() } else { Theme::text_secondary() }));
+        // 引用卡片: whether a citation the pointer is on shows its card. A way of looking at the manuscript, so it stands here, in either
+        // mode of 写作, and not among the tools for a paragraph. Lit while on; following a citation with a click works either way.
+        let cards = !self.settings.citation_cards_hidden;
+        let cards_tip = if cards { tf!("引用卡片：开。指针停在引用上时显示文献和它依据的原句；点击关掉。{}+点击引用仍会打开文献。", "Citation cards: on. Pointing at a citation shows the paper and the sentence it rests on; click to turn off. {}+click on a citation still opens the paper.", crate::write_source::follow_key()) } else { tf!("引用卡片：关。点击后指针停在引用上时显示文献和它依据的原句。{}+点击引用仍会打开文献。", "Citation cards: off. Click to show the paper and the sentence it rests on when pointing at a citation. {}+click on a citation still opens the paper.", crate::write_source::follow_key()) };
+        let cards_button = div()
+            .id("write-citation-cards")
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .size(text_px(26.))
+            .rounded(px(6.))
+            .cursor_pointer()
+            .when(cards, |d| d.bg(Theme::accent_soft()))
+            .when(!cards, |d| d.hover(|s| s.bg(Theme::hover())))
+            .on_click(self.on(Cmd::CitationCards(!cards), cx))
+            .tooltip(move |_, cx| cx.new(|_| crate::write_assist::Tip(cards_tip.clone())).into())
+            .child(ui::icon("quote", 14., if cards { Theme::accent() } else { Theme::text_secondary() }));
         // 铺满: the text as wide as the column, or back to the standard measure; the same setting as 设置 › 外观's 正文宽度. Lit while on.
         let fill = self.settings.reading_appearance.width == wisp_core::settings::TextWidth::Fill;
         let fill_tip = if fill { t("铺满：开。正文随窗口宽度铺满；点击回到标准宽度。设置 › 外观 里也可以选正文宽度。") } else { t("铺满：关。点击让正文随窗口宽度铺满，窗口多宽，一行就多长。") };
@@ -951,6 +969,7 @@ impl Workspace {
                     .when(!outlined && self.in_draft(), |d| d.child(ui::ghost_button("write-manuscripts", Some("list"), Some(tf!("稿件 {}", "Manuscript {}", writing.manuscripts.len()).into())).h(text_px(26.)).px(px(7.)).text_size(text_px(12.)).on_click(self.on_menu(MenuKind::Manuscripts, cx))))
                     // 资料库 is a row of the outline: here while that is put away.
                     .when(!outlined, |d| d.child(tool("write-materials", "image", Some(t("资料库").into())).on_click(self.on(Cmd::WriteFigures(crate::write_figures::Do::Open), cx))))
+                    .child(cards_button)
                     // 预览 shows the whole manuscript as it reads, Markdown drawn; lit while it does, a click goes back to writing.
                     .child(preview)
                     .child(fill_button)
