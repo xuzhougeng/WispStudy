@@ -412,7 +412,7 @@ impl Workspace {
         ready
     }
 
-    /// A picture where the manuscript is read through: the picture, and its caption under it.
+    /// A picture where the manuscript is read through: the picture in the middle of the column, and its caption under it.
     pub(crate) fn render_manuscript_picture(&self, id: String, picture: &manuscript::PictureLine, window: &Window) -> AnyElement {
         let Some(lib) = self.lib.as_ref() else { return div().into_any_element() };
         let width = f32::from(crate::theme::manuscript_width());
@@ -428,7 +428,7 @@ impl Workspace {
         div()
             .flex()
             .flex_col()
-            .items_start()
+            .items_center()
             .gap(px(SHOT_GAP))
             .child(drawn)
             .when(!picture.caption.trim().is_empty(), |d| d.child(div().w_full().text_size(text_px(13.)).text_color(Theme::text_secondary()).child(crate::markdown::render(&id, &picture.caption, None, None))))

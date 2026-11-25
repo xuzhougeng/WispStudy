@@ -1731,7 +1731,8 @@ impl Media {
         if picture.kind == "png" { self.png = true } else { self.jpeg = true }
         self.drawing += 1;
         let (number, (cx, cy)) = (self.drawing, picture_extent(picture.width, picture.height));
-        let ppr = if keep { "<w:pPr><w:keepNext/></w:pPr>" } else { "" };
+        // In the middle of the line, as the manuscript shows it; a first-line indent of the file's style would push it off.
+        let ppr = format!("<w:pPr>{}<w:ind w:firstLineChars=\"0\" w:firstLine=\"0\"/><w:jc w:val=\"center\"/></w:pPr>", if keep { "<w:keepNext/>" } else { "" });
         // The names are said on the elements that use them: the document's root may not have them.
         format!(
             "<w:p>{ppr}<w:r><w:drawing><wp:inline xmlns:wp=\"http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing\" distT=\"0\" distB=\"0\" distL=\"0\" distR=\"0\"><wp:extent cx=\"{cx}\" cy=\"{cy}\"/><wp:docPr id=\"{number}\" name=\"Picture {number}\"/>\

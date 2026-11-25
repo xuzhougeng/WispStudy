@@ -307,7 +307,7 @@ impl ManuscriptFile {
         let kept: Vec<String> = [(draft.tables, "个表格"), (draft.pictures, "张图")].iter().filter(|(count, _)| *count > 0).map(|(count, what)| format!("{count} {what}")).collect();
         if !kept.is_empty() { lines.push(format!("{}留在 Word 文件里，导出时还在原处。", kept.join("、"))) }
         if draft.tracked { lines.push("文件里未接受的修订按接受后的文字读入。".to_string()) }
-        if !draft.headings.is_empty() { lines.push("这个 Word 文件没有用标题样式：按看起来像标题的段落分节，导入后可以在写作页用「设为标题」「并入上一节」调整。".to_string()) }
+        if !draft.headings.is_empty() { lines.push("这个 Word 文件没有用标题样式：按看起来像标题的段落分节，导入后可以在写作页大纲里一节的菜单中调整：把一段设为标题，或并入上一节。".to_string()) }
         lines
     }
 

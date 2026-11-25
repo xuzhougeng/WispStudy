@@ -706,7 +706,7 @@ impl Workspace {
                         .child(div().text_size(text_px(12.)).line_height(text_px(19.)).text_color(Theme::text_tertiary()).child(tf!("「{}」没有用 Word 的标题样式。下面这些段落看上去像标题：勾选的每一段开始新的一节，其余留在正文里。导出回 Word 时，它们仍是文件里原来的段落。{more}", "“{}” uses no Word heading styles. These paragraphs look like headings: each one ticked starts a section, the rest stay in the text. Exported back to Word they are the paragraphs they were. {more}", form.name)))
                         .child(div().flex().gap(px(4.)).child(ui::ghost_button("headings-all", None, Some(t("全选").into())).h(text_px(24.)).text_size(text_px(12.)).on_click(self.on(Cmd::Comment(Do::Headings(true)), cx))).child(ui::ghost_button("headings-none", None, Some(t("全不选").into())).h(text_px(24.)).text_size(text_px(12.)).on_click(self.on(Cmd::Comment(Do::Headings(false)), cx))))
                         .child(div().flex().flex_col().gap(px(2.)).children(rows))
-                        .child(div().px(px(8.)).text_size(text_px(12.)).line_height(text_px(19.)).text_color(Theme::text_tertiary()).child(t("导入后也可以在写作里把光标所在的段落设为标题，或从那里拆成新的一节。")))
+                        .child(div().px(px(8.)).text_size(text_px(12.)).line_height(text_px(19.)).text_color(Theme::text_tertiary()).child(t("导入后也可以在大纲里这一节的菜单中，把光标所在的一段设为标题，或从那里拆成新的一节。")))
                         .child(ui::error_line(&self.modal_error)),
                 )
                 .child(

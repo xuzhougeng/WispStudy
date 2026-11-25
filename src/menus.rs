@@ -81,8 +81,6 @@ pub enum MenuKind {
     PlaySpeed,
     /// The player's ⋯ for the podcast of a paper (its id): make it anew, save its sound or its script.
     PodcastMore(String),
-    /// The ⋯ of the row under the manuscript: the tools it has no room for; true when the row keeps only those with an icon of their own (`write_assist.rs`).
-    WriteMore(bool),
 }
 
 pub struct MenuItem {
@@ -287,9 +285,8 @@ impl Workspace {
                 items.push(item(t("从 Zotero 导入…"), Cmd::ImportZotero));
                 items.push(item(t("手动录入…"), Cmd::AddManual));
             }
-            MenuKind::Manuscripts | MenuKind::Section(_) | MenuKind::ManuscriptExport | MenuKind::WriteLanguage => (items, breaks) = self.manuscript_menu(&kind),
+            MenuKind::Manuscripts | MenuKind::Section(_) | MenuKind::ManuscriptExport | MenuKind::WriteLanguage => (items, breaks) = self.manuscript_menu(&kind, cx),
             MenuKind::WriteNarrow => items = self.narrowing_menu(),
-            MenuKind::WriteMore(bare) => (items, breaks) = self.write_more_menu(bare),
             MenuKind::Export => {
                 items.push(item("BibTeX（.bib）", Cmd::Export(ExportKind::Bibtex)));
                 items.push(item(t("表格（.csv）"), Cmd::Export(ExportKind::Csv)));
