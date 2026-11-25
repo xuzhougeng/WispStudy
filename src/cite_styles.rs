@@ -142,7 +142,7 @@ impl Workspace {
         if let Some(browser) = self.style_browser_mut() { browser.show(&chosen, &root) }
     }
 
-    /// The keys over the list on show (design rule 54), from the window or from its search field, which passes
+    /// The keys over the list on show (design rule 55), from the window or from its search field, which passes
     /// the arrows on: ↑↓ go along the styles across the groups and stop at the ends, Home/End and Page Up/Down
     /// further; a move is what a click on the row is (in the dialog it looks, in the settings it chooses), and
     /// the list scrolls to it. Enter in the dialog is 用这个样式. False when no list of styles has the keys.

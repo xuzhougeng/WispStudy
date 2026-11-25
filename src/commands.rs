@@ -2387,7 +2387,7 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Esc with nothing left to put away in the library: where the corner's ← goes (design.md rule 52), out of a
+    /// Esc with nothing left to put away in the library: where the corner's ← goes (design.md rule 53), out of a
     /// manuscript to the library, else back to 所有文献库.
     /// Not in one press from where words are typed: a field with the keyboard gives it back to the page first (what is
     /// in it stays), words in the search box go next (the list in full), and a conversation's box holding words not

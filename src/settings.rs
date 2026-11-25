@@ -790,7 +790,7 @@ impl Workspace {
         if let Some(view) = &self.settings_view { view.font_search.update(cx, |input, cx| input.set_text(query, cx)) }
     }
 
-    /// Esc in 设置: one level up on the page on show, if it is a level down (design.md rule 53): an opened skill or
+    /// Esc in 设置: one level up on the page on show, if it is a level down (design.md rule 54): an opened skill or
     /// MCP back to its list, a command's fields or a library's parts folded up again. False on a page's top level.
     pub fn settings_up(&mut self, cx: &mut Context<Self>) -> bool {
         use crate::custom::Tab;
