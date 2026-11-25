@@ -10,8 +10,8 @@
 //! when it can be found among the three. Styles that cite in footnotes are
 //! refused: a manuscript here has no footnotes.
 //!
-//! The records keep no volume, issue or pages, so an entry has none in any
-//! style. `render` gives the text of each citation and of the list with
+//! A paper's volume, issue and pages are its record's (`entry`); one whose
+//! record has none has none in any style. `render` gives the text of each citation and of the list with
 //! what is set in italics or raised, and which part of a citation names
 //! which paper (`cite::Rich`), so the Word file can lead from one to the
 //! other.
@@ -192,7 +192,8 @@ impl Builtin {
 
     fn xml(self) -> Result<String> {
         match self {
-            Builtin::Archived(style) => style.get().to_xml().map_err(|err| anyhow!("内置样式 {} 写不出来：{err}", self.name())),
+            // Written out, it names the namespace of CSL as a file of the style repository does: Zotero takes no file without it.
+            Builtin::Archived(style) => style.get().to_xml().map(|xml| crate::adjust::in_namespace(&xml)).map_err(|err| anyhow!("内置样式 {} 写不出来：{err}", self.name())),
             Builtin::Shipped(n) => Ok(SHIPPED[n].1.to_string()),
         }
     }

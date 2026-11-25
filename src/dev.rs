@@ -1034,6 +1034,28 @@ impl Workspace {
                     self.take_cite_style(std::path::Path::new(arg), cx);
                     return;
                 }
+                // 调整 on the list of styles: `adjuststyle` opens it or puts it away; `tunestyle:<detail>;<value>` sets a
+                // detail of the style on show (`brackets;square|round|bare`, `raised;on|off`, `cited;<n>`, `listed;<n>`,
+                // `first;<n>`, `initials;dotspace|dot|space|none`; `tunestyle:reset` is 还原); `keepstyle` keeps what is
+                // set; `askstyle:<key>` takes a style to the assistant.
+                "adjuststyle" => Some(Cmd::AdjustCiteStyles),
+                "tunestyle" => {
+                    use crate::cite_styles::Knob;
+                    use wisp_core::adjust::Brackets;
+                    let (detail, value) = arg.split_once(';').unwrap_or((arg, ""));
+                    let n = value.parse().unwrap_or(0);
+                    Some(Cmd::TuneCiteStyle(match detail {
+                        "brackets" => Some(Knob::Brackets(match value { "square" => Brackets::Square, "round" => Brackets::Round, _ => Brackets::Bare })),
+                        "raised" => Some(Knob::Raised(value == "on")),
+                        "cited" => Some(Knob::Cited(n)),
+                        "listed" => Some(Knob::Listed(n)),
+                        "first" => Some(Knob::ListedFirst(n)),
+                        "initials" => Some(Knob::Initials(match value { "dotspace" => ". ", "dot" => ".", "space" => " ", _ => "" })),
+                        _ => None,
+                    }))
+                }
+                "keepstyle" => Some(Cmd::KeepCiteStyle),
+                "askstyle" => Some(Cmd::AskCiteStyle(arg.to_string())),
                 "candidate" => Some(Cmd::CompleteChoose(arg.parse().ok())),
                 // `command:0` opens the first of the person's own commands on 设置 › 命令.
                 "command" => Some(Cmd::SelectCommand(arg.parse().unwrap_or(0))),

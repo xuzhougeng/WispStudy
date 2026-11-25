@@ -42,6 +42,7 @@
 //! - `connector` the person's own MCP servers the assistant may call; `oauth` signing in to one in the browser
 //! - `update`   which release is the newest, and whether it is newer than this build
 
+pub mod adjust;
 pub mod ai;
 pub mod annotation;
 pub mod annotpdf;

@@ -7,8 +7,14 @@
 //! The list is the common built-in styles in two groups, by how they cite (`csl::NUMBERED`, `csl::BY_AUTHOR`),
 //! and the ones the person added or Zotero has; what is typed into the field over it is looked for among all
 //! the built-in ones. A built-in style is listed by a short name where it has one (`csl::short_name`).
+//!
+//! 调整 (the sliders by the style's name) puts the few details of the style on show that can be changed
+//! (`wisp_core::adjust`) over what they change: the number's brackets and height or the citation's "et al."
+//! over the sentence, the list's "et al." and its initials over the entries. A change is tried on the sample
+//! at once and kept only when asked: as a file of the person's own beside the style, which stays as it is.
+//! The sparkle beside it takes anything else to the assistant, with the style named in its box.
 
-use crate::app::{Cmd, Modal, Workspace};
+use crate::app::{Cmd, Modal, Page, Talk, Workspace};
 use crate::context::Nav;
 use crate::i18n::t;
 use crate::input::{InputEvent, TextInput};
@@ -16,6 +22,7 @@ use crate::theme::{Theme, text_px};
 use crate::ui;
 use gpui::{prelude::FluentBuilder, *};
 use std::path::Path;
+use wisp_core::adjust::{self, Brackets, Cut, Knobs};
 use wisp_core::cite;
 use wisp_core::csl::{self, Listed};
 
@@ -37,6 +44,8 @@ pub(crate) struct StyleBrowser {
     /// How many of the next frames scroll the list to the style on show: on opening, and after a file was added (its
     /// row is at the list's end). Two, since a list drawn for the first time does not know yet that it scrolls.
     reveal: std::cell::Cell<u8>,
+    /// 调整 is open: a way of looking at the list, kept from one style to the next.
+    adjusting: bool,
 }
 
 /// A style as the right side shows it.
@@ -46,8 +55,46 @@ struct Shown {
     title: String,
     /// Whether it numbers the works; none for a style that could not be read.
     numbered: Option<bool>,
+    /// How it reads; with details changed (`tuning`), how it would.
     sample: Result<cite::Sample, String>,
+    /// What of it can be changed, read once 调整 is open on it; none before that, and for a style with no file.
+    tuning: Option<Box<Tuning>>,
+    tuned: bool,
 }
+
+/// The details of the style on show that can be changed.
+struct Tuning {
+    /// The style's own definition.
+    xml: String,
+    /// As its file has them, and as they are set now.
+    was: Knobs,
+    now: Knobs,
+    /// The style a changed one is named after, by its key, and how that style has every detail (`adjust::read`):
+    /// the style itself, or the one a copy was made from. None for a file of the person's own that was made
+    /// elsewhere, which keeps its title.
+    base: Option<(String, Knobs)>,
+    /// The title what is set now would be kept under.
+    title: Option<String>,
+}
+
+/// A detail of the style on show, set.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Knob {
+    Brackets(Brackets),
+    Raised(bool),
+    /// From how many authors on a citation in the text says "et al."; 0 is never.
+    Cited(u32),
+    /// The same of an entry of the list, and how many it names first.
+    Listed(u32),
+    ListedFirst(u32),
+    Initials(&'static str),
+}
+
+/// What may follow an initial, as it reads on two of them.
+const INITIALS: [(&str, &str); 4] = [(". ", "W. F."), (".", "W.F."), (" ", "W F"), ("", "WF")];
+
+/// The most authors a style may be asked to count before it writes "et al.": APA's own is 21.
+const MOST: u32 = 30;
 
 impl StyleBrowser {
     fn read(&mut self, root: &Path) {
@@ -66,8 +113,59 @@ impl StyleBrowser {
             Ok(cite::Style::AuthorYear) => (String::new(), Some(false)),
             Err(_) => (String::new(), None),
         };
-        self.shown = Some(Shown { key: key.to_string(), title, numbered, sample: style.map(|style| cite::sample(&style)).map_err(|err| format!("{err:#}")) });
+        self.shown = Some(Shown { key: key.to_string(), title, numbered, sample: style.map(|style| cite::sample(&style)).map_err(|err| format!("{err:#}")), tuning: None, tuned: false });
     }
+
+    /// 调整 is open: what of the style on show can be changed is read, once.
+    fn tune(&mut self, root: &Path) {
+        let Some(shown) = self.shown.as_mut().filter(|shown| !shown.tuned) else { return };
+        shown.tuned = true;
+        // The two plain forms have no file to change, and a file that cannot be read has nothing to show.
+        if !shown.key.contains(':') || shown.sample.is_err() { return }
+        let Ok(xml) = csl::xml_of(&shown.key, root) else { return };
+        let Ok(knobs) = adjust::knobs(&xml, root) else { return };
+        let base = if shown.key.starts_with("file:") { adjust::base_of(&xml).and_then(|base| Some((adjust::read(&csl::xml_of(&base, root).ok()?), base))).map(|(knobs, base)| (base, knobs)) } else { Some((shown.key.clone(), adjust::read(&xml))) };
+        shown.tuning = Some(Box::new(Tuning { xml, was: knobs.clone(), now: knobs, base, title: None }));
+    }
+}
+
+impl Tuning {
+    fn changed(&self) -> bool {
+        self.now != self.was
+    }
+
+    /// The style with what is set now.
+    fn written(&self) -> String {
+        adjust::write(&self.xml, &self.now)
+    }
+}
+
+/// What a changed style is called: the style it was made from, and in what it is otherwise now, said the way
+/// the list's rows say it. Two copies of one style then tell themselves apart in the list.
+fn adjusted_title(base: &str, was: &Knobs, now: &Knobs) -> String {
+    let mut parts: Vec<String> = vec![];
+    if (now.brackets, now.raised) != (was.brackets, was.raised) && let (Some(brackets), Some(raised)) = (now.brackets, now.raised) {
+        parts.push(match (brackets, raised) {
+            (Brackets::Square, false) => t("方括号").to_string(),
+            (Brackets::Round, false) => t("圆括号").to_string(),
+            (Brackets::Bare, false) => t("不加括号").to_string(),
+            (Brackets::Square, true) => t("上标方括号").to_string(),
+            (Brackets::Round, true) => t("上标圆括号").to_string(),
+            (Brackets::Bare, true) => t("上标").to_string(),
+        });
+    }
+    if now.cited != was.cited && let Some(cut) = now.cited {
+        parts.push(if cut.min == 0 { t("正文不写 et al.").to_string() } else { tf!("正文 {} 位作者起 et al.", "et al. from {} authors in the text", cut.min) });
+    }
+    if now.listed != was.listed && let Some(cut) = now.listed {
+        parts.push(if cut.min == 0 { t("列出全部作者").to_string() } else if cut.first + 1 == cut.min { tf!("列前 {} 位作者", "first {} authors listed", cut.first) } else { tf!("{} 位作者起列前 {} 位", "from {} authors, the first {} listed", cut.min, cut.first) });
+    }
+    if now.initials != was.initials && let Some(initials) = now.initials.as_deref() {
+        let look = INITIALS.iter().find(|(with, _)| *with == initials).map_or(initials, |(_, look)| look);
+        parts.push(tf!("缩写 {look}", "initials {look}"));
+    }
+    if parts.is_empty() { return tf!("{base}（副本）", "{base} (copy)") }
+    tf!("{base}（{}）", "{base} ({})", parts.join(if crate::i18n::is_english() { ", " } else { "，" }))
 }
 
 /// A line of the list: what a group is, or a style.
@@ -123,7 +221,7 @@ impl Workspace {
             if let Some(browser) = this.style_browser_mut() { browser.scroll = ScrollHandle::new() }
             cx.notify();
         });
-        (StyleBrowser { search, scroll: ScrollHandle::new(), bundled, added: csl::added(&self.data_root()), shown: None, reveal: std::cell::Cell::new(2) }, heard)
+        (StyleBrowser { search, scroll: ScrollHandle::new(), bundled, added: csl::added(&self.data_root()), shown: None, reveal: std::cell::Cell::new(2), adjusting: false }, heard)
     }
 
     /// The list on show: the dialog's while it is open, else the settings'.
@@ -139,7 +237,122 @@ impl Workspace {
             Some(Modal::CiteStyle { chosen, .. }) => if chosen.is_empty() { default } else { chosen.clone() },
             _ => default,
         };
-        if let Some(browser) = self.style_browser_mut() { browser.show(&chosen, &root) }
+        if let Some(browser) = self.style_browser_mut() {
+            browser.show(&chosen, &root);
+            if browser.adjusting { browser.tune(&root) }
+        }
+    }
+
+    // ---- 调整
+
+    /// The sliders by a style's name: its details that can be changed are shown, or put away with what was
+    /// set and not kept.
+    pub(crate) fn adjust_cite_styles(&mut self, cx: &mut Context<Self>) {
+        let Some(browser) = self.style_browser_mut() else { return };
+        browser.adjusting = !browser.adjusting;
+        // Read anew: the sample is the style's own again.
+        if !browser.adjusting { browser.shown = None }
+        cx.notify();
+    }
+
+    /// A detail of the style on show is set, and the sample is of the style so changed.
+    pub(crate) fn tune_cite_style(&mut self, knob: Option<Knob>, cx: &mut Context<Self>) {
+        let root = self.data_root();
+        // The name a changed style is called after: the style's it was made from, as the list has it.
+        let base = self.style_browser_mut().and_then(|browser| browser.shown.as_ref()).and_then(|shown| shown.tuning.as_deref()).and_then(|tuning| tuning.base.as_ref()).map(|(key, _)| key.clone());
+        let base = base.map(|key| self.cite_style_name(&key));
+        let Some(shown) = self.style_browser_mut().and_then(|browser| browser.shown.as_mut()) else { return };
+        let Some(tuning) = shown.tuning.as_deref_mut() else { return };
+        // Every number of names that cuts keeps one fewer to name at the most, and a list that named all but
+        // those it cut (three, from four on) goes on doing so.
+        let cut = |was: Option<Cut>, min: u32| {
+            let was = was.unwrap_or_default();
+            let first = if was.min == 0 || was.first + 1 == was.min { min.saturating_sub(1) } else { was.first };
+            Some(Cut { min, first: if min == 0 { 0 } else { first.clamp(1, min.max(2) - 1) } })
+        };
+        match knob {
+            Some(Knob::Brackets(brackets)) => tuning.now.brackets = Some(brackets),
+            Some(Knob::Raised(raised)) => tuning.now.raised = Some(raised),
+            Some(Knob::Cited(min)) => tuning.now.cited = Some(Cut { min, first: if min == 0 { 0 } else { tuning.now.cited.map_or(1, |cut| cut.first.clamp(1, min.max(2) - 1)) } }),
+            Some(Knob::Listed(min)) => tuning.now.listed = cut(tuning.now.listed, min),
+            Some(Knob::ListedFirst(first)) => tuning.now.listed = tuning.now.listed.map(|cut| Cut { first: first.clamp(1, cut.min.max(2) - 1), ..cut }),
+            Some(Knob::Initials(initials)) => tuning.now.initials = Some(initials.to_string()),
+            // 还原
+            None => tuning.now = tuning.was.clone(),
+        }
+        let written = tuning.written();
+        tuning.title = tuning.base.as_ref().zip(base).filter(|_| tuning.changed()).map(|((_, was), base)| adjusted_title(&base, was, &adjust::read(&written)));
+        shown.sample = csl::parse(&written, &root).map(|style| cite::sample(&cite::Style::Csl(std::sync::Arc::new(style)))).map_err(|err| format!("{err:#}"));
+        cx.notify();
+    }
+
+    /// 存为我的样式 / 保存: the style as it is set now is a file of the person's own (`adjust::keep`), and the
+    /// one on show: the dialog is on it, the settings choose it. Gives its key; none when nothing was kept.
+    pub(crate) fn keep_cite_style(&mut self, cx: &mut Context<Self>) -> Option<String> {
+        let root = self.data_root();
+        let shown = self.style_browser_mut().and_then(|browser| browser.shown.as_ref())?;
+        let tuning = shown.tuning.as_deref().filter(|tuning| tuning.changed())?;
+        let (key, written, title) = (shown.key.clone(), tuning.written(), tuning.title.clone());
+        let own = key.starts_with("file:");
+        // The same change of the same style kept before is that file, not one more.
+        let there = if own { None } else { adjust::kept(&root, &key, &adjust::read(&written)) };
+        let (kept, again) = match there {
+            Some(there) => (there, true),
+            None => match adjust::keep(&root, &key, &written, title.as_deref()) {
+                Ok(kept) => (kept, false),
+                Err(err) => {
+                    self.fail(tf!("没有保存：{err:#}", "Not saved: {err:#}"), cx);
+                    return None;
+                }
+            },
+        };
+        if let Some(browser) = self.style_browser_mut() { browser.read(&root) }
+        let name = kept.name.clone();
+        match self.modal.as_mut() {
+            Some(Modal::CiteStyle { chosen, .. }) => {
+                *chosen = kept.key.clone();
+                self.say(if again { tf!("已经有这一份了：「{name}」", "You already have this one: “{name}”") } else if own { tf!("已保存「{name}」", "Saved “{name}”") } else { tf!("已存为「{name}」", "Kept as “{name}”") }, cx);
+            }
+            _ => {
+                let chosen = self.settings.cite_style != kept.key;
+                self.settings.cite_style = kept.key.clone();
+                if chosen { self.save_settings(cx) }
+                self.say(if again { tf!("已经有这一份了：「{name}」，已设为默认", "You already have this one: “{name}”; it is now the default") } else if own { tf!("已保存「{name}」", "Saved “{name}”") } else { tf!("已存为「{name}」，并设为默认", "Kept as “{name}” and made the default") }, cx);
+            }
+        }
+        cx.notify();
+        Some(kept.key)
+    }
+
+    /// The sparkle by a style's name: any other change is the assistant's to make, in a conversation. Its box
+    /// holds the style, named so that it need not be looked for, and the keyboard; what the person had typed
+    /// there stays in front of it.
+    pub(crate) fn ask_cite_style(&mut self, key: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let name = self.cite_style_name(key);
+        let said = tf!("在引用样式「{name}」（{key}）的基础上改一份：", "From the citation style “{name}” ({key}), make one that ");
+        if matches!(self.modal, Some(Modal::CiteStyle { .. })) {
+            self.modal = None;
+            self.modal_subscriptions.clear();
+        }
+        if self.settings_view.is_some() { self.close_settings(window, cx) }
+        let hold = |input: &Entity<TextInput>, window: &mut Window, cx: &mut Context<Self>| {
+            input.update(cx, |input, cx| {
+                let before = input.text().trim_end().to_string();
+                input.set_text(&if before.is_empty() { said.clone() } else { format!("{before}\n{said}") }, cx);
+            });
+            input.read(cx).focus(window);
+        };
+        if self.lib.is_none() {
+            self.home.show();
+            let input = self.home.input.clone();
+            hold(&input, window, cx);
+        } else {
+            if !self.in_draft() { self.run(Cmd::SetPage(Page::Ask), window, cx) }
+            let Some(input) = self.lib.as_ref().map(|lib| lib.library_chat.input.clone()) else { return };
+            hold(&input, window, cx);
+            self.chat_input(Talk::Library, InputEvent::Changed, cx);
+        }
+        cx.notify();
     }
 
     /// The keys over the list on show (design rule 55), from the window or from its search field, which passes
@@ -209,6 +422,9 @@ impl Workspace {
 
     /// 用这个样式: the manuscript cites in the style the dialog is on; none, it follows the settings' again.
     pub(crate) fn submit_cite_style(&mut self, cx: &mut Context<Self>) {
+        // What 调整 has set and the sample shows is what "this style" means: kept first, as the person's own, then used.
+        let pending = matches!(&self.modal, Some(Modal::CiteStyle { browser, .. }) if browser.shown.as_ref().and_then(|shown| shown.tuning.as_deref()).is_some_and(Tuning::changed));
+        if pending && self.keep_cite_style(cx).is_none() { return }
         let Some(Modal::CiteStyle { chosen, .. }) = &self.modal else { return };
         let chosen = chosen.clone();
         let Some(lib) = self.lib.as_mut() else { return };
@@ -403,22 +619,97 @@ impl Workspace {
         if following { about.push(t("在 设置 › 写作 里换了默认，这份稿件跟着换").to_string()) }
         let own = shown.key.starts_with("file:");
         let reveal = if cfg!(target_os = "macos") { t("在访达中显示") } else if cfg!(target_os = "windows") { t("在资源管理器中显示") } else { t("在文件管理器中显示") };
+        // A style with a file can be made otherwise: the sliders show what can be changed here, the sparkle takes anything else to the assistant.
+        let filed = shown.key.contains(':');
         let head = div()
             .flex()
             .items_start()
             .gap(px(8.))
             .child(div().flex().flex_col().flex_1().min_w_0().gap(px(3.)).child(div().text_size(text_px(15.)).line_height(text_px(21.)).font_weight(FontWeight::SEMIBOLD).child(name)).child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_tertiary()).child(about.join(" · "))))
+            .when(filed, |d| {
+                d.child(ui::icon_action("cite-style-adjust", "sliders", if browser.adjusting { Theme::accent() } else { Theme::text_secondary() }, t("调整这个样式的细节")).size(px(28.)).when(browser.adjusting, |d| d.bg(Theme::pressed())).on_click(self.on(Cmd::AdjustCiteStyles, cx)))
+                    .child(ui::icon_action("cite-style-ask", "sparkle", Theme::accent(), t("让助手改这个样式")).size(px(28.)).on_click(self.on(Cmd::AskCiteStyle(shown.key.clone()), cx)))
+            })
             .when(own, |d| {
                 d.child(ui::icon_action("cite-style-reveal", "folder-open", Theme::text_secondary(), reveal).size(px(28.)).on_click(self.on(Cmd::RevealCiteStyle(shown.key.clone()), cx)))
                     .child(ui::icon_action("cite-style-remove", "bin", Theme::text_secondary(), t("移除")).size(px(28.)).on_click(self.on(Cmd::RemoveCiteStyle(shown.key.clone()), cx)))
             });
-        let part = |caption: &'static str, body: Div| div().flex().flex_col().gap(px(6.)).child(ui::caption(t(caption))).child(body);
+        // 调整: each detail stands over what it changes, between the caption and the sample, where it stays
+        // while the sample under it grows and shrinks.
+        let tuning = shown.tuning.as_deref().filter(|_| browser.adjusting);
+        let (over_text, over_list) = tuning.map(|tuning| self.knob_rows(tuning, cx)).unwrap_or_default();
+        let line = tuning.map(|tuning| self.adjust_line(shown, tuning, follow, cx));
+        let part = |caption: &'static str, knobs: Vec<AnyElement>, body: Div| div().flex().flex_col().gap(px(6.)).child(ui::caption(t(caption))).when(!knobs.is_empty(), |d| d.child(div().flex().flex_col().children(knobs))).child(body);
         let text = || div().text_size(text_px(13.)).line_height(text_px(21.));
         match &shown.sample {
-            Ok(sample) => pane.child(head).child(part("正文里", text().child(styled(&sample.sentence)))).child(part("参考文献", div().flex().flex_col().gap(px(8.)).children(sample.list.iter().map(|entry| text().child(styled(entry)))))),
+            Ok(sample) => pane.child(head).children(line).child(part("正文里", over_text, text().child(styled(&sample.sentence)))).child(part("参考文献", over_list, div().flex().flex_col().gap(px(8.)).children(sample.list.iter().map(|entry| text().child(styled(entry)))))),
             // A file that cannot be cited with says why, in the colour of what is wrong.
-            Err(why) => pane.child(head).child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::danger()).child(tf!("这个样式读不了：{}", "This style cannot be read: {}", crate::i18n::phrase(why)))),
+            Err(why) => pane.child(head).children(line).child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::danger()).child(tf!("这个样式读不了：{}", "This style cannot be read: {}", crate::i18n::phrase(why)))),
         }
+    }
+
+    /// The line of 调整 under a style's name, one height whatever it says: what a change comes to, and once
+    /// something is set, the name it would be kept under with the two things to do about it.
+    fn adjust_line(&self, shown: &Shown, tuning: &Tuning, follow: bool, cx: &mut Context<Self>) -> Div {
+        let own = shown.key.starts_with("file:");
+        let line = div().flex().items_center().gap(px(8.)).h(text_px(36.));
+        let quiet = |said: &str| div().flex_1().min_w_0().text_size(text_px(12.)).line_height(text_px(17.)).text_color(Theme::text_tertiary()).child(said.to_string());
+        if tuning.was == Knobs::default() { return line.child(quiet(t("这个样式没有能在这里调的细节，别的改动可以交给助手。"))) }
+        if !tuning.changed() { return line.child(quiet(t(if own { "改动写回这个文件，原来的留在 styles/removed 里。" } else { "改动存成你自己的一份，这个样式不变。" }))) }
+        let name = tuning.title.clone().unwrap_or_else(|| style_label(&shown.key, &shown.title));
+        let keep = t(if own { "保存" } else { "存为我的样式" });
+        // In a manuscript's dialog 用这个样式 keeps it as well, and is the one filled button there.
+        let keep = if follow { crate::settings::button("cite-style-keep", keep) } else { ui::primary_button("cite-style-keep", keep).h(text_px(28.)) };
+        line.child(div().id("cite-style-kept-as").flex_1().min_w_0().truncate().text_size(text_px(12.)).text_color(Theme::text_secondary()).child(name.clone()).tooltip(ui::tip(name)))
+            .child(crate::settings::button("cite-style-reset", t("还原")).on_click(self.on(Cmd::TuneCiteStyle(None), cx)))
+            .child(keep.on_click(self.on(Cmd::KeepCiteStyle, cx)))
+    }
+
+    /// The rows of 调整: those over the sentence (a numbered style's number, or when a citation says "et al."),
+    /// and those over the entries of the list.
+    fn knob_rows(&self, tuning: &Tuning, cx: &mut Context<Self>) -> (Vec<AnyElement>, Vec<AnyElement>) {
+        let row = |label: &str, control: AnyElement| div().flex().items_center().justify_between().gap(px(12.)).min_h(text_px(32.)).child(div().flex_1().min_w_0().text_size(text_px(12.)).line_height(text_px(17.)).text_color(Theme::text_secondary()).child(label.to_string())).child(control).into_any_element();
+        let set = |knob: Knob| Cmd::TuneCiteStyle(Some(knob));
+        // From how many authors on: one fewer than two is never, which stands at the low end, a step from the numbers most asked for.
+        let from = |min: u32, most: u32, knob: fn(u32) -> Knob| (if min == 0 { t("从不").to_string() } else { min.to_string() }, (min > 0).then(|| set(knob(if min <= 2 { 0 } else { min - 1 }))), (min < most).then(|| set(knob(if min == 0 { 2 } else { min + 1 }))));
+        let (mut over_text, mut over_list) = (vec![], vec![]);
+        if let Some(brackets) = tuning.now.brackets {
+            let looks = [("[1]", Brackets::Square), ("(1)", Brackets::Round), ("1", Brackets::Bare)];
+            let chosen = looks.iter().position(|(_, one)| *one == brackets).unwrap_or(usize::MAX);
+            over_text.push(row(t("编号的括号"), crate::settings::segmented("cite-knob-brackets", looks.iter().map(|(look, one)| (*look, set(Knob::Brackets(*one)))).collect(), chosen, self, cx).into_any_element()));
+        }
+        if let Some(raised) = tuning.now.raised {
+            over_text.push(row(t("编号上标"), crate::settings::switch("cite-knob-raised", raised).on_click(self.on(set(Knob::Raised(!raised)), cx)).into_any_element()));
+        }
+        if let Some(cut) = tuning.now.cited {
+            let (value, less, more) = from(cut.min, 10, Knob::Cited);
+            over_text.push(row(t("几位作者起写 et al."), self.stepper("cite-knob-cited", value, less, more, cx)));
+        }
+        if let Some(cut) = tuning.now.listed {
+            let (value, less, more) = from(cut.min, MOST, Knob::Listed);
+            over_list.push(row(t("几位作者起写 et al."), self.stepper("cite-knob-listed", value, less, more, cx)));
+            if cut.min > 0 {
+                over_list.push(row(t("et al. 前列出几位"), self.stepper("cite-knob-first", cut.first.to_string(), (cut.first > 1).then(|| set(Knob::ListedFirst(cut.first - 1))), (cut.first + 1 < cut.min).then(|| set(Knob::ListedFirst(cut.first + 1))), cx)));
+            }
+        }
+        if let Some(initials) = tuning.now.initials.as_deref() {
+            let chosen = INITIALS.iter().position(|(with, _)| *with == initials).unwrap_or(usize::MAX);
+            over_list.push(row(t("名字缩写"), crate::settings::segmented("cite-knob-initials", INITIALS.iter().map(|(with, look)| (*look, set(Knob::Initials(with)))).collect(), chosen, self, cx).into_any_element()));
+        }
+        (over_text, over_list)
+    }
+
+    /// A number set by going down or up: it stands between a minus and a plus, each dim at the end of its way.
+    fn stepper(&self, id: &'static str, value: String, less: Option<Cmd>, more: Option<Cmd>, cx: &mut Context<Self>) -> AnyElement {
+        let mut end = |side: usize, name: &str, cmd: Option<Cmd>| {
+            let button = div().id((id, side)).flex().flex_none().items_center().justify_center().size(text_px(24.)).rounded(px(7.));
+            match cmd {
+                Some(cmd) => button.cursor_pointer().hover(|s| s.bg(Theme::segment())).child(ui::icon(name, 12., Theme::text_secondary())).on_click(self.on(cmd, cx)),
+                None => button.child(ui::icon(name, 12., Theme::text_placeholder())),
+            }
+        };
+        let (less, more) = (end(0, "minus", less), end(1, "plus", more));
+        div().flex().flex_none().items_center().gap(px(2.)).min_h(px(28.)).p(px(2.)).rounded(px(9.)).bg(Theme::groove()).child(less).child(div().flex().justify_center().min_w(text_px(40.)).child(value)).child(more).into_any_element()
     }
 
     /// The dialog of a manuscript's style.
