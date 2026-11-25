@@ -179,7 +179,7 @@ Apart from the tutorials, the documents below are in Chinese.
 
 | | |
 |---|---|
-| [Tutorials](https://xuzhougeng.github.io/WispStudy/en/tutorials/) | Sixteen tutorials written around research tasks, with screenshots: building a library, talking first and building later, migrating, reading just one PDF, close reading, mind maps, reading side by side, listening to a paper, group-meeting slides, asking, picking papers by impact factor and quartile, extracting, writing a review, writing a paper, revising, keeping up with new papers |
+| [Tutorials](https://xuzhougeng.github.io/WispStudy/en/tutorials/) | Eighteen tutorials written around research tasks, with screenshots: building a library, talking first and building later, migrating, reading just one PDF, close reading, mind maps, reading side by side, listening to a paper, group-meeting slides, asking, picking papers by impact factor and quartile, extracting, writing a review, writing a paper, writing directly vs in Wisp Study, revising, keeping up with new papers, several topics at once |
 | [A library, start to finish](docs/TUTORIAL.md) | The original record of building a “plant single-cell transcriptomics” library from nothing (v0.2.0) |
 | [Features in detail](docs/FEATURES.md) | What each page can do |
 | [Data and privacy](docs/DATA.md) | Where the files are, and what leaves your computer |

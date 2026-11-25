@@ -177,7 +177,7 @@ pwsh -File scripts/package-windows.ps1                # 便携版加 dist\WispSt
 
 | | |
 |---|---|
-| [教程](https://xuzhougeng.github.io/WispStudy/tutorials/) | 十六篇按科研场景写的教程，带截图：建库、先聊后建库、迁移、只读一个 PDF、精读、思维导图、对照着读、听论文、组会幻灯片、提问、按影响因子和分区挑文献、提取、写综述、写论文、改稿、跟进新文献 |
+| [教程](https://xuzhougeng.github.io/WispStudy/tutorials/) | 十八篇按科研场景写的教程，带截图：建库、先聊后建库、迁移、只读一个 PDF、精读、思维导图、对照着读、听论文、组会幻灯片、提问、按影响因子和分区挑文献、提取、写综述、写论文、直接写与在 Wisp Study 里写、改稿、跟进新文献、几个课题一起推进 |
 | [建库案例](docs/TUTORIAL.md) | 从零建一个「植物单细胞转录组」文献库的原始记录（v0.2.0） |
 | [功能详解](docs/FEATURES.md) | 每个页面能做什么 |
 | [数据与隐私](docs/DATA.md) | 文件放在哪里，哪些数据会离开本机 |

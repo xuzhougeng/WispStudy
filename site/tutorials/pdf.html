@@ -6,7 +6,7 @@
 <link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/pdf.html">
 <link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/pdf.html">
 <title>只想读一个 PDF · Wisp Study 教程</title>
-<meta name="description" content="把一个 PDF 拖到首页，或用「打开方式 › Wisp Study」打开，直接进入阅读模式；读完再决定是建成文献库，还是移到已有的文献库。">
+<meta name="description" content="把一个 PDF 拖到首页，或用「打开方式 › Wisp Study」打开，直接进入阅读模式；读完再决定是建成文献库，还是移到已有的文献库；要发给别人时，导出一份带标注的 PDF。">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
@@ -38,11 +38,11 @@
   <header class="doc-head">
     <p class="kicker">教程 04　·　阅读</p>
     <h1>只想读一个 PDF：拖进来就读</h1>
-    <p class="lead">同事在群里发来一篇 PDF，你只想马上读一读、标几笔，还没想好它该进哪个文献库，甚至还没有文献库。把它拖到首页就是阅读模式，标注和读到的位置都记着；读完再决定留不留、放在哪里。</p>
+    <p class="lead">同事在群里发来一篇 PDF，你只想马上读一读、标几笔，还没想好它该进哪个文献库，甚至还没有文献库。把它拖到首页就是阅读模式，标注和读到的位置都记着；读完再决定留不留、放在哪里；要发给别人，就导出一份把标注写进去的 PDF。</p>
     <dl class="facts">
       <div><dt>场景</dt><dd>收到一篇讲种子植物根向重力性演化的 Nature Communications 论文，先读，再收进「植物单细胞转录组」。</dd></div>
       <div><dt>需要</dt><dd>一个 PDF。不需要模型；要提问或看译文时才要在「设置 › AI」里配置一个。</dd></div>
-      <div><dt>用时</dt><dd>约 5 分钟，不算读的时间。</dd></div>
+      <div><dt>用时</dt><dd>约 10 分钟，不算读的时间。</dd></div>
     </dl>
   </header>
 
@@ -55,6 +55,7 @@
         <li><a href="#s3">留下来：建成文献库，或移到已有的库</a></li>
         <li><a href="#s4">再打开同一份文件</a></li>
         <li><a href="#s5">从访达或资源管理器打开</a></li>
+        <li><a href="#s6">带着标注发出去：导出带标注的 PDF</a></li>
         <li class="plain"><a href="#recap">回顾</a></li>
       </ol>
     </nav>
@@ -137,6 +138,35 @@
         <aside class="note"><b>提示</b>Windows 上这一项由安装程序登记，便携版没有。Wisp Study 不会把自己设成 PDF 的默认打开方式，双击 PDF 还是用原来的阅读器。这一节没有截图：访达的菜单没有截，本例在开发版里模拟了这一步，窗口停在文献库的列表上时打开另一个 PDF，同样直接进入了它的阅读模式。</aside>
       </section>
 
+      <section id="s6">
+        <h2><i>6</i>带着标注发出去：导出带标注的 PDF</h2>
+        <p>在 Wisp Study 里画的高亮、便签都存在文献库里，PDF 文件本身不变：用别的阅读器打开原文件，看不到这些标注。要发给合作者，或者在别的软件里接着看，v0.19.0 起可以另存一份把标注写进去的 PDF。</p>
+        <p>这一节换了库里的另一篇：「植物单细胞转录组」里玉米叶舌区那篇（Nature Communications，2026，17 页）。在它的阅读模式里，把页面调成「适应整页」，在第 1 页的摘要上做了四处标注：</p>
+        <ul>
+          <li>选中「In this study, we generate…」这一句，在弹出的一排按钮（「复制」「下划线」「高亮」「添加到对话」「翻译」「加到导图」「朗读」）里点「高亮」；</li>
+          <li>选中下一句「By integrating cellular and transcriptomic analyses…」，点「下划线」；</li>
+          <li>点工具栏的「便签」，再点摘要右上角的页边，弹出「第 1 页 · 便签」，在「写下想法…」里写「本文的切入点：叶舌区的单细胞核图谱」，点「保存」；</li>
+          <li>点「文本框」，在左栏空白处拖出一个框，写上「BR → 近轴面细胞伸长 → 叶夹角变大」。点到别处，顶上提示「PDF 标注已保存」。</li>
+        </ul>
+        <p>点右上角的「标注 (4)」，四处标注列在右边，每条都有「定位」和「删除」。列表最下面就是「导出带标注的 PDF…」：</p>
+
+        <figure class="shot">
+          <img src="../img/t/pdf-08-marks.jpg" width="1372" height="867" loading="lazy" alt="阅读模式下的玉米叶舌区论文第 1 页，适应整页 · 69%：摘要里一句黄色高亮，下一句蓝色下划线，摘要右上角的页边有一个便签图标，左栏空白处一个黄色文本框写着 BR → 近轴面细胞伸长 → 叶夹角变大。右边展开的「标注 (4)」列表：第 1 页 · 高亮、第 1 页 · 下划线、第 1 页 · 便签（本文的切入点：叶舌区的单细胞核图谱）、第 1 页 · 文本框，每条右边是定位、笔记或文字、删除；列表最下面是绿色的「导出带标注的 PDF…」。">
+          <figcaption><b>图 8</b>　四处标注和「标注」列表。导出的入口在列表的最下面。</figcaption>
+        </figure>
+
+        <p>点「导出带标注的 PDF…」，选好保存的位置，顶上提示「已导出带 4 处标注的 PDF 到 …」（后面是文件的路径）。按功能说明，同一项也在工具栏放不下时的「⋯」菜单里，和 PDF 文件那一行的右键菜单里；后者本例在列表里展开的文件行上看到了。导出的是正在看的那个文件：正文，或者某个附件。</p>
+        <p>用另一个程序打开导出的文件看看。这里用的是独立的 PDF 库 PyMuPDF，把第 1 页画了出来：</p>
+
+        <figure class="shot">
+          <img src="../img/t/pdf-09-exported.jpg" width="1372" height="1028" loading="lazy" alt="导出的 PDF 第 1 页上半部分，由 PyMuPDF 画出：题目、作者，摘要里同一句是黄色高亮，下一句是蓝色下划线，页边是一个黄色的便签图标，左栏是黄底黄边的文本框，写着 BR → 近轴面细胞伸长 → 叶夹角变大。">
+          <figcaption><b>图 9</b>　导出的文件在别的程序里打开：高亮、下划线、便签和文本框都在，颜色和在 Wisp Study 里一样。</figcaption>
+        </figure>
+
+        <p>再用 PyMuPDF 读一遍文件里的批注：第 1 页有 4 条标准 PDF 批注，类型是 Highlight、Underline、Text（便签）和 FreeText（文本框）；便签的内容是写的那句话，文本框的内容是框里的字。导出的文件还是 17 页，原有的 239 个链接都在；文献库里的原文件没有动，导出前后的校验和一样。</p>
+        <aside class="note warn"><b>注意</b>截图标记是给自己的，不写进导出的文件；这个文件还没有任何标注时，只提示一句，不另存。带密码或权限保护的 PDF 不能导出，因为另存会去掉保护。文本框里的中文用阅读器自带的中文字体（宋体）显示，个别不带中文字体的阅读器（包括在 Wisp Study 里再打开这份导出的文件）只显示其中的英文，悬停或打开批注仍能看到全文。这三条照的是功能说明，本例没有逐一试过。</aside>
+      </section>
+
       <section id="recap" class="recap">
         <h2>回顾</h2>
         <ul>
@@ -144,6 +174,7 @@
           <li>没有放进任何文献库的 PDF，在一段以它命名的对话里，「最近对话」里找得到。</li>
           <li>值得留下时，「建成文献库」开一个新库，或「移到文献库…」放进已有的库，PDF、标注和读到的位置一起过去。</li>
           <li>应用按文件内容认文件，同一份 PDF 再打开，回到它所在的地方。</li>
+          <li>「导出带标注的 PDF…」另存一份 PDF，高亮、下划线、便签和文本框都写成标准批注，别的阅读器里也看得到；原文件不动。</li>
           <li>下一步：在文献库里精读一篇，见<a href="read.html">精读一篇文献</a>。</li>
         </ul>
       </section>
@@ -168,7 +199,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>关于这篇教程</b>　截图来自 2026 年 11 月在 macOS 上用 v0.17.0 的一次实际操作，没有配置模型。</p>
+      <p><b>关于这篇教程</b>　图 1–7 来自 2026 年 11 月在 macOS 上用 v0.17.0 的一次实际操作，没有配置模型。图 8、图 9 是 2026 年 11 月 24 日在 v0.19.0 上的操作，用的是一个有 40 篇文献的「植物单细胞转录组」，没有用到模型；图 9 是用 PyMuPDF 把导出文件的第 1 页画出来的。</p>
       <p><b>助手可能出错</b>　它的建议和回答都要你确认；关键的数字和结论请对照原文。</p>
     </div>
   </div>

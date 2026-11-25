@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/libraries.html">
+<link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/libraries.html">
+<title>Several topics at once · Wisp Study tutorials</title>
+<meta name="description" content="Two topics, two libraries: one library has the assistant screen in the background while you work in the other, and the window says when it is done. Then ask the assistant on the home page, which reads every library on the shelf; the sources of its answer say which library they come from.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../../app-icon.png">
+<link rel="stylesheet" href="../../style.css">
+<link rel="stylesheet" href="../../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="Site">
+      <a href="index.html" aria-current="page">Tutorials</a>
+      <a href="../index.html#ideas">Ideas</a>
+      <a href="../index.html#tools">Tools</a>
+      <a href="../index.html#download">Download</a>
+    </nav>
+    <a class="lang" href="../../tutorials/libraries.html" lang="zh-CN" hreflang="zh-CN">中文</a>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="Location"><a href="index.html">Tutorials</a><span>›</span>Follow up</nav>
+
+  <header class="doc-head">
+    <p class="kicker">Tutorial 18 · Follow up</p>
+    <h1>Several topics at once: work in the background, ask across libraries</h1>
+    <p class="lead">You have more than one topic on the go: plant single-cell transcriptomics and root hair development, each with a library of its own. In this tutorial one library's assistant screens its papers in the background while you work in the other, and it is done when you come back. Then, on the home page, you ask the assistant a question that spans both libraries: it looks in both, every source of its answer says which library it comes from, and a click takes you to that paper in that library.</p>
+    <dl class="facts">
+      <div><dt>Scenario</dt><dd>“<span lang="zh-CN">植物单细胞转录组</span>” (plant single-cell transcriptomics) has 40 papers waiting to be screened, “<span lang="zh-CN">根毛发育</span>” (root hair development) 30 papers just brought in from PubMed; do the two meet anywhere on root hairs?</dd></div>
+      <div><dt>Needs</dt><dd>Two libraries, and a model provider set up in “Settings › AI”.</dd></div>
+      <div><dt>Time</dt><dd>About 10 minutes, of which screening 40 papers took a little over a minute in the background.</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="Sections of this tutorial">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#s1">Start screening in one library</a></li>
+        <li><a href="#s2">Leave it: the home page's card says how far it is</a></li>
+        <li><a href="#s3">Work on in another library</a></li>
+        <li><a href="#s4">Done: a line at the top of the window</a></li>
+        <li><a href="#s5">Back home, ask both libraries</a></li>
+        <li><a href="#s6">Sources that name their library</a></li>
+        <li class="plain"><a href="#recap">Recap</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>Start screening in one library</h2>
+        <p>The home page holds two libraries: “<span lang="zh-CN">植物单细胞转录组</span>”, 40 papers all still pending, and “<span lang="zh-CN">根毛发育</span>”, 30 papers just fetched with a PubMed search. Open the first one, click “Screening” in the sidebar and write the criteria under “Screening criteria”: only original research that sequences single cells or single nuclei in plants; reviews and method-only papers are not included. Then click “Ask assistant to screen 40 papers”.</p>
+        <p>The assistant starts reading paper by paper. The box says “Assistant reading 3 / 40”, and a paper it has read gets a suggestion at the right of the list, such as “Suggestion: Included · Confidence 99%”. How screening works and how suggestions are confirmed is in <a href="start.html">Start from a topic</a>; here the model is GPT-6.1 Sol through a local gateway, reading three papers at a time.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/libraries-01-screening.jpg" width="1372" height="867" loading="lazy" alt="The Screening page of the plant single-cell library: the criteria read “Only original research that sequences single cells or single nuclei in plants; reviews and method-only papers are not included.”; below, “Round 1 · 40 → 0 included”, “40 pending papers, 3 with suggestions under the current criteria” and a Stop button; the progress box “Assistant reading 3 / 40” lists the three papers being read; the first rows of the list carry green suggestions, the others say Reading….">
+          <figcaption><b>Figure 1.</b> Screening has started: the assistant reads three papers at a time, and each paper read gets a suggestion.</figcaption>
+        </figure>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>Leave it: the home page's card says how far it is</h2>
+        <p>No need to wait. Click “← All libraries” at the top left to go home: the card of “<span lang="zh-CN">植物单细胞转录组</span>” now has a spinner and “Screening 7 / 40” at its bottom right. It goes on reading in the background and has reached the seventh paper.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/libraries-02-home.jpg" width="1372" height="867" loading="lazy" alt="The home page with two library cards. The plant single-cell card shows “40 papers” at the bottom left and a spinner with “Screening 7 / 40” at the bottom right; the root hair card shows “30 papers” and “Opened 2026.11.24”; to the right is the dashed card for a new library.">
+          <figcaption><b>Figure 2.</b> Leaving a library does not stop its screening: the card on the home page says what it is doing and how far it has come.</figcaption>
+        </figure>
+
+        <p>Until this version, leaving a library stopped a batch like this, and it had to be started again. Now screening, extracting fields, finding open full texts and translating go on in the background, and their results go into their own library as before.</p>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>Work on in another library</h2>
+        <p>From the home page, open “<span lang="zh-CN">根毛发育</span>” and look through the 30 papers just fetched. At the bottom of this library's sidebar there is a line of progress: a spinner, “Screening · <span lang="zh-CN">植物</span>…” and “19/40”, with a small arrow. Click that line to go back to the screening page of the other library; that is also where you stop it.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/libraries-03-elsewhere.jpg" width="1372" height="867" loading="lazy" alt="The root hair library: the list holds 30 root hair papers, such as Glutamate triggers defense responses and promotes root hair elongation… and Glucose-TOR Signaling Regulates Root Hair Elongation in Arabidopsis…; at the bottom of the sidebar, above Custom fields, a line of progress “Screening · 植物… 19/40” with a progress bar.">
+          <figcaption><b>Figure 3.</b> In another library, the bottom of the sidebar shows the progress too; a click goes back to that library.</figcaption>
+        </figure>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>Done: a line at the top of the window</h2>
+        <p>Still browsing “<span lang="zh-CN">根毛发育</span>”, a little over a minute later a line appears at the top of the window: “Screening in “<span lang="zh-CN">植物单细胞转录组</span>” is done: 40”, and the progress line at the bottom of the sidebar is gone.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/libraries-04-done.jpg" width="1372" height="867" loading="lazy" alt="The root hair library, with a line and a tick at the top middle of the window: Screening in “植物单细胞转录组” is done: 40; the progress line at the bottom of the sidebar has gone.">
+          <figcaption><b>Figure 4.</b> When a task in the background is done, the top of the window says so, whatever library you are in.</figcaption>
+        </figure>
+
+        <p>Back in the first library, all 40 papers have a suggestion: Included 23, Related 11, Irrelevant 5, Insufficient evidence 1. They are only suggestions: the papers are still “Pending” until you look them over under “Confirm”, exactly as if you had waited in the library for the assistant to finish.</p>
+        <aside class="note"><b>Tip</b>What goes on in the background is screening, extracting, finding open full texts and translating, and a conversation still answering when you leave finishes its answer; a step that needs your agreement (an import, say) waits for you, and the card says “Waiting for you”. Importing PDFs, migrating from Zotero, text recognition and reading aloud stop when you leave the library (these are from the feature list; this tutorial did not try each). Quitting the app ends every task in the background, and what they had already found is kept.</aside>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>Back home, ask both libraries</h2>
+        <p>With the screening done, you want to know whether the two topics meet on root hairs. The assistant inside a library keeps to that library; a question across libraries is asked on the home page. Click the assistant button at the bottom right of the home page: under the box is a row of starts, and “Ask my libraries” puts “Look this up in my libraries:” into the box.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/libraries-05-ask.jpg" width="1372" height="867" loading="lazy" alt="The home page's assistant: the line “What do you want to work out today?” and a box holding “Look this up in my libraries:”; under it the starts Research an idea, Review a manuscript, Find a few papers, A library from a Word file and, on a second line, Ask my libraries, shown chosen; claude/claude-sonnet-5-5 at the right.">
+          <figcaption><b>Figure 5.</b> “Ask my libraries”: the home page's assistant reads every library on the shelf.</figcaption>
+        </figure>
+
+        <p>Then write the question; here it was typed over the box's words: “Search my libraries: what do the two libraries <span lang="zh-CN">植物单细胞转录组</span> and <span lang="zh-CN">根毛发育</span> hold on root hairs (or root epidermal cell fate)? Back each point with a quoted sentence. Answer in English.” The model is Claude Sonnet 5.5 through a local gateway. Asked the same without “Answer in English.”, it answered in Chinese, though the question and the interface were English, so the last sentence was added for this run. It listed the papers of both libraries, searched their full texts for “root hair”, read the records of a few, and had answered within a minute and a half.</p>
+      </section>
+
+      <section id="s6">
+        <h2><i>6</i>Sources that name their library</h2>
+        <p>The answer takes the two libraries one by one. Each point quotes a sentence, followed by a blue label such as [P24] or [P25]; for what it knew from titles only, it says so (“Microbes and stress are covered by titles only”). Its gap: “<span lang="zh-CN">根毛发育</span>” holds genetics but no single-cell root hair study, and “<span lang="zh-CN">植物单细胞转录组</span>” no paper on root hairs.</p>
+        <p>The source cards under the answer name the library of each paper, such as “P2 (<span lang="zh-CN">根毛发育</span>) · Glucose-TOR Signaling Regul…”, and those that do not fit are under “12 more sources”.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/libraries-06-answer.jpg" width="1372" height="867" loading="lazy" alt="The home page's conversation: the second half of the answer, with quoted sentences followed by [P25], [P24], [P6], [P14], [P15], [P20]; a section “植物单细胞转录组 (40 papers)” with [P39], [P38], [P45]; a section Gap. Under it three rows of source cards: P21 (根毛发育), P2 (根毛发育), P13 (根毛发育), P3 (根毛发育), P22 (根毛发育), P18 (根毛发育), P16 (根毛发育), P19 (根毛发育), and “12 more sources”.">
+          <figcaption><b>Figure 6.</b> On a source card, the brackets after the label say which library the paper is in.</figcaption>
+        </figure>
+
+        <p>Click the card “P2 (<span lang="zh-CN">根毛发育</span>)”: the window opens the root hair library with this paper's details on the right, Glucose-TOR Signaling Regulates Root Hair Elongation in Arabidopsis via the RHD6-RSL4 Transcriptional Cascade. The conversation stays under “Recent conversations” on the home page.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/libraries-07-source.jpg" width="1372" height="867" loading="lazy" alt="The root hair library open, with the Info tab of Glucose-TOR Signaling Regulates Root Hair Elongation in Arabidopsis via the RHD6-RSL4 Transcriptional Cascade on the right: authors, Plants (Basel, Switzerland) 15(17) · 2026 · Published, DOI and PMID, Unread, Pending, Linked, and the abstract below.">
+          <figcaption><b>Figure 7.</b> A click on a source card opens that paper in its library.</figcaption>
+        </figure>
+
+        <aside class="note warn"><b>Note</b>In a conversation of the home page, the other libraries are read-only: the assistant can list papers, search and read full texts and read marks, but not add tags, change a status or import papers; open that library to change it. The “Assistant” inside a library still keeps to that library.</aside>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>Recap</h2>
+        <ul>
+          <li>While a library screens, extracts, finds full texts or translates, leave it and work elsewhere: it goes on in the background, and its results go into its own library.</li>
+          <li>The home page's card and the bottom of another library's sidebar say how far it is, and a click goes back; when it is done, the top of the window says so.</li>
+          <li>A question across libraries is asked on the home page: click “Ask my libraries”, or just say “look in my libraries for …”.</li>
+          <li>The source cards of the answer name each paper's library, and a click opens that paper there; the other libraries are read-only in that conversation.</li>
+          <li>Next: write the screening suggestions in, see “Confirm the screening decisions” in <a href="start.html#s6">Start from a topic</a>.</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="follow.html"><small>Previous · 17</small><strong>Keep up with new papers</strong></a>
+    <a class="next" href="index.html"><small>Back to</small><strong>All tutorials</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>References</h2>
+      <ol>
+        <li><a href="index.html">All tutorials</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">Features: what each page can do (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">Data and privacy: where files live and what leaves your machine (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">Questions and ideas: Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>About this tutorial.</b> The screenshots come from one real run in November 2026 on macOS with v0.19.0, with the English interface; the Chinese page shows a run of its own with the Chinese interface, whose numbers differ. Screening used GPT-6.1 Sol and the question Claude Sonnet 5.5, both through a local gateway; the 30 root hair papers were fetched from PubMed that day. A model judges and answers differently each time, so numbers and wording will differ when you follow along; the steps are the same.</p>
+      <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation; check key numbers and conclusions against the original.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

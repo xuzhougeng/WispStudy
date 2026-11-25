@@ -157,6 +157,19 @@
           <li>The sentences it took when citing were recorded as sources wherever they could be found in the paper, so the six citations of this paragraph can all be opened on the References page and checked.</li>
         </ul>
         <p>In the new paragraph each citation stands right after the clause it supports, for example <code>[@Song2022]</code> and <code>[@Cervantes-Perez2024]</code> in the second sentence. Each claim rests on one abstract sentence of one paper, so the paragraph is only as good as those sentences: open the sources on the References page before you rely on it.</p>
+        <h3>v0.19.0: how the others write it first, then its own words</h3>
+        <p>v0.19.0 changed how the assistant writes. Before it writes, it looks at how the papers in the library write the same part (here the introduction) and follows how they organise it, while the sentences are its own. After it has written, each sentence is compared word for word with the abstract and full text of the papers it cites: where eight English words or more in a row (or sixteen Chinese characters) are the same, it is told to put that sentence in its own words. A direct quotation in quotation marks does not count.</p>
+        <p>To see this step, a new manuscript with the same title was made in v0.19.0 in another library, the demo library “Plant single-cell transcriptomics” (40 papers; only the maize ligular region paper has its full text, the others have abstracts), with three paragraphs of the same meaning in Introduction and the same instruction in “Assistant writes”, this time to a real model. Within a minute it had written a paragraph after the first one, grouped by organ: roots, leaves, reproductive and floral organs, other organs.</p>
+        <p>In the conversation its steps are folded into one grey line, “Read manuscript · Find candidate sentences · Write manuscript”. Click it to unfold:</p>
+        <ul>
+          <li>“Find candidate sentences: en · introduction · limit 15”, followed by “3 sentences”: before writing, it looked for English sentences in the introductions of the library's papers, to see how others write this part.</li>
+          <li>“Write manuscript: … · 1 e…”, followed by “Wrote “Introduction””. When the comparison finds copied sentences, this line says how many repeat the paper cited, and the assistant is told to rewrite them; here it says only “Wrote”, so the comparison found no copied sentence.</li>
+        </ul>
+        <figure class="shot">
+          <img src="../../img/en/t/write-16-own-words.jpg" width="1372" height="867" loading="lazy" alt="Assistant writes: in the conversation, under the instruction, three unfolded tool lines: Read manuscript, Read 1 section; Find candidate sentences en · introduction · limit 15, 3 sentences; Write manuscript, Wrote “Introduction”. Below is the assistant's answer, listing by roots, leaves, reproductive and floral organs and other organs which atlases the paragraph names and which papers it cites. In the manuscript on the right the new paragraph follows the first one, with green citations.">
+          <figcaption><b>Figure 10.</b> v0.19.0: in the unfolded tool lines, “Find candidate sentences” is the assistant looking at how the library's papers write their introductions; “Write manuscript” says only “Wrote “Introduction””, with no copied sentence.</figcaption>
+        </figure>
+        <p>At the end of its answer it said what to check: the last sentence of the paragraph, that these atlases are dominated by Arabidopsis and cereals, is its own reading of the list, without a citation, and may be too strong; only two claims carry a quoted original sentence, and for the rest it read only abstracts. Notes like these are worth reading: with few full texts in the library, there is little for “how the others write it” to follow.</p>
       </section>
 
       <section id="s7">
@@ -166,14 +179,14 @@
 
         <figure class="shot">
           <img src="../../img/en/t/write-10-library.jpg" width="1372" height="870" loading="lazy" alt="The “Materials” dialog: at the top the search box and the “Upload pictures” button, below a row of filters: All 2, Uploaded 1, From papers 1; two cards: workflow.png (marked New and Uploaded by me) and Fig. 1 (Zhang, Ke et al. 2023 · Establishm…); at the bottom “Click a picture to put it after the paragraph at the caret · Drop picture files here, or paste one” and “Close”; a notice at the top says “1 brought into Materials. Click one to put it into the manuscript.”">
-          <figcaption><b>Figure 10.</b> Materials holds the pictures you uploaded and the pictures kept in Figures. Click one to put it into the manuscript.</figcaption>
+          <figcaption><b>Figure 11.</b> Materials holds the pictures you uploaded and the pictures kept in Figures. Click one to put it into the manuscript.</figcaption>
         </figure>
 
         <p>Click “Fig. 1” and it goes into the section you are writing, on a paragraph of its own after the paragraph at the cursor. You see the figure right in the manuscript, with its caption under it. For a figure from a paper, the caption automatically ends with a citation of that paper. The caption is the figure's legend, which can be edited in the figure's own dialog (“Figures”); here the legend was shortened to one line, “Establishment of a method for cotton root protoplast isolation.”, because the one read from the page was long. You can also drag a picture file onto the manuscript or paste it into the manuscript, and it is taken into Materials and placed at the cursor.</p>
 
         <figure class="shot">
           <img src="../../img/en/t/write-11-figure.jpg" width="1372" height="870" loading="lazy" alt="The Results section on the Writing page: the first paragraph is the sentence “Protoplasts from cotton roots grown for 72 hours gave the highest yield and viability (Zhang et al., 2023).” Below it is the placed figure, the panels of Fig. 1 of the cotton paper, and under the figure the caption “Establishment of a method for cotton root protoplast isolation (Zhang et al., 2023).” At the bottom of the outline on the left are “Materials 1” and “References 14”.">
-          <figcaption><b>Figure 11.</b> The figure placed in the manuscript, with a citation under its caption. The 1 beside “Materials” at the bottom of the outline is how many pictures this manuscript uses.</figcaption>
+          <figcaption><b>Figure 12.</b> The figure placed in the manuscript, with a citation under its caption. The 1 beside “Materials” at the bottom of the outline is how many pictures this manuscript uses.</figcaption>
         </figure>
 
         <p>In the text of the manuscript a figure is one line of Markdown, <code>![caption](figures/….png)</code>. You can see and edit it when the cursor moves to that line. Delete the line and the figure leaves the manuscript, while the picture stays in Materials.</p>
@@ -202,7 +215,7 @@ Our stages follow the single-nucleus atlas of the maize ligular region [@Wang202
 
         <figure class="shot">
           <img src="../../img/en/t/write-13-table.jpg" width="1372" height="867" loading="lazy" alt="The Writing page, Methods section: the bold heading “Sampling compared with the maize ligule atlas”; a paragraph with the citation shown in green as (Wang et al., 2026); “Table 1 Sampling of the maize ligule atlas by stage”; below it six lines of text with vertical bars, the second being |:--|:-:|--:|. On the right the Candidates panel, under the manuscript a row of buttons and the box to tell the assistant what to change.">
-          <figcaption><b>Figure 13.</b> While you edit, a table is lines of text with vertical bars.</figcaption>
+          <figcaption><b>Figure 14.</b> While you edit, a table is lines of text with vertical bars.</figcaption>
         </figure>
 
         <p>Click the eye icon above the manuscript, “Preview” (its tooltip reads “Preview: the whole manuscript laid out, with its Markdown drawn”), and the whole manuscript is laid out as a reader will read it; click it again to go back to editing:</p>
@@ -215,7 +228,7 @@ Our stages follow the single-nucleus atlas of the maize ligular region [@Wang202
 
         <figure class="shot">
           <img src="../../img/en/t/write-14-preview.jpg" width="1372" height="867" loading="lazy" alt="The preview on the Writing page: under Methods the bold small heading, the paragraph with (Wang et al., 2026), the title of Table 1 and a table of three columns and five rows (Stage, Tissue, Cells or nuclei); below it the empty Results and Discussion, each reading This section is empty.; at the end “References 1 papers” and one full APA-style entry: Wang, Q., Yang, H., … Li, G. (2026). A single-nucleus atlas of ligular region uncovers brassinosteroid-driven cell fate transitions controlling leaf angle in maize. Nature Communications, 17(1), 10762. with its DOI.">
-          <figcaption><b>Figure 14.</b> “Preview”: the table drawn as a table, the citation and the references at the end in the export's format.</figcaption>
+          <figcaption><b>Figure 15.</b> “Preview”: the table drawn as a table, the citation and the references at the end in the export's format.</figcaption>
         </figure>
 
         <p>In the preview all three columns are left-aligned: the alignment written with colons is used only in the exported Word file. The table's number, “Table 1”, is an ordinary paragraph above the table, made bold with <code>**</code>.</p>
@@ -228,7 +241,7 @@ Our stages follow the single-nucleus atlas of the maize ligular region [@Wang202
 
         <figure class="shot">
           <img src="../../img/en/t/write-12-export.jpg" width="1372" height="870" loading="lazy" alt="The Export menu: Markdown (.md), Word (.docx), Copy manuscript; below a divider are “Citations in Word: author–year (Zhang et al., 20…” (checked), “Citations in Word: numbered [1]”, APA Style 7th edition, Nature, Cell, NLM/Vancouver: Citing Medicine 2nd editi…, IEEE Reference Guide version 11.29.2023, two items of China National Standard GB/T 7714-2015, Chicago Manual of Style 18th edition (auth…; last is “Add a citation style file (Zotero’s .csl)…”.">
-          <figcaption><b>Figure 12.</b> The Export menu (the Results section of the manuscript is on show). The lower half picks the citation format in Word.</figcaption>
+          <figcaption><b>Figure 13.</b> The Export menu (the Results section of the manuscript is on show). The lower half picks the citation format in Word.</figcaption>
         </figure>
 
         <p>The exported Word file writes citations in the selected format and lists the references at the end. Exported from this manuscript, the text has citations such as <code>(Zhang et al., 2023)</code>, the citation in the figure caption is the same, and at the end are the 14 papers cited under References, each as a full entry. A citation in the text is a Word field linked to its entry at the end. A figure placed in the manuscript is embedded in the Word file, the figure above and the caption below.</p>
@@ -236,7 +249,7 @@ Our stages follow the single-nucleus atlas of the maize ligular region [@Wang202
 
         <figure class="shot">
           <img src="../../img/en/t/write-15-word.jpg" width="932" height="1017" loading="lazy" alt="The first page of the exported Word file, opened in LibreOffice: the title “A single-nucleus transcriptome atlas of rice lamina joint development”, Methods, the small heading in italics, the paragraph with (Wang et al., 2026), “Table 1 Sampling of the maize ligule atlas by stage”, then a table with thin borders: the header Stage, Tissue, Cells or nuclei in bold, the Tissue column centred and the numbers right-aligned; last, References and one full entry.">
-          <figcaption><b>Figure 15.</b> The exported Word file: the table is a Word table, aligned by the colons of its second line. The empty sections were not exported.</figcaption>
+          <figcaption><b>Figure 16.</b> The exported Word file: the table is a Word table, aligned by the colons of its second line. The empty sections were not exported.</figcaption>
         </figure>
 
         <p>In Markdown the citations stay as raw text such as <code>[@Zhang2023]</code>, and the pictures are copied to the <code>figures</code> folder beside the .md file. To typeset them in a proper citation format, switch to “Manuscript” on the References page, click “Export BibTeX”, and hand the .md, the .bib and <code>figures</code> together to Pandoc.</p>
@@ -249,7 +262,7 @@ Our stages follow the single-nucleus atlas of the maize ligular region [@Wang202
           <li>Write down what you mean in your own language. Candidates show how others in the library write the same part, and “Cite” records one original sentence as a source.</li>
           <li>“Find citations” finds citable papers sentence by sentence, with reasons and original sentences. It misses some, so look again yourself at sentences with nothing ticked.</li>
           <li>The star button on the References page fills in the basis for citations that have no source, and marks those it cannot find in the warning color.</li>
-          <li>“Assistant writes” hands off the looking up of papers and the writing of whole paragraphs. Each change can be undone, and every section keeps versions.</li>
+          <li>“Assistant writes” hands off the looking up of papers and the writing of whole paragraphs. Each change can be undone, and every section keeps versions. It first looks at how the library's papers write the same part, and after writing compares each sentence with the papers it cites; long runs copied from them are named on the tool line, and it is told to rewrite them.</li>
           <li>In “Materials” you upload your own figures or find the ones kept in Figures, and one click puts them into the manuscript. In Word the figures are embedded in the file, and in Markdown they are in the <code>figures</code> folder beside it.</li>
           <li>A table is written in the text with vertical bars, and the colons of its second line set how each column is aligned; “Preview” lays out the table, the citations and the references at the end as the export does.</li>
           <li>Citations in the manuscript are shown in the format chosen in the “Export” menu, and the exported Word file writes citations in it, lists the references, and has written tables as real tables.</li>
@@ -261,7 +274,7 @@ Our stages follow the single-nucleus atlas of the maize ligular region [@Wang202
 
   <nav class="pager" aria-label="Previous and next">
     <a class="prev" href="review.html"><small>Previous · 13</small><strong>Write a review in stages</strong></a>
-    <a class="next" href="revise.html"><small>Next · 15</small><strong>Revise with co-authors</strong></a>
+    <a class="next" href="compare-writing.html"><small>Next · 15</small><strong>Writing directly or in Wisp Study</strong></a>
   </nav>
 </main>
 
@@ -277,7 +290,7 @@ Our stages follow the single-nucleus atlas of the maize ligular region [@Wang202
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> The screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface and a stand-in model that answers by fixed rules, so the numbers in this tutorial are those of that run. A real model answers differently each time, so the wording and numbers will differ when you follow along; the steps are the same. Section 8 (Figures 13 to 15) comes from a demo manuscript made in another run with v0.18.0, with no model involved; Figure 15 is the exported Word file opened in LibreOffice.</p>
+      <p><b>About this tutorial.</b> The screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface and a stand-in model that answers by fixed rules, so the numbers in this tutorial are those of that run. A real model answers differently each time, so the wording and numbers will differ when you follow along; the steps are the same. Section 8 (Figures 14 to 16) comes from a demo manuscript made in another run with v0.18.0, with no model involved; Figure 16 is the exported Word file opened in LibreOffice. Figure 10 comes from a separate run on November 24, 2026 with v0.19.0, in the demo library “Plant single-cell transcriptomics”, with a real model, Claude Sonnet 5.5, called through a local gateway.</p>
       <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation; check key numbers and conclusions against the original.</p>
     </div>
   </div>

@@ -6,7 +6,7 @@
 <link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/ask.html">
 <link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/ask.html">
 <title>Ask the whole library, and check the answers · Wisp Study tutorials</title>
-<meta name="description" content="Ask a review-style question about the whole library: see which materials the assistant read, learn to read sources with page numbers and quoted sentences, click through to the PDF, then have /verify check every claim; search the web for what the library does not hold, and have the assistant draw a diagram.">
+<meta name="description" content="Ask a review-style question about the whole library: see which materials the assistant read, learn to read sources with page numbers and quoted sentences, click through to the PDF, then have /verify check every claim; search the web for what the library does not hold, and have the assistant draw a diagram; before asking, find the exact words and your own marks with a search of the whole library, and lay out one paper with a skill of your own called by /name.">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
@@ -38,7 +38,7 @@
   <header class="doc-head">
     <p class="kicker">Tutorial 10 · Read</p>
     <h1>Ask the whole library, and check the answers</h1>
-    <p class="lead">You meet your advisor tomorrow and want a feel for the whole field first: which species and organs are covered, what the protoplast and nucleus routes each cost, and where the papers disagree. In this tutorial the assistant reads the whole library to answer, and then you check the passages it cites one by one instead of taking its word. What the library cannot answer, such as what a tool's documentation says today, it can look up on the web; what you will explain to others, it can draw as a diagram.</p>
+    <p class="lead">You meet your advisor tomorrow and want a feel for the whole field first: which species and organs are covered, what the protoplast and nucleus routes each cost, and where the papers disagree. In this tutorial the assistant reads the whole library to answer, and then you check the passages it cites one by one instead of taking its word. What the library cannot answer, such as what a tool's documentation says today, it can look up on the web; what you will explain to others, it can draw as a diagram. The last two sections lean less on the model: first find the exact words in the full texts, attachments and your own marks with a search of the whole library, then have the assistant lay out one paper for a lab meeting the same way every time with a skill you write.</p>
     <dl class="facts">
       <div><dt>Scenario</dt><dd>Before a lab meeting, an overview of the 90 papers in the “Plant single-cell transcriptomics” library.</dd></div>
       <div><dt>Needs</dt><dd>A screened library in which most papers have a stored PDF; a model provider. For web search, a key for a search service (DeepSeek's can be shared with its models).</dd></div>
@@ -58,6 +58,8 @@
         <li><a href="#s6">Compare, search and keep asking</a></li>
         <li><a href="#s7">Look beyond the library: web search</a></li>
         <li><a href="#s8">Have the assistant draw a diagram</a></li>
+        <li><a href="#s9">Find the words first: search the whole library</a></li>
+        <li><a href="#s10">Call your own skill with /</a></li>
         <li class="plain"><a href="#recap">Recap</a></li>
       </ol>
     </nav>
@@ -220,6 +222,99 @@
         <p>Besides flowcharts it can draw timelines, pie charts, mind maps, sequence diagrams and more, for example “draw the papers in the library by year of publication”. Every word in a diagram is the model's: the order of the steps and the numbers (here 65,691 cells or nuclei, 32 clusters) need checking against the original, just like the quotes of step 3.</p>
       </section>
 
+      <section id="s9">
+        <h2><i>9</i>Find the words first: search the whole library</h2>
+        <p>Sometimes you do not want an answer, only to know where some words occur in the library: which paper, which page, and the sentence as written. No model is needed for that. Go back to “All papers”, type the words in the search box above the list and press <kbd>Enter</kbd>, or click “Full text &amp; marks” at the end of the box. Typing alone still filters the list by title, authors and the like; <kbd>Enter</kbd> searches the whole library word for word: the full texts and attachments that have been read, the marks on the PDFs and the notes written on them, titles and abstracts.</p>
+        <p>This step uses the same 40-paper library as steps 7 and 8, where only the maize ligule atlas has a stored PDF. Type <code>brassinosteroid</code> and press Enter. The list gives way to the places found, and the header reads “"brassinosteroid": 17 places in 2 papers”. The places are grouped by paper, with the count on the right: 12 in the maize ligule paper, in its “Title”, its “Abstract”, its text on “p. 1” and “p. 2”, and a few reference titles on pages 15 and 16; 5 in a paper on sepals in Arabidopsis, all in its “Title” and “Abstract”. Each place shows the sentence it is in, with the words found marked.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/ask-13-libfind.jpg" width="1372" height="867" loading="lazy" alt="The results of a search of the whole library: the header reads brassinosteroid, 17 places in 2 papers; under the maize ligule paper are rows marked Title, Abstract and p. 1, 2, 15 and 16, under the Arabidopsis sepal paper a Title row and four Abstract rows, with the word marked in yellow; the footer reads Searched the full text of 1 paper.">
+          <figcaption><b>Figure 13.</b> Searching the whole library: the places are grouped by paper, each saying whether it is in the title, the abstract or on which page, followed by its sentence.</figcaption>
+        </figure>
+
+        <p>Look at the footer: “Searched the full text of 1 paper”. Of the 40 papers only the maize ligule atlas has a PDF; the others have links only, so only their titles, abstracts and notes were searched. That the Arabidopsis paper shows up only in its “Abstract” does not mean its text never uses the word: its text is not in the library. To search more widely, attach the PDFs of the papers you use most.</p>
+        <p>Try another word, <code>auricle</code>. This time all 16 places are in the maize ligule paper, but they are of many kinds: the “Abstract”, the text from “p. 1” to “p. 15”, a “Highlight · p. 1”, a “Highlight note · p. 1” and, last, “S1 p. 8”. S1 is the paper's attachment, its 19 pages of supplementary information; attachments are searched too, and the page says which attachment it is in. The highlight is one made on page 1 of the PDF before the search: select “BR treatment leads to ectopic emergence of the auricle and ligule.” and click “Highlight” beside the selection. The note on it comes a little further down.</p>
+        <p>Click the row “S1 p. 8” (or choose it with <kbd>↑</kbd> <kbd>↓</kbd> and press <kbd>Enter</kbd>). The PDF opens on the right, its toolbar reading “Attachment S1” and “8 / 19 pages”, and the sentence from the legend of Supplementary Fig. 9 is painted yellow: the auricle is absent in L2 after prolonged BR treatment.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/ask-14-libfind-open.jpg" width="1372" height="867" loading="lazy" alt="On the left the 16 places of auricle, among them a Highlight row and a Highlight note row on p. 1, with the last row, S1 p. 8, selected; on the right page 8 of attachment S1, where sentence e of the legend of Supplementary Fig. 9 is marked in yellow.">
+          <figcaption><b>Figure 14.</b> Click a place and the PDF stops at that page with the sentence marked. This one is in attachment S1.</figcaption>
+        </figure>
+
+        <p>What you write on your marks is found as well. To put a note on that highlight, click “Annotations (1)” at the top right of the PDF, then “Note” beside the highlight, write “For the lab meeting: BR treatment makes auricle and ligule emerge ectopically” and click “Save note”. That is the “Highlight note” row in Figure 14. Now search for <code>lab meeting</code>: “1 place in 1 paper”, marked “Highlight note · p. 1”. These words are nowhere in the paper; they are yours. Click the row and the PDF goes back to page 1, with the place of the highlight marked.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/ask-15-libfind-note.jpg" width="1372" height="867" loading="lazy" alt="A search for lab meeting: 1 place in 1 paper, a single row marked Highlight note p. 1 reading For the lab meeting: BR treatment makes auricle and ligule emerge ectopically; on the right page 1 of the PDF with the highlighted sentence of the abstract in yellow.">
+          <figcaption><b>Figure 15.</b> The note written on a highlight is found; click it to go back to the highlight.</figcaption>
+        </figure>
+
+        <p>The search only reads: it changes nothing in the library and involves no model. Press <kbd>Esc</kbd> or click “Back to list” to return to the list of papers. Because it finds the same words letter for letter, it makes up for what the assistant cannot do: before you ask, check that the original says it; after an answer, search the words it quoted and see what else the library says about them.</p>
+        <aside class="note"><b>Tip</b>For papers with a PDF from which no text came (scans, encrypted files), the text cannot be searched this time, and the header says how many there are. This library has none, so that line did not appear here. When it does, “Recognise page text” in the paper's details reads the pages, and you can search again.</aside>
+      </section>
+
+      <section id="s10">
+        <h2><i>10</i>Call your own skill with /</h2>
+        <p>The commands of step 6 are prompt templates. When you want the assistant to do one thing the same way every time, such as how a journal club outline of one paper is laid out and what goes in each part, write the way down as a skill: a folder with a <code>SKILL.md</code> in it. The name and description at the top say what it is called and what it is for; the rest says how to do it. It is written like Claude's skills, so a skill folder written elsewhere can be dropped in as it is.</p>
+        <p>The skill written for this tutorial is called journal-club:</p>
+
+        <figure class="code">
+          <figcaption>skills/journal-club/SKILL.md</figcaption>
+<pre><code>---
+name: journal-club
+description: Turn one paper into a lab-meeting outline: one-line conclusion, question, materials and methods, main findings (with figure and page), limitations and questions for discussion.
+---
+
+# Presenting one paper at journal club
+
+Read the paper's full text first (read_fulltext), at least the results and methods; if there is no full text, say the outline rests on the abstract only and give no page numbers.
+
+Write in this order, each part under its own heading, one page at most:
+
+1. **Conclusion in one sentence**: the paper's most important finding.
+2. **Question**: what the authors set out to answer and why it matters (two or three sentences).
+3. **Materials and methods**: species and line, tissue and stage, sequencing platform, number of cells or nuclei, key analyses. Write only numbers the paper gives, each followed by its source with the page.
+4. **Main findings**: three to five, one sentence each, followed by the figure it rests on (e.g. Fig. 2c) and the quoted source.
+5. **Limitations**: what can be questioned in the samples, methods or reasoning; say which the authors admit themselves and which are your judgement.
+6. **Questions for discussion**: two or three to put to the group, those touching our own work first.
+
+Write the outline in English. Do not translate the abstract; keep it an outline someone can talk from.</code></pre>
+        </figure>
+
+        <p>Skills are on the “SKILL” tab of “Settings › Custom”. The tab has “Import skill folder…”, “Import Markdown file…” and “Open skills folder”: the skills folder is <code>skills</code>, beside <code>settings.json</code>. Put the journal-club folder in it and open the tab again: the skill is listed, with the sentence of its description under its name and its switch on at the right.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/ask-16-skill-folder.jpg" width="1372" height="867" loading="lazy" alt="The Custom page of Settings on its SKILL tab: a row journal-club with its description underneath and a green switch turned on at the right; below it the buttons Import skill folder, Import Markdown file and Open skills folder, and a gray paragraph saying what a skill is.">
+          <figcaption><b>Figure 16.</b> “Settings › Custom › SKILL”: journal-club, put into the skills folder.</figcaption>
+        </figure>
+
+        <p>A skill that is on is read by the assistant by itself when a request fits its description; you can also name it. Type <code>/</code> in the question box: after the built-in commands the list has one more row, “/journal-club”, followed by “Optional additional content” and the skill's description, and tagged “Skills” at the right (a command of your own is tagged “Custom”).</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/ask-17-skill-list.jpg" width="1372" height="867" loading="lazy" alt="A slash typed in the Assistant's question box, and above it the list of commands: /search, /cite, /review, /compare, /write, /slides, /verify, /compact, /new, and last /journal-club with a gray Skills tag at the right.">
+          <figcaption><b>Figure 17.</b> Type <code>/</code>: skills are in the same list as the commands, tagged “Skills”.</figcaption>
+        </figure>
+
+        <p>The paper to present is the maize ligule atlas, so select it, and in its “Ask” tab type:</p>
+        <blockquote><cite>Ask</cite><p>/journal-club presenting this at our lab meeting next week; our group works on rice leaf angle</p></blockquote>
+        <p>After the name comes what to do this time. What is sent is the whole of the skill's instructions with this sentence, so the assistant need not first decide whether to read the skill. The answer was complete about a minute after it was sent, in the six parts in the order of the SKILL.md: “Conclusion in one sentence”, “Question”, “Materials and methods”, “Main findings”, “Limitations” and “Questions for discussion”. One line of the skill is there because of a first try. Without “Write the outline in English.”, the same request with the English interface was answered in Chinese: in this build the words that hand a skill to the model are Chinese whatever the interface language, and the model followed them. Saying the language in the skill settles it.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/ask-18-skill-answer.jpg" width="1372" height="867" loading="lazy" alt="The paper's Ask tab: the question /journal-club presenting this at our lab meeting next week; our group works on rice leaf angle in a gray bubble at the top right, and below it the start of the outline, Conclusion in one sentence, Question and Materials and methods, each with green quoted sources with page numbers; the paper's PDF on the right.">
+          <figcaption><b>Figure 18.</b> Calling the skill with <code>/journal-club</code>: the answer follows the six parts the skill lays down, with sources after the numbers.</figcaption>
+        </figure>
+
+        <p>It kept to what the skill asks. The numbers under “Materials and methods” come with their sources, such as 65,691 cells or nuclei and the 6,241 nuclei of W22. “Limitations” is split into “Admitted by the authors” and “My judgement”; among the latter, that each line of the three-line comparison has one S2 library, so line is confounded with batch, and that the link between lignification and leaf angle is correlative. “Questions for discussion” puts the rice ones first: the first asks whether the rice homologs of LG1, BZR1, bHLH30/155 and EXPA5 form the same module in a lamina joint, which has no maize-style auricle. It opens by saying what it rests on:</p>
+        <blockquote><cite>Assistant</cite><p>Based on the full text and supplementary legends already provided.</p></blockquote>
+
+        <figure class="shot">
+          <img src="../../img/en/t/ask-19-skill-sources.jpg" width="1372" height="867" loading="lazy" alt="The end of the answer: three questions for discussion, the first headed Rice relevance; below them source cards, seven marked Exact quote found in green and one marked Quote found on p.10 in orange, and a button 10 more sources.">
+          <figcaption><b>Figure 19.</b> The end of the answer. The source cards are checked word for word as usual.</figcaption>
+        </figure>
+
+        <p>The source cards are compared word for word, as in step 3. Of the eight shown, seven read “Exact quote found” and one, “P40 p.12 · "In this study, 83 maize inbred lines"”, reads “Quote found on p.10”: the words are in the paper, on another page than the one given, and clicking the card goes there. The other ten are behind “10 more sources”. A skill sets the method and the layout, not whether the content is right: before you present, open a few cards as in step 4.</p>
+        <aside class="note"><b>Tip</b>A skill is words only: its instructions go to the model with the question, scripts in its folder are never run, and it gives the assistant no extra tools and skips no confirmation. A skill whose name has a space in it, or is the name of a command, is not in the / list; the assistant still reads it when a request fits its description. After changing a SKILL.md, open the “SKILL” tab again to read it anew.</aside>
+      </section>
+
       <section id="recap" class="recap">
         <h2>Recap</h2>
         <ul>
@@ -229,6 +324,8 @@
           <li>“Exact quote found” says only that the words are in the original; whether the conclusion holds is for /verify and your own reading of the context to decide.</li>
           <li>What the library cannot answer, the assistant can search the web for (“Settings › Network › Web search”); what leaves is the search words, the service bills for it, and web pages get no word-for-word check, so open them yourself.</li>
           <li>Ask the assistant to draw a diagram and it writes Mermaid, which the window draws; over the diagram are “Actual size”, “Copy image” and “Show source”.</li>
+          <li>To find where some words occur in the library, type them in the list's search box and press Enter (or click “Full text &amp; marks”): full texts, attachments, marks and notes are searched word for word, the places are grouped by paper with page and sentence, and clicking one goes back to that page of the PDF. Text that was never read cannot be searched; the footer says how many full texts were.</li>
+          <li>A method you use again and again can be a skill (a folder with a SKILL.md, under “Settings › Custom › SKILL”); call it with <code>/name</code> and what to do. It is words only, and its sources are checked as usual.</li>
           <li>To read the whole library into one table, paper by paper, continue with <a href="extract.html">Read a batch of papers into one table</a>; for a deep read of one paper, go back to <a href="read.html">Read one paper closely</a>.</li>
         </ul>
       </section>
@@ -253,7 +350,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> The screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface and a stand-in model that answers by fixed rules, so the numbers in this tutorial are those of that run. A real model answers differently each time, so your wording and numbers will differ; the steps are the same. Steps 7 and 8 (Figures 7 to 12) come from another run with v0.18.0 on a library of 40 papers, with a real model, Claude Sonnet 5.5 (claude/claude-sonnet-5-5) called through a local gateway, and web search through DeepSeek; their questions were asked in English.</p>
+      <p><b>About this tutorial.</b> The screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface and a stand-in model that answers by fixed rules, so the numbers in this tutorial are those of that run. A real model answers differently each time, so your wording and numbers will differ; the steps are the same. Steps 7 and 8 (Figures 7 to 12) come from another run with v0.18.0 on a library of 40 papers, with a real model, Claude Sonnet 5.5 (claude/claude-sonnet-5-5) called through a local gateway, and web search through DeepSeek; their questions were asked in English. Steps 9 and 10 (Figures 13 to 19) come from a run with v0.19.0 in November 2026 on the same 40 papers, of which only the maize ligule atlas has its PDF and its 19 pages of supplementary information (attachment S1); the model of step 10 was again Claude Sonnet 5.5 (claude/claude-sonnet-5-5) through a local gateway, and the skill journal-club was written for this tutorial.</p>
       <p><b>The assistant can be wrong.</b> Confirm its suggestions and answers yourself; check key numbers and conclusions against the original.</p>
     </div>
   </div>

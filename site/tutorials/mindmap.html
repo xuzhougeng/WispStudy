@@ -6,7 +6,7 @@
 <link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/mindmap.html">
 <link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/mindmap.html">
 <title>把一篇文献理成思维导图 · Wisp Study 教程</title>
-<meta name="description" content="在 PDF 旁边开一栏思维导图：让模型读全文起草，点节点上的页码回到原文那一句，从 PDF 里选一段加成节点，自己加分支、收起、改，和译文并排成三栏，最后把大纲复制成 Markdown。">
+<meta name="description" content="在 PDF 旁边开一栏思维导图：让模型读全文起草，点节点上的页码回到原文那一句，从 PDF 里选一段加成节点，自己加分支、收起、改，和译文并排成三栏，把大纲复制成 Markdown；导图可以缩放、拖动，节点可以拖到别的节点下面。">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
@@ -57,6 +57,7 @@
         <li><a href="#s5">从原文加一句，写下自己的</a></li>
         <li><a href="#s6">原文 · 译文 · 导图</a></li>
         <li><a href="#s7">把导图带走：复制大纲</a></li>
+        <li><a href="#s8">移动、缩放，拖动节点</a></li>
         <li class="plain"><a href="#recap">回顾</a></li>
       </ol>
     </nav>
@@ -85,7 +86,7 @@
 
         <p>本例的草稿有 7 个分支：问题与背景、图谱构建、BR 的阶段特异作用、早期、后期、自交系差异、意义与局限，下面一共 35 条要点。根节点也被换成了一句中文的概括。</p>
         <p>要点右边的绿色页码是它的出处：模型给出一句原文，应用在全文里逐字找到它，才标上页码。找不到的就不标，所以 35 条里只有 14 条带页码，没有页码的要点是模型的概括，要自己对照原文。</p>
-        <aside class="note"><b>提示</b>导图按原大小排，比这一栏宽、比窗口高时，在导图上滚动查看。选中一个节点，导图会滚到它在的位置。</aside>
+        <aside class="note"><b>提示</b>导图比这一栏大时，按住空白处拖动，或者用滚轮、触控板挪动；右下角的小条可以缩小放大，整张放进这一栏，见第 8 节。选中一个节点，导图会移到它在的位置。</aside>
         <aside class="note warn"><b>注意</b>起草时这篇的全文会发给你配置的模型服务。读不出全文的文献，只凭摘要起草。</aside>
       </section>
 
@@ -173,6 +174,27 @@
         <p>命令行和 MCP 读到的也是这份大纲：<code>wisp mind_map --id &lt;文献 ID&gt;</code> 返回节点数和同样的 Markdown，外部的 AI 客户端可以拿它接着写，见<a href="follow.html#s6">跟进新文献</a>里 MCP 的一节。</p>
       </section>
 
+      <section id="s8">
+        <h2><i>8</i>移动、缩放，拖动节点</h2>
+        <p>v0.19.0 起，导图可以整张挪动、缩放，节点可以直接拖到别处。这一节回到只有「原文 · 导图」两栏的版面，导图还是第 5 节之后的样子。</p>
+        <p>导图一栏的右下角有一个小条：<code>−</code>、当前比例、<code>+</code> 和一个四角图标。指针停在四角图标上，提示是「整张导图放进这一栏」；点一下，整张导图缩到 69%，所有分支都看得见。<code>−</code> 和 <code>+</code> 缩小放大，点中间的百分比回到 100%。按住 <kbd>⌘</kbd>（Windows 上是 <kbd>Ctrl</kbd>）滚动滚轮，也能缩放。</p>
+
+        <figure class="shot">
+          <img src="../img/t/mindmap-09-zoom.jpg" width="1372" height="867" loading="lazy" alt="原文 · 导图两栏：右边整张导图缩小到一栏里，根节点在左，「问题与背景」「图谱构建」「BR 的阶段特异作用」「早期」四个分支收起着，「后期」展开七条要点，下面是「自交系差异」「意义与局限」和最下面的「组会上要问：外源 BR 的浓度梯度和处理时机」；右下角的小条是 −、69%、+ 和四角图标。">
+          <figcaption><b>图 9</b>　点右下角的四角图标，整张导图放进这一栏，小条上写着现在的比例 69%。</figcaption>
+        </figure>
+
+        <p>不缩放也可以挪：按住导图的空白处拖动，整张导图跟着走；不按键只滚动滚轮，导图上下移动。</p>
+        <p>节点也能拖。第 5 节加的「组会上要问：外源 BR 的浓度梯度和处理时机」挂在根节点下面，其实它问的是这篇的局限，想挂到「意义与局限」下。按住这个节点往上拖：它原来的位置变淡，一个半透明的副本跟着指针走；拖到「意义与局限」中间时，「意义与局限」外面出现一圈绿色。</p>
+
+        <figure class="shot">
+          <img src="../img/t/mindmap-10-drag.jpg" width="1372" height="867" loading="lazy" alt="导图缩在 69%：「组会上要问：外源 BR 的浓度梯度和处理时机」一个带绿框的半透明副本压在「意义与局限」右下方，「意义与局限」外面有一圈绿色；最下面原来的位置上同一个节点字变成了浅灰色。">
+          <figcaption><b>图 10</b>　拖着节点停在「意义与局限」中间，那里出现一圈绿色：松手，它就挂到那里。</figcaption>
+        </figure>
+
+        <p>松手，这个节点成了「意义与局限」下面的最后一条，带着绿框表示选中。拖到一个节点的上缘或下缘，出现的不是一圈而是一条绿线，松手就排到那个节点前面或后面，同一层。节点下面有分支的，分支跟着一起走。拖到一半改主意，先点过导图的空白处、让导图接住键盘，按 <kbd>Esc</kbd> 放下，什么都不变；拖错了，<kbd>⌘</kbd>+<kbd>Z</kbd> 撤销。</p>
+      </section>
+
       <section id="recap" class="recap">
         <h2>回顾</h2>
         <ul>
@@ -181,6 +203,7 @@
           <li>小圆点收起和展开分支；点导图空白处后用键盘加、改、删、移动节点，<kbd>⌘</kbd>+<kbd>Z</kbd> 撤销。</li>
           <li>点页码回到原文那一句；在 PDF 里选一段点「加到导图」，它挂在选中的节点下面，带着页码。</li>
           <li>导图和译文可以并排成三栏；「复制大纲」把整张图复制成 Markdown。</li>
+          <li>右下角的小条缩小、放大、把整张导图放进这一栏；按住空白处拖动导图，把节点拖到另一个节点上，中间挂成分支，上下缘排到前后。</li>
           <li>下一步：把几篇放在一起读，见<a href="compare.html">对照着读几篇文献</a>。</li>
         </ul>
       </section>
@@ -205,7 +228,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>关于这篇教程</b>　截图来自 2026 年 11 月在 macOS 上用 v0.18.0 的一次实际操作。起草用的是 Claude Sonnet 5.5，翻译用的是 GPT-6 Luna，都经本机的网关调用。模型每次起草的导图不一样，你照做时分支、措辞和带页码的条数会有出入，步骤是一样的。</p>
+      <p><b>关于这篇教程</b>　图 1 到图 8 来自 2026 年 11 月在 macOS 上用 v0.18.0 的一次实际操作；第 8 节的图 9、图 10 是 2026 年 11 月 24 日在 v0.19.0 上接着这次的导图做的，没有用到模型。起草用的是 Claude Sonnet 5.5，翻译用的是 GPT-6 Luna，都经本机的网关调用。模型每次起草的导图不一样，你照做时分支、措辞和带页码的条数会有出入，步骤是一样的。</p>
       <p><b>助手可能出错</b>　它起草的要点都要你核对；关键的数字和结论请对照原文。</p>
     </div>
   </div>
