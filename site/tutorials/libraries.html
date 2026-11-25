@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/libraries.html">
+<link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/libraries.html">
+<title>几个课题一起推进 · Wisp Study 教程</title>
+<meta name="description" content="手上有两个课题、两个文献库：一个库让助手在后台筛选，你去另一个库做别的；做完窗口上方提示一句。再在首页问助手，它读得到书架上所有的文献库，回答的出处写明来自哪个库。">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../app-icon.png">
+<link rel="stylesheet" href="../style.css">
+<link rel="stylesheet" href="../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">跳到正文</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="站点">
+      <a href="index.html" aria-current="page">教程</a>
+      <a href="../index.html#ideas">理念</a>
+      <a href="../index.html#tools">工具</a>
+      <a href="../index.html#download">下载</a>
+    </nav>
+    <a class="lang" href="../en/tutorials/libraries.html" lang="en" hreflang="en">English</a>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="位置"><a href="index.html">教程</a><span>›</span>跟进</nav>
+
+  <header class="doc-head">
+    <p class="kicker">教程 18　·　跟进</p>
+    <h1>几个课题一起推进：后台运行与跨库提问</h1>
+    <p class="lead">手上不止一个课题：一个是植物单细胞转录组，一个是根毛发育，各有各的文献库。本篇让一个库的助手在后台逐篇筛选，你去另一个库做别的，回来时它已经做完；再回到首页问助手一个横跨两个库的问题，它到两个库里去查，回答的每条出处写明来自哪个库，点一下就到那个库里的那一篇。</p>
+    <dl class="facts">
+      <div><dt>场景</dt><dd>「植物单细胞转录组」40 篇等着筛选，「根毛发育」30 篇刚从 PubMed 检索进来；想知道两边在根毛上有没有交集。</dd></div>
+      <div><dt>需要</dt><dd>两个文献库，一个在「设置 › AI」里配置好的模型服务。</dd></div>
+      <div><dt>用时</dt><dd>约 10 分钟，其中筛选 40 篇在后台用了一分多钟。</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="本篇的小节">
+      <h2>本篇</h2>
+      <ol>
+        <li><a href="#s1">在一个库里开始筛选</a></li>
+        <li><a href="#s2">离开它：首页的卡片写着做到哪了</a></li>
+        <li><a href="#s3">在另一个库里接着做事</a></li>
+        <li><a href="#s4">做完了，窗口上方提示一句</a></li>
+        <li><a href="#s5">回首页，问两个库</a></li>
+        <li><a href="#s6">出处写明来自哪个库</a></li>
+        <li class="plain"><a href="#recap">回顾</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>在一个库里开始筛选</h2>
+        <p>首页上有两个文献库：「植物单细胞转录组」40 篇，都还待判断；「根毛发育」30 篇，是刚用一条 PubMed 检索式取回的。先打开「植物单细胞转录组」，点侧栏的「筛选」，在「筛选目标」里写下收录标准：只收在植物里做单细胞或单细胞核转录组测序的原始研究；综述和只讲方法的文章不收。然后点「让助手判断 40 篇」。</p>
+        <p>助手开始逐篇阅读，框里写着「助手正在阅读 3 / 40」，读完的一篇在列表右边出现建议，如「建议：已纳入 · 把握 99%」。筛选怎么用、建议怎么确认，见<a href="start.html">从一个课题开始</a>；本篇用的是本机网关调用的 GPT-6.1 Sol，三篇同时读。</p>
+
+        <figure class="shot">
+          <img src="../img/t/libraries-01-screening.jpg" width="1372" height="867" loading="lazy" alt="「植物单细胞转录组」的筛选页：筛选目标写着「只收在植物里做单细胞或单细胞核转录组测序的原始研究；综述和只讲方法的文章不收。」；下面「第 1 轮 · 40 → 0 篇已纳入」，「待判断 40 篇，其中 3 篇已有按当前目标的建议」和「停止」按钮；进度框「助手正在阅读 3 / 40」，列出正在读的三篇；列表前三篇右边是绿色的建议，其余写着「正在阅读…」。">
+          <figcaption><b>图 1</b>　筛选开始了：助手一次读三篇，读完的一篇右边出现建议。</figcaption>
+        </figure>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>离开它：首页的卡片写着做到哪了</h2>
+        <p>不必等它读完。点左上角「← 所有文献库」回到首页：「植物单细胞转录组」的卡片右下角多了一个转圈的图标和「筛选 8 / 40」，说明它在后台接着读，已经读到第 8 篇。</p>
+
+        <figure class="shot">
+          <img src="../img/t/libraries-02-home.jpg" width="1372" height="867" loading="lazy" alt="首页：两张文献库卡片。「植物单细胞转录组」卡片底部左边「40 篇文献」，右边一个转圈的图标和「筛选 8 / 40」；「根毛发育」卡片底部是「30 篇文献」和「打开于 2026.11.24」；右边是新建文献库的虚线卡片。">
+          <figcaption><b>图 2</b>　离开文献库，筛选不会停：首页的卡片写着在做什么、做到第几篇。</figcaption>
+        </figure>
+
+        <p>以前离开文献库，这样的批量任务就停了，回来要重新开始。现在筛选、提取词条、查找开放全文和翻译都会在后台接着做，结果照常存进它自己的库。</p>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>在另一个库里接着做事</h2>
+        <p>在首页点开「根毛发育」，看看刚取回的 30 篇。这个库的侧栏底部有一行进度：转圈的图标、「筛选 · 植物单细胞…」和「20/40」，后面一个小箭头。点这一行就回到「植物单细胞转录组」的筛选页；要停也在那里停。</p>
+
+        <figure class="shot">
+          <img src="../img/t/libraries-03-elsewhere.jpg" width="1372" height="867" loading="lazy" alt="「根毛发育」文献库：列表里是 30 篇根毛研究，如 Glutamate triggers defense responses and promotes root hair elongation…、Glucose-TOR Signaling Regulates Root Hair Elongation in Arabidopsis…；侧栏底部、「自定义词条」上方有一行进度「筛选 · 植物单细胞… 20/40」和一条进度条。">
+          <figcaption><b>图 3</b>　在别的文献库里，侧栏底部也有它的进度，点一下回到那个库。</figcaption>
+        </figure>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>做完了，窗口上方提示一句</h2>
+        <p>还在「根毛发育」里翻着列表，一分多钟后，窗口上方出现一句「「植物单细胞转录组」的筛选做完了：40 篇」，侧栏底部的进度那一行也消失了。</p>
+
+        <figure class="shot">
+          <img src="../img/t/libraries-04-done.jpg" width="1372" height="867" loading="lazy" alt="「根毛发育」文献库，窗口上方中间是一条带对勾的提示：「植物单细胞转录组」的筛选做完了：40 篇；侧栏底部已经没有进度那一行。">
+          <figcaption><b>图 4</b>　后台的任务做完时，不管你在哪个文献库，窗口上方都提示一句。</figcaption>
+        </figure>
+
+        <p>回到「植物单细胞转录组」，40 篇都有了建议：已纳入 25 篇，相关 10 篇，不相关 5 篇。这些只是建议，文献的收录状态还是「待判断」，要你在「确认」里过目后才写入，和在库里一直等着它读完是一样的。</p>
+        <aside class="note"><b>提示</b>在后台接着做的是筛选、提取、查找开放全文和翻译，离开时还在回答的对话也会答完；要你同意才能继续的步骤（例如导入）会等你回来，卡片上写着「等你同意」。导入 PDF、Zotero 迁移、文字识别和朗读离开文献库就停（这几条见「功能详解」，本篇没有逐一试）。退出应用会结束所有后台任务，已经得到的结果都保留。</aside>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>回首页，问两个库</h2>
+        <p>筛完了，想知道两个课题在根毛上有没有交集。在文献库里问助手，它只管这一个库；跨库的问题要回首页问。点首页右下角的助手按钮，输入框下面有一排开头，最后一个是「问我的文献库」，点它，输入框里先写好了「在我的文献库里查一查：」。</p>
+
+        <figure class="shot">
+          <img src="../img/t/libraries-05-ask.jpg" width="1372" height="867" loading="lazy" alt="首页的助手：标题一行「卡在哪一步了？说说看。」，输入框里是「在我的文献库里查一查：」；下面一行开头：调研一个想法、审一份稿件、找几篇文献、从 Word 建文献库、问我的文献库，最后一个是选中的样子；右边写着 claude/claude-sonnet-5-5。">
+          <figcaption><b>图 5</b>　「问我的文献库」：首页的助手读得到书架上所有的文献库。</figcaption>
+        </figure>
+
+        <p>接着写下问题：「「植物单细胞转录组」和「根毛发育」两个库里关于根毛（或根表皮细胞命运）的研究各有哪些？每个结论引一句原文作依据。」本例用的是本机网关调用的 Claude Sonnet 5.5。它先列出两个库的文献，在全文里检索「root hair」，再读了几篇的记录，不到一分半钟答完。</p>
+      </section>
+
+      <section id="s6">
+        <h2><i>6</i>出处写明来自哪个库</h2>
+        <p>回答按两个库分开写，每个结论后面是蓝色的 [P4]、[P5] 这样的标签，下面引着原句；只看了题目、没有核对原文的，它也直说「这几篇我只看了题目」。最后的小结是：两个库几乎没有交集，「根毛发育」里没有单细胞研究，「植物单细胞转录组」里也没有研究根毛的。</p>
+        <p>回答下面的出处卡片写明每一篇来自哪个库，如「P26（根毛发育）· A root-cap-specific transcri…」「P33（植物单细胞转录组）· A single-nucleus at…」，放不下的收在「另外 15 个出处」里。</p>
+
+        <figure class="shot">
+          <img src="../img/t/libraries-06-answer.jpg" width="1372" height="867" loading="lazy" alt="首页助手的对话：回答的后半部分，「2. RHD6/RSL 转录级联与营养、糖信号」下 [P4]、[P5] 各引一句英文原文，「3. 顶端生长的细胞生物学」下 [P9] 引一句，「4. 微生物、胁迫与其他」列出只看了题目的几篇；「小结」说两个库几乎没有交集。下面三排出处卡片：P1（植物单细胞转录组）、P2（植物单细胞转录组）、P33（植物单细胞转录组）、P27（根毛发育）、P26（根毛发育）、P4（根毛发育）、P5（根毛发育）、P15（根毛发育），最后是「另外 15 个出处」。">
+          <figcaption><b>图 6</b>　出处卡片上，标签后面的括号写着文献来自哪个库。</figcaption>
+        </figure>
+
+        <p>点「P26（根毛发育）」这张卡片，窗口打开「根毛发育」文献库，右边就是这一篇的详情：A root-cap-specific transcriptional network controls root hair elongation and nutrient foraging。这段对话留在首页的「最近对话」里，之后还找得到。</p>
+
+        <figure class="shot">
+          <img src="../img/t/libraries-07-source.jpg" width="1372" height="867" loading="lazy" alt="「根毛发育」文献库打开，右边是 A root-cap-specific transcriptional network controls root hair elongation and nutrient foraging 的信息页：作者、期刊 Current biology、DOI 和 PMID，状态「未读」「待判断」「有链接」，下面是摘要。">
+          <figcaption><b>图 7</b>　点出处卡片，打开那个文献库里的那一篇。</figcaption>
+        </figure>
+
+        <aside class="note warn"><b>注意</b>在首页的对话里，别的文献库是只读的：助手可以列文献、检索全文、读原文和标注，但不能加标签、改状态或导入文献；要改，请打开那个库再做。文献库里面的「助手」仍然只管自己这个库。</aside>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>回顾</h2>
+        <ul>
+          <li>一个文献库在筛选、提取、查找全文或翻译时，离开它去做别的，它在后台接着做，结果存进它自己的库。</li>
+          <li>首页的卡片和别的库侧栏底部都写着它做到哪了，点一下回到那个库；做完时窗口上方提示一句。</li>
+          <li>跨库的问题回首页问：点「问我的文献库」，或直接说「在我的文献库里找……」。</li>
+          <li>回答的出处卡片写明来自哪个库，点一下打开那个库里的那一篇；别的库在这里只读。</li>
+          <li>下一步：把筛选的建议写入，见<a href="start.html#s6">从一个课题开始</a>的「确认收录判断」。</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="上一篇和下一篇">
+    <a class="prev" href="follow.html"><small>上一篇 · 17</small><strong>跟进新文献</strong></a>
+    <a class="next" href="index.html"><small>回到</small><strong>全部教程</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>参考</h2>
+      <ol>
+        <li><a href="index.html">全部教程</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">功能详解：每个页面能做什么</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">数据与隐私：文件放在哪里，哪些数据会离开本机</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">问题与想法：Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>关于这篇教程</b>　截图来自 2026 年 11 月在 macOS 上用 v0.19.0 的一次实际操作。筛选用的是 GPT-6.1 Sol，提问用的是 Claude Sonnet 5.5，都经本机的网关调用；「根毛发育」的 30 篇是当天从 PubMed 检索的。模型每次的判断和回答不一样，你照做时数字和措辞会有出入，步骤是一样的。</p>
+      <p><b>助手可能出错</b>　它的建议和回答都要你确认；关键的数字和结论请对照原文。</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

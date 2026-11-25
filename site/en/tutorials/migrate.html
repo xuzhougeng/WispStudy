@@ -6,7 +6,7 @@
 <link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/migrate.html">
 <link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/migrate.html">
 <title>Bring in the papers you already have · Wisp Study tutorials</title>
-<meta name="description" content="Move the records in Zotero, a folder of PDFs collected over the years, a .bib from your advisor and a few DOIs into one library, then complete the records that were not recognized, find the missing full texts, shrink a PDF that is too big and get the text out of a scan. Apart from text recognition, no model is needed.">
+<meta name="description" content="Move the records in Zotero, a folder of PDFs collected over the years, a .bib from your advisor and a few DOIs into one library, then complete the records that were not recognized, find the missing full texts, shrink a PDF that is too big, get the text out of a scan and file a supplement that came in on its own under its paper. Apart from text recognition, no model is needed.">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
@@ -38,7 +38,7 @@
   <header class="doc-head">
     <p class="kicker">Tutorial 03 · Collect</p>
     <h1>Bring in the papers you already have: Zotero, PDFs and records</h1>
-    <p class="lead">The worst part of switching tools is that everything is scattered. Some of it is in Zotero, some is PDFs you saved over the years, and some is a .bib from your advisor and a few DOIs noted in a report. This tutorial moves all of it into one library, keeps one copy of each duplicate, completes the records that were not recognized and finds the missing full texts. Last, it shrinks a 90 MB PDF and gets the text out of a scan.</p>
+    <p class="lead">The worst part of switching tools is that everything is scattered. Some of it is in Zotero, some is PDFs you saved over the years, and some is a .bib from your advisor and a few DOIs noted in a report. This tutorial moves all of it into one library, keeps one copy of each duplicate, completes the records that were not recognized and finds the missing full texts. Last, it shrinks a 90 MB PDF, gets the text out of a scan and files a supplement that took a row of its own under its paper.</p>
     <dl class="facts">
       <div><dt>Scenario</dt><dd>The project has been running for a while. The papers are spread over Zotero, a PDF folder with subfolders by species, a .bib and a few DOIs.</dd></div>
       <div><dt>Needs</dt><dd>A library (it can be empty) and a computer that is online. No model is needed: apart from the text recognition in step 8 (DeepSeek OCR or a vision model), no step here goes through a model provider.</dd></div>
@@ -58,6 +58,7 @@
         <li><a href="#s6">Find the missing full texts</a></li>
         <li><a href="#s7">A PDF that is too big: compress it</a></li>
         <li><a href="#s8">A scan with no text: text recognition</a></li>
+        <li><a href="#s9">A supplement on a row of its own: file it under its paper</a></li>
         <li class="plain"><a href="#recap">Recap</a></li>
       </ol>
     </nav>
@@ -254,6 +255,43 @@
         <aside class="note warn"><b>Note</b>DeepSeek OCR sends the file out and charges by the page. On the command line the same thing is <code>wisp ocr_pdf</code>, and the assistant in the window can do it too, asking you first. The vision model works only in the window and reads at most 40 pages at a time; click again to go on with the rest.</aside>
       </section>
 
+      <section id="s9">
+        <h2><i>9</i>A supplement on a row of its own: file it under its paper</h2>
+        <p>When a whole folder is imported (step 3), a paper's Supplementary Information is often in it too. Its first page usually has no title and no DOI, so it becomes a “paper” of its own, titled with its file name, with authors and year missing, on a row apart from its main text. From v0.19.0 it can be filed under that paper as an attachment.</p>
+        <p>This example uses the maize ligular region paper (Nature Communications, 2026) that was already in the library. Its main text and its 19-page supplement belonged together; to make the situation, the supplement was first taken off: right-click attachment S1 among its unfolded files and choose “Remove attachment” (the message at the top reads “Attachment removed; file moved to removed.”). Then <code>maize-ligule-MOESM1.pdf</code> was dragged into the window on its own. It became a row of its own, “maize-ligule-MOESM1”, “Authors and year missing”, and “All papers” went from 40 to 41.</p>
+        <p>Right-click that row (or select several and right-click them together) and choose “File under another paper…”:</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/migrate-17-fileinto-menu.jpg" width="1372" height="867" loading="lazy" alt="The first row of the paper list is maize-ligule-MOESM1, Authors and year missing. The menu of a right click on it holds Open PDF, Read in a new window, View information, Ask about paper, Favorites, Mark as Unread (ticked), Mark as Skimmed, Mark as Read closely, Edit title, information and fields…, Look up by title…, Add another file…, File under another paper…, Copy title, Copy BibTeX, Show in Finder and Move to trash. All papers on the left is 41.">
+          <figcaption><b>Figure 17.</b> The supplement imported on its own takes a row. In its menu, “File under another paper…” comes right after “Add another file…”.</figcaption>
+        </figure>
+
+        <p>The dialog lists the other papers of the library, under the name of the file to be filed, <code>maize-ligule-MOESM1.pdf</code>, and a sentence on what will happen. Type <code>ligul</code> into “Find by title, author or year” and only the ligular region paper is left. Click it to choose it; only then does “File here” light up:</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/migrate-18-fileinto-dialog.jpg" width="1372" height="867" loading="lazy" alt="The “File under another paper” dialog: the file name maize-ligule-MOESM1.pdf; the text “Choose the paper it belongs to. The file becomes that paper's attachment, with its annotations, its reading position and the figures taken from it; this record moves to the trash, and restoring it from there brings the file back.”; the search box holds ligul; below it one chosen row: A single-nucleus atlas of ligular region uncovers brassinosteroid-driven cell fate transitions controlling leaf angle in maize, Wang, Qibin et al. · 2026 · Nature Communications. The buttons are Cancel and File here.">
+          <figcaption><b>Figure 18.</b> Find the paper it belongs to by title, author or year, choose it, then click “File here”.</figcaption>
+        </figure>
+
+        <p>Click “File here”. The message at the top reads “Filed 1 file under “A single-nucleus atlas of ligu…”; the record it came with is in the trash.”, followed by “Undo”. “All papers” is back at 40 and “Trash” holds 1:</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/migrate-19-filed.jpg" width="1372" height="867" loading="lazy" alt="The message at the top of the window: Filed 1 file under “A single-nucleus atlas of ligu…”; the record it came with is in the trash, with a green Undo on its right. The row of maize-ligule-MOESM1 is gone from the list; on the left All papers is 40 and Trash 1; the details on the right are those of the ligular region paper.">
+          <figcaption><b>Figure 19.</b> Once filed, the row of its own is in the trash. While the message is up, “Undo” puts the file back on that row.</figcaption>
+        </figure>
+
+        <p>“Undo” was tried on another copy of the same data: the message “Undone: the file is back with its own record.” came up, the row was back in the list and “All papers” was 41 again.</p>
+        <p>Now look at the ligular region paper: its row starts with a small arrow (a paper with only its main text has none). Click the arrow and its files are listed under it by file name, the main text first, then the attachments in the order S1, S2. Click the row of “Attachment S1” and the supplement opens in the reader on the right:</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/migrate-20-unfolded.jpg" width="1372" height="867" loading="lazy" alt="After a search for ligular the list holds only the ligular region paper, its arrow unfolded, with two rows under it: maize-ligule.pdf, Body · 11.3 MB; maize-ligule-MOESM1.pdf, Attachment S1 · 27.0 MB, this row shown as chosen. On the right the PDF tab shows the supplement: the toolbar says Attachment S1 and 1 / 19 pages, and the first page holds Supplementary Fig. 1 and Supplementary Fig. 2.">
+          <figcaption><b>Figure 20.</b> Unfold the paper's files in the list and click “Attachment S1”: the 19-page supplement opens right in the reader.</figcaption>
+        </figure>
+
+        <p>A file filed this way takes along the annotations, reading position, extracted text and cut-out figures it had on its old row (this supplement had just been imported and had none yet). Questions about this paper now hand the main text and the attachment to the assistant together, see <a href="read.html">Read one paper closely</a>.</p>
+        <aside class="note"><b>Tip</b>Filed under the wrong paper, or want it apart again later? Restore the old row from “Trash” and the file goes back to it. This was tried in the run for the Chinese version of this page: after the restore “All papers” was 41, the supplement was a row of its own again, and the arrow of the ligular region paper was gone, leaving only its main text.</aside>
+      </section>
+
       <section id="recap" class="recap">
         <h2>Recap</h2>
         <ul>
@@ -263,6 +301,7 @@
           <li>A record with only a title was completed by title into the published version in Nature Communications, not the preprint. Of 12 papers missing full text, 8 were found, and the reasons for the others are in the details.</li>
           <li>Ticking three collections moved 10 items from Zotero. The 90.9 MB Nature PDF that came with them was compressed to 12.6 MB, and the original is in <code>removed/</code>.</li>
           <li>DeepSeek OCR read the text of 27 of the 35 pages of a scan, which can now be used to ask questions.</li>
+          <li>A supplement on a row of its own became attachment S1 of the maize ligular region paper with “File under another paper…”. Its old row is in the trash, and restoring it takes the file back. Unfold the paper in the list and a click opens the supplement.</li>
           <li>Apart from text recognition, no model was used anywhere. Next you can <a href="read.html">read one of these papers closely</a>, or go back to <a href="start.html">start from a topic</a> and fill out the library with a search.</li>
         </ul>
       </section>
@@ -287,7 +326,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> Most screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface; Figures 2 and 3 still show the Chinese interface and the earlier run (Figure 2 comes from a small database made for the demo). Figures 4, 5 and 12–16 come from another run with v0.18.0, also with the English interface, on a library of 40 papers: the Zotero database was made for the demo (its items are real papers), the scan was made by drawing a preprint page by page into pictures, and text recognition used DeepSeek OCR (straight to DeepSeek, not through a model provider). The numbers in the text come from those runs and will differ with your own papers, but the steps are the same. The text uses the labels of the English interface (Settings › General › Interface language).</p>
+      <p><b>About this tutorial.</b> Most screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface; Figures 2 and 3 still show the Chinese interface and the earlier run (Figure 2 comes from a small database made for the demo). Figures 4, 5 and 12–16 come from another run with v0.18.0, also with the English interface, on a library of 40 papers: the Zotero database was made for the demo (its items are real papers), the scan was made by drawing a preprint page by page into pictures, and text recognition used DeepSeek OCR (straight to DeepSeek, not through a model provider). Figures 17–20 come from a run on November 24, 2026 with v0.19.0, with the English interface, on the same library of 40 papers (renamed “Plant single-cell transcriptomics” for the English run); no model was used. The numbers in the text come from those runs and will differ with your own papers, but the steps are the same. The text uses the labels of the English interface (Settings › General › Interface language).</p>
       <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation. Check key numbers and conclusions against the original text.</p>
     </div>
   </div>

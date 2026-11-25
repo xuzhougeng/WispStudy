@@ -6,7 +6,7 @@
 <link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/migrate.html">
 <link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/migrate.html">
 <title>把已有的文献搬进来 · Wisp Study 教程</title>
-<meta name="description" content="把 Zotero 里的记录、攒了几年的 PDF 文件夹、导师发来的 .bib 和几个 DOI 搬进同一个文献库，再补齐没认出的题录，找回缺的全文，把过大的 PDF 压小，让扫描件读出文字。除了文字识别，全程不需要模型。">
+<meta name="description" content="把 Zotero 里的记录、攒了几年的 PDF 文件夹、导师发来的 .bib 和几个 DOI 搬进同一个文献库，再补齐没认出的题录，找回缺的全文，把过大的 PDF 压小，让扫描件读出文字，再把单独成行的补充材料归到它的文章名下。除了文字识别，全程不需要模型。">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
@@ -38,7 +38,7 @@
   <header class="doc-head">
     <p class="kicker">教程 03　·　收集</p>
     <h1>把已有的文献搬进来：Zotero、PDF 与题录</h1>
-    <p class="lead">换工具时最怕的是东西散在几处：一部分在 Zotero 里，一部分是这几年随手存下的 PDF，还有导师发来的 .bib 和报告上记下的几个 DOI。这一篇把它们搬进同一个文献库，重复的只留一份，再把没认出来的题录补齐，把缺的全文找回来；最后把一个 90 MB 的 PDF 压小，让一份扫描件读出文字。</p>
+    <p class="lead">换工具时最怕的是东西散在几处：一部分在 Zotero 里，一部分是这几年随手存下的 PDF，还有导师发来的 .bib 和报告上记下的几个 DOI。这一篇把它们搬进同一个文献库，重复的只留一份，再把没认出来的题录补齐，把缺的全文找回来；最后把一个 90 MB 的 PDF 压小，让一份扫描件读出文字，再把单独占了一行的补充材料归到它的文章名下。</p>
     <dl class="facts">
       <div><dt>场景</dt><dd>课题已经做了一阵，文献散在 Zotero、一个按物种分了子文件夹的 PDF 文件夹、一份 .bib 和几个 DOI 里。</dd></div>
       <div><dt>需要</dt><dd>一个文献库（可以是空的）和能上网的电脑。不需要模型：除了第 8 步的文字识别（DeepSeek OCR 或一个看图模型），每一步都不经过模型服务。</dd></div>
@@ -58,6 +58,7 @@
         <li><a href="#s6">找回缺的全文</a></li>
         <li><a href="#s7">太大的 PDF：压缩</a></li>
         <li><a href="#s8">读不出文字的扫描件：文字识别</a></li>
+        <li><a href="#s9">补充材料各占一行：归入已有文献</a></li>
         <li class="plain"><a href="#recap">回顾</a></li>
       </ol>
     </nav>
@@ -254,6 +255,43 @@
         <aside class="note warn"><b>注意</b>DeepSeek OCR 要把文件传出去，还按页收费。命令行里同一件事是 <code>wisp ocr_pdf</code>，窗口里的助手也能做，用之前会先问你；看图模型只在窗口里能用，一次最多读 40 页，剩下的再点一次接着读。</aside>
       </section>
 
+      <section id="s9">
+        <h2><i>9</i>补充材料各占一行：归入已有文献</h2>
+        <p>整个文件夹导入时（第 3 步），文章的补充材料（Supplementary Information）往往也在里面。它第一页通常没有题目和 DOI，于是自己成了一篇“文献”，题目是文件名，作者、年份待补，和它的正文分在两行。v0.19.0 起，可以把它归到正文那篇名下，当作附件。</p>
+        <p>本例用库里原有的玉米叶舌区那篇（Nature Communications，2026）演示。它的正文和 19 页的补充材料本来在一起；为了做出这种情况，先在它展开的文件里右键附件 S1，选「移除附件」（窗口顶上提示「附件已移除（文件移到了 removed 文件夹）。」），再把 <code>maize-ligule-MOESM1.pdf</code> 单独拖进窗口导入。它果然成了单独的一行「maize-ligule-MOESM1」，「作者、年份待补」，「全部文献」从 40 变成 41。</p>
+        <p>右键这一行（也可以先选中几条，一起右键），选「归入已有文献…」：</p>
+
+        <figure class="shot">
+          <img src="../img/t/migrate-17-fileinto-menu.jpg" width="1372" height="867" loading="lazy" alt="文献列表第一行是 maize-ligule-MOESM1，作者、年份待补，全文是已存 PDF；在它上面右键弹出的菜单有打开 PDF、在新窗口中阅读、查看信息、就这篇提问、收藏、标为未读、标为已浏览、标为已精读、编辑题目、信息与词条…、按题目补全…、再添加一个文件…、归入已有文献…、复制题目、复制 BibTeX、在访达中显示、移到回收站。左侧「全部文献」是 41。">
+          <figcaption><b>图 17</b>　单独导入的补充材料占了一行。右键菜单里，「再添加一个文件…」下面就是「归入已有文献…」。</figcaption>
+        </figure>
+
+        <p>弹出的对话框列出库里其余的文献，上面写着要归的文件 <code>maize-ligule-MOESM1.pdf</code> 和会发生什么。在「按题目、作者、年份查找」里输入 <code>ligul</code>，只剩叶舌区那篇。点它选中，「归入」按钮才亮起来：</p>
+
+        <figure class="shot">
+          <img src="../img/t/migrate-18-fileinto-dialog.jpg" width="1372" height="867" loading="lazy" alt="「归入已有文献」对话框：文件名 maize-ligule-MOESM1.pdf；说明「选它所属的文献。文件成为那篇文献的附件，标注、读到的位置和取出的图片都跟着；原来的这一条移到回收站，从回收站恢复时文件也回来。」；查找框里是 ligul；下面一行已选中：A single-nucleus atlas of ligular region uncovers brassinosteroid-driven cell fate transitions controlling leaf angle in maize，Wang, Qibin 等 · 2026 · Nature Communications；按钮是取消和归入。">
+          <figcaption><b>图 18</b>　按题目、作者或年份找到它所属的文章，选中，再点「归入」。</figcaption>
+        </figure>
+
+        <p>点「归入」，窗口顶上提示「已把 1 个文件归入「A single-nucleus atlas of ligu…」，原来的那条在回收站里。」，后面是「撤销」。「全部文献」回到 40，「回收站」里多了 1 条：</p>
+
+        <figure class="shot">
+          <img src="../img/t/migrate-19-filed.jpg" width="1372" height="867" loading="lazy" alt="窗口顶部的提示：已把 1 个文件归入「A single-nucleus atlas of ligu…」，原来的那条在回收站里，右边是绿色的「撤销」。列表里 maize-ligule-MOESM1 那一行不见了，左侧全部文献 40，回收站 1；右边详情是叶舌区那篇文献。">
+          <figcaption><b>图 19</b>　归入之后，单独的那一行进了回收站。提示还在的时候点「撤销」，文件回到原来那一条上。</figcaption>
+        </figure>
+
+        <p>在另一份同样准备好的数据里试了「撤销」：提示「已撤销：文件回到了原来的条目上。」，那一行回到列表，「全部文献」又是 41。</p>
+        <p>再看叶舌区那篇：行首多了一个小箭头（只有正文的文章没有）。点箭头，下面按文件名列出它的文件，正文在前，附件按 S1、S2 排。点「附件 S1」那一行，补充材料就在右边的阅读器里打开：</p>
+
+        <figure class="shot">
+          <img src="../img/t/migrate-20-unfolded.jpg" width="1372" height="867" loading="lazy" alt="搜索 ligular 后列表里只有叶舌区那篇，行首箭头已展开，下面两行：maize-ligule.pdf，正文 · 11.3 MB；maize-ligule-MOESM1.pdf，附件 S1 · 27.0 MB，这一行是选中的样子。右边 PDF 标签页打开的是补充材料：工具栏左边写着附件 S1，1 / 19 页，第一页是 Supplementary Fig. 1 和 Supplementary Fig. 2。">
+          <figcaption><b>图 20</b>　在列表里展开这篇的文件，点「附件 S1」，19 页的补充材料直接在阅读器里打开。</figcaption>
+        </figure>
+
+        <p>归进来的文件带着它在原来那一条上的标注、读到的位置、读出的文字和从它截的图（本例的补充材料刚导入，还没有这些）。之后就这篇提问，正文和附件一起交给助手，见<a href="read.html">精读一篇文献</a>。</p>
+        <aside class="note"><b>提示</b>归错了，或者过后想拆开：在「回收站」里恢复原来那一条，文件就回到它名下。本例试过：恢复之后「全部文献」是 41，补充材料又是单独的一行，叶舌区那篇行首的箭头没有了，只剩正文。</aside>
+      </section>
+
       <section id="recap" class="recap">
         <h2>回顾</h2>
         <ul>
@@ -263,6 +301,7 @@
           <li>没认出 DOI 的补充材料，按题目补全成了 New Phytologist 上的正式版本；9 篇缺全文的找回 2 篇，其余的原因写在明细里。</li>
           <li>只勾三个分类从 Zotero 搬了 10 条；带来的 90.9 MB 的 Nature 压缩成 12.6 MB，原文件在 <code>removed/</code> 里。</li>
           <li>35 页的扫描件用 DeepSeek OCR 读出了 34 页的文字，可以拿来提问了。</li>
+          <li>单独成行的补充材料用「归入已有文献…」成了玉米叶舌区那篇的附件 S1，原来那一条在回收站里，恢复它文件就回去；在列表里展开那篇，点一下就能读。</li>
           <li>除了文字识别，整个过程没有用到模型。接下来可以<a href="read.html">精读其中一篇</a>，或者回到<a href="start.html">从一个课题开始</a>，用检索把库补全。</li>
         </ul>
       </section>
@@ -287,7 +326,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>关于这篇教程</b>　截图和数字来自 2026 年 11 月在 macOS 上用 v0.10.0 的一次实际操作；图 2 是 v0.17.0 上的操作。图 4、图 5 和图 12–16 是 2026 年 11 月 23 日在 v0.18.0 上的另一次操作：库里原有 40 篇文献，Zotero 数据库是为演示做的（条目是真实的论文），扫描件是把一份预印本逐页画成图片做成的，文字识别用的是 DeepSeek OCR（直接连 DeepSeek，没有经过模型服务）。模型每次的回答不一样，你照做时措辞和数字会有出入，步骤是一样的。</p>
+      <p><b>关于这篇教程</b>　截图和数字来自 2026 年 11 月在 macOS 上用 v0.10.0 的一次实际操作；图 2 是 v0.17.0 上的操作。图 4、图 5 和图 12–16 是 2026 年 11 月 23 日在 v0.18.0 上的另一次操作：库里原有 40 篇文献，Zotero 数据库是为演示做的（条目是真实的论文），扫描件是把一份预印本逐页画成图片做成的，文字识别用的是 DeepSeek OCR（直接连 DeepSeek，没有经过模型服务）。图 17–20 是 2026 年 11 月 24 日在 v0.19.0 上的操作，用的是同样 40 篇的文献库，没有用到模型。模型每次的回答不一样，你照做时措辞和数字会有出入，步骤是一样的。</p>
       <p><b>助手可能出错</b>　它的建议和回答都要你确认；关键的数字和结论请对照原文。</p>
     </div>
   </div>

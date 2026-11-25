@@ -157,6 +157,19 @@
           <li>它引用时摘的原句，在文献里找得到的都记成了出处，这一段的 11 处引用在参考文献页都能点开核对。</li>
         </ul>
         <p>新段落每句话后面引用各自分开写，例如 <code>[@Liu2024] [@TenorioBerrio2025]</code>，投稿前可以合并。「Maize datasets encompass roots and leaves」引的 <code>[@Wang2026c]</code> 是一篇比较制样方法的文献，并不是图谱，这类地方仍要对照出处看一遍。</p>
+        <h3>v0.19.0：先看别人怎么写，再用自己的话写</h3>
+        <p>v0.19.0 改了助手写的方式：动笔前，它先看文献库里的论文在同一部分（这里是导言）是怎么写的，照它们的组织来写，句子自己写；写完后，每句话都和它所引文献的摘要、全文逐字比对，有连续八个英文词或十六个汉字以上一字不差的，就让它改成自己的话（加了引号的直接引语不算）。</p>
+        <p>为了看这一步，在 v0.19.0 上另开了一份同名稿件，用演示库「植物单细胞转录组」（40 篇文献，只有那篇玉米叶舌区的论文带全文，其余只有摘要），在 Introduction 写下同样意思的三段中文，切到「助手写」，交代同一句话。不到一分钟，它在第一段后面写进了一段英文，按器官分组，引了 9 篇。</p>
+        <p>对话里它的几步收成一行灰字「读取稿件 · 查找候选句 · 写稿件」，点一下展开：</p>
+        <ul>
+          <li>「查找候选句：en · introduction · limit 10」，后面是「3 句」：动笔前，它在库里论文的导言部分找了英文的句子，看别人在这一部分怎么写。</li>
+          <li>「写稿件：… · 1 处」，后面是「已写入「Introduction」」。比对发现有照抄的句子时，这一行会写明有几句和所引文献的原文大段相同，并让助手改写；这次只写着「已写入」，比对没有找到照抄的句子。</li>
+        </ul>
+        <figure class="shot">
+          <img src="../img/t/write-16-own-words.jpg" width="1372" height="867" loading="lazy" alt="助手写：中间对话里，交代下面是展开的三行工具调用：读取稿件 读了 1 节；查找候选句 en · introduction · limit 10，3 句；写稿件 1 处，已写入「Introduction」。下面是助手的回答，按根、叶、生殖器官、其他列出这一段写了哪些图谱和引了哪几篇，最后有三点说明。右边稿件第一段中文之后是新写的英文段落，带绿色的引用。">
+          <figcaption><b>图 10</b>　v0.19.0：展开的工具行里，「查找候选句」是它先看库里论文的导言怎么写；「写稿件」后面只写着「已写入「Introduction」」，没有照抄的句子。</figcaption>
+        </figure>
+        <p>回答的最后它交代了三件事：稿件的其他段是中文、新段是英文，问要不要把另外两段也译成英文；库里没有拟南芥根、叶的经典图谱，这一段只覆盖库里有的文献；库里只有那篇玉米论文的导言有可参照的句子，所以这一段的组织方式是它自己定的。这样的说明值得读：库里全文少的时候，「照别人的写法」能参照的就少。</p>
       </section>
 
       <section id="s7">
@@ -166,14 +179,14 @@
 
         <figure class="shot">
           <img src="../img/t/write-10-library.jpg" width="1372" height="867" loading="lazy" alt="「资料库」对话框：上面是搜索框和「上传图片」按钮，下面一排筛选：全部 2、我上传的 1、文献里收藏的 1；两张卡片：workflow.png（标着刚上传、我上传的）和 Fig. 1（Zhang, Yanxia 等 2023 · Root bran…）；底部写着「点一张图，把它放进稿件光标所在的段落后面 · 图片文件可以拖进来，也可以粘贴」和「关闭」；顶上提示「已放进资料库 1 张，点一下放进稿件。」">
-          <figcaption><b>图 10</b>　资料库里是自己上传的图和图片库里收藏的图。点一张，放进稿件。</figcaption>
+          <figcaption><b>图 11</b>　资料库里是自己上传的图和图片库里收藏的图。点一张，放进稿件。</figcaption>
         </figure>
 
         <p>点「Fig. 1」，它放进正在写的这一节，在光标所在段落的后面单独占一段：稿件里直接看到这张图，图注在它下面。出自文献的图，图注末尾自动带上那篇文献的引用。图片文件也可以直接拖到稿件上，或在稿件里粘贴，它会收进资料库并放在光标处。</p>
 
         <figure class="shot">
           <img src="../img/t/write-11-figure.jpg" width="1372" height="867" loading="lazy" alt="写作页的 Results 一节：第一段是「盐胁迫下野生型和 lbd16 突变体的出土侧根密度都会下降，但突变体降得更多 (Zhang et al., 2023)。」，下面是放进来的图 1，图下是图注「Fig. 1 Identification of LBD16 as a mediator for LR development in response to salinity (Zhang et al., 2023).」；左边大纲底部「资料库 1」「参考文献 1」。">
-          <figcaption><b>图 11</b>　放进稿件的图，图注下带着引用。大纲底部「资料库」旁的 1 是这份稿件用了几张图。</figcaption>
+          <figcaption><b>图 12</b>　放进稿件的图，图注下带着引用。大纲底部「资料库」旁的 1 是这份稿件用了几张图。</figcaption>
         </figure>
 
         <p>图在稿件的文字里是一行 Markdown，<code>![图注](figures/….png)</code>，光标移到这一行时能看到、能改；删掉这一行，图就从稿件里去掉，图片仍在资料库里。</p>
@@ -202,7 +215,7 @@
 
         <figure class="shot">
           <img src="../img/t/write-13-table.jpg" width="1372" height="867" loading="lazy" alt="写作页，Methods 一节：小标题「与玉米叶舌区图谱的取样对照」加粗；一段中文，句中引用显示为绿色的 (Wang et al., 2026)；「表 1　玉米叶舌区图谱各阶段的取样」；下面是六行带竖线的文字，第二行是 |:--|:-:|--:|。右边是候选句面板，稿件下方是一排按钮和「让助手改这一节」的输入框。">
-          <figcaption><b>图 13</b>　编辑时，表格是几行带竖线的字。</figcaption>
+          <figcaption><b>图 14</b>　编辑时，表格是几行带竖线的字。</figcaption>
         </figure>
 
         <p>点稿件上方的眼睛图标「预览」（悬停时写着「预览：看排好版的全文，Markdown 照它写的样子画出来」），整份稿件按读者读到的样子排出来，再点一下回到编辑：</p>
@@ -215,7 +228,7 @@
 
         <figure class="shot">
           <img src="../img/t/write-14-preview.jpg" width="1372" height="867" loading="lazy" alt="写作页的预览：Methods 一节下是加粗的小标题、带 (Wang et al., 2026) 的段落、表 1 的标题和一张四列五行的表格（阶段、取样部位、细胞或细胞核数）；下面是没写的 Results 和 Discussion，各写着这一节还没有写；最后是「参考文献 1 篇」，一条完整的 APA 式条目：Wang, Q., Yang, H., … Li, G. (2026). A single-nucleus atlas of ligular region uncovers brassinosteroid-driven cell fate transitions controlling leaf angle in maize. Nature Communications, 17(1), 10762. 和 DOI。">
-          <figcaption><b>图 14</b>　「预览」：表格画成表格，引用和文末的参考文献按导出的格式排。</figcaption>
+          <figcaption><b>图 15</b>　「预览」：表格画成表格，引用和文末的参考文献按导出的格式排。</figcaption>
         </figure>
 
         <p>预览里三列都是靠左的：冒号写的对齐，要到导出的 Word 里才用上。表的编号「表 1」是写在表上方的一段普通文字，加粗是 <code>**</code> 写的。</p>
@@ -228,7 +241,7 @@
 
         <figure class="shot">
           <img src="../img/t/write-12-export.jpg" width="1372" height="867" loading="lazy" alt="「导出」菜单：Markdown (.md)、Word (.docx)、复制全文；分隔线下是「Word 里的引用：作者-年份 (Zhang et al., 20…」（打勾）、「Word 里的引用：编号 [1]」、APA Style 7th edition、Nature、Cell、NLM/Vancouver: Citing Medicine 2nd editi…、IEEE Reference Guide version 11.29.2023、两项 China National Standard GB/T 7714-2015、Chicago Manual of Style 18th edition (auth…；最后是「添加引用样式文件（Zotero 的 .csl）…」。">
-          <figcaption><b>图 12</b>　v0.17.0 的「导出」菜单（第 7 节的演示稿件）。下半部分选 Word 里的引用格式。</figcaption>
+          <figcaption><b>图 13</b>　v0.17.0 的「导出」菜单（第 7 节的演示稿件）。下半部分选 Word 里的引用格式。</figcaption>
         </figure>
 
         <p>导出的 Word 文件按选中的格式写引用，文末列出参考文献：第 7 节那份演示稿件导出后，正文里是 <code>(Zhang et al., 2023)</code>，图注里的引用也一样，文末是 References 下的一条完整条目。正文里的引用是 Word 的域，链到文末对应的那一条。放进稿件的图嵌在 Word 文件里，图在上、图注在下。</p>
@@ -236,7 +249,7 @@
 
         <figure class="shot">
           <img src="../img/t/write-15-word.jpg" width="932" height="1017" loading="lazy" alt="导出的 Word 文件第一页（用 LibreOffice 打开）：题目「水稻叶枕发育的单细胞核转录组图谱」，Methods，斜体的小标题，带 (Wang et al., 2026) 的段落，「表 1　玉米叶舌区图谱各阶段的取样」，下面是一张细线表格：表头阶段、取样部位、细胞或细胞核数加粗，取样部位一列居中，数字一列靠右；最后是 References 和一条完整条目。">
-          <figcaption><b>图 15</b>　导出的 Word 文件：表格是 Word 的表格，对齐照第二行的冒号。没写的节没有导出。</figcaption>
+          <figcaption><b>图 16</b>　导出的 Word 文件：表格是 Word 的表格，对齐照第二行的冒号。没写的节没有导出。</figcaption>
         </figure>
 
         <p>Markdown 里引用仍是 <code>[@Zhang2023]</code> 这样的原样文字，图片复制到 .md 文件旁边的 <code>figures</code> 文件夹；要排成正式的引文格式，在参考文献页切到「全文」点「导出 BibTeX」，把 .md、.bib 和 <code>figures</code> 一起交给 Pandoc。</p>
@@ -249,7 +262,7 @@
           <li>用中文写下意思，候选句给出文献库里别人在同一部分的写法，「引用」把一句原文记成出处。</li>
           <li>「配引用」逐句找出可引的文献，附理由和原句；它会漏选，没勾的句子要自己再看。</li>
           <li>参考文献页的星形按钮为没有出处的引用补上依据，找不到依据的用提醒色标出。</li>
-          <li>「助手写」把查文献和成段的活交出去，每处改动可撤销，每节留有版本。</li>
+          <li>「助手写」把查文献和成段的活交出去，每处改动可撤销，每节留有版本；它先看库里论文在同一部分怎么写，写完逐句和所引文献比对，大段照抄的会在工具行写明并让它改写。</li>
           <li>「资料库」里上传自己的图、找图片库里收藏的图，点一下放进稿件；Word 里图嵌在文件中，Markdown 的图在旁边的 <code>figures</code> 文件夹。</li>
           <li>表格用竖线写在正文里，第二行的冒号定各列对齐；「预览」把表格、引用和文末参考文献按导出的样子排出来。</li>
           <li>稿件里的引用按「导出」菜单选的格式显示，导出的 Word 文件按它写引用并列出参考文献，表格是 Word 里真正的表格。</li>
@@ -261,7 +274,7 @@
 
   <nav class="pager" aria-label="上一篇和下一篇">
     <a class="prev" href="review.html"><small>上一篇 · 13</small><strong>分阶段写一篇综述</strong></a>
-    <a class="next" href="revise.html"><small>下一篇 · 15</small><strong>和合作者改稿</strong></a>
+    <a class="next" href="compare-writing.html"><small>下一篇 · 15</small><strong>直接写与在 Wisp Study 里写</strong></a>
   </nav>
 </main>
 
@@ -277,7 +290,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>关于这篇教程</b>　截图和数字来自 2026 年 11 月在 macOS 上用 v0.10.0 的一次实际操作；图 4、第 7 节和图 12 是 v0.17.0 上一份演示稿件的操作；第 8 节和图 15 是 2026 年 11 月 23 日在 v0.18.0 上新建的一份演示稿件，没有用到模型，图 15 是用 LibreOffice 打开导出的 Word 文件截的。模型每次的回答不一样，你照做时措辞和数字会有出入，步骤是一样的。</p>
+      <p><b>关于这篇教程</b>　截图和数字来自 2026 年 11 月在 macOS 上用 v0.10.0 的一次实际操作；图 4、第 7 节和图 13 是 v0.17.0 上一份演示稿件的操作；第 8 节和图 16 是 2026 年 11 月 23 日在 v0.18.0 上新建的一份演示稿件，没有用到模型，图 16 是用 LibreOffice 打开导出的 Word 文件截的；图 10 是 2026 年 11 月 24 日在 v0.19.0 上另开的一份稿件，用演示库「植物单细胞转录组」，模型是 Claude Sonnet 5.5，经本机的网关调用。模型每次的回答不一样，你照做时措辞和数字会有出入，步骤是一样的。</p>
       <p><b>助手可能出错</b>　它的建议和回答都要你确认；关键的数字和结论请对照原文。</p>
     </div>
   </div>

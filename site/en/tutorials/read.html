@@ -6,7 +6,7 @@
 <link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/read.html">
 <link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/read.html">
 <title>Read one paper closely · Wisp Study tutorials</title>
-<meta name="description" content="Read one paper from start to finish: read the abstract and paragraphs next to a translation, highlight and underline, ask the assistant about this paper and check where its answer comes from, save an answer as a note, and cut the key figures into the Figures page. Click a figure number in the text to see the figure, write text boxes on the page, and read in columns: a free split, original · translation · original, and a label for each column.">
+<meta name="description" content="Read one paper from start to finish: read the abstract and paragraphs next to a translation, highlight and underline, ask the assistant about this paper and check where its answer comes from, save an answer as a note, and cut the key figures into the Figures page. Click a figure number in the text to see the figure, write text boxes on the page, and read in columns: a free split, original · translation · original, and a label for each column. Get around a long paper with the scrollbar, a page number, all pages at a glance and two pages across, and undo a change to an annotation.">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
@@ -38,7 +38,7 @@
   <header class="doc-head">
     <p class="kicker">Tutorial 05 · Read</p>
     <h1>Read one paper closely: read, mark, ask, note</h1>
-    <p class="lead">Next week it is your turn to present a paper at the lab meeting, so you need to understand this one thoroughly. This tutorial reads it from start to finish in Wisp Study: the abstract and the hard paragraphs next to a translation, highlights and underlines as you go, questions to the assistant about this paper wherever you are stuck with a check of the sentences it quotes, good answers saved as notes, and the figures you will present cut into the Figures page. The last two sections go back to the same paper, to try clicking a figure number in the text to see the figure, finding the text again from a figure, and writing text boxes on the page. The last section goes back to the split: one half widened and zoomed on its own, then three columns of original · translation · original.</p>
+    <p class="lead">Next week it is your turn to present a paper at the lab meeting, so you need to understand this one thoroughly. This tutorial reads it from start to finish in Wisp Study: the abstract and the hard paragraphs next to a translation, highlights and underlines as you go, questions to the assistant about this paper wherever you are stuck with a check of the sentences it quotes, good answers saved as notes, and the figures you will present cut into the Figures page. The last two sections go back to the same paper, to try clicking a figure number in the text to see the figure, finding the text again from a figure, and writing text boxes on the page. Section 9 goes back to the split: one half widened and zoomed on its own, then three columns of original · translation · original. The last section gets around the 17 pages: the scrollbar, a jump to a page, all pages at a glance, two pages across, and an undo of a highlight removed by mistake.</p>
     <dl class="facts">
       <div><dt>Scenario</dt><dd>Close reading of a paper on cell-type-specific immune programs in the Arabidopsis leaf epidermis, in preparation for a lab meeting.</dd></div>
       <div><dt>Needs</dt><dd>A paper with its PDF, and a model provider set up in “Settings › AI”.</dd></div>
@@ -59,6 +59,7 @@
         <li><a href="#s7">See figures as you read: click a figure number in the text</a></li>
         <li><a href="#s8">Write on the page: text boxes and boxes</a></li>
         <li><a href="#s9">Read in columns: a free split, three columns, and each column's label</a></li>
+        <li><a href="#s10">Get around a long paper, and take marks back</a></li>
         <li class="plain"><a href="#recap">Recap</a></li>
       </ol>
     </nav>
@@ -299,6 +300,58 @@
         <aside class="note"><b>Tip</b>In this run the two halves of a “Free” split had no labels at their top left (see Figure 18); a “Fixed” split and three columns have them. Three columns are always equally wide: to drag the line and zoom each half on its own, close one column to get back to two halves.</aside>
       </section>
 
+      <section id="s10">
+        <h2><i>10</i>Get around a long paper, and take marks back</h2>
+        <p>With 17 pages, getting from the introduction to the methods by the scroll wheel alone takes a while. v0.19.0 added several ways of getting around a PDF, and annotations can now be undone. Like section 9, this section was taken in its own run on the maize paper, A single-nucleus atlas of ligular region uncovers brassinosteroid-driven cell fate transitions controlling leaf angle in maize, in reading mode.</p>
+
+        <h3>The scrollbar: the page you drag to, written beside it</h3>
+        <p>A thin scrollbar runs down the right edge of the reading area, and where its thumb sits is where you are in the whole paper. Hold the thumb and drag it down, and a small tag beside it says which page you have reached. In this example it was dragged to “6 / 17 pages”, with the page stopped at the caption of Fig. 2 at the top of page 6. The page number in the toolbar changes to “6 / 17 pages” with it. Let go and the tag goes away.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/read-22-scrollbar.jpg" width="1372" height="867" loading="lazy" alt="Page 6 in reading mode: the caption of Fig. 2 at the top, the start of the sections Comparative snRNA-seq analysis and BR promotes LA expansion below. Beside the thumb of the scrollbar at the right is a small tag “6 / 17 pages”, and the toolbar also reads “6 / 17 pages”.">
+          <figcaption><b>Figure 22.</b> While the thumb is held and dragged, the tag beside it gives the page. This picture was taken with the button still held.</figcaption>
+        </figure>
+
+        <h3>Go to a page</h3>
+        <p>When you know where you are going, it is quicker still. The page number in the toolbar, “6 / 17 pages”, is a button, with the hover tip “Go to page…”. Click it and “Go to page” opens. Type <code>12</code> (“of 17” is written beside the box) and click “Go”: the view is on page 12, and the number reads “12 / 17 pages”.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/read-23-gotopage.jpg" width="1372" height="867" loading="lazy" alt="The page is dimmed, and in the middle is the dialog “Go to page”: 12 in the box, “of 17” beside it, and “Cancel” and a green “Go” at the bottom right. The toolbar reads “6 / 17 pages”.">
+          <figcaption><b>Figure 23.</b> Click the page number in the toolbar and type the page to go to.</figcaption>
+        </figure>
+
+        <h3>All pages: the 17 pages at a glance</h3>
+        <p>The four-square icon left of the page number (hover tip “All pages”) lays out every page of the PDF small. In this window that was eight to a row, three rows in all. Page 12, the one being read, has a green ring, and which pages are large figures and which are references can be told at a glance. Click the thumbnail of page 7 and you are back to reading, on page 7. If you do not want to move, press <kbd>Esc</kbd> to return to the page you were on.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/read-24-overview.jpg" width="1372" height="867" loading="lazy" alt="All pages: 17 thumbnails in three rows of eight, each with its page number below; page 12 has a green ring. The four-square icon in the toolbar is green, followed by “12 / 17 pages”.">
+          <figcaption><b>Figure 24.</b> “All pages”. Page 12, the one being read, has a green ring; click any page to go there.</figcaption>
+        </figure>
+
+        <h3>Two pages across, like an open book</h3>
+        <p>Page 7 is all panels of Fig. 3, while its caption sits at the top of page 8, so the two are worth seeing side by side. Click the split icon in the toolbar (“Split”): the menu has a new item, “Two pages across: the next page in a column beside”. Choose it, and a column opens to the right of the original, labelled “Next page” at its top left and showing page 8; the column on the left is labelled “Original”. Then choose “Fit page” in the zoom menu (here “Fit page · 69%”), and one screen holds the open pair: the figure of page 7 on the left, the caption and text of page 8 on the right.</p>
+        <p>Scroll the left column down and the right one follows, always a page ahead: after some scrolling in this example, the left column showed the foot of page 7 and the top of page 8, the right column the foot of page 8 and the top of page 9. In the “Split” menu, both “Side by side” and “Two pages across” are now ticked; click “Two pages across” again to go back to one page.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/read-25-next.jpg" width="1372" height="867" loading="lazy" alt="Two columns in reading mode: the left one, labelled “Original”, is page 7 with panels a to l of Fig. 3; the right one, labelled “Next page”, is page 8 with the caption of Fig. 3 at the top and then the text and the Discussion. The toolbar shows “7 / 17 pages”, “Fit page · 69%” and the split icon in green.">
+          <figcaption><b>Figure 25.</b> “Two pages across” with “Fit page”: Fig. 3 on page 7 and its caption on page 8 on one screen.</figcaption>
+        </figure>
+
+        <p>“Next page” is a column, not a mode of its own. Click its label and the menu has “Show original”, “Show the next page” (ticked), “Show translation”, “Show the mind map”, “Move left” and “Close this column”, as with the labels of section 9.</p>
+
+        <h3>Undo for annotations, and red and orange highlights</h3>
+        <p>Back on page 2, select the sentence on the four stages (from “Ligular region development progresses through four sequential stages” to “stage”) and click “Highlight”; it is yellow. Click the highlight once, and its color menu has seven dots: v0.19.0 added red and orange after yellow, green, blue, pink and purple. In this example it was set to red.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/read-26-colours.jpg" width="1372" height="867" loading="lazy" alt="In the left column of page 2 the sentence on the four stages is highlighted in red, and a small menu floats over it: seven color dots, yellow, green, blue, pink, purple, red and orange, the red one ringed, then “Remove highlight”. The top right reads “Annotations (1)”.">
+          <figcaption><b>Figure 26.</b> The color menu of a highlight, now with red and orange. The highlight is red, so the red dot is ringed.</figcaption>
+        </figure>
+
+        <p>Click it again and click “Remove highlight”: the sentence is plain again and the top right reads “Annotations (0)”. Now press <kbd>⌘</kbd> + <kbd>Z</kbd> (<kbd>Ctrl</kbd> + <kbd>Z</kbd> on Windows): the highlight comes back where it was, still red, and the count is “Annotations (1)” again. Press it once more and what is undone is the change of color, so the highlight is yellow again. <kbd>⌘</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd> redoes it, and it is red once more.</p>
+
+        <aside class="note"><b>Tip</b>Underlines, boxes, sticky notes, text boxes and screenshot marks can be undone the same way, and so can changes to a note, a text, a position or a size; this example only tried a highlight. According to the feature list, each PDF keeps its own history, so an undo only changes the file in front of you; the history lasts while the library is open and is cleared when it closes; and while you type in a text field, <kbd>⌘</kbd> + <kbd>Z</kbd> undoes the typing there.</aside>
+      </section>
+
       <section id="recap" class="recap">
         <h2>Recap</h2>
         <ul>
@@ -309,6 +362,7 @@
           <li>Clicking a figure number in the text shows the figure and its caption. “Pin beside” puts it in the other half, and after “Go to figure” you use “Back to where you were” to return. A supplementary figure number points to the supplementary material attached to this paper, and “Related text” shows which paragraphs of the text mention a figure.</li>
           <li>“Text box” writes on the page, and text boxes and boxes both have eight handles for resizing.</li>
           <li>Switch the split to “Free” to drag the line between the halves (a double click evens them) and zoom a chosen half on its own. “Translation” while the view is split gives three columns, original · translation · original, the right one scrolled on its own. Each column's label at its top left changes what the column shows, moves it or closes it; dragging a label swaps columns too, and a translation follows the original right next to it.</li>
+          <li>Dragging the scrollbar shows the page beside it, the page number jumps to a page, and “All pages” shows every page at once; “Two pages across” with “Fit page” reads like an open book; <kbd>⌘</kbd> + <kbd>Z</kbd> undoes a change to an annotation, bringing a removed highlight back as it was, and highlights have red and orange too.</li>
           <li>Next: widen the questions to the whole library, see <a href="ask.html">Ask the whole library, and check the answers</a>. To read the key information of a batch of papers into a table, see <a href="extract.html">Read a batch of papers into one table</a>.</li>
         </ul>
       </section>
@@ -333,7 +387,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> A model answers differently each time, so wording and numbers will differ when you follow along, but the steps are the same. Most screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface and a stand-in model that answers by fixed rules; Figure 15 still shows the Chinese interface and the earlier run. Figures 18 to 21 are from a separate v0.18.0 run with the English interface, on the maize ligular region paper, with a real model (codex/gpt-6-luna, called through a local gateway) for the translation.</p>
+      <p><b>About this tutorial.</b> A model answers differently each time, so wording and numbers will differ when you follow along, but the steps are the same. Most screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface and a stand-in model that answers by fixed rules; Figure 15 still shows the Chinese interface and the earlier run. Figures 18 to 21 are from a separate v0.18.0 run with the English interface, on the maize ligular region paper, with a real model (codex/gpt-6-luna, called through a local gateway) for the translation. Figures 22 to 26 were taken in November 2026 with v0.19.0 and the English interface, on the same maize paper; that section used no model.</p>
       <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation. Check key numbers and conclusions against the original text.</p>
     </div>
   </div>
