@@ -110,6 +110,8 @@ const PHRASES: &[(&str, &str)] = &[
     ("{} 迟迟没有答完，没有再等", "{0} took too long to answer; gave up waiting"),
     ("无法读取 {} 的返回内容：{}", "Could not read what {0} returned: {1}"),
     ("代理地址 {} 无法使用：{}", "The proxy address {0} cannot be used: {1}"),
+    // What is wrong with a proxy address as typed (`settings::proxy_problem`).
+    ("不支持 {}:// 代理。可用：{}。", "{0}:// proxies are not supported. Use one of: {1}."),
     ("没有找到这篇文献：{}", "Paper not found: {0}"),
     // Why a file gave no text (`fulltext`), and what the tools say of a paper without one.
     ("无法读取文件：{}", "The file could not be read: {0}"),
@@ -119,7 +121,7 @@ const PHRASES: &[(&str, &str)] = &[
     // Why an engine did not read a file's pages (`ocr`).
     ("{}（HTTP {n}）：{}", "{0:t} (HTTP {1}): {2}"),
     ("{}（HTTP {n}）", "{0:t} (HTTP {1})"),
-    ("{} 需要 API Key：在「设置 › 网络 › 文字识别」填写，或设置环境变量 {}（在 {} 申请）。", "{0:t} needs an API key: enter it under Settings › Network › Text recognition, or set the environment variable {1} (get one at {2})."),
+    ("{} 需要 API Key：在「设置 › AI › 模型」的 DeepSeek 服务里填写，或设置环境变量 {}（在 {} 申请）。", "{0:t} needs an API key: enter it for the DeepSeek service under Settings › AI › Models, or set the environment variable {1} (get one at {2})."),
     ("{} 最多接受 {n} MB 的文件，这个文件有 {n} MB：先用「压缩 PDF」把它变小。", "{0:t} takes files of up to {1} MB and this one has {2} MB: make it smaller with “Compress PDF” first."),
     ("{} 返回的不是 JSON。", "What {0:t} returned is not JSON."),
     ("{} 的返回内容无法识别。", "What {0:t} returned could not be made sense of."),

@@ -83,7 +83,7 @@ fn main() {
     let mut words: Vec<String> = std::env::args().skip(1).collect();
     // The proxy chosen in the app's settings holds here too; a settings file that cannot be read is reported by `data_root`.
     if let Ok(settings) = Settings::load(&settings_file()) {
-        wisp_net::set_proxy(&settings.proxy);
+        wisp_net::set_proxy(&settings.global_proxy());
         wisp_net::set_contact(settings.contact());
     }
     let result = take_data_dir(&mut words).and_then(data_root).and_then(|root| {

@@ -759,7 +759,7 @@ impl Workspace {
             Settings::default()
         });
         crate::i18n::set_language(settings.language);
-        wisp_net::set_proxy(&settings.proxy);
+        wisp_net::set_proxy(&settings.global_proxy());
         wisp_net::set_contact(settings.contact());
         let root = settings.data_root(&default_root());
         let _ = std::fs::create_dir_all(&root);

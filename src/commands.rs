@@ -144,9 +144,13 @@ pub enum Cmd {
     SetDensity(String),
     /// Which partition the 分区 column shows (`journals::ZONES`).
     SetJournalZone(String),
-    /// 设置 › 网络 › 网页搜索: an engine's key, `websearch::AUTO` or `websearch::OFF`.
+    /// 设置 › 网络's switch: the proxy kept is used, or left aside.
+    ToggleProxy,
+    /// 设置 › 网络's 测试: one request the way requests now go.
+    TestReach,
+    /// 设置 › AI › 任务 › 网页搜索: an engine's key, `websearch::AUTO` or `websearch::OFF`.
     SetWebSearchEngine(String),
-    /// 设置 › 网络 › 文字识别: an engine's key, `ocr::AUTO` or `ocr::OFF`.
+    /// 设置 › AI › 任务 › 文字识别: an engine's key, `ocr::AUTO` or `ocr::OFF`.
     SetOcrEngine(String),
     /// The voice 朗读 reads in, a key of `speech::VOICES`.
     SetSpeechVoice(String),
@@ -879,6 +883,8 @@ impl Workspace {
                 self.save_settings(cx);
                 window.refresh();
             }
+            Cmd::ToggleProxy => self.toggle_proxy(cx),
+            Cmd::TestReach => self.test_reach(cx),
             Cmd::SetWebSearchEngine(engine) => {
                 self.settings.web_search.engine = engine;
                 self.save_settings(cx);

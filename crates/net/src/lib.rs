@@ -182,6 +182,16 @@ pub fn latest_release(url: &str) -> Result<Option<Release>, String> {
     }
 }
 
+/// Whether `url` answers the way requests now go: through the global proxy (`set_proxy`), else the
+/// environment's, else directly. How long the answer took to begin. Any answer counts, whatever its status:
+/// what is asked is whether there is a way there, which is what 设置 › 网络's 测试 shows.
+pub fn try_reach(url: &str) -> Result<Duration, String> {
+    let agent: ureq::Agent = ureq::Agent::config_builder().http_status_as_error(false).max_redirects(0).timeout_global(Some(Duration::from_secs(15))).user_agent(USER_AGENT).proxy(proxy_for("")?).build().into();
+    let started = std::time::Instant::now();
+    agent.get(url).call().map_err(network_error)?;
+    Ok(started.elapsed())
+}
+
 /// The most a release's package may be; they are some tens of megabytes.
 const MAX_PACKAGE: u64 = 512 << 20;
 
@@ -422,7 +432,7 @@ pub fn reach() -> wisp_core::tools::Reach<'static> {
 pub fn read_file(asked: &str, name: &str, file: &[u8]) -> Result<ocr::Reading, String> {
     let settings = wisp_core::settings::Settings::load(&wisp_core::settings::settings_file()).map_err(|e| format!("{e:#}"))?;
     let ready = ocr::ready(&settings, asked)?;
-    if ready.engine.key == ocr::MODEL { return Err("看图模型按页面的图片读，这里画不出页面：请在桌面应用里用它，或在「设置 › 网络 › 文字识别」填写 DeepSeek 的 Key。".into()) }
+    if ready.engine.key == ocr::MODEL { return Err("看图模型按页面的图片读，这里画不出页面：请在桌面应用里用它，或在「设置 › AI › 模型」的 DeepSeek 服务里填写 Key。".into()) }
     Ok(ocr::Reading { engine: ready.engine, pages: send_file(&ocr::request(&ready, name, file)?, ready.engine)? })
 }
 
@@ -946,6 +956,16 @@ event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{
         let asked = server.join().unwrap();
         assert!(asked[0].starts_with("POST /api/v3/images/generations ") && asked[0].contains("\"watermark\":false"), "{}", asked[0]);
         assert!(asked[1].starts_with("GET /out/a.png "), "{}", asked[1]);
+    }
+
+    #[test]
+    fn a_host_that_answers_is_reached_whatever_it_says() {
+        let (base, server) = serve("HTTP/1.1 503 Service Unavailable\r\ncontent-length: 0\r\nconnection: close\r\n\r\n");
+        assert!(try_reach(&format!("{base}/works?rows=0")).is_ok());
+        assert!(server.join().unwrap().starts_with("GET /works?rows=0 "));
+        // Nothing listens there: the reason is said.
+        let gone = { let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); format!("http://{}", listener.local_addr().unwrap()) };
+        assert!(try_reach(&gone).unwrap_err().starts_with("网络请求失败："));
     }
 
     #[test]
