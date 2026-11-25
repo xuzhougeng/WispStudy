@@ -542,9 +542,9 @@ pub fn build_context(library_name: &str, topic: &str, papers: &[&Paper], fields:
 - 用户要把文献收进文献库时，用 save_search 保存检索式，再用 run_search 导入，导入前用户会在窗口里确认；也可以提醒用户用「检索与导入」或「添加文献」。");
     }
     ctx.documents = documents;
-    // A paper cited earlier that is not among these keeps its label too.
+    // A paper cited earlier that is not among these keeps its label too, one read in another library among them.
     for source in known {
-        if !ctx.sources.iter().any(|s| s.paper_id == source.paper_id) { ctx.sources.push(source.clone()) }
+        if !ctx.sources.iter().any(|s| s.paper_id == source.paper_id && s.library == source.library) { ctx.sources.push(source.clone()) }
     }
     ctx
 }
@@ -1591,6 +1591,44 @@ impl Transcript {
     pub fn questions(&self) -> usize {
         self.items.iter().filter(|item| matches!(item, Said::User { .. })).count()
     }
+
+    /// What was said, with the papers of `sources` it still names: those an answer cites, those whose label
+    /// stands bare in a question, an answer or a tool's line (a model writes 「P70 里」 as well as `[P70]`, a person
+    /// asks about 「P24」), and every paper read in another library, which no later reading of this library
+    /// names again under the same label. The rest is labelled anew when the conversation is taken up.
+    pub fn of(items: Vec<Said>, sources: &[Source], compacted: Option<crate::compact::Compaction>) -> Transcript {
+        let mut named: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for item in &items {
+            let text = match item {
+                Said::User { text, .. } => text,
+                Said::Answer { text } => {
+                    named.extend(citations(text).into_iter().map(|citation| citation.label.to_ascii_uppercase()));
+                    text
+                }
+                Said::Tool { call, .. } => call,
+            };
+            named.extend(bare_labels(text));
+        }
+        // One source a label: a build before this one could list a paper of another library twice.
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let sources = sources.iter().filter(|source| (!source.library.is_empty() || named.contains(&source.label.to_ascii_uppercase())) && seen.insert(&source.label)).cloned().collect();
+        Transcript { items, sources, compacted }
+    }
+}
+
+/// The labels written without brackets in a text, upper-cased: `P` and digits standing as a word of their own
+/// (「P70 里」, `**P32**`, 「P2（葡萄糖）」), not part of a longer one (`MP3`, `P2X7`).
+fn bare_labels(text: &str) -> Vec<String> {
+    let bytes = text.as_bytes();
+    let word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let mut found = vec![];
+    for (at, &b) in bytes.iter().enumerate() {
+        if !matches!(b, b'P' | b'p') || (at > 0 && word(bytes[at - 1])) { continue }
+        let digits = bytes[at + 1..].iter().take_while(|b| b.is_ascii_digit()).count();
+        if digits == 0 || bytes.get(at + 1 + digits).is_some_and(|&b| word(b)) { continue }
+        found.push(format!("P{}", &text[at + 1..at + 1 + digits]));
+    }
+    found
 }
 
 // ---- one-off requests
@@ -2914,6 +2952,47 @@ mod tests {
             Some(Usage { input: 7000, cached: Some(6400), output: 110, reasoning: 40 })
         );
         assert_eq!(read(Protocol::Responses, &[r#"data: {"type":"response.completed","response":{"usage":{"input_tokens":640,"input_tokens_details":{"cached_tokens":512},"output_tokens":9,"output_tokens_details":{"reasoning_tokens":3}}}}"#]), Some(Usage { input: 640, cached: Some(512), output: 9, reasoning: 3 }));
+    }
+
+    #[test]
+    fn a_conversation_taken_up_again_keeps_its_labels() {
+        // A conversation of the home page read 70 papers in two libraries; its answer names two of them without
+        // brackets, as models do, and cites one of its own library.
+        let mut sources = vec![Source { label: "P1".into(), paper_id: "own".into(), title: "Own".into(), ..Default::default() }, Source { label: "P2".into(), paper_id: "other".into(), title: "Other".into(), ..Default::default() }];
+        let mut shelf: Vec<(String, String)> = (0..44).map(|n| (format!("cells-{n}"), format!("Cells {n}"))).collect();
+        shelf.push(("ligule".into(), "Maize ligule atlas".into()));
+        add_sources_of(&mut sources, "L-cells", "植物单细胞转录组", &shelf);
+        add_sources_of(&mut sources, "L-hair", "根毛发育", &(0..25).map(|n| (format!("hair-{n}"), format!("Hair {n}"))).collect::<Vec<_>>());
+        let ligule = sources.iter().find(|s| s.paper_id == "ligule").unwrap().label.clone();
+        assert_eq!(ligule, "P47");
+        let items = vec![
+            Said::User { text: "两个库里关于根毛的研究".into(), images: vec![], files: vec![], prompt: String::new() },
+            Said::Tool { call: "读取文献：P30 · 文献库「植物单细胞转录组」".into(), result: "完成".into(), failed: false },
+            Said::Answer { text: format!("只在 {ligule}（玉米叶舌区）里命中，**P72** 讲 SOMBRERO；本库见 [P1]。MP3 和 P2X7 不是标签。") },
+        ];
+        let kept = Transcript::of(items, &sources, None);
+        // Every paper read in another library stays; of the conversation's own, the one cited.
+        assert_eq!(kept.sources.len(), 1 + 70);
+        assert!(kept.sources.iter().any(|s| s.label == "P1") && !kept.sources.iter().any(|s| s.label == "P2"));
+        assert_eq!(bare_labels("P70 里，**P32**、p5。MP3 P2X7 P_1 [P3]"), vec!["P70", "P32", "P5", "P3"]);
+        // Read back after a restart, the follow-up's tools find the same papers under the same labels.
+        let mut known = serde_json::from_str::<Transcript>(&serde_json::to_string(&kept).unwrap()).unwrap().sources;
+        let ligule_source = known.iter().find(|s| s.label == ligule).unwrap();
+        assert_eq!((ligule_source.paper_id.as_str(), ligule_source.library.as_str(), ligule_source.library_name.as_str()), ("ligule", "L-cells", "植物单细胞转录组"));
+        add_sources_of(&mut known, "L-cells", "植物单细胞转录组", &[("ligule".into(), "Maize ligule atlas".into()), ("new".into(), "New".into())]);
+        let mut result = json!([{"id": "ligule"}, {"id": "new"}]);
+        add_labels_of(&mut result, &known, "L-cells");
+        assert_eq!((result[0]["label"].as_str(), result[1]["label"].as_str()), (Some(ligule.as_str()), Some("P73")));
+        // Taken up again, the context holds each of them once, beside the conversation's own papers.
+        let own = Paper { id: "own".into(), title: "Own".into(), ..Default::default() };
+        let ctx = build_context("对话", "", &[&own], &[], &BTreeMap::new(), &[], &Scope::Library, "接着问", &known);
+        assert_eq!(ctx.sources.len(), known.len());
+        assert_eq!(ctx.sources.iter().find(|s| s.paper_id == "own").map(|s| s.label.as_str()), Some("P1"));
+        let doubled = Transcript::of(vec![], &[known.clone(), known.clone()].concat(), None);
+        assert_eq!(doubled.sources.len(), known.len() - 1);
+        let mut args = json!({"paperId": "P72"});
+        resolve_labels(&mut args, &known);
+        assert_eq!((args["paperId"].as_str(), args["library"].as_str()), (Some("hair-24"), Some("L-hair")));
     }
 
     #[test]

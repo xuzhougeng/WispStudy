@@ -397,23 +397,15 @@ impl Chat {
     }
 
     /// The conversation as it is kept in the library: what was said, and
-    /// the papers its answers cite, so the labels still lead somewhere later.
+    /// the papers it names, so the labels still lead somewhere later (`Transcript::of`).
     pub(crate) fn transcript(&self) -> ai::Transcript {
-        let mut cited: HashSet<String> = HashSet::new();
-        let items = self
-            .messages
-            .iter()
-            .filter_map(|item| {
-                if let ChatItem::Answer(text) = item { cited.extend(ai::citations(text).into_iter().map(|citation| citation.label)) }
-                said(item)
-            })
-            .collect();
+        let items = self.messages.iter().filter_map(said).collect();
         // Where the summary stands is counted in what is kept: an answer piece without text is not.
         let compacted = self.compacted.clone().map(|mut compacted| {
             compacted.at = self.messages[..compacted.at.min(self.messages.len())].iter().filter_map(said).count();
             compacted
         });
-        ai::Transcript { items, sources: self.sources().iter().filter(|source| cited.contains(&source.label)).cloned().collect(), compacted }
+        ai::Transcript::of(items, self.sources(), compacted)
     }
 
     pub(crate) fn reset(&mut self, cx: &mut App) {
