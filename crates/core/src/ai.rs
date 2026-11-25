@@ -1657,6 +1657,23 @@ pub fn plain_request(profile: &Profile, system: &str, prompt: &str) -> Result<Ht
     Ok(request)
 }
 
+/// What 设置 › AI › 模型's 连接测试 asks a model that answers in words: a question whose answer is one word.
+pub const TEST_QUESTION: &str = "Reply with the single word: ready";
+
+/// The request of 连接测试 for a model that answers in words. It is made with the profile as a task would make
+/// it, thinking and all, since a setting the service refuses is one of the things the test is there to find.
+pub fn test_request(profile: &Profile) -> Result<HttpRequest, String> {
+    plain_request(profile, "This is a connection test.", TEST_QUESTION)
+}
+
+/// What a model said to 连接测试, cut to its first line: enough to show that it answered.
+pub fn test_reply(text: &str) -> String {
+    let line = text.lines().map(str::trim).find(|line| !line.is_empty()).unwrap_or("");
+    let mut reply: String = line.chars().take(80).collect();
+    if reply.len() < line.len() { reply.push('…') }
+    reply
+}
+
 /// What a model is told when it reads a page of a paper that gave no text.
 pub const READ_PAGE_PROMPT: &str = "这是一篇学术论文的一页的图像。按阅读顺序逐字转写这一页的文字（双栏先左栏后右栏）。标题单独成行；段落之间空一行；同一段内不要换行，行末被连字符拆开的单词要接回去。\n\
 不要转写页眉页脚和页码、图片里的文字、表格内容；图注和表注可以保留。保持原文的语言，不要翻译、不要总结、不要添加任何说明或 Markdown 标记。\n这一页没有正文文字时，只输出 EMPTY。";
@@ -2087,6 +2104,8 @@ pub fn error_message(status: u16, body: &str) -> String {
     let detail = serde_json::from_str::<Value>(body).ok().and_then(|v| v["error"]["message"].as_str().or(v["message"].as_str()).or(v["detail"].as_str()).or(v["detail"][0]["msg"].as_str()).map(String::from)).unwrap_or_else(|| body.chars().take(300).collect());
     let hint = match status {
         401 | 403 => "API Key 无效或没有权限",
+        // DeepSeek's word for an account with nothing left on it.
+        402 => "账户余额不足",
         404 => "地址或模型名称不存在",
         429 => "请求过于频繁或额度不足",
         500..=599 => "模型服务暂时不可用",
@@ -2740,6 +2759,19 @@ mod tests {
         let other = plain_request(&Profile { protocol: Protocol::OpenAI, base_url: "http://x/v1".into(), api_key: "k".into(), model: "m".into(), ..Default::default() }, "S", "Q").unwrap();
         assert_eq!(other.body["messages"], json!([{"role": "system", "content": "S"}, {"role": "user", "content": "Q"}]));
         assert!(plain_request(&Profile::default(), "S", "Q").is_err() || !Profile::default().key().is_empty());
+    }
+
+    #[test]
+    fn the_connection_test() {
+        // Asked as a task would ask: the thinking the profile sets goes along.
+        let asked = test_request(&Profile { protocol: Protocol::OpenAI, base_url: "https://api.deepseek.com".into(), api_key: "k".into(), model: "deepseek-v4-flash".into(), effort: "off".into(), ..Default::default() }).unwrap();
+        assert_eq!((asked.url.as_str(), asked.body["messages"][1]["content"].as_str(), &asked.body["thinking"]), ("https://api.deepseek.com/chat/completions", Some(TEST_QUESTION), &json!({"type": "disabled"})));
+        assert!(asked.body.get("tools").is_none());
+        // What is missing is said before anything is sent.
+        assert!(test_request(&Profile { protocol: Protocol::OpenAI, base_url: "https://x/v1".into(), api_key: "k".into(), model: " ".into(), ..Default::default() }).unwrap_err().contains("模型名称"));
+        // The reply's first line is enough, and a long one is cut.
+        assert_eq!((test_reply("\n  Ready.\nAnything else?"), test_reply("")), ("Ready.".to_string(), String::new()));
+        assert_eq!(test_reply(&"很长".repeat(60)).chars().count(), 81);
     }
 
     #[test]

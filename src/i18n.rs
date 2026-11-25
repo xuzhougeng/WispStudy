@@ -105,6 +105,10 @@ const PHRASES: &[(&str, &str)] = &[
     ("《{}》", "“{0}”"),
     // Why a request failed (`wisp_net`) and why a full text was not fetched (`tools::find_pdf`, `openaccess`).
     ("网络请求失败：{}", "The request failed: {0}"),
+    ("连接中断：{}", "The connection broke: {0}"),
+    ("无法解析模型服务的返回内容：{}", "What the model service returned could not be read: {0}"),
+    // What 设置 › AI › 模型's 连接测试 says of an address where no model answers (`wisp_net::test_model`).
+    ("服务有回应，但不是模型的回答，请检查服务地址和接口。收到的是：{}", "The service answered, but not as a model does: check the address and the interface. What came back: {0}"),
     ("{} 返回 HTTP {n}", "{0} returned HTTP {1}"),
     ("{} 限制了请求频率，请稍后再试", "{0} is limiting requests; try again later"),
     ("{} 迟迟没有答完，没有再等", "{0} took too long to answer; gave up waiting"),
@@ -408,6 +412,10 @@ mod tests {
         assert_eq!(english_reasons("请填写检索式。"), "Enter a query.");
         assert_eq!(english_reasons(&format!("api.crossref.org 限制了请求频率，请稍后再试；{}。", wisp_core::sources::GIVE_EMAIL)), "api.crossref.org is limiting requests; try again later; it allows more requests once a contact email is set under Settings › Network › Literature databases.");
         assert_eq!(english_reasons("看图模型：账户余额不足（HTTP 402）：Insufficient Balance"), "Vision model: insufficient balance (HTTP 402): Insufficient Balance");
+        // What 连接测试 can say of a model (`wisp_net::test_model`).
+        assert_eq!(english_reasons("地址或模型名称不存在（HTTP 404）：Model Not Exist"), "no such address or model name (HTTP 404): Model Not Exist");
+        assert_eq!(english_reasons(&format!("{}收到的是：<html>Welcome</html>", wisp_net::NOT_A_MODEL)), "The service answered, but not as a model does: check the address and the interface. What came back: <html>Welcome</html>");
+        assert_eq!(english_reasons(wisp_net::TEST_TIMED_OUT), "No answer within a minute; gave up waiting.");
         // A reason not known, and words that are no reason at all, stay as they are.
         assert_eq!((english_reasons("磁盘满了；www.ebi.ac.uk 返回 HTTP 503。"), english_reasons("我的研究：根；叶")), ("磁盘满了; www.ebi.ac.uk returned HTTP 503.".to_string(), "我的研究：根；叶".to_string()));
     }

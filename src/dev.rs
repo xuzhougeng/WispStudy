@@ -854,6 +854,8 @@ impl Workspace {
                 "translate" => Some(Cmd::ToggleTranslation),
                 // `profile:1` shows the second provider on 设置 › AI › 模型.
                 "profile" => Some(Cmd::SelectProvider(arg.parse().unwrap_or(0))),
+                // `testmodels` is 连接测试 on that page: one short question to each of the provider's models.
+                "testmodels" => Some(Cmd::TestModels),
                 // `palette` opens the command palette; `palette:<text>` with that typed into it.
                 "palette" => {
                     if self.palette.is_none() { self.toggle_palette(window, cx) }

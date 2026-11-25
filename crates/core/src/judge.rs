@@ -48,6 +48,18 @@ pub fn ready(profile: &Profile) -> Result<(), String> {
     request(profile, json!(""), json!({})).map(|_| ())
 }
 
+/// The request of 设置 › AI › 模型's 连接测试 for a model that judges: one plain statement and two answers,
+/// asked the way `screen_request` asks about a paper.
+pub fn test_request(profile: &Profile) -> Result<HttpRequest, String> {
+    let questions = json!({"test": {"type": "choice", "instructions": "This is a connection test. Judge whether the statement is true.", "criteria": {"true": "The statement is true.", "false": "The statement is false."}}});
+    request(profile, json!({"statement": "Water boils at 100 °C at sea level."}), questions)
+}
+
+/// The answer to `test_request`: the choice it made, or why there is none.
+pub fn read_test(reply: &Value) -> Result<String, String> {
+    reply["answers"]["test"]["choice"].as_str().map(str::trim).filter(|choice| !choice.is_empty()).map(String::from).ok_or_else(|| "判断模型的回答里没有结论。".to_string())
+}
+
 /// The names the verdicts go by in the question, with the key of `model::SCREENINGS` each stands for and what it means.
 const VERDICTS: [(&str, &str, &str); 3] = [
     ("include", "included", "The paper is about the topic and meets the screening goal: it should be read."),
@@ -174,5 +186,14 @@ mod tests {
         assert_eq!(read_screening(&bare).map(|j| (j.verdict, j.reason)), Ok(("included".to_string(), "判断模型的结论：已纳入。它只作判断，不写理由。".to_string())));
         assert!(read_screening(&json!({"answers": {}})).unwrap_err().contains("没有结论"));
         assert!(read_screening(&json!({"answers": {"verdict": {"choice": "maybe"}}})).unwrap_err().contains("maybe"));
+    }
+
+    #[test]
+    fn the_connection_test() {
+        let asked = test_request(&jev()).unwrap();
+        assert_eq!((asked.url.as_str(), asked.body["model"].as_str(), asked.body["questions"]["test"]["type"].as_str()), ("https://api.typesafe.ai/v1/systemone", Some("jev-latest"), Some("choice")));
+        assert!(test_request(&Profile { api_key: String::new(), key_env: "WISP_NO_SUCH_KEY".into(), ..jev() }).unwrap_err().contains("API Key"));
+        assert_eq!(read_test(&json!({"answers": {"test": {"type": "choice", "choice": "true", "confidence": 0.99}}})), Ok("true".to_string()));
+        assert!(read_test(&json!({"answers": {}})).unwrap_err().contains("没有结论"));
     }
 }
