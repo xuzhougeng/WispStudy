@@ -325,7 +325,12 @@ mod tests {
         store.set_excerpt_figures(&blot.id, &[bars.id.clone(), "G-none".into(), gel.id.clone(), bars.id.clone()]).unwrap();
         assert_eq!(store.excerpt_figures(&blot.id).unwrap(), vec![bars.id.clone(), gel.id.clone()]);
         store.set_excerpt_figures(&qpcr.id, std::slice::from_ref(&bars.id)).unwrap();
-        assert_eq!(store.figure_excerpts(&bars.id).unwrap(), vec![qpcr.id.clone(), blot.id.clone()]);
+        // Both were kept in the same instant, so which comes first is their ids' say: compare them as a set.
+        let mut of_bars = store.figure_excerpts(&bars.id).unwrap();
+        of_bars.sort();
+        let mut both = vec![qpcr.id.clone(), blot.id.clone()];
+        both.sort();
+        assert_eq!(of_bars, both);
         assert_eq!(store.excerpt_links().unwrap().len(), 3);
         assert!(store.set_excerpt_figures("E-none", &[]).unwrap_err().to_string().contains("摘录不存在"));
         // The set is replaced, not added to.
