@@ -116,6 +116,8 @@ pub(crate) struct Taken {
     bytes: Option<Vec<u8>>,
     /// What was read of a Word file, to make the draft again at the headings the person chose.
     read: Option<docx::Read>,
+    /// The pictures a Markdown file shows from files beside it: they come into the figure library with it.
+    pictures: Vec<manuscript::Picture>,
 }
 
 /// A Word file without heading styles, waiting for the person to say which
@@ -169,9 +171,12 @@ fn take_file(path: &Path) -> Result<Taken, String> {
     let bytes = std::fs::read(path).map_err(|err| tf!("无法读取 {name}：{err}", "Cannot read {name}: {err}"))?;
     if is_word(path) {
         let read = wisp_core::docx::read(&bytes).map_err(|err| format!("{err:#}"))?;
-        return Ok(Taken { draft: manuscript::from_word(&read, &name), kind: "docx", bytes: Some(bytes), read: Some(read) });
+        return Ok(Taken { draft: manuscript::from_word(&read, &name), kind: "docx", bytes: Some(bytes), read: Some(read), pictures: vec![] });
     }
-    Ok(Taken { draft: manuscript::from_markdown(&String::from_utf8_lossy(&bytes), &name), kind: "markdown", bytes: None, read: None })
+    let draft = manuscript::from_markdown(&String::from_utf8_lossy(&bytes), &name);
+    // Read here, off the main thread, and written as a PNG where the kind is not one kept, as a picture brought into 资料库 is.
+    let pictures = manuscript::read_pictures(&draft, path.parent().unwrap_or(Path::new("")), &crate::write_figures::as_kept);
+    Ok(Taken { draft, kind: "markdown", bytes: None, read: None, pictures })
 }
 
 impl Workspace {
@@ -568,21 +573,27 @@ impl Workspace {
         }
     }
 
-    fn manuscript_import(&mut self, library: &str, name: &str, taken: Taken, cx: &mut Context<Self>) {
+    fn manuscript_import(&mut self, library: &str, name: &str, mut taken: Taken, cx: &mut Context<Self>) {
         let name = name.to_string();
         self.write_snapshot("leave");
         let Some(lib) = self.lib.as_mut().filter(|lib| lib.info.id == library) else { return };
-        let made = match lib.store.import_manuscript(&taken.draft, taken.kind, &name, taken.bytes.as_deref()) {
+        // The file's pictures first: the manuscript is written with their addresses in the figure library.
+        let pictures = std::mem::take(&mut taken.pictures);
+        let made = lib.store.bring_pictures(&mut taken.draft, pictures).and_then(|brought| Ok((lib.store.import_manuscript(&taken.draft, taken.kind, &name, taken.bytes.as_deref())?, brought)));
+        let (made, brought) = match made {
             Ok(made) => made,
             Err(err) => {
                 self.fail(tf!("「{name}」没有导入：{err:#}", "“{name}” not imported: {err:#}"), cx);
                 return self.draft_file_done(library, cx);
             }
         };
+        if brought.added > 0 { lib.gallery.items = lib.store.list_figures().unwrap_or_default() }
         let draft = &taken.draft;
         let (id, section) = (made.id.clone(), opening_section(&lib.store, &made));
         let mut said = tf!("已导入「{name}」：{} 节", "Imported “{name}”: {} sections", made.sections.len());
         if !draft.comments.is_empty() { said.push_str(&tf!("，{} 条批注", ", {} comments", draft.comments.len())) }
+        if brought.shown() > 0 { said.push_str(&tf!("，{} 张图（也收进了资料库）", ", {} pictures (kept in Materials too)", brought.shown())) }
+        if let Some((address, why)) = brought.left.first() { said.push_str(&tf!("。{} 张图没有带进来：{address}（{}）", ". {} pictures were not brought in: {address} ({})", brought.left.len(), t(why.said()))) }
         if draft.tables + draft.pictures > 0 { said.push_str(&tf!("。{} 个表格、{} 张图留在 Word 文件里，导出时还在原处", ". {} tables and {} pictures stay in the Word file and return on export", draft.tables, draft.pictures)) }
         if draft.tracked { said.push_str(t("。文件里未接受的修订按接受后的文字读入")) }
         lib.writing.manuscripts.push(made);
@@ -999,6 +1010,11 @@ mod tests {
         std::fs::write(dir.join("根.md"), "# 根的综述\n\n## 引言\n\n根向下生长，吸收水分和养分。\n").unwrap();
         let taken = take_file(&dir.join("根.md")).unwrap();
         assert_eq!((taken.kind, taken.bytes.is_none(), taken.draft.title.as_str(), taken.draft.sections[0].name.as_str()), ("markdown", true, "根的综述", "引言"));
+        // A Markdown file's pictures are read with it, one of a kind that is not kept written as a PNG.
+        std::fs::write(dir.join("fig.gif"), [0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 1, 0, 1, 0, 0x80, 0, 0, 0, 0, 0, 0xff, 0xff, 0xff, 0x21, 0xf9, 4, 1, 0, 0, 0, 0, 0x2c, 0, 0, 0, 0, 1, 0, 1, 0, 0, 2, 2, 0x44, 1, 0, 0x3b]).unwrap();
+        std::fs::write(dir.join("图.md"), "## 结果\n\n盐胁迫下根变短。\n\n![根长](fig.gif)\n").unwrap();
+        let taken = take_file(&dir.join("图.md")).unwrap();
+        assert!(taken.pictures.len() == 1 && taken.pictures[0].name == "fig.gif" && taken.pictures[0].bytes.as_ref().is_ok_and(|bytes| wisp_core::figure::picture_kind(bytes) == Some("png")), "{:?}", taken.pictures);
         std::fs::write(dir.join("坏.docx"), b"not a zip").unwrap();
         assert!(take_file(&dir.join("坏.docx")).is_err());
         std::fs::remove_dir_all(&dir).ok();

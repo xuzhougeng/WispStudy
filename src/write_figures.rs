@@ -164,6 +164,12 @@ fn kept_bytes(bytes: Vec<u8>) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+/// A picture that is not of a kind kept, written as a PNG: for the pictures a Markdown file brings along
+/// (`manuscript::read_pictures`). `None` for what is no picture that can be read.
+pub(crate) fn as_kept(bytes: &[u8]) -> Option<Vec<u8>> {
+    kept_bytes(bytes.to_vec()).ok()
+}
+
 /// How many cards stand in a row `width` wide, and how wide each is.
 fn grid(width: f32) -> (usize, f32) {
     let inner = (width - 40.).max(CARD_MIN);

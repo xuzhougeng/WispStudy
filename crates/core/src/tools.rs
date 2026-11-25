@@ -488,9 +488,9 @@ pub fn catalog() -> Vec<ToolDef> {
         scoped(
             "import_manuscript",
             "导入稿件",
-            "把一个在别处写好的稿件文件导入写作页，成为一份新稿件，等同于用户在写作页点「导入」：Word（.docx）、Markdown（.md）或纯文本（.txt）。原文件不改。正文按文件的标题分节（Word 文件没有用标题样式时，按看起来像标题的段落分节，结果的 guessedHeadings 列出它们，用户可以在写作页调整）；Word 文件里的批注一起带进来，表格和图片留在文件的副本里，从写作页导出 Word 时还在原处。正文里的引用保持文件里的写法，不会变成文献库的引用；要把文件参考文献表里的文献收进文献库，另用 import_docx_references。同一个文件已经是稿件时不会再导入一份（already 为 true）。导入后用 read_manuscript 读它、comment_manuscript 留审阅意见、edit_section 改它。",
+            "把一个在别处写好的稿件文件导入写作页，成为一份新稿件，等同于用户在写作页点「导入」：Word（.docx）、Markdown（.md）或纯文本（.txt）。原文件不改。正文按文件的标题分节（Word 文件没有用标题样式时，按看起来像标题的段落分节，结果的 guessedHeadings 列出它们，用户可以在写作页调整）；Word 文件里的批注一起带进来，表格和图片留在文件的副本里，从写作页导出 Word 时还在原处。Markdown 文件里单独成行的图片（`![图注](figures/fig1.png)`，地址相对于这个文件）一起收进图片库，在稿件里还在原处；只收 PNG、JPEG 和 WebP，网上的图片、找不到的文件和别的格式留着原来那一行，结果的 figures.left 列出它们。正文里的引用保持文件里的写法，不会变成文献库的引用；要把文件参考文献表里的文献收进文献库，另用 import_docx_references。同一个文件已经是稿件时不会再导入一份（already 为 true）。导入后用 read_manuscript 读它、comment_manuscript 留审阅意见、edit_section 改它。",
             json!({
-                "path": {"type": "string", "description": "本机稿件文件的路径：.docx、.md、.markdown 或 .txt。"}
+                "path": {"type": "string", "description": "本机稿件文件的路径：.docx、.md、.markdown 或 .txt。也可以是一个文件夹（例如别的工具写稿和出图的项目文件夹）：里面或它的下一层只有一个 .docx / .md 时导入它，有几个时会列出来，请再指明其中一个。"}
             }),
             &["path"],
         ),
@@ -750,7 +750,8 @@ pub fn describe_result(result: &Result<Value, String>) -> String {
                 }
             } else if let (Some(file), Some(sections)) = (value["file"].as_str(), value["manuscript"]["sections"].as_array()) {
                 let title = value["manuscript"]["title"].as_str().unwrap_or("");
-                if value["already"] == true { format!("「{file}」已经是稿件《{title}》") } else { format!("已导入「{file}」：{} 节", sections.len()) }
+                let figures = value["figures"]["added"].as_u64().unwrap_or(0) + value["figures"]["known"].as_u64().unwrap_or(0);
+                if value["already"] == true { format!("「{file}」已经是稿件《{title}》") } else if figures > 0 { format!("已导入「{file}」：{} 节，{figures} 张图", sections.len()) } else { format!("已导入「{file}」：{} 节", sections.len()) }
             } else if let (Some(sections), Some(_)) = (value["sections"].as_array(), value["added"].as_array()) {
                 format!("大纲现有 {} 节", sections.len())
             } else if let Some(manuscripts) = value["manuscripts"].as_array() {
@@ -3406,6 +3407,42 @@ pub(crate) mod tests {
         assert!(call(&root, "restyle_docx", &json!({"path": path, "style": "numeric"})).unwrap_err().contains("csl:nature"));
         assert!(call(&root, "read_docx_citations", &json!({"path": root.join("x.pdf")})).is_err());
         assert!(catalog().iter().any(|tool| tool.name == "restyle_docx" && tool.writes && tool.confirm) && catalog().iter().any(|tool| tool.name == "read_docx_citations" && !tool.writes));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn a_folder_gives_its_manuscript_with_the_pictures_beside_it() {
+        let (root, _) = sample();
+        let dir = crate::libraries::list(&root)[0].dir.clone();
+        let project = root.join("salt project");
+        std::fs::create_dir_all(project.join("paper/figures")).unwrap();
+        let mut png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR".to_vec();
+        png.extend([0, 0, 1, 44, 0, 0, 0, 100, 8, 2, 0, 0, 0]);
+        std::fs::write(project.join("paper/figures/fig1.png"), &png).unwrap();
+        std::fs::write(project.join("paper/figures/fig2.pdf"), b"%PDF-1.7").unwrap();
+        // A readme is no manuscript, nor a file an editor left: the one draft under the folder is meant.
+        std::fs::write(project.join("README.md"), "# Notes\n").unwrap();
+        std::fs::write(project.join("paper/~$draft.docx"), b"x").unwrap();
+        std::fs::write(project.join("paper/draft.md"), "# Salt and roots\n\n## Results\n\nRoots are shorter under salt.\n\n![Root length](figures/fig1.png)\n\n![Growth curve](figures/fig2.pdf)\n").unwrap();
+        let card = preview_call(&Store::open(&dir).unwrap(), "import_manuscript", &json!({"path": project})).unwrap();
+        assert_eq!(card[2..], ["文件旁边的 1 张图一起收进图片库，稿件里还在原处。", "1 张图没有带进来（不是 PNG、JPEG 或 WebP 图片）：figures/fig2.pdf"], "{card:?}");
+        assert!(card[0].contains("draft.md"));
+        let done = call(&root, "import_manuscript", &json!({"path": project})).unwrap();
+        assert_eq!((done["file"].as_str(), done["figures"]["added"].as_u64(), done["figures"]["known"].as_u64(), done["figures"]["left"].clone()), (Some("draft.md"), Some(1), Some(0), json!([{"address": "figures/fig2.pdf", "reason": "不是 PNG、JPEG 或 WebP 图片"}])));
+        assert_eq!(describe_result(&Ok(done.clone())), "已导入「draft.md」：1 节，1 张图");
+        // The picture is a figure of the library, the person's own, and the manuscript shows it from there.
+        let figures = call(&root, "list_figures", &json!({})).unwrap();
+        let figure = figures["figures"].as_array().unwrap().iter().find(|figure| figure["legend"] == "Root length").unwrap_or_else(|| panic!("{figures}"));
+        let body = call(&root, "read_manuscript", &json!({"section": "Results"})).unwrap()["sections"][0]["body"].as_str().unwrap().to_string();
+        assert!(body.contains(&format!("![Root length]({})", figure["address"].as_str().unwrap())) && body.contains("![Growth curve](figures/fig2.pdf)"), "{body}");
+        // The folder again: the file already is that manuscript, though its picture is now shown from the library.
+        let again = call(&root, "import_manuscript", &json!({"path": project})).unwrap();
+        assert_eq!((again["already"].as_bool(), again["manuscript"]["id"].clone()), (Some(true), done["manuscript"]["id"].clone()));
+        // With two drafts the caller is told which there are; with none, that there is none.
+        std::fs::write(project.join("paper/draft v2.md"), "## Results\n\nNew.\n").unwrap();
+        let which = call(&root, "import_manuscript", &json!({"path": project})).unwrap_err();
+        assert!(which.contains("2 个") && which.contains("draft.md") && which.contains("draft v2.md") && !which.contains("README"), "{which}");
+        assert!(call(&root, "import_manuscript", &json!({"path": project.join("paper/figures")})).unwrap_err().contains("没有稿件文件"));
         std::fs::remove_dir_all(root).ok();
     }
 

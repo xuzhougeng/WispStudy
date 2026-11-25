@@ -297,6 +297,12 @@ impl Store {
         Ok(())
     }
 
+    /// The figure whose picture is these bytes, when the library lists one: a picture brought in again is the
+    /// one already here.
+    pub fn figure_holding(&self, bytes: &[u8]) -> Result<Option<Figure>> {
+        Ok(self.list_figures()?.into_iter().find(|figure| figure.size_bytes == bytes.len() as u64 && std::fs::read(self.figure_path(figure)).is_ok_and(|kept| kept == bytes)))
+    }
+
     /// Keep what a person changed about a figure: its number, legend, notes and tags.
     /// Where it came from and its picture stay as they are.
     pub fn save_figure(&mut self, figure: &mut Figure) -> Result<()> {

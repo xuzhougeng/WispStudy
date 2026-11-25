@@ -193,8 +193,8 @@ pub fn resolve(base: &str, href: &str) -> String {
     format!("{scheme}://{host}/{}{trailing}{tail}", segments.join("/"))
 }
 
-/// `%2F` and the like read back, for a DOI written into an address.
-fn percent_decoded(text: &str) -> String {
+/// `%2F` and the like read back, for a DOI written into an address (and a file's name in a Markdown file's).
+pub(crate) fn percent_decoded(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
     let mut at = 0;
