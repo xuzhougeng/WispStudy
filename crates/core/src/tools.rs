@@ -442,7 +442,7 @@ pub fn catalog() -> Vec<ToolDef> {
             }),
             &["changes"],
         ),
-        scoped("list_cite_styles", "引用样式列表", "列出导出 Word 时可用的引用样式（CSL，与 Zotero 用的是同一种定义文件）：common 是常用的内置样式，added 是用户添加的和 Zotero 里装的，builtin 是全部内置样式。每个样式有 key 和名称。只读。", json!({}), &[]),
+        scoped("list_cite_styles", "引用样式列表", "列出导出 Word 时可用的引用样式（CSL，与 Zotero 用的是同一种定义文件）：common 是常用的内置样式（先是顺序编码的，再是著者-出版年的），added 是用户添加的和 Zotero 里装的，builtin 是全部内置样式。每个样式有 key 和名称 name，常用的还有界面上显示的短名 short。只读。", json!({}), &[]),
         scoped(
             "read_cite_style",
             "读取引用样式",
@@ -465,7 +465,7 @@ pub fn catalog() -> Vec<ToolDef> {
         scoped(
             "save_cite_style",
             "保存引用样式",
-            "把一份 CSL 定义保存为用户的引用样式（数据文件夹的 styles/ 下），之后出现在写作页「导出」菜单的引用样式里，由用户自己选用。保存前先用 try_cite_style 试排并得到用户认可。<info> 里的 <title> 是菜单里显示的名称，<id> 要与原样式不同。同名文件会被替换，原来的内容留在 styles/removed/。返回样式的 key 和试排结果。",
+            "把一份 CSL 定义保存为用户的引用样式（数据文件夹的 styles/ 下），之后出现在引用样式的列表里（设置 › 写作，和写作页「导出」菜单的「引用样式」），由用户自己选用。保存前先用 try_cite_style 试排并得到用户认可。<info> 里的 <title> 是菜单里显示的名称，<id> 要与原样式不同。同名文件会被替换，原来的内容留在 styles/removed/。返回样式的 key 和试排结果。",
             json!({
                 "name": {"type": "string", "description": "文件名，例如 my-journal.csl；只用字母、数字和连字符。"},
                 "csl": {"type": "string", "description": "完整的 CSL 定义（XML）。"}
@@ -1016,7 +1016,7 @@ fn dispatch(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fet
             let mut out = cite_preview(store, &crate::csl::load(&saved.key, &root)?, args)?;
             out["style"] = json!(saved.key);
             out["name"] = json!(saved.name);
-            out["next"] = json!("已保存。请告诉用户：在写作页「导出」菜单的引用样式里选它，导出 Word 时就按它写引用。");
+            out["next"] = json!("已保存。请告诉用户：在写作页「导出」菜单的「引用样式」里给这份稿件选它，或在 设置 › 写作 里设为默认，导出 Word 时就按它写引用。");
             Ok(out)
         }
         "read_docx_citations" => local::read_docx_citations(store, args, fetch),
@@ -2106,7 +2106,7 @@ fn data_root(info: &LibraryInfo) -> std::path::PathBuf {
 }
 
 fn cite_styles(root: &Path) -> Value {
-    let listed = |styles: Vec<crate::csl::Listed>| styles.into_iter().map(|style| json!({"key": style.key, "name": style.name})).collect::<Vec<_>>();
+    let listed = |styles: Vec<crate::csl::Listed>| styles.into_iter().map(|style| json!({"key": style.key, "name": style.name, "short": crate::csl::short_name(&style.key)})).collect::<Vec<_>>();
     json!({"common": listed(crate::csl::common()), "added": listed(crate::csl::added(root)), "builtin": listed(crate::csl::bundled()), "simple": [{"key": "author-year", "name": "作者-年份"}, {"key": "numeric", "name": "编号"}]})
 }
 

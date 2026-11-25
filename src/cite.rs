@@ -41,7 +41,7 @@ pub struct Citing {
     pub read: Read,
 }
 
-/// How a manuscript's citations read for a reader, in the style chosen for export (`Settings::cite_style`): what the
+/// How a manuscript's citations read for a reader, in the style the manuscript cites in (`Workspace::cite_style_key`): what the
 /// editor shows in a citation's place while the caret is not in it, so a paragraph reads as it will in the file.
 /// Made anew only when the manuscript, the style or the library changes; a frame in between reads what was made.
 #[derive(Default)]
@@ -256,7 +256,7 @@ fn listed(lib: &Library, cx: &App) -> Listed {
 impl Workspace {
     /// Before the writing page is drawn: what the manuscript cites.
     pub(crate) fn cite_refresh(&mut self, cx: &App) {
-        let (style, root) = (self.settings.cite_style.clone(), self.data_root());
+        let (style, root) = (self.cite_style_key(), self.data_root());
         let Some(lib) = self.lib.as_mut() else { return };
         lib.citing.listed = listed(lib, cx);
         lib.citing.read.here = read_here(lib, &style, &root, cx);

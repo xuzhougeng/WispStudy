@@ -572,7 +572,7 @@ impl Workspace {
         let mut comments = lib.store.comments(&manuscript.id).map_err(|err| format!("{err:#}"))?;
         // The assistant's comments are known by where they are from, not by its name: the file names it in the interface's language.
         for comment in comments.iter_mut().filter(|comment| comment.origin == wisp_core::comment::ASSISTANT && comment.author == wisp_core::comment::ASSISTANT_NAME) { comment.author = t(wisp_core::comment::ASSISTANT_NAME).to_string() }
-        let style = wisp_core::csl::style(&self.settings.cite_style, &self.data_root()).map_err(|err| tf!("没有导出，引用样式读不了：{err:#}", "Not exported, the citation style cannot be read: {err:#}"))?;
+        let style = wisp_core::csl::style(if manuscript.cite_style.is_empty() { &self.settings.cite_style } else { &manuscript.cite_style }, &self.data_root()).map_err(|err| tf!("没有导出，引用样式读不了：{err:#}", "Not exported, the citation style cannot be read: {err:#}"))?;
         let (done, from_file) = lib.store.manuscript_word(manuscript, &comments, track, &self.settings.author_name(), style).map_err(|err| tf!("没有导出：{err:#}", "Not exported: {err:#}"))?;
         let mut said = vec![];
         if from_file {
@@ -623,25 +623,6 @@ impl Workspace {
     /// The folder that holds the libraries, and the citation styles the person added (`csl::FOLDER`).
     pub(crate) fn data_root(&self) -> std::path::PathBuf {
         self.settings.data_root(&wisp_core::settings::default_root())
-    }
-
-    /// 添加引用样式文件: a `.csl` file, as Zotero's style repository has them, taken into the data folder and chosen.
-    pub(crate) fn add_cite_style(&mut self, cx: &mut Context<Self>) {
-        let picked = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: false, prompt: Some(t("添加").into()), extensions: Some(vec!["csl".into()]) });
-        cx.spawn(async move |this, cx| {
-            let Ok(Ok(Some(paths))) = picked.await else { return };
-            let Some(path) = paths.into_iter().next() else { return };
-            this.update(cx, |this, cx| match wisp_core::csl::add(&this.data_root(), &path) {
-                Ok(style) => {
-                    this.settings.cite_style = style.key;
-                    this.save_settings(cx);
-                    this.say(tf!("已添加「{}」，导出 Word 时按它写引用", "Added “{}”; Word exports will cite in it", style.name), cx);
-                }
-                Err(err) => this.fail(tf!("没有添加：{err:#}", "Not added: {err:#}"), cx),
-            })
-            .ok();
-        })
-        .detach();
     }
 
     /// The items of the writing page's menus.
@@ -695,23 +676,9 @@ impl Workspace {
                     items.push(item(if writing.comments.list.is_empty() { "Word（.docx）".into() } else { t("Word（.docx），带批注").into() }, false, Cmd::ExportManuscript(ManuscriptExport::Docx)));
                 }
                 items.push(item(t("复制全文").into(), false, Cmd::ExportManuscript(ManuscriptExport::Copy)));
-                // How the Word file cites: the manuscript keeps its keys, a reader of the file gets a journal's form and the list.
-                // The two plain forms, the journals' styles most asked for, then the CSL files the person added or Zotero has.
-                let chosen = self.settings.cite_style.as_str();
-                let simple = wisp_core::cite::Style::from_key(chosen);
+                // How it cites is the manuscript's own, chosen in a dialog of its own: the menu says which style it is.
                 breaks.push(items.len());
-                for (to, name) in [(wisp_core::cite::Style::AuthorYear, "Word 里的引用：作者-年份 (Zhang et al., 2024)"), (wisp_core::cite::Style::Numeric, "Word 里的引用：编号 [1]")] {
-                    items.push(item(t(name).into(), !chosen.contains(':') && simple == to, Cmd::CiteStyle(to.key().to_string())));
-                }
-                let mut styles = wisp_core::csl::common();
-                styles.extend(wisp_core::csl::added(&self.data_root()));
-                // One chosen through the assistant or by hand that is in neither list is still said to be the one.
-                if chosen.contains(':') && !styles.iter().any(|style| style.key == chosen) && let Some(name) = wisp_core::csl::name_of(chosen, &self.data_root()) {
-                    styles.push(wisp_core::csl::Listed { key: chosen.to_string(), name });
-                }
-                for style in styles { items.push(item(style.name, style.key == chosen, Cmd::CiteStyle(style.key))) }
-                breaks.push(items.len());
-                items.push(item(t("添加引用样式文件（Zotero 的 .csl）…").into(), false, Cmd::AddCiteStyle));
+                items.push(MenuItem { label: t("引用样式…").into(), checked: false, note: Some(self.cite_style_name(&self.cite_style_key()).into()), cmd: Cmd::OpenCiteStyles });
             }
             MenuKind::WriteLanguage => {
                 for (code, name) in LANGUAGES { items.push(item(format!("{} ({code})", t(name)), writing.language() == code, Cmd::WriteLanguage(code.to_string()))) }

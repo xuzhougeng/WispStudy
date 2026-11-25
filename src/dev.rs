@@ -989,12 +989,21 @@ impl Workspace {
                     _ => Cmd::OpenSettings(match arg {
                         "appearance" => SettingsPage::Appearance,
                         "shortcuts" => SettingsPage::Shortcuts,
+                        "writing" => SettingsPage::Writing,
                         "network" => SettingsPage::Network,
                         "storage" => SettingsPage::Storage,
                         "about" => SettingsPage::About,
                         _ => SettingsPage::General,
                     }),
                 }),
+                // `citestyles` opens the dialog of the manuscript's citation style (after `page:write`); `citestyle:<key>` is a click
+                // on a style in it, or on 设置 › 写作 (`settings:writing`) where it sets the default; `addcitestyle:<file.csl>` adds a file.
+                "citestyles" => Some(Cmd::OpenCiteStyles),
+                "citestyle" => Some(if matches!(self.modal, Some(Modal::CiteStyle { .. })) { Cmd::LookCiteStyle(arg.to_string()) } else { Cmd::DefaultCiteStyle(arg.to_string()) }),
+                "addcitestyle" => {
+                    self.take_cite_style(std::path::Path::new(arg), cx);
+                    return;
+                }
                 "candidate" => Some(Cmd::CompleteChoose(arg.parse().ok())),
                 // `command:0` opens the first of the person's own commands on 设置 › 命令.
                 "command" => Some(Cmd::SelectCommand(arg.parse().unwrap_or(0))),

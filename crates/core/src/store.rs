@@ -523,6 +523,8 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     ("structures", "pages_read", "INTEGER NOT NULL DEFAULT 0"),
     ("structures", "page_count", "INTEGER NOT NULL DEFAULT 0"),
     ("manuscript_sections", "bare", "INTEGER NOT NULL DEFAULT 0"),
+    // The style a manuscript cites in; empty follows the settings (`Manuscript::cite_style`).
+    ("manuscripts", "cite_style", "TEXT NOT NULL DEFAULT ''"),
     ("import_batches", "depth", "INTEGER NOT NULL DEFAULT 0"),
     ("pdf_annotations", "color", "TEXT NOT NULL DEFAULT ''"),
     ("papers", "volume", "TEXT NOT NULL DEFAULT ''"),

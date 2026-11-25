@@ -586,10 +586,17 @@ pub enum Cmd {
     /// The top-left arrow of a manuscript: out of 写作, back to the page it was opened from.
     LeaveWrite,
     ExportManuscript(ManuscriptExport),
-    /// How a manuscript exported to Word cites (`cite::Style::key`).
-    CiteStyle(String),
-    /// 写作: a `.csl` file to cite by in Word files.
+    /// 设置 › 写作: the style manuscripts cite in that chose none of their own, by its key (`csl::style`).
+    DefaultCiteStyle(String),
+    /// 「导出」 › 引用样式: the dialog of the manuscript's own style; a click in it looks at a style.
+    OpenCiteStyles,
+    LookCiteStyle(String),
+    /// 添加 .csl 文件, in either place the styles are listed.
     AddCiteStyle,
+    /// A style the person added: shown where its file is, taken out of the list, and put back by the toast's 撤销.
+    RevealCiteStyle(String),
+    RemoveCiteStyle(String),
+    RestoreCiteStyle { file: String, xml: String, default: bool },
     /// The section's earlier versions.
     WriteHistory,
     HistoryPick(usize),
@@ -1120,12 +1127,15 @@ impl Workspace {
                 if let Some(lib) = self.lib.as_mut() { lib.citing.whole = whole }
             }
             Cmd::WriteCiteFix(pieces) => self.cite_fix(pieces, cx),
-            Cmd::CiteStyle(style) => {
-                self.settings.cite_style = style;
-                self.save_settings(cx);
-                self.say(t("导出 Word 时按这种格式写引用，文末列出参考文献；稿件里仍是引用键"), cx);
+            Cmd::DefaultCiteStyle(style) => self.set_default_cite_style(style, cx),
+            Cmd::OpenCiteStyles => self.open_cite_styles(window, cx),
+            Cmd::LookCiteStyle(style) => {
+                if let Some(Modal::CiteStyle { chosen, .. }) = self.modal.as_mut() { *chosen = style }
             }
             Cmd::AddCiteStyle => self.add_cite_style(cx),
+            Cmd::RevealCiteStyle(style) => self.reveal_cite_style(&style, cx),
+            Cmd::RemoveCiteStyle(style) => self.remove_cite_style(style, cx),
+            Cmd::RestoreCiteStyle { file, xml, default } => self.restore_cite_style(&file, &xml, default, cx),
             Cmd::WriteCopyReferences => self.copy_references(cx),
             Cmd::WriteSide(side) => {
                 // The page on show asked for again folds the panel under a narrow manuscript, or opens it; another page opens it.
