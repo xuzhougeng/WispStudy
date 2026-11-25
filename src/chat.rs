@@ -941,29 +941,39 @@ impl Workspace {
             Say(&'static str),
             Command(&'static str),
             /// A file is picked to go with the next question: a Word file, or a PowerPoint file as the reference for slides.
-            Pick(&'static str),
+            /// Its line ends in "…", as a line that opens a file dialog does; that the file can be dropped instead is its tooltip.
+            Pick(&'static str, &'static str),
         }
         use Start::*;
+        // In the order a library is worked through (find, sort, read, write), which a row of two reads left to right and one column top to bottom.
+        // Inside a card the sentences come first and the commands last, so every card ends the same way.
+        // `/search` looks inside the library (its full texts and records), so it is reading, not finding.
         let groups: [(&str, &str, &[Start]); 4] = [
-            ("search", "找文献", &[Say("按这个文献库的主题在 PubMed 和 Europe PMC 试检索，看看还有哪些文献没有收进来。"), Say("给还没有 PDF 的文献查找开放全文。"), Command("search")]),
-            ("file-text", "读文献", &[Say("这些文献主要在研究哪些问题？按主题归类。"), Say("哪些文献的结论相互支持或矛盾？"), Say("我还没读的文献里，哪几篇最值得先读？为什么？"), Command("compare")]),
+            ("search", "找文献", &[Say("按这个文献库的主题在 PubMed 和 Europe PMC 试检索，看看还有哪些文献没有收进来。"), Say("给还没有 PDF 的文献查找开放全文。")]),
             ("list-todo", "整理", &[Say("给这些文献按主题打上标签，优先用已有的标签。"), Say("把我还没读的文献里最值得先读的几篇加上星标。"), Say("读一遍这些文献，为自定义词条提出取值。")]),
-            ("pen-line", "写", &[Command("review"), Command("write"), Command("cite"), Pick("给一个写好的 Word 文件换引用格式：选文件，或把它拖进来。"), Pick("照自己的一份幻灯片做汇报：选 .pptx 文件，或把它拖进来。")]),
+            ("file-text", "读文献", &[Say("这些文献主要在研究哪些问题？按主题归类。"), Say("哪些文献的结论相互支持或矛盾？"), Say("我还没读的文献里，哪几篇最值得先读？为什么？"), Command("search"), Command("compare")]),
+            ("pen-line", "写", &[Pick("给写好的 Word 文件换引用格式…", "选一个 .docx 文件，或把它拖进来"), Pick("照自己的一份幻灯片做汇报…", "选一个 .pptx 文件，或把它拖进来"), Command("review"), Command("write"), Command("cite")]),
         ];
         // A width of its own: a card that shares the row's width is measured before its lines wrap, and is then too short for them.
         // So the page's width is worked out here (less its padding, edge lines and a scroll bar): two cards to a row while each keeps a readable width, else one, as wide as reads well.
+        const GAP: f32 = 12.;
         let room = f32::from(window.viewport_size().width) - self.sidebar_width(window) - self.detail_width(window) - 60.;
-        let width = if room >= 2. * 270. + 12. { ((room - 12.) / 2.).min(348.) } else { room.clamp(240., 520.) };
-        let cards = groups.into_iter().map(|(icon, title, starts)| {
+        let paired = room >= 2. * 270. + GAP;
+        let width = if paired { ((room - GAP) / 2.).min(348.) } else { room.clamp(240., 520.) };
+        let mut cards: Vec<Div> = groups.into_iter().map(|(icon, title, starts)| {
             let lines = starts.iter().enumerate().map(|(n, start)| {
-                let line = div().id(SharedString::from(format!("start-{icon}-{n}"))).flex().gap(px(8.)).w_full().px(px(8.)).py(px(6.)).rounded(px(6.)).text_size(text_px(13.)).line_height(text_px(19.)).cursor_pointer().hover(|s| s.bg(Theme::hover())).active(|s| s.bg(Theme::pressed()));
+                // Every line is the same block: one size, one leading, one inset, so a wrapped line goes back to the same left edge as the others.
+                let line = div().id(SharedString::from(format!("start-{icon}-{n}"))).w_full().px(px(8.)).py(px(6.)).rounded(px(6.)).text_size(text_px(13.)).line_height(text_px(19.)).cursor_pointer().hover(|s| s.bg(Theme::hover())).active(|s| s.bg(Theme::pressed()));
                 match start {
-                    Say(text) => line.child(div().flex_1().min_w_0().child(t(text))).on_click(self.on(Cmd::Suggest(Talk::Library, t(text).to_string()), cx)),
+                    Say(text) => line.child(t(text)).on_click(self.on(Cmd::Suggest(Talk::Library, t(text).to_string()), cx)),
+                    // One run of text, not two boxes: the command in the accent, what it does after it in the secondary colour.
                     Command(name) => {
                         let about = ai::SLASH.iter().find(|slash| slash.name == *name).map_or("", |slash| slash.about);
-                        line.child(div().flex_none().font_weight(FontWeight::MEDIUM).text_color(Theme::accent()).child(format!("/{name}"))).child(div().flex_1().min_w_0().text_color(Theme::text_secondary()).child(t(about))).on_click(self.on(Cmd::StartCommand(name), cx))
+                        let command = format!("/{name}");
+                        let lit = HighlightStyle { color: Some(Theme::accent()), font_weight: Some(FontWeight::MEDIUM), ..Default::default() };
+                        line.text_color(Theme::text_secondary()).child(StyledText::new(format!("{command} {}", t(about))).with_highlights([(0..command.len(), lit)])).on_click(self.on(Cmd::StartCommand(name), cx))
                     }
-                    Pick(text) => line.child(div().flex_1().min_w_0().child(t(text))).on_click(self.on(Cmd::AttachImages(Talk::Library), cx)),
+                    Pick(text, tip) => line.child(t(text)).tooltip(ui::tip(t(tip))).on_click(self.on(Cmd::AttachImages(Talk::Library), cx)),
                 }
             });
             div()
@@ -972,15 +982,22 @@ impl Workspace {
                 .flex_none()
                 .w(px(width))
                 .max_w_full()
-                .gap(px(1.))
                 .p(px(6.))
                 .rounded(px(10.))
                 .border_1()
                 .border_color(Theme::line())
                 .bg(Theme::bg_body())
-                .child(div().flex().items_center().gap(px(7.)).px(px(8.)).pt(px(6.)).pb(px(6.)).mb(px(2.)).border_b_1().border_color(Theme::line()).child(ui::icon(icon, 14., Theme::text_secondary())).child(div().text_size(text_px(12.)).font_weight(FontWeight::MEDIUM).text_color(Theme::text_secondary()).child(t(title))))
+                // The kind is a quiet label on the lines' left edge; the card's edge already bounds it, so no line under it.
+                .child(div().flex().items_center().gap(px(6.)).px(px(8.)).pt(px(6.)).pb(px(4.)).child(ui::icon(icon, 13., Theme::text_tertiary())).child(div().text_size(text_px(12.)).font_weight(FontWeight::MEDIUM).text_color(Theme::text_tertiary()).child(t(title))))
                 .children(lines)
-        });
+        }).collect();
+        // Nothing on the page gives way to the others when it is taller than the window: the page scrolls instead (a shrunk card would be squashed, the icon too).
+        // Two to a row, both as tall as the taller (a row stretches its cards), so their edges line up across and down; one column below that.
+        let mut rows = vec![];
+        while !cards.is_empty() {
+            let row: Vec<Div> = cards.drain(..if paired { 2.min(cards.len()) } else { 1 }).collect();
+            rows.push(div().flex().flex_none().gap(px(GAP)).children(row));
+        }
         div()
             .id("chat-start")
             .flex()
@@ -994,10 +1011,10 @@ impl Workspace {
             .px(px(24.))
             .pt(px(32.))
             .pb(px(24.))
-            .child(div().flex().items_center().justify_center().size(px(44.)).mb(px(4.)).rounded(px(12.)).bg(Theme::accent_soft()).child(ui::icon("sparkle", 22., Theme::accent())))
-            .child(div().text_size(text_px(16.)).font_weight(FontWeight::SEMIBOLD).child(t("交给助手")))
-            .child(div().max_w(px(600.)).text_size(text_px(12.)).line_height(text_px(18.)).text_center().text_color(Theme::text_tertiary()).child(t("交代一件事，或者提一个问题。助手会自己检索和翻阅文献库，回答标出出处；要改动文献库时先问你。")))
-            .child(div().flex().flex_wrap().justify_center().items_start().gap(px(12.)).w(px(2. * width + 12.)).max_w_full().pt(px(18.)).children(cards))
+            .child(div().flex().flex_none().items_center().justify_center().size(px(44.)).mb(px(4.)).rounded(px(12.)).bg(Theme::accent_soft()).child(ui::icon("sparkle", 22., Theme::accent())))
+            .child(div().flex_none().text_size(text_px(16.)).font_weight(FontWeight::SEMIBOLD).child(t("交给助手")))
+            .child(div().flex_none().max_w(px(if paired { 2. * width + GAP } else { width })).text_size(text_px(12.)).line_height(text_px(18.)).text_center().text_color(Theme::text_tertiary()).child(t("交代一件事，或者提一个问题。助手会自己检索和翻阅文献库，回答标出出处；要改动文献库时先问你。")))
+            .child(div().flex().flex_col().flex_none().gap(px(GAP)).max_w_full().pt(px(18.)).children(rows))
             .into_any_element()
     }
 
