@@ -53,6 +53,9 @@ pub enum PdfEvent {
     Translate(String, Option<String>),
     /// Read the selected text aloud (朗读): its 1-based page and the text.
     ReadAloud(usize, String),
+    /// 收藏为方法 / 收藏为导言: the selected text, on its 1-based page, as the words of a passage of that kind
+    /// (`excerpt::METHOD`, `INTRO`) to keep.
+    Excerpt(&'static str, usize, String),
     /// Reading metadata, saved by the owner before the viewer redraws it.
     Annotate { paper: String, resource: String, page: usize, kind: Kind, quote: String, boxes: Vec<[f32; 4]> },
     AnnotationNote { resource: String, id: String, note: String },
@@ -3894,6 +3897,14 @@ impl PdfView {
         cx.notify();
     }
 
+    /// 收藏为方法 / 收藏为导言: what is selected becomes the words of a passage of that kind, for the owner's dialog.
+    pub fn excerpt_selection(&mut self, kind: &'static str, cx: &mut Context<Self>) {
+        let Some((page, text)) = self.selected() else { return };
+        self.selection = None;
+        cx.emit(PdfEvent::Excerpt(kind, page, text));
+        cx.notify();
+    }
+
     /// Select glyphs `from` to `to` of a 0-based page, as a drag would; nothing when that page's glyphs are not at hand.
     pub fn select_marks(&mut self, page: usize, from: usize, to: usize, cx: &mut Context<Self>) -> bool {
         let Some(marks) = self.marks.get(&page) else { return false };
@@ -4119,6 +4130,7 @@ impl PdfView {
                 .when(!piece && !self.library_chat, |d| d.child(button("pdf-quote-paper", t("添加到对话")).text_color(Theme::accent()).on_click(cx.listener(|this, _, _, cx| this.quote(false, cx)))))
                 .when(!piece, |d| d.child(button("pdf-translate", t("翻译")).on_click(cx.listener(|this, _, _, cx| this.translate(None, cx)))))
                 .when(!piece && self.maps, |d| d.child(button("pdf-to-map", t("加到导图")).on_click(cx.listener(|this, _, _, cx| this.map_selection(cx)))))
+                .when(!piece, |d| d.child(button("pdf-to-method", t("收藏为方法")).on_click(cx.listener(|this, _, _, cx| this.excerpt_selection(wisp_core::excerpt::METHOD, cx)))).child(button("pdf-to-intro", t("收藏为导言")).on_click(cx.listener(|this, _, _, cx| this.excerpt_selection(wisp_core::excerpt::INTRO, cx)))))
                 .when(!piece, |d| d.child(button("pdf-read-aloud", t("朗读")).on_click(cx.listener(|this, _, _, cx| this.read_selection_aloud(cx)))))
                 // A piece of the page: a figure to keep, or a picture for the next question.
                 .when(piece, |d| d.child(button("pdf-cut-keep", t("收藏到图片库")).text_color(Theme::accent()).on_click(cx.listener(|this, _, _, cx| this.collect_cut(cx)))))

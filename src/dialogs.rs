@@ -38,6 +38,7 @@ fn option_chip(id: impl Into<ElementId>, label: impl Into<SharedString>, chosen:
 impl Workspace {
     pub fn render_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.tend_figure_dialog(window, cx);
+        self.tend_excerpt_dialog(window, cx);
         // 资料库 reads its cards' pictures as it draws them: it is drawn before anything of the dialogs is borrowed.
         if matches!(self.modal, Some(Modal::WriteFigures)) {
             let card = self.render_write_figures_dialog(window, cx)?;
@@ -65,6 +66,7 @@ impl Workspace {
             Modal::ReviewEvidence(_) => self.render_review_evidence_dialog(window, cx)?,
             Modal::ReviewText { .. } => self.render_review_text_dialog(window, cx)?,
             Modal::Figure(_) => self.render_figure_dialog(window, cx)?,
+            Modal::Excerpt(_) => self.render_excerpt_dialog(window, cx)?,
             Modal::WriteFigures => return None,
             Modal::Extract(_) => self.render_extract_dialog(cx)?,
             Modal::Headings(_) => self.render_headings_dialog(cx)?,

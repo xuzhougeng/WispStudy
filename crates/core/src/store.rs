@@ -569,10 +569,11 @@ fn check_schema_version(found: i32, supported: i32) -> Result<()> {
 /// What deleting a paper for good takes from the database: its row, with
 /// the rows that refer to it, and its conversations.
 /// A stored file becomes `paper`'s, as a file of `kind`; what was marked on its pages and cut out of them goes
-/// with it (those rows name the paper too, and would go with the other paper's record otherwise).
+/// with it, and the methods and introductions kept from its words (those rows name the paper too, and would go with the other
+/// paper's record otherwise).
 fn hand_file(db: &Connection, file: &str, paper: &str, kind: &str) -> Result<()> {
     db.execute("UPDATE resources SET paper_id = ?2, resource_type = ?3 WHERE id = ?1", params![file, paper, kind])?;
-    for table in ["pdf_annotations", "pdf_shapes", "pdf_cuts", "pdf_texts", "figures"] {
+    for table in ["pdf_annotations", "pdf_shapes", "pdf_cuts", "pdf_texts", "figures", "excerpts"] {
         db.execute(&format!("UPDATE {table} SET paper_id = ?2 WHERE resource_id = ?1"), params![file, paper])?;
     }
     Ok(())
@@ -622,6 +623,7 @@ impl Store {
         db.execute_batch(crate::figure::SCHEMA)?;
         db.execute_batch(crate::annotation::SCHEMA)?;
         db.execute_batch(crate::extract::SCHEMA)?;
+        db.execute_batch(crate::excerpt::SCHEMA)?;
         add_columns(&db)?;
         crate::manuscript::migrate_drafts(&mut db)?;
         db.pragma_update(None, "user_version", SCHEMA_VERSION)?;

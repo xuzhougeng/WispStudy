@@ -667,6 +667,8 @@ pub enum Cmd {
     FigureShape(wisp_core::imagegen::Shape),
     /// 提取: everything the page, its dialog and the sparkles by a paper's fields do (`src/extract.rs`).
     Extract(crate::extract::Do),
+    /// 方法库 and 导言库: everything their pages and a passage's dialog do (`src/excerpts.rs`).
+    Excerpt(crate::excerpts::Do),
     // Dialogs
     CloseModal,
     SubmitModal,
@@ -1608,6 +1610,7 @@ impl Workspace {
             }
 
             Cmd::Extract(what) => self.run_extract(what, window, cx),
+            Cmd::Excerpt(what) => self.run_excerpts(what, window, cx),
             Cmd::ManageFields => self.fields_dialog(None, window, cx),
             Cmd::EditField(id) => self.fields_dialog(Some(id), window, cx),
             Cmd::DeleteField(id) => {

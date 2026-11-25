@@ -662,6 +662,12 @@ impl Workspace {
             PdfEvent::ReadAloud(..) | PdfEvent::Figure(_) if self.lib.as_ref().is_some_and(|lib| lib.apart(&view).is_some()) => self.say(t("朗读和收进图片库只对正在读的那篇：先在列表里选中它。"), cx),
             PdfEvent::ReadAloud(page, text) => self.read_aloud(Some((*page, text.clone())), cx),
             PdfEvent::Figure(piece) => self.collect_piece(piece, cx),
+            // 收藏为方法 / 收藏为导言: the words are of the paper the view shows, kept beside or read in a window of its own as well.
+            PdfEvent::Excerpt(kind, page, text) => {
+                let Some(paper) = self.lib.as_ref().and_then(|lib| lib.apart(&view).or_else(|| lib.selected.clone())) else { return };
+                let file = view.read(cx).resource_id().to_string();
+                self.collect_excerpt(kind, paper, file, *page, text, cx);
+            }
             PdfEvent::Annotate { paper, resource, page, kind, quote, boxes } => self.change_pdf_annotation(resource, |store| store.add_pdf_annotation(paper, resource, *page, *kind, quote, boxes).map(|_| ()), cx),
             PdfEvent::AnnotationNote { resource, id, note } => self.change_pdf_annotation(resource, |store| store.update_pdf_annotation_note(resource, id, note), cx),
             PdfEvent::RecolorAnnotation { resource, id, color } => self.change_pdf_annotation(resource, |store| store.recolor_pdf_annotation(resource, id, color), cx),

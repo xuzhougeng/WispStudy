@@ -1,9 +1,9 @@
 //! 移到文献库: a paper taken from one library (or a conversation, a draft) into another, with what is its own
 //! there: its files (copied, each once by its bytes), their text, parts and the place they were read to, the
-//! highlights, boxes, notes and pieces marked on them, its conversations and the figures cut from it. Its
-//! custom fields go to the fields of the same name and kind; the rest are named in the answer. Its screening
-//! decision does not go: it was made against the other library's goal, and the paper waits here.
-//! The library it came from keeps it in its trash, so nothing is lost by a move.
+//! highlights, boxes, notes and pieces marked on them, its conversations, the figures cut from it and the
+//! methods and introductions kept from it, with their links to those figures. Its custom fields go to the fields of the same name
+//! and kind; the rest are named in the answer. Its screening decision does not go: it was made against the
+//! other library's goal, and the paper waits here. The library it came from keeps it in its trash, so nothing is lost by a move.
 //! A paper this library already holds (the same DOI, PMID or title, or one of the same files) is not added
 //! twice: what the moved one brings is joined to it, blanks filled, tags and notes added.
 
@@ -192,6 +192,17 @@ impl Store {
             taken.marks += put(&tx, table, &names, found, to_paper)?;
         }
         put(&tx, "figures", &figure_names, pictures, to_paper)?;
+        // Its methods and introductions, and their links to the figures this library holds now; a link to one it does
+        // not stays behind.
+        let (excerpt_names, excerpts) = rows(&from.db, "excerpts", "paper_id", id)?;
+        let excerpt_ids: Vec<String> = excerpts.iter().map(|row| text(&excerpt_names, row, "id")).collect();
+        put(&tx, "excerpts", &excerpt_names, excerpts, to_paper)?;
+        for excerpt in excerpt_ids {
+            let (names, links) = rows(&from.db, "excerpt_figures", "excerpt_id", &excerpt)?;
+            let held = |row: &Vec<Value>| tx.query_row("SELECT 1 FROM figures WHERE id = ?1", [text(&names, row, "figure_id")], |_| Ok(())).optional().ok().flatten().is_some();
+            let links: Vec<Vec<Value>> = links.into_iter().filter(held).collect();
+            put(&tx, "excerpt_figures", &names, links, |_, _| {})?;
+        }
         let (names, conversations) = rows(&from.db, "conversations", "paper_id", id)?;
         let conversation_ids: Vec<String> = conversations.iter().map(|row| text(&names, row, "id")).collect();
         put(&tx, "conversations", &names, conversations, to_paper)?;
@@ -268,6 +279,30 @@ mod tests {
         assert_eq!(to.list_conversations(&taken.paper).unwrap().len(), 1);
         // The other library keeps it, in its trash.
         assert!(from.in_trash(&id).unwrap());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_paper_moves_with_its_excerpts_and_their_figures() {
+        let dir = temp_dir("methods");
+        let (mut from, id) = source(&dir);
+        let png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x10\x00\x00\x00\x10\x08\x02\x00\x00\x00";
+        let mut blot = crate::figure::Figure { paper_id: id.clone(), label: "Fig. 2".into(), ..Default::default() };
+        from.add_figure(&mut blot, png).unwrap();
+        let mut drawn = crate::figure::Figure::default();
+        from.add_figure(&mut drawn, png).unwrap();
+        let mut method = crate::excerpt::Excerpt { paper_id: id.clone(), name: "Western blot".into(), text: "Proteins were separated.".into(), ..Default::default() };
+        from.add_excerpt(&mut method).unwrap();
+        from.set_excerpt_figures(&method.id, &[blot.id.clone(), drawn.id.clone()]).unwrap();
+        let mut intro = crate::excerpt::Excerpt { kind: crate::excerpt::INTRO.into(), paper_id: id.clone(), name: "从根毛切入".into(), ..Default::default() };
+        from.add_excerpt(&mut intro).unwrap();
+        let mut to = Store::open(&dir.join("to")).unwrap();
+        let taken = to.take_paper(&mut from, &id).unwrap();
+        // The method is the paper's here; its link to the paper's figure came along, the one to a picture of the other library did not.
+        let moved = to.get_excerpt(&method.id).unwrap();
+        assert_eq!((moved.paper_id.as_str(), moved.text.as_str()), (taken.paper.as_str(), "Proteins were separated."));
+        assert_eq!(to.excerpt_figures(&method.id).unwrap(), vec![blot.id.clone()]);
+        assert_eq!(to.get_excerpt(&intro.id).unwrap().kind, crate::excerpt::INTRO);
         std::fs::remove_dir_all(dir).ok();
     }
 

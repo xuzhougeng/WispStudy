@@ -16,6 +16,9 @@
 //! the model that draws (`Task::Image`, `wisp_core::imagegen`), the picture
 //! that comes back is the dialog's, to draw again or to keep. A figure kept
 //! that way has no paper: it says so where the others say where they are from.
+//!
+//! A figure kept may be linked to methods of 方法库 (`excerpts.rs`), what produced it: its dialog names them,
+//! each a way to that method's dialog. The links are set from the method's side.
 
 use crate::i18n::{t, tc};
 use crate::app::{Cmd, MenuItem, MenuKind, Modal, Page, Picture, Tab, Workspace};
@@ -926,6 +929,8 @@ impl Workspace {
             .child(named(t("图注"), ask_legend, tall("figure-legend", &form.legend, 190.)))
             .child(named(t("标签"), ask_tags, div().w(px(wide)).child(ui::field(&form.tags, window, cx))).when(!offered.is_empty(), |d| d.child(div().flex().flex_wrap().gap(px(5.)).pt(px(3.)).w(px(wide)).children(offered))))
             .child(named(t("备注"), ask_notes, tall("figure-notes", &form.notes, 130.)))
+            // The methods linked to it, each a way to that method; the links are set in a method's dialog.
+            .children(form.id.as_deref().and_then(|id| self.render_figure_methods(id, wide, cx)))
             .child(div().w(px(wide)).child(ui::error_line(&self.modal_error)));
         let footer = div()
             .flex()
@@ -985,10 +990,10 @@ impl Workspace {
         Thumb::Loading
     }
 
-    /// 文献 and 图片: the two things 收藏 holds.
+    /// 文献, 图片, 方法 and 导言: the four things 收藏 holds.
     pub(crate) fn render_collection_switch(&self, cx: &mut Context<Self>) -> Div {
         let Some(lib) = self.lib.as_ref() else { return div() };
-        let figures = lib.page == Page::Figures;
+        let (figures, methods, intros) = (lib.page == Page::Figures, lib.page == Page::Methods, lib.page == Page::Intros);
         let side = |id: &'static str, label: String, chosen: bool, cmd: Cmd, this: &Self, cx: &mut Context<Self>| {
             div()
                 .id(id)
@@ -1013,8 +1018,10 @@ impl Workspace {
             .p(px(3.))
             .rounded(px(9.))
             .bg(Theme::groove())
-            .child(side("collect-papers", tf!("文献 {}", "Papers {}", lib.papers.iter().filter(|p| p.starred).count()), !figures, Cmd::SetView(View::Starred), self, cx))
+            .child(side("collect-papers", tf!("文献 {}", "Papers {}", lib.papers.iter().filter(|p| p.starred).count()), !figures && !methods && !intros, Cmd::SetView(View::Starred), self, cx))
             .child(side("collect-figures", tf!("图片 {}", "Figures {}", lib.gallery.items.len()), figures, Cmd::SetPage(Page::Figures), self, cx))
+            .child(side("collect-methods", tf!("方法 {}", "Methods {}", lib.excerpts.count(wisp_core::excerpt::METHOD)), methods, Cmd::SetPage(Page::Methods), self, cx))
+            .child(side("collect-intros", tf!("导言 {}", "Intros {}", lib.excerpts.count(wisp_core::excerpt::INTRO)), intros, Cmd::SetPage(Page::Intros), self, cx))
     }
 
     pub fn render_figures(&mut self, width: f32, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {

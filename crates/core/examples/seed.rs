@@ -5,10 +5,13 @@
 //! The first PDF is attached to the first paper of the first library; any
 //! further ones become papers of the second library, each with its PDF as
 //! full text, so 写作 has sentences to show. PDFs after `--supplement` are
-//! the first paper's attachments S1, S2, …
+//! the first paper's attachments S1, S2, … The first paper of the second
+//! library gets a figure, methods (one linked to it) and introductions.
 
 use wisp_core::annotation::{Kind, TextStyle};
+use wisp_core::figure::Figure;
 use wisp_core::libraries;
+use wisp_core::excerpt::{self, Excerpt};
 use wisp_core::model::{FieldDef, FieldKind, Paper};
 use wisp_core::store::Store;
 
@@ -87,6 +90,46 @@ fn main() -> anyhow::Result<()> {
     }
     // With PDFs of its own the library needs no sample record (one of them may be this very paper).
     if more.is_empty() { store.add_paper(Paper { title: "A single-cell RNA sequencing profiles the developmental landscape of Arabidopsis root".into(), authors: "Zhang, Tian-Qi; Xu, Zhou-Geng; Shang, Guan-Dong; Wang, Jia-Wei".into(), year: Some(2019), journal: "Molecular Plant".into(), doi: "10.1016/j.molp.2019.04.004".into(), ..Default::default() })?; }
+    // 方法库: two methods of its first paper, one linked to the blot it gave, and one written down by hand;
+    // 导言库: two ways papers lead into their question.
+    if let Some(paper) = store.list_papers()?.into_iter().next_back() {
+        let mut blot = Figure { paper_id: paper.id.clone(), page: 6, label: "Fig. 3".into(), legend: "Western blot of WOX5-GFP in root tips after auxin treatment; actin as the loading control.".into(), tags: vec!["western blot".into()], ..Default::default() };
+        store.add_figure(&mut blot, &blot_picture()?)?;
+        let methods = [
+            ("Western blot", 9, "Total proteins were extracted from 5-day-old root tips, separated by 10% SDS-PAGE and transferred to PVDF membranes (90 min, 100 V). Membranes were blocked in 5% milk and incubated with anti-GFP (1:2000) overnight at 4 °C.", "转膜我们改成 60 min，条带一样清楚；一抗 1:5000 也够。", vec!["蛋白", "western blot"], true),
+            ("根尖原生质体分离", 4, "Root tips (0.5 cm) were digested in 1.5% cellulase R10 and 0.4% macerozyme R10 for 2 h at 22 °C with gentle shaking, filtered through a 40 μm strainer and washed twice.", "酶解超过 2 h 细胞活力下降，单细胞测序前控制在 1.5 h。", vec!["单细胞", "原生质体"], false),
+        ];
+        for (name, page, text, notes, tags, linked) in methods {
+            let mut method = Excerpt { paper_id: paper.id.clone(), page, name: name.into(), text: text.into(), notes: notes.into(), tags: tags.into_iter().map(String::from).collect(), ..Default::default() };
+            store.add_excerpt(&mut method)?;
+            if linked { store.set_excerpt_figures(&method.id, std::slice::from_ref(&blot.id))? }
+        }
+        let intros = [
+            ("从组织的复杂性切入", 1, "The root is a complex organ composed of many cell types, each arising from stem cells in the meristem. How these cell types are specified, and in which order, has been inferred mostly from a handful of marker genes.", "先讲器官由很多细胞类型组成，再说以前只靠少数标记基因：空白一句话就点出来了。", vec!["空白", "单细胞"]),
+            ("从技术的局限切入", 2, "Bulk RNA-seq averages over thousands of cells and hides the transitions between states. Single-cell RNA sequencing now makes it possible to follow these transitions directly, yet a developmental atlas of the Arabidopsis root at this resolution is still missing.", "用旧方法的局限引出新方法，最后落到「还没有图谱」，正好接上本文的目的。", vec!["方法局限", "空白"]),
+        ];
+        for (name, page, text, notes, tags) in intros {
+            let mut intro = Excerpt { kind: excerpt::INTRO.into(), paper_id: paper.id.clone(), page, name: name.into(), text: text.into(), notes: notes.into(), tags: tags.into_iter().map(String::from).collect(), ..Default::default() };
+            store.add_excerpt(&mut intro)?;
+        }
+        let mut own = Excerpt { name: "qPCR 引物验证".into(), text: "每对引物做 5 个梯度的标准曲线，扩增效率在 90%–110% 之间才用。".into(), tags: vec!["qPCR".into()], ..Default::default() };
+        store.add_excerpt(&mut own)?;
+    }
     println!("seeded {}", root.display());
     Ok(())
+}
+
+/// A picture like a western blot: six lanes, a band that grows lane by lane over a loading control.
+fn blot_picture() -> anyhow::Result<Vec<u8>> {
+    let picture = image::RgbImage::from_fn(480, 240, |x, y| {
+        let lane = ((x as f32 - 40.) / 80.).round().clamp(0., 5.);
+        let (dx, strength) = ((x as f32 - (40. + lane * 80.)) / 30., 0.25 + lane * 0.14);
+        let band = |at: f32, depth: f32| depth * (-(dx.powi(4)) - ((y as f32 - at) / 9.).powi(2)).exp();
+        let ink = (band(80., strength) + band(170., 0.7)).min(1.);
+        let grey = (245. - ink * 215.) as u8;
+        image::Rgb([grey, grey, grey])
+    });
+    let mut bytes = vec![];
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut bytes, 90).encode_image(&picture)?;
+    Ok(bytes)
 }

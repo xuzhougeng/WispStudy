@@ -38,6 +38,7 @@ mod filing;
 mod floating;
 mod dialogs;
 mod draft;
+mod excerpts;
 mod guide;
 mod home;
 mod input;
