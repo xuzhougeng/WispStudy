@@ -308,8 +308,7 @@ impl Workspace {
             let mut ctx = ai::build_context(&lib.info.name, &lib.info.topic, &papers, &lib.fields, &fulltext, &attachments, &scope, &prompt, &chat.known);
             // The tools reach every paper of the library, so every paper can be cited.
             ctx.add_sources(&lib.papers);
-            // What an earlier part of the conversation read in other libraries is still what its labels name.
-            ctx.sources.extend(chat.known.iter().filter(|source| !source.library.is_empty()).cloned());
+            // What an earlier part of the conversation read in other libraries is among them: `build_context` keeps every known source.
             // Without a library the model is told so, and where papers are found then.
             // And which libraries are on the shelf, which it can read and not change (`tools::ACROSS`).
             if draft { ctx.instructions = format!("{}{}", ai::draft_instructions(&ctx), ai::shelf_note(&shelf)) }

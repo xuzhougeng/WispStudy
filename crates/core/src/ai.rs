@@ -511,9 +511,9 @@ pub fn build_context(library_name: &str, topic: &str, papers: &[&Paper], fields:
 - 用户要把文献收进文献库时，用 save_search 保存检索式，再用 run_search 导入，导入前用户会在窗口里确认；也可以提醒用户用「检索与导入」或「添加文献」。");
     }
     ctx.documents = documents;
-    // A paper cited earlier that is not among these keeps its label too.
+    // A paper cited earlier that is not among these keeps its label too, one read in another library among them.
     for source in known {
-        if !ctx.sources.iter().any(|s| s.paper_id == source.paper_id) { ctx.sources.push(source.clone()) }
+        if !ctx.sources.iter().any(|s| s.paper_id == source.paper_id && s.library == source.library) { ctx.sources.push(source.clone()) }
     }
     ctx
 }
@@ -1578,7 +1578,9 @@ impl Transcript {
             };
             named.extend(bare_labels(text));
         }
-        let sources = sources.iter().filter(|source| !source.library.is_empty() || named.contains(&source.label.to_ascii_uppercase())).cloned().collect();
+        // One source a label: a build before this one could list a paper of another library twice.
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let sources = sources.iter().filter(|source| (!source.library.is_empty() || named.contains(&source.label.to_ascii_uppercase())) && seen.insert(&source.label)).cloned().collect();
         Transcript { items, sources, compacted }
     }
 }
@@ -2921,6 +2923,13 @@ mod tests {
         let mut result = json!([{"id": "ligule"}, {"id": "new"}]);
         add_labels_of(&mut result, &known, "L-cells");
         assert_eq!((result[0]["label"].as_str(), result[1]["label"].as_str()), (Some(ligule.as_str()), Some("P73")));
+        // Taken up again, the context holds each of them once, beside the conversation's own papers.
+        let own = Paper { id: "own".into(), title: "Own".into(), ..Default::default() };
+        let ctx = build_context("对话", "", &[&own], &[], &BTreeMap::new(), &[], &Scope::Library, "接着问", &known);
+        assert_eq!(ctx.sources.len(), known.len());
+        assert_eq!(ctx.sources.iter().find(|s| s.paper_id == "own").map(|s| s.label.as_str()), Some("P1"));
+        let doubled = Transcript::of(vec![], &[known.clone(), known.clone()].concat(), None);
+        assert_eq!(doubled.sources.len(), known.len() - 1);
         let mut args = json!({"paperId": "P72"});
         resolve_labels(&mut args, &known);
         assert_eq!((args["paperId"].as_str(), args["library"].as_str()), (Some("hair-24"), Some("L-hair")));
