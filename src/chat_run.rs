@@ -26,8 +26,10 @@ use wisp_core::{compact, time, tools, usage};
 /// among `sources` (a paper named, the first papers of a tag named) is added under the next label, as the tools' finds
 /// are. `prompt` as it is when nothing is named.
 /// A figure of `figures` (by its token's value, `Workspace::question_figures`) is named by its paper's label and page.
+/// A method or an introduction of `kept` (when `offers.excerpts`) by its passage, notes and source, its paper under a
+/// label as a paper named is.
 #[allow(clippy::too_many_arguments)]
-fn mention_note(prompt: &str, keys: &wisp_core::mention::Keys, papers: &[Paper], tags: &[(String, usize)], manuscripts: &[Manuscript], shelf: &[LibraryInfo], offers: crate::mention::Offers, figures: &[(String, wisp_core::mention::FigureSeen)], sources: Option<&mut Vec<ai::Source>>) -> String {
+fn mention_note(prompt: &str, keys: &wisp_core::mention::Keys, papers: &[Paper], tags: &[(String, usize)], manuscripts: &[Manuscript], shelf: &[LibraryInfo], offers: crate::mention::Offers, figures: &[(String, wisp_core::mention::FigureSeen)], kept: &Kept, sources: Option<&mut Vec<ai::Source>>) -> String {
     use wisp_core::mention::{self, Named, Thing};
     let Some(sources) = sources else { return prompt.to_string() };
     let tokens = mention::tokens(prompt);
@@ -42,8 +44,11 @@ fn mention_note(prompt: &str, keys: &wisp_core::mention::Keys, papers: &[Paper],
     let figure_paper = |value: &str| wisp_core::mention::figure_named(value).map(|named| named.paper);
     let figured: Vec<String> = figures.iter().filter_map(|(value, _)| figure_paper(value)).collect();
     let mut named_ids: Vec<&str> = tokens.iter().filter_map(|token| keys.paper(&token.named)).chain(figured.iter().map(String::as_str)).collect();
+    let excerpt = |value: &str| kept.excerpts.iter().find(|excerpt| offers.excerpts && excerpt.id == value);
     for token in &tokens {
         if let Named::Other { kind: mention::TAG, value } = token.named { named_ids.extend(tagged(&mention::decode(value)).into_iter().take(10).map(|paper| paper.id.as_str())) }
+        // The paper a method or an introduction is from is cited by its label.
+        if let Named::Other { kind: mention::EXCERPT, value } = token.named && let Some(excerpt) = excerpt(value) && !excerpt.paper_id.is_empty() { named_ids.push(excerpt.paper_id.as_str()) }
     }
     let mut missing: Vec<Paper> = vec![];
     for id in named_ids {
@@ -72,6 +77,14 @@ fn mention_note(prompt: &str, keys: &wisp_core::mention::Keys, papers: &[Paper],
                 let (_, seen) = figures.iter().find(|(known, _)| *known == value)?;
                 Some(Thing::Figure(mention::FigureSeen { label: label(&figure_paper(&value)?)?, ..seen.clone() }))
             }
+            Named::Other { kind: mention::EXCERPT, value } => {
+                let excerpt = excerpt(value)?;
+                let paper = papers.iter().find(|paper| !excerpt.paper_id.is_empty() && paper.id == excerpt.paper_id).and_then(|paper| Some((paper, label(&paper.id)?)));
+                let attachment = kept.files.iter().find(|(id, _)| *id == excerpt.id).and_then(|(_, n)| *n);
+                // A method's figures as the person linked them; an introduction has none.
+                let figures: Vec<&wisp_core::figure::Figure> = if excerpt.kind == wisp_core::excerpt::METHOD { kept.links.iter().filter(|(of, _)| *of == excerpt.id).filter_map(|(_, figure)| kept.figures.iter().find(|known| known.id == *figure)).collect() } else { vec![] };
+                Some(Thing::Excerpt { excerpt, paper, attachment, figures })
+            }
             named => {
                 let id = keys.paper(named)?;
                 let paper = papers.iter().find(|paper| paper.id == id)?;
@@ -81,6 +94,15 @@ fn mention_note(prompt: &str, keys: &wisp_core::mention::Keys, papers: &[Paper],
     };
     let (text, named) = mention::resolve(prompt, find, crate::i18n::is_english());
     if named.is_empty() { prompt.to_string() } else { format!("{text}\n\n{}", mention::note(&named)) }
+}
+
+/// The methods and introductions a question may name, as `mention_note` reads them: the library's, the links to
+/// figures, the figures of 图片库, and for each named one selected in an attachment that attachment's number.
+struct Kept<'a> {
+    excerpts: &'a [wisp_core::excerpt::Excerpt],
+    links: &'a [(String, String)],
+    figures: &'a [wisp_core::figure::Figure],
+    files: Vec<(String, Option<usize>)>,
 }
 
 /// The steps one question may take. Each is a request to the model; all but
@@ -451,7 +473,12 @@ impl Workspace {
         }
         // The things named with @: each token written as the model reads it (its label and short name), and a note of them
         // after the question. A paper not yet a source of the conversation gets the next label; the context itself is not touched.
-        let prompt = mention_note(&prompt, &lib.keys, &lib.papers, &lib.tags, &lib.writing.manuscripts, &shelf, offers, &figures.seen, chat.ctx.as_mut().map(|ctx| &mut ctx.sources));
+        // The attachment each method or introduction named was selected in, as the answers number them.
+        let named: Vec<String> = wisp_core::mention::tokens(&prompt).iter().filter_map(|token| match token.named { wisp_core::mention::Named::Other { kind: wisp_core::mention::EXCERPT, value } => Some(value.to_string()), _ => None }).collect();
+        let excerpt_files: Vec<(String, Option<usize>)> = lib.excerpts.items.iter().filter(|excerpt| named.contains(&excerpt.id) && !excerpt.resource_id.is_empty()).map(|excerpt| (excerpt.id.clone(), lib.attachment_number(&excerpt.paper_id, &excerpt.resource_id))).collect();
+        let kept = Kept { excerpts: &lib.excerpts.items, links: &lib.excerpts.links, figures: &lib.gallery.items, files: excerpt_files };
+        let chat = chat_of!(lib, talk);
+        let prompt = mention_note(&prompt, &lib.keys, &lib.papers, &lib.tags, &lib.writing.manuscripts, &shelf, offers, &figures.seen, &kept, chat.ctx.as_mut().map(|ctx| &mut ctx.sources));
         // The passages selected in a PDF go first, written as the answers cite: the labels are known by now.
         // A question asked again has them in its words already; the box's stay for the box.
         let quotes = if asked_again { vec![] } else { std::mem::take(&mut chat.quotes) };

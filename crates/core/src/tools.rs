@@ -189,6 +189,7 @@ pub fn catalog() -> Vec<ToolDef> {
                 "query": {"type": "string", "description": "在名称、原文、备注、标签，以及所属文献的题目、作者、期刊和年份中搜索；空格分开的每个词都必须出现。"},
                 "tag": {"type": "string", "description": "只返回带这个标签的方法。"},
                 "paperId": {"type": "string", "description": "只返回这篇文献（ID）的方法。"},
+                "id": {"type": "string", "description": "只返回这一个方法（ID），例如问题里用 @ 点名的那个。"},
                 "limit": {"type": "integer", "description": "最多返回多少个，默认 50，最多 500。"},
                 "offset": {"type": "integer", "description": "跳过前面多少个，用于翻页。"},
             }),
@@ -202,6 +203,7 @@ pub fn catalog() -> Vec<ToolDef> {
                 "query": {"type": "string", "description": "在名称、原文、备注、标签，以及所属文献的题目、作者、期刊和年份中搜索；空格分开的每个词都必须出现。"},
                 "tag": {"type": "string", "description": "只返回带这个标签的段落。"},
                 "paperId": {"type": "string", "description": "只返回这篇文献（ID）的段落。"},
+                "id": {"type": "string", "description": "只返回这一段（ID），例如问题里用 @ 点名的那段。"},
                 "limit": {"type": "integer", "description": "最多返回多少段，默认 50，最多 500。"},
                 "offset": {"type": "integer", "description": "跳过前面多少段，用于翻页。"},
             }),
@@ -1212,14 +1214,14 @@ fn list_figures(store: &mut Store, info: &LibraryInfo, args: &Value) -> Result<V
 
 /// `list_methods` and `list_introductions`: the excerpts of a kind; a method with the figures it is linked to.
 fn list_excerpts(store: &mut Store, info: &LibraryInfo, kind: &str, args: &Value) -> Result<Value> {
-    let (words, tag, paper) = (crate::figure::search_words(text(args, "query")?), text(args, "tag")?, text(args, "paperId")?);
+    let (words, tag, paper, id) = (crate::figure::search_words(text(args, "query")?), text(args, "tag")?, text(args, "paperId")?, text(args, "id")?);
     let (limit, offset) = (number(args, "limit", 50, 500)?, number(args, "offset", 0, usize::MAX)?);
     let papers = store.list_papers()?;
     let by_id: BTreeMap<&str, &Paper> = papers.iter().map(|p| (p.id.as_str(), p)).collect();
     let methods = store.list_excerpts(Some(kind))?;
     let found: Vec<&crate::excerpt::Excerpt> = methods
         .iter()
-        .filter(|m| (tag.is_empty() || m.tags.iter().any(|t| t == tag)) && (paper.is_empty() || m.paper_id == paper) && m.matches(by_id.get(m.paper_id.as_str()).copied(), &words))
+        .filter(|m| (id.is_empty() || m.id == id) && (tag.is_empty() || m.tags.iter().any(|t| t == tag)) && (paper.is_empty() || m.paper_id == paper) && m.matches(by_id.get(m.paper_id.as_str()).copied(), &words))
         .collect();
     // A linked figure is named while it is listed: one of a paper in the trash is not.
     let figures = store.list_figures()?;
@@ -2488,6 +2490,9 @@ pub(crate) mod tests {
         let own_found = call(&root, "list_methods", &json!({"tag": "细胞"})).unwrap();
         assert_eq!((own_found["total"].as_u64(), own_found["methods"][0]["paper"].is_null(), own_found["methods"][0]["page"].is_null()), (Some(1), true, true));
         assert_eq!(call(&root, "list_methods", &json!({"paperId": atlas})).unwrap()["total"], 1);
+        // One by its id, as a mention's note points to it; another kind's id finds nothing.
+        assert_eq!(call(&root, "list_methods", &json!({"id": own.id})).unwrap()["methods"][0]["name"], "原生质体分离");
+        assert_eq!(call(&root, "list_methods", &json!({"id": opening.id})).unwrap()["total"], 0);
         assert_eq!(call(&root, "list_methods", &json!({"limit": 1, "offset": 1})).unwrap()["methods"].as_array().unwrap().len(), 1);
         // The introductions are listed apart, with their paper and without figures.
         let intros = call(&root, "list_introductions", &json!({"query": "stem"})).unwrap();

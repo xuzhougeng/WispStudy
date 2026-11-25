@@ -342,9 +342,11 @@ impl TextInput {
         self.revision
     }
 
-    /// The stretches drawn as other words that are still a citation in its brackets where they stand, in a field drawn as Markdown.
+    /// The stretches drawn as other words that are still a citation in its brackets where they stand: a manuscript's
+    /// citations in a field drawn as Markdown, a question's mentions in a plain one (`mention.rs`). A selection takes
+    /// each whole (`whole_cites`, `stepped`).
     fn cites(&self) -> impl Iterator<Item = Range<usize>> + '_ {
-        let on = self.markdown && !self.masked;
+        let on = !self.masked;
         self.folds.iter().map(|(range, _)| range.clone()).filter(move |range| on && self.text.get(range.clone()).is_some_and(|written| written.starts_with('[') && written.ends_with(']')))
     }
 

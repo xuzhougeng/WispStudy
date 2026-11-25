@@ -4,16 +4,21 @@
 //! The text is the truth: a mention is a token in the box's plain text, nothing beside it. A paper is written as a
 //! manuscript cites it, `[@Zhang2024]` (its key, `cite::Index`); anything else as `[@kind:value]`: a library on the
 //! shelf `[@library:<id>]`, a tag `[@tag:<name>]`, a section of a manuscript `[@section:<id>]`, a figure or table of
-//! a paper `[@figure:<paper>/<file>/<number>]` (`figure_value`). A value holds what a
+//! a paper `[@figure:<paper>/<file>/<number>]` (`figure_value`), a method or an introduction of 方法库 / 导言库
+//! `[@excerpt:<id>]` (one kind for both: the record says which). A value holds what a
 //! token cannot (a blank, a bracket) percent-encoded (`token`, `decode`). A token whose kind is not known, or whose
 //! key, id or tag nothing has, stays the text it is. So Undo, 撤回, history and copying need nothing of their own.
 //!
 //! What the model gets (`resolve`, `note`): the token written as it reads naturally (`[P12]（Zhang 等 2024）`,
 //! 标签「X」（N 篇）, 稿件「T」的「节名」一节, `[P1 p.5] 的 Fig. 3`), and a note after the question naming each thing once,
 //! with what it needs to read it. A tag is a group named, a section a place named: neither changes what the
-//! conversation reads. A figure goes with its caption, its page and, cut out of its page, its picture.
+//! conversation reads. A figure goes with its caption, its page and, cut out of its page, its picture. A method or an
+//! introduction goes with its passage (the source paper's words, to learn from and not to copy), the person's notes,
+//! its tags, where it is from as answers cite, and for a method the figures linked to it.
 
+use crate::excerpt::{Excerpt, METHOD};
 use crate::figref::{self, Key};
+use crate::figure::Figure;
 use crate::libraries::LibraryInfo;
 use crate::manuscript::{Manuscript, Section};
 use crate::model::{Paper, author_names};
@@ -28,8 +33,10 @@ pub const TAG: &str = "tag";
 pub const SECTION: &str = "section";
 /// The kind of `[@figure:<paper>/<file>/<number>]`: a figure or table of a paper, in one of its PDFs (`figure_value`).
 pub const FIGURE: &str = "figure";
+/// The kind of `[@excerpt:<id>]`: a method of 方法库 or an introduction of 导言库, by its id.
+pub const EXCERPT: &str = "excerpt";
 /// The kinds a token other than a paper's may name. A kind not here leaves its token as written.
-pub const KINDS: [&str; 4] = [LIBRARY, TAG, SECTION, FIGURE];
+pub const KINDS: [&str; 5] = [LIBRARY, TAG, SECTION, FIGURE, EXCERPT];
 /// How far back from the caret an `@` is looked for, in characters: what is typed after it to find a paper.
 pub const QUERY_MAX: usize = 40;
 /// Rows the popup offers.
@@ -48,6 +55,13 @@ const TAG_LISTED: usize = 10;
 const SECTION_TEXT_MAX: usize = 1500;
 /// Authors the note names before 等.
 const AUTHORS_MAX: usize = 6;
+/// A method's or an introduction's passage up to this many characters goes with the note; of a longer one its start,
+/// the rest a tool call away.
+const EXCERPT_TEXT_MAX: usize = 2000;
+/// How much of an excerpt's name its folded label shows.
+const EXCERPT_LABEL_MAX: usize = 16;
+/// How much of a linked figure's caption the note gives.
+const LINKED_LEGEND_MAX: usize = 200;
 
 /// What a token names, as written.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,6 +178,7 @@ pub fn readable(text: &str) -> String {
             Named::Paper(key) => out.push_str(&format!("@{key}")),
             Named::Other { kind: TAG, value } => out.push_str(&format!("#{}", decode(value))),
             Named::Other { kind: SECTION, .. } => out.push('§'),
+            Named::Other { kind: EXCERPT, .. } => out.push('¶'),
             Named::Other { kind: FIGURE, value } => out.push_str(&figure_named(&decode(value)).map_or_else(|| format!("@{}", decode(value)), |named| key_written(named.key))),
             Named::Other { value, .. } => out.push_str(&format!("@{}", decode(value))),
         }
@@ -353,21 +368,66 @@ pub fn matching_sections<'a>(query: &str, sections: impl IntoIterator<Item = (&'
     found
 }
 
+/// The methods or introductions every word of `query` is in: the name, a tag, the passage or the notes; those whose
+/// name (or, without one, the start of its words) begins with the query first, then those with a tag that does,
+/// then in the order given. With its rank, as `matching_ranked`.
+pub fn matching_excerpts<'a>(query: &str, excerpts: impl IntoIterator<Item = &'a Excerpt>, limit: usize) -> Vec<(u8, &'a Excerpt)> {
+    let words: Vec<String> = query.split_whitespace().map(str::to_lowercase).collect();
+    if words.is_empty() { return vec![] }
+    let mut found: Vec<(u8, &Excerpt)> = excerpts
+        .into_iter()
+        .filter_map(|excerpt| {
+            let tags: Vec<String> = excerpt.tags.iter().map(|tag| tag.to_lowercase()).collect();
+            let hay = format!("{}\n{}\n{}\n{}", excerpt.name, excerpt.text, excerpt.notes, excerpt.tags.join("\n")).to_lowercase();
+            if !words.iter().all(|word| hay.contains(word.as_str())) { return None }
+            let first = words[0].as_str();
+            let rank = if excerpt.headline().to_lowercase().starts_with(first) { 0 } else if tags.iter().any(|tag| tag.starts_with(first)) { 1 } else { 2 };
+            Some((rank, excerpt))
+        })
+        .collect();
+    found.sort_by_key(|(rank, _)| *rank);
+    found.truncate(limit);
+    // As the other kinds rank: 0 a name that begins with the query, 1 the rest.
+    found.into_iter().map(|(rank, excerpt)| (rank.min(1), excerpt)).collect()
+}
+
+/// A method or an introduction on one line, as its row and the model name it: its name, or the start of its words.
+pub fn excerpt_name(excerpt: &Excerpt, chars: usize) -> String {
+    cut(excerpt.headline(), chars)
+}
+
+/// A method or an introduction as its mention is drawn: `方法·名字` / `Method · name`, the name cut short.
+pub fn excerpt_label(excerpt: &Excerpt, english: bool) -> String {
+    let name = excerpt_name(excerpt, EXCERPT_LABEL_MAX);
+    match (excerpt.kind == METHOD, english) {
+        (true, false) => format!("方法·{name}"),
+        (false, false) => format!("导言·{name}"),
+        (true, true) => format!("Method · {name}"),
+        (false, true) => format!("Intro · {name}"),
+    }
+}
+
+/// Where a method or an introduction is from, for the right of its row: the paper's short name and the page,
+/// `Zhang 等 2024 · p.5`; nothing for one written down without a paper.
+pub fn excerpt_side(excerpt: &Excerpt, paper: Option<&Paper>, english: bool) -> String {
+    let Some(paper) = paper.filter(|_| !excerpt.paper_id.is_empty()) else { return String::new() };
+    let name = short_name(paper, english);
+    if excerpt.page > 0 { format!("{name} · p.{}", excerpt.page) } else { name }
+}
+
 /// How many of `total` rows each kind gets when `@` alone lists them, the kinds in the order they are listed and
-/// `have` how many rows each could give: every kind that has rows at least `FLOOR` of them (fewer when it has
-/// fewer, or when the room is too small for all), what is left to the kinds in their order.
+/// `have` how many rows each could give: every kind that has rows one first, then each up to `FLOOR` in their order,
+/// what is left to the kinds in their order. So with up to four kinds each has two; with five or six (助手 with its
+/// methods and introductions) the last ones have one, and none is left out while there is room.
 pub fn share(have: &[usize], total: usize) -> Vec<usize> {
     let mut given: Vec<usize> = vec![0; have.len()];
     let mut left = total;
-    for (n, &rows) in have.iter().enumerate() {
-        let floor = rows.min(FLOOR).min(left);
-        given[n] = floor;
-        left -= floor;
-    }
-    for (n, &rows) in have.iter().enumerate() {
-        let more = (rows - given[n]).min(left);
-        given[n] += more;
-        left -= more;
+    for floor in [1, FLOOR, usize::MAX] {
+        for (n, &rows) in have.iter().enumerate() {
+            let more = rows.min(floor).saturating_sub(given[n]).min(left);
+            given[n] += more;
+            left -= more;
+        }
     }
     given
 }
@@ -533,6 +593,10 @@ pub enum Thing<'a> {
     Section { manuscript: &'a Manuscript, section: &'a Section },
     /// A figure or table of a paper.
     Figure(FigureSeen),
+    /// A method or an introduction: its paper and the label the conversation cites it by (none for one written down
+    /// without a paper, or whose paper is gone), the number of the attachment its words were selected in, and for a
+    /// method the figures of 图片库 linked to it.
+    Excerpt { excerpt: &'a Excerpt, paper: Option<(&'a Paper, String)>, attachment: Option<usize>, figures: Vec<&'a Figure> },
 }
 
 impl Thing<'_> {
@@ -543,6 +607,7 @@ impl Thing<'_> {
             (Thing::Tag { name: a, .. }, Thing::Tag { name: b, .. }) => a == b,
             (Thing::Section { section: a, .. }, Thing::Section { section: b, .. }) => a.id == b.id,
             (Thing::Figure(a), Thing::Figure(b)) => a.cited() == b.cited() && a.key == b.key,
+            (Thing::Excerpt { excerpt: a, .. }, Thing::Excerpt { excerpt: b, .. }) => a.id == b.id,
             _ => false,
         }
     }
@@ -555,6 +620,7 @@ impl Thing<'_> {
             Thing::Tag { name, papers } => format!("标签「{name}」（{} 篇）", papers.len()),
             Thing::Section { manuscript, section } => format!("稿件「{}」的「{}」一节", manuscript.shown_title(), section.name.trim()),
             Thing::Figure(figure) => format!("{} 的 {}", figure.cited(), figure.key),
+            Thing::Excerpt { excerpt, .. } => format!("{}「{}」", if excerpt.kind == METHOD { "方法" } else { "导言" }, excerpt_name(excerpt, 40)),
         }
     }
 }
@@ -640,10 +706,65 @@ pub fn note(named: &[Thing]) -> String {
                     Err(why) => out.push_str(&format!("  没能截出这张图的图片（{why}），只有上面的图注和页码：回答时说明没有看到图本身。\n")),
                 }
             }
+            Thing::Excerpt { excerpt, paper, attachment, figures } => out.push_str(&excerpt_note(excerpt, paper.as_ref().map(|(paper, label)| (*paper, label.as_str())), *attachment, figures)),
         }
     }
     out.push_str("点名只说明问的是哪一个，不是让你改动它们，也不表示用户同意了任何改动。");
     if named.iter().any(|thing| matches!(thing, Thing::Section { .. })) { out.push_str("点到稿件的一节，是说问题说的是这一节，不是要你改它：用户没有要求改，就不要用 edit_section 改它。") }
+    out
+}
+
+/// What the note says of a method or an introduction: what it is, where it is from as answers cite it, its passage
+/// (whole up to `EXCERPT_TEXT_MAX`, else its start and the tool that reads it whole), the person's notes and tags, and
+/// for a method the figures linked to it.
+fn excerpt_note(excerpt: &Excerpt, paper: Option<(&Paper, &str)>, attachment: Option<usize>, figures: &[&Figure]) -> String {
+    let method = excerpt.kind == METHOD;
+    let (kind, tool) = if method { ("方法", "list_methods") } else { ("导言", "list_introductions") };
+    let shelf = if method { "方法库" } else { "导言库" };
+    let mut out = format!("- {kind}「{}」（{shelf}里的一条，ID {}）：", excerpt_name(excerpt, 80), excerpt.id);
+    let own = excerpt.paper_id.is_empty();
+    match paper {
+        Some((paper, label)) => {
+            let file = attachment.map(|n| format!(" S{n}")).unwrap_or_default();
+            let cited = if excerpt.page > 0 { format!("[{label}{file} p.{}]", excerpt.page) } else { format!("[{label}{file}]") };
+            let place = match (attachment, excerpt.page) {
+                (Some(n), 0) => format!("的附件 S{n}"),
+                (Some(n), page) => format!("的附件 S{n} 第 {page} 页"),
+                (None, 0) => String::new(),
+                (None, page) => format!("第 {page} 页"),
+            };
+            out.push_str(&format!("出自 [{label}]（{}，{}）{place}，引用这段原文时写 {cited}。\n", short_name(paper, false), paper.title.split_whitespace().collect::<Vec<_>>().join(" ")));
+        }
+        None if own => out.push_str(&format!("用户自己记下的{kind}，不出自任何文献。\n")),
+        None => out.push_str("它出自的文献已经不在文献库里了，只有下面的原文。\n"),
+    }
+    let text = excerpt.text.trim();
+    let length = text.chars().count();
+    if text.is_empty() {
+        out.push_str("  还没有原文。\n");
+    } else {
+        let (shown, whole) = if length <= EXCERPT_TEXT_MAX { (text.to_string(), true) } else { (text.chars().take(EXCERPT_TEXT_MAX).collect::<String>(), false) };
+        if own { out.push_str("  用户记下的内容：\n") } else { out.push_str("  原文（来源文献自己的话，照收藏时选中的样子）：\n") }
+        out.push_str(&format!("<<<\n{shown}{}\n>>>\n", if whole { "" } else { "……" }));
+        if !whole { out.push_str(&format!("  原文共 {length} 字，上面只是前 {EXCERPT_TEXT_MAX} 字；完整的用 {tool} 读（id 填 {}）。\n", excerpt.id)) }
+        if !own { out.push_str("  这是来源文献的原话：用来学习、参考它的写法和做法；写进稿件时用自己的话写，要用原句就加引号并注明出处，不要不加引号照抄。\n") }
+    }
+    let notes = excerpt.notes.trim();
+    if !notes.is_empty() { out.push_str(&format!("  用户的备注（用户自己写的，不是文献的话）：{}\n", notes.split_whitespace().collect::<Vec<_>>().join(" "))) }
+    if !excerpt.tags.is_empty() { out.push_str(&format!("  标签：{}\n", excerpt.tags.join("、"))) }
+    if method && !figures.is_empty() {
+        let listed: Vec<String> = figures
+            .iter()
+            .map(|figure| {
+                let name = if figure.headline().is_empty() { "没有图号".to_string() } else { cut(figure.headline(), 40) };
+                let page = if figure.page > 0 { format!("，第 {} 页", figure.page) } else { String::new() };
+                let legend = cut(&figure.legend, LINKED_LEGEND_MAX);
+                let legend = if legend.is_empty() || legend == name { String::new() } else { format!("：{legend}") };
+                format!("{name}（图片库 ID {}{page}）{legend}", figure.id)
+            })
+            .collect();
+        out.push_str(&format!("  用户给它关联的图（这个方法做出来的结果）：{}。图本身没有附在这个问题里，要看就用 list_figures 找到它的文件。\n", listed.join("；")));
+    }
     out
 }
 
@@ -772,12 +893,16 @@ mod tests {
     }
 
     #[test]
-    fn every_kind_with_rows_gets_two_of_the_eight() {
+    fn every_kind_with_rows_gets_a_share_of_the_eight() {
         assert_eq!(share(&[20, 5, 4], OFFERED), [4, 2, 2]);
         assert_eq!(share(&[20, 1, 0], OFFERED), [7, 1, 0]);
         assert_eq!(share(&[3, 20], OFFERED), [3, 5]);
         assert_eq!(share(&[0, 0], OFFERED), [0, 0]);
-        assert_eq!(share(&[9, 9, 9, 9, 9], 8), [2, 2, 2, 2, 0]);
+        // Five or six kinds (助手 with its methods and introductions): the first two each, the last one each; none left out.
+        assert_eq!(share(&[9, 9, 9, 9, 9], 8), [2, 2, 2, 1, 1]);
+        assert_eq!(share(&[9, 9, 9, 9, 9, 9], 8), [2, 2, 1, 1, 1, 1]);
+        assert_eq!(share(&[9, 1, 0, 9, 9], 8), [3, 1, 0, 2, 2]);
+        assert_eq!(share(&[1, 1, 1, 1, 1, 1, 1, 1, 1], 8), [1, 1, 1, 1, 1, 1, 1, 1, 0]);
     }
 
     #[test]
@@ -867,5 +992,69 @@ mod tests {
         assert!(note.contains("稿件「根的综述」（ID M1）的「引言」一节（ID S1，属于导言）：共 7 字，现在的正文：\n<<<\n根尖的干细胞。\n>>>"), "{note}");
         assert!(note.contains("用 read_manuscript 读（manuscript 填 M1，section 填 S2）"), "{note}");
         assert!(note.contains("不要用 edit_section 改它"));
+    }
+
+    #[test]
+    fn methods_and_introductions_are_found_and_drawn_by_their_names() {
+        use crate::excerpt::INTRO;
+        let excerpt = |id: &str, kind: &str, name: &str, text: &str, notes: &str, tags: &[&str]| Excerpt { id: id.into(), kind: kind.into(), name: name.into(), text: text.into(), notes: notes.into(), tags: tags.iter().map(|tag| tag.to_string()).collect(), ..Default::default() };
+        let all = [
+            excerpt("E1", METHOD, "Western blot", "Proteins were transferred to PVDF.", "转膜 90 min", &["蛋白"]),
+            excerpt("E2", METHOD, "根尖原生质体分离", "Root tips were digested with cellulase.", "", &["western"]),
+            excerpt("E3", INTRO, "从临床问题切入", "Drought limits crop yield.", "想借鉴它怎样点出空白", &["空白"]),
+            excerpt("E4", METHOD, "", "Western blots were imaged on a ChemiDoc.", "", &[]),
+        ];
+        let found = |query: &str| matching_excerpts(query, &all, OFFERED).into_iter().map(|(rank, e)| (rank, e.id.as_str())).collect::<Vec<_>>();
+        // The name that begins with it, one without a name by the start of its words, then a tag, then the words.
+        assert_eq!(found("western"), [(0, "E1"), (0, "E4"), (1, "E2")]);
+        assert_eq!(found("pvdf"), [(1, "E1")]);
+        assert_eq!(found("空白"), [(1, "E3")]);
+        assert_eq!(found("转膜"), [(1, "E1")]);
+        assert_eq!(found("根尖"), [(0, "E2")]);
+        assert!(found("elisa").is_empty());
+        // Drawn by kind and name, cut short; English as the English interface writes it.
+        assert_eq!(excerpt_label(&all[0], false), "方法·Western blot");
+        assert_eq!(excerpt_label(&all[2], true), "Intro · 从临床问题切入");
+        assert_eq!(excerpt_label(&excerpt("E5", METHOD, "Chromatin immunoprecipitation sequencing", "", "", &[]), true), "Method · Chromatin immun…");
+        assert_eq!(excerpt_label(&all[3], false), "方法·Western blots w…");
+        // Where it is from at the right of its row; nothing for one written down without a paper.
+        let paper = paper("P1", "Root stem cells", "Zhang, Wei; Li, Na", Some(2024));
+        let kept = Excerpt { paper_id: "P1".into(), page: 5, ..all[0].clone() };
+        assert_eq!(excerpt_side(&kept, Some(&paper), false), "Zhang 等 2024 · p.5");
+        assert_eq!(excerpt_side(&Excerpt { page: 0, ..kept.clone() }, Some(&paper), true), "Zhang et al. 2024");
+        assert_eq!(excerpt_side(&all[0], None, false), "");
+        let written = token(EXCERPT, "E1");
+        assert_eq!((written.as_str(), readable(&format!("比较 {written}"))), ("[@excerpt:E1]", "比较 ¶".to_string()));
+        assert_eq!(Keys::default().paper(&Named::Other { kind: EXCERPT, value: "E1" }), None);
+    }
+
+    #[test]
+    fn a_method_goes_to_the_model_with_its_passage_source_notes_and_figures() {
+        use crate::excerpt::INTRO;
+        let source = paper("P1", "Root stem cells", "Zhang, Wei; Li, Na", Some(2024));
+        let blot = Excerpt { id: "E1".into(), kind: METHOD.into(), paper_id: "P1".into(), resource_id: "R2".into(), page: 5, name: "Western blot".into(), text: "Proteins were transferred to PVDF.".into(), notes: "转膜改成 90 min".into(), tags: vec!["蛋白".into(), "western".into()], ..Default::default() };
+        let gel = Figure { id: "G1".into(), paper_id: "P1".into(), page: 6, label: "Fig. 2".into(), legend: "Immunoblot of PLT1.".into(), ..Default::default() };
+        let own = Excerpt { id: "E2".into(), kind: INTRO.into(), name: "我的开头".into(), text: "我们从产量缺口切入。".into(), ..Default::default() };
+        let long = Excerpt { id: "E3".into(), kind: INTRO.into(), paper_id: "P1".into(), page: 0, name: "长".into(), text: "长".repeat(EXCERPT_TEXT_MAX + 10), ..Default::default() };
+        let find = |named: &Named| match named {
+            Named::Other { kind: EXCERPT, value: "E1" } => Some(Thing::Excerpt { excerpt: &blot, paper: Some((&source, "P3".into())), attachment: Some(1), figures: vec![&gel] }),
+            Named::Other { kind: EXCERPT, value: "E2" } => Some(Thing::Excerpt { excerpt: &own, paper: None, attachment: None, figures: vec![] }),
+            Named::Other { kind: EXCERPT, value: "E3" } => Some(Thing::Excerpt { excerpt: &long, paper: Some((&source, "P3".into())), attachment: None, figures: vec![] }),
+            _ => None,
+        };
+        let (text, named) = resolve("照 [@excerpt:E1] 写方法，开头像 [@excerpt:E2] 和 [@excerpt:E3]，[@excerpt:E1] [@excerpt:gone]", find, false);
+        assert_eq!(text, "照 方法「Western blot」 写方法，开头像 导言「我的开头」 和 导言「长」，方法「Western blot」 [@excerpt:gone]");
+        assert_eq!(named.len(), 3);
+        let note = note(&named);
+        assert!(note.contains("- 方法「Western blot」（方法库里的一条，ID E1）：出自 [P3]（Zhang 等 2024，Root stem cells）的附件 S1 第 5 页，引用这段原文时写 [P3 S1 p.5]。"), "{note}");
+        assert!(note.contains("原文（来源文献自己的话，照收藏时选中的样子）：\n<<<\nProteins were transferred to PVDF.\n>>>"), "{note}");
+        assert!(note.contains("不要不加引号照抄"), "{note}");
+        assert!(note.contains("用户的备注（用户自己写的，不是文献的话）：转膜改成 90 min") && note.contains("标签：蛋白、western"), "{note}");
+        assert!(note.contains("Fig. 2（图片库 ID G1，第 6 页）：Immunoblot of PLT1.") && note.contains("list_figures"), "{note}");
+        // One written down by the person is said to be theirs, and is not warned about as a paper's words.
+        assert!(note.contains("- 导言「我的开头」（导言库里的一条，ID E2）：用户自己记下的导言，不出自任何文献。\n  用户记下的内容：\n<<<\n我们从产量缺口切入。\n>>>\n- "), "{note}");
+        // A long one: its start, and the tool that reads it whole by its id; without a page, cited by the paper.
+        assert!(note.contains("引用这段原文时写 [P3]。") && note.contains(&format!("原文共 {} 字", EXCERPT_TEXT_MAX + 10)) && note.contains("用 list_introductions 读（id 填 E3）"), "{note}");
+        assert!(!note.contains(&"长".repeat(EXCERPT_TEXT_MAX + 1)));
     }
 }

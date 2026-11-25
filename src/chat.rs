@@ -2109,9 +2109,9 @@ pub(crate) fn paper_placeholder(papers: usize) -> &'static str {
 /// The box of a paper's conversation as it is made, before a paper is on show.
 pub(crate) const PAPER_PLACEHOLDER: &str = "就这篇文献提问，输入 / 选择命令，@ 指图表或文献";
 /// The box of the library's conversation (助手).
-pub(crate) const LIBRARY_PLACEHOLDER: &str = "交代一件事或提一个问题，输入 / 选择命令，@ 指文献、标签或稿件的一节，可以粘贴图片";
+pub(crate) const LIBRARY_PLACEHOLDER: &str = "交代一件事或提一个问题，输入 / 选择命令，@ 指文献、标签等，可以粘贴图片";
 /// The box of the conversation that writes the manuscript (助手写).
-pub(crate) const WRITE_PLACEHOLDER: &str = "告诉助手写什么、改什么，@ 指稿件的一节或文献";
+pub(crate) const WRITE_PLACEHOLDER: &str = "告诉助手写什么、改什么，@ 指稿件的一节、文献等";
 
 #[cfg(test)]
 mod tests {

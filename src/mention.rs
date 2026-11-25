@@ -7,6 +7,10 @@
 //! `[@section:<id>]`, `[@library:<id>]`), which the box draws folded as a short name, the sent question as the same
 //! name in the accent, a click on it going to the thing.
 //!
+//! In 助手 and 助手写 `@` also names a method of 方法库 or an introduction of 导言库 (`[@excerpt:<id>]`), drawn as
+//! `方法·名字` / `导言·名字`, sent with its passage, notes, tags, source and linked figures, a click on it opening its
+//! dialog as its row does. 用这段提问 puts the same token in 助手's box (`mention_excerpt`).
+//!
 //! In a paper's conversation `@` also names a figure or table of the paper being read (`[@figure:<paper>/<file>/<number>]`),
 //! the figures first: drawn as the paper writes its number (`Fig. 3`), sent with its caption and page and its picture
 //! cut out of the page (`question_figures`), a click on it going to the figure in the PDF. The figures are read off
@@ -28,7 +32,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use wisp_core::figref;
 use wisp_core::manuscript::{Manuscript, Section};
-use wisp_core::mention::{self, Candidate, FIGURE, FigureCandidate, LIBRARY, Named, OFFERED, SECTION, TAG};
+use wisp_core::excerpt::{Excerpt, INTRO, METHOD};
+use wisp_core::mention::{self, Candidate, EXCERPT, FIGURE, FigureCandidate, LIBRARY, Named, OFFERED, SECTION, TAG};
 use wisp_core::model::Paper;
 
 /// The box a mention is typed in: a conversation's, or the home page's.
@@ -46,6 +51,8 @@ pub enum Kind {
     Paper,
     Tag,
     Section,
+    Method,
+    Intro,
 }
 
 impl Kind {
@@ -57,6 +64,8 @@ impl Kind {
             Kind::Paper => "文献",
             Kind::Tag => "标签",
             Kind::Section => "稿件",
+            Kind::Method => "方法",
+            Kind::Intro => "导言",
         }
     }
 
@@ -67,6 +76,9 @@ impl Kind {
             Kind::Paper => "file-text",
             Kind::Tag => "tag",
             Kind::Section => "heading",
+            // As 收藏 shows the two pages.
+            Kind::Method => "flask-conical",
+            Kind::Intro => "quote",
         }
     }
 }
@@ -79,6 +91,8 @@ pub struct Offers {
     pub sections: bool,
     /// The figures and tables of the papers a paper's conversation is about.
     pub figures: bool,
+    /// The methods and introductions of the library (方法库, 导言库).
+    pub excerpts: bool,
 }
 
 /// A row of the popup: what it names, the token taking it writes, its title and what stands at its right.
@@ -174,6 +188,8 @@ enum Target {
     Library(String),
     /// A figure, by its token's value.
     Figure(String),
+    /// A method or an introduction, by its id.
+    Excerpt(String),
 }
 
 impl Workspace {
@@ -201,12 +217,13 @@ impl Workspace {
 
     /// What a place can name besides papers: the libraries on the shelf in the home page's assistant (its box and a
     /// conversation not yet made a library); the library's tags in its conversation; the sections of the manuscript
-    /// a conversation is about (`mention_manuscript`).
+    /// a conversation is about (`mention_manuscript`); the methods and introductions in the library's conversation and
+    /// in the one that writes (what a methods section or an introduction is written after).
     pub(crate) fn offers(&self, place: Place) -> Offers {
         let draft = self.lib.as_ref().is_some_and(|lib| lib.info.draft);
         match place {
             Place::Home => Offers { libraries: true, ..Default::default() },
-            Place::Chat(talk) => Offers { libraries: talk == Talk::Library && draft, tags: talk == Talk::Library, sections: self.mention_manuscript(place).is_some(), figures: talk == Talk::Paper },
+            Place::Chat(talk) => Offers { libraries: talk == Talk::Library && draft, tags: talk == Talk::Library, sections: self.mention_manuscript(place).is_some(), figures: talk == Talk::Paper, excerpts: talk != Talk::Paper },
         }
     }
 
@@ -233,19 +250,20 @@ impl Workspace {
         self.libraries.iter().filter(|info| !info.draft)
     }
 
-    /// The papers a place offers, in the order `@` alone lists them: the paper(s) asked about or selected in the list
-    /// first, then those on show in their order, then the rest of the library. None in the home page's box.
+    /// The papers a place offers, in the order `@` alone lists them: those selected in the list first, then those on
+    /// show in their order, then the rest of the library. Not the paper(s) a paper's conversation is about: naming
+    /// the paper being asked about says nothing. None in the home page's box.
     fn candidates(&self, place: Place) -> Vec<&Paper> {
         let (Place::Chat(talk), Some(lib)) = (place, self.lib.as_ref()) else { return vec![] };
         let mut ids: Vec<&str> = vec![];
+        let about: Vec<String> = if talk == Talk::Paper { lib.talk_papers() } else { vec![] };
         if !lib.info.draft {
-            if talk == Talk::Paper { ids.extend(lib.talk_papers().iter().filter_map(|id| lib.paper(id)).map(|paper| paper.id.as_str())) }
             if lib.marked.is_empty() { ids.extend(lib.selected.as_deref().and_then(|id| lib.paper(id)).map(|paper| paper.id.as_str())) } else { ids.extend(lib.marked.iter().filter_map(|id| lib.paper(id)).map(|paper| paper.id.as_str())) }
             ids.extend(lib.shown.iter().map(|&i| lib.papers[i].id.as_str()));
         }
         ids.extend(lib.papers.iter().map(|paper| paper.id.as_str()));
         let mut seen = std::collections::HashSet::new();
-        ids.into_iter().filter(|id| seen.insert(*id)).filter_map(|id| lib.paper(id)).collect()
+        ids.into_iter().filter(|id| !about.iter().any(|known| known == id)).filter(|id| seen.insert(*id)).filter_map(|id| lib.paper(id)).collect()
     }
 
     /// The text or the caret of a box changed: what its `@` is offered now, if one is being typed.
@@ -309,11 +327,12 @@ impl Workspace {
                 None => vec![],
             };
             let figures: Vec<(u8, Hit)> = if offers.figures { self.figure_hits(alone, query) } else { vec![] };
-            // Where a manuscript is written its sections come first; where a paper is read, its figures.
+            let (methods, intros) = if offers.excerpts { (excerpt_hits(lib, METHOD, alone, query), excerpt_hits(lib, INTRO, alone, query)) } else { (vec![], vec![]) };
+            // Where a manuscript is written its sections come first, then what it is written after; where a paper is read, its figures.
             match talk {
-                Talk::Write => lists.extend([(Kind::Section, sections), (Kind::Paper, papers)]),
+                Talk::Write => lists.extend([(Kind::Section, sections), (Kind::Method, methods), (Kind::Intro, intros), (Kind::Paper, papers)]),
                 Talk::Paper => lists.extend([(Kind::Figure, figures), (Kind::Paper, papers)]),
-                Talk::Library => lists.extend([(Kind::Paper, papers), (Kind::Tag, tags), (Kind::Section, sections)]),
+                Talk::Library => lists.extend([(Kind::Paper, papers), (Kind::Tag, tags), (Kind::Section, sections), (Kind::Method, methods), (Kind::Intro, intros)]),
             }
         }
         lists.retain(|(_, rows)| !rows.is_empty());
@@ -321,7 +340,7 @@ impl Workspace {
             let given = mention::share(&lists.iter().map(|(_, rows)| rows.len()).collect::<Vec<_>>(), OFFERED);
             return lists.into_iter().zip(given).flat_map(|((_, rows), n)| rows.into_iter().take(n).map(|(_, hit)| hit)).collect();
         }
-        // The best eight of all, by rank and then figures, papers, tags, sections; shown kind by kind.
+        // The best eight of all, by rank and then figures, papers, tags, sections, methods, introductions; shown kind by kind.
         let mut all: Vec<(u8, Kind, usize, Hit)> = lists.into_iter().flat_map(|(kind, rows)| rows.into_iter().enumerate().map(move |(n, (rank, hit))| (rank, kind, n, hit))).collect();
         all.sort_by_key(|(rank, kind, n, _)| (*rank, *kind, *n));
         all.truncate(OFFERED);
@@ -611,7 +630,28 @@ impl Workspace {
         self.pinning = false;
         let Some(lib) = self.lib.as_ref() else { return };
         let Some(key) = lib.keys.key(paper_id) else { return };
-        let token = mention::paper_token(key);
+        self.mention_in(talk, &mention::paper_token(key), cx);
+        if let Some(lib) = self.lib.as_ref() { lib.chat(talk).input.read(cx).focus(window) }
+        cx.notify();
+    }
+
+    /// 用这段提问 on a method or an introduction: 助手, with the passage's token and a space at its box's caret, one
+    /// step of Undo, the box given the keyboard as the page is drawn. The note sent with the question carries its words,
+    /// notes and source (`mention::note`), as `@` naming it does.
+    pub(crate) fn mention_excerpt(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if self.lib.as_ref().and_then(|lib| lib.excerpts.excerpt(id)).is_none() { return }
+        self.mention_in(Talk::Library, &mention::token(EXCERPT, id), cx);
+        let Some(lib) = self.lib.as_mut() else { return };
+        let chat = lib.chat_mut(Talk::Library);
+        // Out of 历史, back to the conversation the box asks in.
+        chat.history = None;
+        lib.focus_box = Some(Talk::Library);
+        self.run(Cmd::SetPage(Page::Ask), window, cx);
+    }
+
+    /// A token and a space put at a conversation's caret, in place of what is selected there, apart from a word before it.
+    fn mention_in(&mut self, talk: Talk, token: &str, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_ref() else { return };
         let input = lib.chat(talk).input.clone();
         input.update(cx, |input, cx| {
             let at = input.selection();
@@ -622,8 +662,6 @@ impl Workspace {
             let end = at.start + written.len();
             input.select_range(end..end, cx);
         });
-        input.read(cx).focus(window);
-        cx.notify();
     }
 
     /// A tag's mention clicked: the papers' list kept to that tag, as a click on the tag in the sidebar away from the list does.
@@ -672,6 +710,10 @@ impl Workspace {
                         None => lib.files.iter().any(|file| file.id == named.file).then(|| mention::key_written(named.key))?,
                     };
                     Some((token.range.clone(), label, Some(Target::Figure(value))))
+                }
+                Named::Other { kind: EXCERPT, value } if offers.excerpts => {
+                    let excerpt = lib?.excerpts.excerpt(value)?;
+                    Some((token.range.clone(), mention::excerpt_label(excerpt, english), Some(Target::Excerpt(excerpt.id.clone()))))
                 }
                 // A section of any of the library's manuscripts: the one on show may have changed since it was named.
                 Named::Other { kind: SECTION, value } => {
@@ -734,6 +776,8 @@ impl Workspace {
                 Target::Section(manuscript, section) => Cmd::MentionSection(manuscript, section),
                 Target::Library(id) => Cmd::OpenLibrary(id),
                 Target::Figure(value) => Cmd::MentionFigure(value),
+                // Its dialog, over the conversation, as a click on its row on 方法 / 导言 opens it.
+                Target::Excerpt(id) => Cmd::Excerpt(crate::excerpts::Do::Open(id)),
             });
             marks.push((from..shown.len(), go));
             at = range.end;
@@ -779,6 +823,22 @@ impl Workspace {
         self.home.input.update(cx, |input, _| input.choosing = open);
         cx.notify();
     }
+}
+
+/// The rows of the methods or the introductions (`kind`): `@` alone the newest first, a query by name, tags, the
+/// passage's words and the notes (`mention::matching_excerpts`). At the right where it is from: the paper and page.
+fn excerpt_hits(lib: &crate::app::Library, kind: &str, alone: bool, query: &str) -> Vec<(u8, Hit)> {
+    let english = crate::i18n::is_english();
+    let of_kind = lib.excerpts.items.iter().filter(|excerpt| excerpt.kind == kind);
+    let found: Vec<(u8, &Excerpt)> = if alone { of_kind.take(OFFERED).map(|excerpt| (0, excerpt)).collect() } else { mention::matching_excerpts(query, of_kind, OFFERED) };
+    let shown = if kind == METHOD { Kind::Method } else { Kind::Intro };
+    found
+        .into_iter()
+        .map(|(rank, excerpt)| {
+            let title = if excerpt.headline().is_empty() { t(if kind == METHOD { "未命名的方法" } else { "未命名的导言" }).to_string() } else { ui::one_line(excerpt.headline()) };
+            (rank, Hit { kind: shown, token: mention::token(EXCERPT, &excerpt.id), title, side: mention::excerpt_side(excerpt, lib.paper(&excerpt.paper_id), english) })
+        })
+        .collect()
 }
 
 /// The figures and tables of a paper's PDFs (`figure_files`), as `@` offers them: of each number the place its file
