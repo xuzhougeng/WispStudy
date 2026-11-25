@@ -182,6 +182,32 @@ pub fn catalog() -> Vec<ToolDef> {
             &[],
         ),
         scoped(
+            "list_methods",
+            "查询方法库",
+            "查询方法库：用户从文献里收藏的实验方法，各自的名称、原文（text，文献自己的原话，照选中时的样子）、用户的备注（为什么适合、改了哪些参数、依据是什么）、标签，以及它出自哪篇文献的哪一页；paper 为空的是用户自己记下的方法，不出自任何文献。figures 是用户给这个方法关联的图片库里的图：这个方法做出来的结果（例如 western blot 方法对应的那张条带图），各自的图号和图注，要看图就用 list_figures 找到它的文件。用户要汇总、比较、选择实验方法，或要调整实验参数、问某个参数有什么依据时，先读这里：比较时按原文说，引用原文时注明出处（文献和页码），不要把备注当成文献的话。回收站中文献的方法不返回。",
+            json!({
+                "query": {"type": "string", "description": "在名称、原文、备注、标签，以及所属文献的题目、作者、期刊和年份中搜索；空格分开的每个词都必须出现。"},
+                "tag": {"type": "string", "description": "只返回带这个标签的方法。"},
+                "paperId": {"type": "string", "description": "只返回这篇文献（ID）的方法。"},
+                "limit": {"type": "integer", "description": "最多返回多少个，默认 50，最多 500。"},
+                "offset": {"type": "integer", "description": "跳过前面多少个，用于翻页。"},
+            }),
+            &[],
+        ),
+        scoped(
+            "list_introductions",
+            "查询导言库",
+            "查询导言库：用户从文献的引言（Introduction）里收藏的段落，用来看别人怎样开篇、怎样引入自己的问题：选了什么背景、怎样指出尚未解决的空白、怎样落到这项研究的目的上。各自有名称（用户概括的引入方式，例如「从临床问题切入」）、原文（text，文献自己的原话，照选中时的样子）、用户的备注（想借鉴什么）、标签，以及出自哪篇文献的哪一页；paper 为空的是用户自己记下的。用户问别人是怎样引入、开篇、写导言的，要比较这些引入方式，或要为自己的引言找写法时，先读这里：按原文说，引用原文时注明出处（文献和页码），不要把备注当成文献的话，也不要照抄原文当自己的句子。回收站中文献的段落不返回。",
+            json!({
+                "query": {"type": "string", "description": "在名称、原文、备注、标签，以及所属文献的题目、作者、期刊和年份中搜索；空格分开的每个词都必须出现。"},
+                "tag": {"type": "string", "description": "只返回带这个标签的段落。"},
+                "paperId": {"type": "string", "description": "只返回这篇文献（ID）的段落。"},
+                "limit": {"type": "integer", "description": "最多返回多少段，默认 50，最多 500。"},
+                "offset": {"type": "integer", "description": "跳过前面多少段，用于翻页。"},
+            }),
+            &[],
+        ),
+        scoped(
             "list_papers",
             "查询文献",
             "查询文献库中的文献，返回简要记录和匹配总数。规则与界面上的列表相同：不指定 screening 时不包含判为「不相关」的文献，回收站中的文献不返回。",
@@ -639,7 +665,7 @@ pub fn library_catalog() -> Vec<ToolDef> {
 
 /// The tools a conversation of the home page may point at a library on the shelf with `library` (跨库提问, #275):
 /// those that read papers and what is kept with them. None of them writes, and none asks for a yes.
-pub const ACROSS: [&str; 8] = ["library_status", "list_papers", "get_paper", "search_fulltext", "read_fulltext", "find_passages", "list_pdf_annotations", "list_figures"];
+pub const ACROSS: [&str; 10] = ["library_status", "list_papers", "get_paper", "search_fulltext", "read_fulltext", "find_passages", "list_pdf_annotations", "list_figures", "list_methods", "list_introductions"];
 
 /// The tools of the home page's assistant, whose conversation is a library of its own that is not on the shelf
 /// yet: those of a library, bound to the conversation's own papers, and beside them `list_libraries` and a
@@ -1008,6 +1034,8 @@ fn dispatch(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fet
         "offer_action" => crate::offer::offered(args),
         "list_papers" => list_papers(store, info, args),
         "list_figures" => list_figures(store, info, args),
+        "list_methods" => list_excerpts(store, info, crate::excerpt::METHOD, args),
+        "list_introductions" => list_excerpts(store, info, crate::excerpt::INTRO, args),
         "list_pdf_annotations" => list_pdf_annotations(store, args),
         "get_paper" => get_paper(store, args),
         "mind_map" => mind_map(store, args),
@@ -1180,6 +1208,38 @@ fn list_figures(store: &mut Store, info: &LibraryInfo, args: &Value) -> Result<V
         })
         .collect();
     Ok(json!({"library": info.name, "total": found.len(), "offset": offset, "figures": page, "tags": crate::figure::tag_counts(&figures).into_iter().map(|(tag, count)| json!({"tag": tag, "count": count})).collect::<Vec<_>>()}))
+}
+
+/// `list_methods` and `list_introductions`: the excerpts of a kind; a method with the figures it is linked to.
+fn list_excerpts(store: &mut Store, info: &LibraryInfo, kind: &str, args: &Value) -> Result<Value> {
+    let (words, tag, paper) = (crate::figure::search_words(text(args, "query")?), text(args, "tag")?, text(args, "paperId")?);
+    let (limit, offset) = (number(args, "limit", 50, 500)?, number(args, "offset", 0, usize::MAX)?);
+    let papers = store.list_papers()?;
+    let by_id: BTreeMap<&str, &Paper> = papers.iter().map(|p| (p.id.as_str(), p)).collect();
+    let methods = store.list_excerpts(Some(kind))?;
+    let found: Vec<&crate::excerpt::Excerpt> = methods
+        .iter()
+        .filter(|m| (tag.is_empty() || m.tags.iter().any(|t| t == tag)) && (paper.is_empty() || m.paper_id == paper) && m.matches(by_id.get(m.paper_id.as_str()).copied(), &words))
+        .collect();
+    // A linked figure is named while it is listed: one of a paper in the trash is not.
+    let figures = store.list_figures()?;
+    let figure_by_id: BTreeMap<&str, &crate::figure::Figure> = figures.iter().map(|f| (f.id.as_str(), f)).collect();
+    let mut links: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (excerpt, figure) in store.excerpt_links()? { links.entry(excerpt).or_default().push(figure) }
+    let page: Vec<Value> = found
+        .iter()
+        .skip(offset)
+        .take(limit)
+        .map(|m| {
+            let source = by_id.get(m.paper_id.as_str()).map(|p| json!({"id": p.id, "title": p.title, "authors": p.short_authors(), "year": p.year}));
+            let linked: Vec<Value> = links.get(&m.id).into_iter().flatten().filter_map(|id| figure_by_id.get(id.as_str())).map(|f| json!({"id": f.id, "label": f.label, "legend": f.legend})).collect();
+            let mut out = json!({"id": m.id, "name": m.name, "text": m.text, "notes": m.notes, "tags": m.tags, "paper": source, "page": (m.page > 0).then_some(m.page), "addedAt": m.added_at, "updatedAt": m.updated_at});
+            if kind == crate::excerpt::METHOD { out["figures"] = json!(linked) }
+            out
+        })
+        .collect();
+    let key = if kind == crate::excerpt::METHOD { "methods" } else { "introductions" };
+    Ok(json!({"library": info.name, "total": found.len(), "offset": offset, key: page, "tags": crate::excerpt::tag_counts(&methods, kind).into_iter().map(|(tag, count)| json!({"tag": tag, "count": count})).collect::<Vec<_>>()}))
 }
 
 fn list_pdf_annotations(store: &Store, args: &Value) -> Result<Value> {
@@ -2398,6 +2458,47 @@ pub(crate) mod tests {
         assert_eq!((western["total"].as_u64(), western["figures"][0]["page"].is_null()), (Some(1), true));
         assert_eq!(call(&root, "list_figures", &json!({"paper": "nobody"})).unwrap()["total"], 0);
         assert_eq!(call(&root, "list_figures", &json!({"limit": 1, "offset": 1})).unwrap()["figures"].as_array().unwrap().len(), 1);
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn methods_and_introductions_are_listed_with_their_source() {
+        let (root, atlas) = sample();
+        let info = find_library(&root, "").unwrap();
+        let mut store = Store::open(&info.dir).unwrap();
+        let png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x02\x80\x00\x00\x01\xe0\x08\x02\x00\x00\x00";
+        let mut gel = crate::figure::Figure { paper_id: atlas.clone(), page: 4, label: "Fig. 3".into(), legend: "WOX5 protein by western blot.".into(), ..Default::default() };
+        store.add_figure(&mut gel, png).unwrap();
+        let mut blot = crate::excerpt::Excerpt { paper_id: atlas.clone(), page: 9, name: "Western blot".into(), text: "Proteins were transferred to PVDF membranes for 90 min.".into(), notes: "我们改成 60 min".into(), tags: vec!["蛋白".into()], ..Default::default() };
+        store.add_excerpt(&mut blot).unwrap();
+        store.set_excerpt_figures(&blot.id, std::slice::from_ref(&gel.id)).unwrap();
+        let mut own = crate::excerpt::Excerpt { name: "原生质体分离".into(), tags: vec!["细胞".into(), "蛋白".into()], ..Default::default() };
+        store.add_excerpt(&mut own).unwrap();
+        let mut opening = crate::excerpt::Excerpt { kind: crate::excerpt::INTRO.into(), paper_id: atlas.clone(), page: 1, name: "从干细胞的维持切入".into(), text: "Stem cells persist through the life of a plant.".into(), tags: vec!["蛋白".into()], ..Default::default() };
+        store.add_excerpt(&mut opening).unwrap();
+        drop(store);
+        let all = call(&root, "list_methods", &json!({})).unwrap();
+        assert_eq!((all["total"].as_u64(), all["tags"][0]["tag"].as_str(), all["tags"][0]["count"].as_u64()), (Some(2), Some("蛋白"), Some(2)));
+        // By its words and its paper's; with the page, the paper and the figures it leads to.
+        let found = call(&root, "list_methods", &json!({"query": "pvdf zhang"})).unwrap();
+        let method = &found["methods"][0];
+        assert_eq!((found["total"].as_u64(), method["id"].as_str(), method["page"].as_u64(), method["paper"]["title"].as_str(), method["notes"].as_str()), (Some(1), Some(blot.id.as_str()), Some(9), Some("Root stem cell niche"), Some("我们改成 60 min")));
+        assert_eq!(method["figures"], json!([{"id": gel.id, "label": "Fig. 3", "legend": "WOX5 protein by western blot."}]));
+        // One written down without a paper leads back to nothing.
+        let own_found = call(&root, "list_methods", &json!({"tag": "细胞"})).unwrap();
+        assert_eq!((own_found["total"].as_u64(), own_found["methods"][0]["paper"].is_null(), own_found["methods"][0]["page"].is_null()), (Some(1), true, true));
+        assert_eq!(call(&root, "list_methods", &json!({"paperId": atlas})).unwrap()["total"], 1);
+        assert_eq!(call(&root, "list_methods", &json!({"limit": 1, "offset": 1})).unwrap()["methods"].as_array().unwrap().len(), 1);
+        // The introductions are listed apart, with their paper and without figures.
+        let intros = call(&root, "list_introductions", &json!({"query": "stem"})).unwrap();
+        let intro = &intros["introductions"][0];
+        assert_eq!((intros["total"].as_u64(), intro["id"].as_str(), intro["page"].as_u64(), intro["paper"]["id"].as_str(), intro["figures"].is_null()), (Some(1), Some(opening.id.as_str()), Some(1), Some(atlas.as_str()), true));
+        assert_eq!((intros["tags"][0]["count"].as_u64(), call(&root, "list_introductions", &json!({"query": "pvdf"})).unwrap()["total"].as_u64()), (Some(1), Some(0)));
+        // They only read.
+        for name in ["list_methods", "list_introductions"] {
+            let tool = catalog().into_iter().find(|t| t.name == name).unwrap();
+            assert!(!tool.writes && !tool.confirm && ACROSS.contains(&tool.name), "{name}");
+        }
         std::fs::remove_dir_all(root).ok();
     }
 

@@ -59,6 +59,10 @@ pub enum Page {
     Write,
     /// 图片库: the figures cut out of the library's PDFs, the other half of 收藏 (`src/figures.rs`).
     Figures,
+    /// 方法库: the methods kept from the library's papers, the third part of 收藏 (`src/excerpts.rs`).
+    Methods,
+    /// 导言库: the introductions kept from them, the fourth, drawn by the same code (`src/excerpts.rs`).
+    Intros,
     /// 提取: what the assistant proposes for the custom fields, looked over and written together (`src/extract.rs`).
     Extract,
 }
@@ -75,13 +79,15 @@ impl Page {
             Page::Sources => "sources",
             Page::Write => "write",
             Page::Figures => "figures",
+            Page::Methods => "methods",
+            Page::Intros => "intros",
             Page::Extract => "extract",
         }
     }
 
     /// The page of that word; the papers for any other.
     pub fn from_key(key: &str) -> Page {
-        [Page::Ask, Page::Trash, Page::Screen, Page::Guide, Page::Sources, Page::Write, Page::Figures, Page::Extract].into_iter().find(|page| page.key() == key).unwrap_or(Page::Papers)
+        [Page::Ask, Page::Trash, Page::Screen, Page::Guide, Page::Sources, Page::Write, Page::Figures, Page::Methods, Page::Intros, Page::Extract].into_iter().find(|page| page.key() == key).unwrap_or(Page::Papers)
     }
 }
 
@@ -412,6 +418,8 @@ pub struct Library {
     pub citing: crate::cite::Citing,
     /// 图片库: the figures cut out of the library's PDFs.
     pub gallery: crate::figures::Gallery,
+    /// 方法库 and 导言库: the passages kept from the library's papers, and the methods' links to figures.
+    pub excerpts: crate::excerpts::Excerpts,
     /// 写作's 资料库, and the pictures the manuscript on show draws (`write_figures.rs`).
     pub write_figures: crate::write_figures::Shelf,
     /// 提取: the assistant's proposals for the custom fields, its run over the papers, and their confirmation.
@@ -722,6 +730,8 @@ impl Library {
         self.origins = self.store.file_origins()?;
         self.shrunk = self.store.shrunk_files()?;
         self.gallery.items = self.store.list_figures()?;
+        self.excerpts.items = self.store.list_excerpts(None)?;
+        self.excerpts.links = self.store.excerpt_links()?;
         self.extract.proposals = wisp_core::extract::Proposals::new(self.store.list_proposals()?);
         self.extract_settle();
         // Filters on a field that no longer exists would hide everything.
@@ -1061,6 +1071,7 @@ impl Workspace {
         let writing = Writing { manuscripts, manuscript, section_id, reading: false, title, typed: 0, editor, find, search: Default::default(), structures: BTreeMap::new(), sorting: Sorting::default(), scroll: ScrollHandle::new(), assist: Default::default(), revise: Default::default(), comments, editor_scroll: ScrollHandle::new(), side: Side::default(), side_open: false, agent: Default::default(), seek, away: false };
         let citing = crate::cite::Citing::new(&store, &writing.manuscript, &mut subscriptions, cx);
         let gallery = crate::figures::Gallery::new(&mut subscriptions, cx);
+        let excerpts = crate::excerpts::Excerpts::new(&mut subscriptions, cx);
         let write_figures = crate::write_figures::Shelf::new(&mut subscriptions, cx);
         // The sort kept with the library may name a partition the 分区 column no longer shows (the setting was changed while
         // another library, or none, was open): the list is sorted by the column's, so its header says so.
@@ -1161,6 +1172,7 @@ impl Workspace {
             writing,
             citing,
             gallery,
+            excerpts,
             write_figures,
             extract: crate::extract::Extract::new(),
             aside: vec![],

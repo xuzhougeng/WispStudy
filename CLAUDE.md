@@ -30,8 +30,8 @@ cargo clippy --all-targets              # expected to be warning-free
 
 | Before working on | Read |
 |---|---|
-| A module of the engine: journal metrics (分区 / 影响因子), 文字识别 (`ocr`), docx, slides (pptx), diagrams (`mermaid`), 批注, 配引用, 出处, an assistant's changes to a section (`revise`), 助手写, 图片库, 图号看图 (`figref`), 思维导图 (`mindmap`), screening, 提取, providers / 生图 / 判断, translation, full text and structure, candidates, open full texts, search sources, web search (`websearch`, `tools::Reach`), note saving | `docs/dev/core.md` |
-| A feature of the window: the conversations and the diagrams in an answer, 写作 and its modes, citations, 综述, 图片库, 提取, 筛选, 自定义 (connectors, skills, OAuth), settings, layout, keyboard and selection, the PDF view and its columns, 思维导图, the text input | `docs/dev/app.md` |
+| A module of the engine: journal metrics (分区 / 影响因子), 文字识别 (`ocr`), docx, slides (pptx), diagrams (`mermaid`), 批注, 配引用, 出处, an assistant's changes to a section (`revise`), 助手写, 图片库, 方法库 and 导言库 (`excerpt`), 图号看图 (`figref`), 思维导图 (`mindmap`), screening, 提取, providers / 生图 / 判断, translation, full text and structure, candidates, open full texts, search sources, web search (`websearch`, `tools::Reach`), note saving | `docs/dev/core.md` |
+| A feature of the window: the conversations and the diagrams in an answer, 写作 and its modes, citations, 综述, 图片库, 方法库 and 导言库, 提取, 筛选, 自定义 (connectors, skills, OAuth), settings, layout, keyboard and selection, the PDF view and its columns, 思维导图, the text input | `docs/dev/app.md` |
 | Anything the person sees: layout, a new panel, header, bar or label (the design principles, 安静的版面) | `docs/dev/design.md` |
 | Running, scripting and looking at the app | `docs/dev/debugging.md` |
 | CI, signing, releases, `site/` | `docs/dev/release-and-site.md` |
@@ -92,4 +92,4 @@ A thin shell over `tools` and `mcp`: argument words in, JSON out; `wisp mcp` is 
 
 ## Scope
 
-Ported from BiblioCell, without its datasets and web version. The roadmap (tools with CLI and MCP, the agent chat, search and import, screening, 写作, 图片库, 批注, 改稿, 生图, 判断, 出处, 助手写, slides) and what each step left out are in `docs/dev/roadmap.md`. API keys are stored in plain text in `settings.json`; when empty, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` are read from the environment.
+Ported from BiblioCell, without its datasets and web version. The roadmap (tools with CLI and MCP, the agent chat, search and import, screening, 写作, 图片库, 方法库 and 导言库, 批注, 改稿, 生图, 判断, 出处, 助手写, slides) and what each step left out are in `docs/dev/roadmap.md`. API keys are stored in plain text in `settings.json`; when empty, `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` are read from the environment.

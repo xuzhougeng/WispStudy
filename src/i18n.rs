@@ -341,7 +341,7 @@ mod tests {
     #[test]
     fn shared_labels_have_english_translations() {
         use wisp_core::{ai, model, settings::Task, structure};
-        for table in [&model::SCREENINGS[..], &model::READINGS, &model::FULLTEXTS, &model::PUBLICATION_STATUSES, &structure::SECTIONS, &structure::LANGUAGES, &ai::EFFORTS] {
+        for table in [&model::SCREENINGS[..], &model::READINGS, &model::FULLTEXTS, &model::PUBLICATION_STATUSES, &structure::SECTIONS, &structure::LANGUAGES, &ai::EFFORTS, &wisp_core::excerpt::KINDS] {
             for (_, text) in table { assert_ne!(translate(Language::En, text), *text, "missing translation: {text}") }
         }
         for task in Task::ALL { assert_ne!(translate(Language::En, task.label()), task.label()) }

@@ -711,6 +711,41 @@ impl Workspace {
                     self.lib.as_ref().and_then(|l| l.gallery.items.get(n.parse::<usize>().unwrap_or(0))).map(|figure| if source { Cmd::FigureSource(figure.id.clone()) } else { Cmd::OpenFigure(figure.id.clone()) })
                 }
                 "figtag" => Some(Cmd::FigureTag(arg.to_string())),
+                // `method:<n>` / `intro:<n>` opens the n-th method of 方法库 / introduction of 导言库, `method:new` / `intro:new` the
+                // dialog of one written down, `method:source:<n>` / `method:ask:<n>` the place its words stand / the library's
+                // conversation with it; `methodtag:<tag>` / `introtag:<tag>` narrows that page, `methodfind:<words>` /
+                // `introfind:<words>` searches it; in a method's dialog `methodpick` opens or closes the list of figures,
+                // `methodlink:<n>` links the n-th figure of the library; `excerptname:<text>` is typed into the dialog's name.
+                "method" | "intro" => {
+                    let kind = if name == "intro" { wisp_core::excerpt::INTRO } else { wisp_core::excerpt::METHOD };
+                    let nth = |this: &Self, n: &str| this.lib.as_ref().and_then(|l| l.excerpts.items.iter().filter(|e| e.kind == kind).nth(n.parse::<usize>().unwrap_or(0))).map(|e| e.id.clone());
+                    use crate::excerpts::Do;
+                    match arg.split_once(':') {
+                        _ if arg == "new" => Some(Cmd::Excerpt(Do::New(kind.into()))),
+                        Some(("source", n)) => nth(self, n).map(|id| Cmd::Excerpt(Do::Source(id))),
+                        Some(("ask", n)) => nth(self, n).map(|id| Cmd::Excerpt(Do::Ask(id))),
+                        _ => nth(self, arg).map(|id| Cmd::Excerpt(Do::Open(id))),
+                    }
+                }
+                "methodtag" | "introtag" => Some(Cmd::Excerpt(crate::excerpts::Do::Tag(if name == "introtag" { wisp_core::excerpt::INTRO } else { wisp_core::excerpt::METHOD }.into(), arg.to_string()))),
+                "methodfind" | "introfind" => {
+                    let kind = if name == "introfind" { wisp_core::excerpt::INTRO } else { wisp_core::excerpt::METHOD };
+                    if let Some(lib) = self.lib.as_ref() { lib.excerpts.shelf(kind).search.update(cx, |input, cx| input.insert(arg, cx)) }
+                    return;
+                }
+                "methodpick" => Some(Cmd::Excerpt(crate::excerpts::Do::Pick)),
+                "methodlink" => self.lib.as_ref().and_then(|l| l.gallery.items.get(arg.parse::<usize>().unwrap_or(0))).map(|figure| Cmd::Excerpt(crate::excerpts::Do::Link(figure.id.clone()))),
+                "excerptname" => {
+                    if let Some(Modal::Excerpt(form)) = self.modal.as_ref() { form.name.update(cx, |input, cx| input.insert(arg, cx)) }
+                    return;
+                }
+                // `pdfmethod` / `pdfintro` keeps what `pdfpick:` selected as a method / an introduction, as 收藏为方法 /
+                // 收藏为导言 does: its dialog.
+                "pdfmethod" | "pdfintro" => {
+                    let kind = if name == "pdfintro" { wisp_core::excerpt::INTRO } else { wisp_core::excerpt::METHOD };
+                    if let Some(pdf) = self.lib.as_ref().and_then(|l| l.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.excerpt_selection(kind, cx)) }
+                    return;
+                }
                 // `tag:<tag>` is a click on a tag of the sidebar, `tag:+<tag>` one with ⌘ / Ctrl, `tag:-<tag>` one with ⌥ / Alt.
                 "tag" => Some(match (arg.strip_prefix('+'), arg.strip_prefix('-')) {
                     (Some(tag), _) => Cmd::ClickTag(tag.to_string(), true),

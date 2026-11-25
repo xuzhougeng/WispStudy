@@ -123,6 +123,8 @@ pub enum Modal {
     ReviewText { what: ReviewText, input: Entity<TextInput> },
     /// A figure of the figure library, or a piece of a PDF page about to become one.
     Figure(Box<crate::figures::FigureForm>),
+    /// A method of 方法库 or an introduction of 导言库, or a passage of a PDF about to become one (`excerpts.rs`).
+    Excerpt(Box<crate::excerpts::ExcerptForm>),
     /// 提取: which fields to ask the assistant about, for which papers.
     Extract(Box<crate::extract::Form>),
     /// 写作: which paragraphs of a Word file without heading styles start a section.
@@ -464,6 +466,7 @@ impl Workspace {
             Modal::ReviewEvidence(_) => self.submit_review_evidence(window, cx),
             Modal::ReviewText { .. } => self.submit_review_text(window, cx),
             Modal::Figure(_) => self.submit_figure(window, cx),
+            Modal::Excerpt(_) => self.submit_excerpt(window, cx),
             Modal::WriteFigures => {}
             Modal::Complete(form) => {
                 if form.chosen.is_some() { self.complete_apply(window, cx) } else if form.by_id { self.complete_lookup(cx) } else { self.complete_find(cx) }

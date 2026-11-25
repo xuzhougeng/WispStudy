@@ -503,6 +503,8 @@ impl Workspace {
             Page::Screen => self.render_screen(main_width, window, cx),
             Page::Write => self.render_write(main_width, window, cx),
             Page::Figures => self.render_figures(main_width, window, cx),
+            Page::Methods => self.render_excerpts(wisp_core::excerpt::METHOD, window, cx),
+            Page::Intros => self.render_excerpts(wisp_core::excerpt::INTRO, window, cx),
             Page::Extract => self.render_extract(cx),
         };
         let shown = sidebar_width > 0.;
@@ -612,10 +614,10 @@ impl Workspace {
         let mut view_rows: Vec<AnyElement> = VIEWS
             .into_iter()
             .map(|(id, icon, label, view)| {
-                // 收藏 holds the starred papers and the figure library: both count, and either page is its own.
-                // The figures are not narrowed by the list's filters, so under them only the papers count.
-                let collected = if view == View::Starred && !filtered { lib.gallery.items.len() } else { 0 };
-                let active = (on_papers && lib.filters.view == view) || (view == View::Starred && lib.page == Page::Figures);
+                // 收藏 holds the starred papers, the figure library, the methods and the introductions: all count, and each
+                // page is its own. Those are not narrowed by the list's filters, so under them only the papers count.
+                let collected = if view == View::Starred && !filtered { lib.gallery.items.len() + lib.excerpts.items.len() } else { 0 };
+                let active = (on_papers && lib.filters.view == view) || (view == View::Starred && matches!(lib.page, Page::Figures | Page::Methods | Page::Intros));
                 nav(id, icon, t(label), Some(lib.counts.view(view) + collected).filter(|n| *n > 0), active, Cmd::SetView(view), self, cx).into_any_element()
             })
             .collect();

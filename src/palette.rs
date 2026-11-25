@@ -117,6 +117,8 @@ impl Workspace {
                 ("scan-text", "提取", "", Cmd::SetPage(Page::Extract)),
                 ("pen-line", "写作", "", Cmd::SetPage(Page::Write)),
                 ("image", "图片库", "", Cmd::SetPage(Page::Figures)),
+                ("flask-conical", "方法库", "", Cmd::SetPage(Page::Methods)),
+                ("quote", "导言库", "", Cmd::SetPage(Page::Intros)),
                 ("bin", "回收站", "", Cmd::SetPage(Page::Trash)),
                 ("plus", "通过 DOI / PMID / 网址添加…", "add", Cmd::AddById),
                 ("plus", "导入 PDF 文件…", "import-pdf", Cmd::ImportPdfs),

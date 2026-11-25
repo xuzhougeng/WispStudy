@@ -73,6 +73,8 @@ pub enum MenuKind {
     Answer(Talk, String),
     /// A figure of the figure library.
     Figure(String),
+    /// A method of 方法库 or an introduction of 导言库.
+    Excerpt(String),
     /// The podcast kept for a paper (its id): save its sound or its script elsewhere.
     PodcastFiles(String),
     /// 播客's playlist: every podcast kept in the library, the latest first.
@@ -277,6 +279,7 @@ impl Workspace {
         match kind {
             MenuKind::Paper(_) | MenuKind::PaperMore(_) | MenuKind::Papers(_) | MenuKind::Trashed(_) | MenuKind::TrashedMany(_) | MenuKind::File(_) | MenuKind::Tag(_) | MenuKind::Conversation(..) | MenuKind::Text(_) | MenuKind::Answer(..) => (items, breaks) = self.context_menu(&kind),
             MenuKind::Figure(id) => (items, breaks) = self.figure_menu(&id),
+            MenuKind::Excerpt(id) => (items, breaks) = self.excerpt_menu(&id),
             MenuKind::Add => {
                 items.push(item(t("通过 DOI / PMID / 网址添加…"), Cmd::AddById));
                 items.push(item(t("导入 PDF 文件…"), Cmd::ImportPdfs));
