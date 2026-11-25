@@ -8,7 +8,7 @@
 //! it writes. After a tool wrote, the window reads the manuscripts again
 //! (`manuscripts_synced`): the editor takes each change as a step of its
 //! own Undo, the section changed is shown, and what changed is lit the way
-//! 改稿 lights it (`Revising::show`), each change to be gone to or taken back.
+//! `revise.rs` lights it (`Revising::show`), each change to be gone to or taken back.
 
 use crate::app::{Cmd, Edge, Side, Talk, Workspace};
 use crate::i18n::t;
@@ -19,7 +19,6 @@ use std::collections::HashMap;
 use std::ops::Range;
 use wisp_core::compose;
 use wisp_core::manuscript::{self, Snapshot};
-use wisp_core::settings::Task;
 
 /// The least the manuscript and the conversation are given of the page's width, and the share the manuscript comes with.
 const MANUSCRIPT_MIN: f32 = 340.;
@@ -149,7 +148,7 @@ impl Workspace {
         lib.writing.agent.changed.clear();
         lib.writing.agent.asked = question.split_whitespace().collect::<Vec<_>>().join(" ");
         lib.writing.agent.versions.at = None;
-        if lib.writing.revise.run.as_ref().is_some_and(|run| run.told) { lib.writing.revise.leave() }
+        lib.writing.revise.leave();
     }
 
     /// What a question of that conversation tells the model about the manuscript (`compose::note`).
@@ -183,7 +182,7 @@ impl Workspace {
         let reshaped = was.is_none_or(|was| was.sections.iter().map(|s| (&s.id, &s.name, &s.kind)).ne(current.sections.iter().map(|s| (&s.id, &s.name, &s.kind))));
         // The sections that read otherwise now, with what they read before the first change in answer to this question.
         let mut touched: Vec<String> = vec![];
-        // In a manuscript that came from a Word file each change is said where it was made, as 改稿 says its own: section, the words before, the words now.
+        // In a manuscript that came from a Word file each change is said where it was made, as a comment: section, the words before, the words now.
         let mut said: Vec<(String, String, String)> = vec![];
         for section in &current.sections {
             let old = was.and_then(|was| was.section(&section.id)).map_or("", |s| s.body.as_str());
@@ -233,14 +232,13 @@ impl Workspace {
 
     /// Light what the assistant changed in the section on show in answer to the question in hand.
     pub(crate) fn agent_marks(&mut self, cx: &App) {
-        let model = self.settings.profile_for_or_default(Task::Chat).labelled();
         let Some(lib) = self.lib.as_mut() else { return };
         let writing = &mut lib.writing;
         let Some(before) = writing.agent.changed.get(&writing.section_id) else { return };
         let text = writing.editor.read(cx).text().to_string();
         let changes: Vec<(Range<usize>, String)> = compose::hunks(before, &text).into_iter().map(|hunk| (hunk.after, before[hunk.before].to_string())).collect();
         if changes.is_empty() { return }
-        writing.revise.show(&writing.section_id, &writing.agent.asked, &model, &text, changes);
+        writing.revise.show(&writing.section_id, &text, changes);
     }
 
     /// How wide the manuscript stands beside the conversation, of a page this wide.
@@ -371,7 +369,7 @@ impl Workspace {
             .p(px(2.))
             .rounded(px(8.))
             .bg(Theme::groove())
-            .child(tab("write-mode-own", "pen-line", "自己写", "你来写：助手在旁边找句子、配引用，按你的话改一节", !on, false, self, cx))
+            .child(tab("write-mode-own", "pen-line", "自己写", "你来写：助手只是手边的工具，找句子、配引用、润色一段，结果由你取舍", !on, false, self, cx))
             .child(tab("write-mode-agent", "sparkle", "助手写", "和助手对话，由它查文献、动笔；稿件在右边，你看着它写，随时亲手改或换回早先的版本", on, true, self, cx))
     }
 

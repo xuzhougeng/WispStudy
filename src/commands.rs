@@ -631,7 +631,7 @@ pub enum Cmd {
     WriteAssistUse(crate::write_assist::Use),
     /// 配引用's card: tick a paper, show more, write the ticked citations (write_cite.rs).
     WriteCited(crate::write_cite::Do),
-    /// 改稿: the box under the manuscript where the assistant is told what to change (`revise.rs`).
+    /// The list of what the assistant changed in the section on show (`revise.rs`).
     Revise(crate::revise::Do),
     /// 写作's other mode, where the assistant writes (`write_agent.rs`).
     Agent(crate::write_agent::Do),

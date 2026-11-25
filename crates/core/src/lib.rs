@@ -22,7 +22,7 @@
 //! - `pptx`     slides written as a PowerPoint file: what is on a slide is said, where it stands is decided here
 //! - `docx`     Word files for 写作: read into paragraphs and comments, written again with the text as it stands and its comments
 //! - `comment`  批注: remarks on words of a manuscript, the person's, the assistant's and those a Word file came with
-//! - `revise`   改稿: the assistant's changes to a section as blocks of words to find and words to put there
+//! - `revise`   an assistant's changes to a section of a manuscript: where each goes, and the words to light up
 //! - `markdown` the Markdown of an answer → blocks to draw
 //! - `panes`    分栏: the reading area as columns on an eight-unit grid, and what a window of a given width shows of a layout
 //! - `ai`       context building, request bodies and stream parsing for 文献库提问

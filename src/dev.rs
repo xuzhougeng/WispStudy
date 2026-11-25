@@ -531,23 +531,19 @@ impl Workspace {
                         _ => Some(Cmd::Source(Do::Find(None))),
                     }
                 }
-                // `revise:<wish>` tells the assistant what to change in the section, as if typed into the box under the manuscript and sent;
-                // `revise:stop`, `revise:keep`, `revise:undo` (all) / `revise:undo;<n>`, `revise:go;<n>`, `revise:next` / `revise:prev` are its buttons.
+                // The list of what the assistant changed in the section on show (助手写): `revise:keep`, `revise:undo` (all) /
+                // `revise:undo;<n>`, `revise:go;<n>`, `revise:next` / `revise:prev` are its buttons.
                 "revise" => {
                     use crate::revise::Do;
                     let (what, n) = arg.split_once(';').map_or((arg, 0), |(what, n)| (what, n.parse::<usize>().unwrap_or(0)));
                     Some(Cmd::Revise(match (what, arg.contains(';')) {
-                        ("stop", _) => Do::Stop,
                         ("keep", _) => Do::Keep,
                         ("undo", false) => Do::UndoAll,
                         ("undo", true) => Do::Undo(n),
                         ("go", _) => Do::Go(n),
                         ("next", _) => Do::Step(true),
                         ("prev", _) => Do::Step(false),
-                        _ => {
-                            if let Some(lib) = self.lib.as_ref() { lib.writing.revise.input.update(cx, |input, cx| input.set_text(arg, cx)) }
-                            Do::Send
-                        }
+                        _ => return,
                     }))
                 }
                 "assisted" => Some(Cmd::WriteAssistUse(match arg { "replace" => crate::write_assist::Use::Replace, "below" => crate::write_assist::Use::Below, "copy" => crate::write_assist::Use::Copy, _ => crate::write_assist::Use::Drop })),
