@@ -2324,9 +2324,13 @@ impl Workspace {
             self.close_palette(window, cx);
         } else if self.modal.as_ref().is_some_and(|modal| matches!(modal, Modal::Figure(form) if form.beside_page())) && !self.figure_dialog_focused(window, cx) {
             // The figure dialog standing beside the page: Esc on the page (a selection copied from) does not put away what was written.
+        } else if let Some(Modal::Excerpt(form)) = self.modal.as_mut().filter(|modal| matches!(modal, Modal::Excerpt(form) if form.picking)) {
+            // The list of figures to link, open inside the dialog: folded up before the dialog goes.
+            form.picking = false;
+            window.focus(&self.focus);
         } else if self.modal.is_some() {
             self.run(Cmd::CloseModal, window, cx);
-        } else if self.dismiss_font_picker(window, cx) {
+        } else if self.dismiss_font_picker(window, cx) || self.settings_up(cx) {
         } else if self.settings_view.is_some() {
             self.close_settings(window, cx);
         } else if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()).filter(|pdf| pdf.read(cx).overview_open()) {
@@ -2376,12 +2380,15 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Esc with nothing left to put away in the library: back to 所有文献库, the way its ← goes (design.md rule 52).
+    /// Esc with nothing left to put away in the library: where the corner's ← goes (design.md rule 52), out of a
+    /// manuscript to the library, else back to 所有文献库.
     /// Not in one press from where words are typed: a field with the keyboard gives it back to the page first (what is
     /// in it stays), words in the search box go next (the list in full), and a conversation's box holding words not
     /// yet sent keeps the library open, since leaving would lose them.
     fn leave_by_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if window.context_stack().iter().any(|context| context.contains("TextInput")) { return window.focus(&self.focus) }
+        // The corner's arrow is the way out from here: out of a manuscript to the page 写作 was opened from.
+        if self.outline_shown() && !self.in_draft() { return self.run(Cmd::LeaveWrite, window, cx) }
         let Some(lib) = self.lib.as_mut() else { return };
         if lib.page == Page::Papers && !lib.search.read(cx).text().is_empty() {
             // `set_text` says nothing to the box's subscription: the list is given back here.
