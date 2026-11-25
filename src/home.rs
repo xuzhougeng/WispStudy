@@ -100,6 +100,7 @@ impl Render for Workspace {
             .children(self.render_modal(window, cx))
             .children(self.render_palette(cx))
             .children(self.render_menu(window, cx))
+            .children(self.render_bell_list(window, cx))
             .children(if self.settings_view.is_none() { self.podcast_bar(cx) } else { None })
             .children(self.render_toast(cx))
             // While an edge is held (the sidebar's, the detail panel's, the one between a conversation and its PDF), a layer over everything hears the pointer
@@ -424,6 +425,8 @@ impl Workspace {
             UpdateState::Available(release, _) | UpdateState::Downloading(release) | UpdateState::Ready(release, ..) => Some(release.version.clone()),
             _ => None,
         };
+        // What ended in a library left at work, once there is something (`bell.rs`).
+        let bell = self.render_bell(cx);
         let page = div()
             .id("home")
             .flex_1()
@@ -460,6 +463,7 @@ impl Workspace {
                                     .gap(px(4.))
                                     // Only while a newer release is on offer.
                                     .when_some(new_version, |d, version| d.child(ui::primary_button("home-update", tf!("新版本 {version}", "New version {version}")).h(text_px(28.)).px(px(10.)).rounded_full().text_size(text_px(12.)).on_click(self.on(Cmd::OpenSettings(SettingsPage::About), cx))))
+                                    .children(bell)
                                     // How the libraries are laid out, once there is one: the two ways side by side, the one in force lit.
                                     .when(!empty, |d| {
                                         let mut way = |id: &'static str, icon: &'static str, rows: bool, name: &'static str| div().id(id).flex().flex_none().items_center().justify_center().size(text_px(28.)).rounded(px(6.)).cursor_pointer().when(listed == rows, |d| d.bg(Theme::pressed())).hover(|s| s.bg(Theme::hover())).child(ui::icon(icon, 15., if listed == rows { Theme::text() } else { Theme::text_tertiary() })).tooltip(ui::tip(t(name))).on_click(self.on(Cmd::HomeList(rows), cx));

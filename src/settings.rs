@@ -611,6 +611,7 @@ impl Workspace {
         // The open library belongs to the old folder, and those answering off screen.
         self.lib = None;
         self.parked.clear();
+        self.bell.forget(None);
         theme::set_accent("blue");
         self.libraries = libraries::list(&self.root);
         self.save_settings(cx);

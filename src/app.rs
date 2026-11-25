@@ -453,6 +453,8 @@ pub struct Workspace {
     pub parked: Vec<Library>,
     /// While `in_library` has a library left at work in `lib`'s place for a call: what the call does is not on show.
     pub away: bool,
+    /// 铃铛: what those libraries finished while off screen, for the home page (`bell.rs`).
+    pub(crate) bell: crate::bell::Bell,
     /// 设置, shown instead of the home page or the library while it is open.
     pub settings_view: Option<SettingsView>,
     /// 连接器: where the connection of each one tried stands (`custom.rs`).
@@ -801,7 +803,7 @@ impl Workspace {
         shortcuts::rebuild(&settings.shortcuts, cx);
         let libraries = libraries::list(&root);
         let home = crate::draft::Home::new(window, cx);
-        let mut this = Workspace { focus, settings, settings_path, root, libraries, lib: None, parked: vec![], away: false, stepping: false, main_window: window.window_handle(), settings_view: None, connections: vec![], skills: vec![], update: UpdateState::Idle, update_told: None, session: Session::default(), modal: None, modal_error: String::new(), modal_subscriptions: vec![], figure_at: (0., 0.), figure_drag: None, menu: None, palette: None, toast, home_scroll: ScrollHandle::new(), home, resizing: None, column_drag: None, picked: None, pinning: false, mark_over: None, filters_over: [false; 2], filters_drawn: false, star_ask: false, tour: Default::default() };
+        let mut this = Workspace { focus, settings, settings_path, root, libraries, lib: None, parked: vec![], away: false, bell: Default::default(), stepping: false, main_window: window.window_handle(), settings_view: None, connections: vec![], skills: vec![], update: UpdateState::Idle, update_told: None, session: Session::default(), modal: None, modal_error: String::new(), modal_subscriptions: vec![], figure_at: (0., 0.), figure_drag: None, menu: None, palette: None, toast, home_scroll: ScrollHandle::new(), home, resizing: None, column_drag: None, picked: None, pinning: false, mark_over: None, filters_over: [false; 2], filters_drawn: false, star_ask: false, tour: Default::default() };
         // A new day of use is counted once at start; on the fifth the home page asks for a star, until answered.
         // A settings file that could not be read is not written over with defaults for it (the toast says so).
         if this.toast.is_none() && wisp_core::settings::note_use(&mut this.settings, &wisp_core::time::today()) { this.save_settings(cx) }
@@ -943,9 +945,12 @@ impl Workspace {
         // What it was at before the call: what the call ends is said, since nobody was looking.
         let (answering, running): (bool, Vec<crate::works::Kind>) = (parked.answering(), parked.running().into_iter().map(|work| work.kind).collect());
         let open = self.lib.replace(parked);
+        let asked = self.answers_under_way();
         let away = std::mem::replace(&mut self.away, true);
         let result = f(self, cx);
         self.away = away;
+        // What ended is kept for the home page's bell as well as said.
+        if self.lib.as_ref().is_some_and(|lib| lib.info.id == id) { self.note_ended(asked, &running) }
         let back = std::mem::replace(&mut self.lib, open);
         if let Some(back) = back.filter(|lib| lib.info.id == id) {
             let name = back.info.name.clone();
@@ -970,6 +975,8 @@ impl Workspace {
 
     pub(crate) fn open_library(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
         let Some(mut info) = self.libraries.iter().find(|l| l.id == id).cloned() else { return };
+        // What the bell has of it is in front of the person now.
+        self.bell.seen_library(id);
         // The library on show, at work: it stays as it is, not opened a second time.
         if self.lib.as_ref().is_some_and(|lib| lib.info.id == id && lib.at_work()) { return }
         // One answering off screen is taken up as it stands: the answer goes on arriving where it is read.

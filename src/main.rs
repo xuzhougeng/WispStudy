@@ -24,6 +24,7 @@ mod viewers;
 #[cfg(debug_assertions)]
 mod dev;
 mod background;
+mod bell;
 mod chat;
 mod cite;
 mod cite_styles;
