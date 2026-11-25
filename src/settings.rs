@@ -524,7 +524,7 @@ impl Workspace {
                         cx.notify();
                     }));
                 }
-                let (styles, heard) = self.style_browser_new(cx);
+                let (styles, heard) = self.style_browser_new(window, cx);
                 subscriptions.push(heard);
                 let kept = |keys: &std::collections::BTreeMap<String, String>| keys.get("deepseek").is_some_and(|key| !key.trim().is_empty());
                 let deepseek_fields = [kept(&self.settings.web_search.keys), kept(&self.settings.ocr.keys)];

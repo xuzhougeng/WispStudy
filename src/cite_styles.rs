@@ -9,6 +9,7 @@
 //! the built-in ones. A built-in style is listed by a short name where it has one (`csl::short_name`).
 
 use crate::app::{Cmd, Modal, Workspace};
+use crate::context::Nav;
 use crate::i18n::t;
 use crate::input::{InputEvent, TextInput};
 use crate::theme::{Theme, text_px};
@@ -110,12 +111,14 @@ impl Workspace {
         }
     }
 
-    /// A list of styles for one of its two places, with what is typed into its field heard.
-    pub(crate) fn style_browser_new(&mut self, cx: &mut Context<Self>) -> (StyleBrowser, Subscription) {
+    /// A list of styles for one of its two places, with what is typed into its field heard: Enter there is
+    /// the dialog's 用这个样式.
+    pub(crate) fn style_browser_new(&mut self, window: &mut Window, cx: &mut Context<Self>) -> (StyleBrowser, Subscription) {
         // Those that cite in footnotes cannot be used here, so they are not offered.
         let bundled: Vec<Listed> = csl::bundled().into_iter().filter(|style| !csl::in_notes(&style.key)).collect();
         let search = cx.new(|cx| TextInput::new(tf!("搜索全部 {} 个内置样式", "Search all {} built-in styles", bundled.len()), cx));
-        let heard = cx.subscribe(&search, |this, _, event: &InputEvent, cx| {
+        let heard = cx.subscribe_in(&search, window, |this, _, event: &InputEvent, window, cx| {
+            if *event == InputEvent::Submit && matches!(this.modal, Some(Modal::CiteStyle { .. })) { return this.run(Cmd::SubmitModal, window, cx) }
             if *event != InputEvent::Changed { return }
             if let Some(browser) = this.style_browser_mut() { browser.scroll = ScrollHandle::new() }
             cx.notify();
@@ -139,6 +142,49 @@ impl Workspace {
         if let Some(browser) = self.style_browser_mut() { browser.show(&chosen, &root) }
     }
 
+    /// The keys over the list on show (design rule 54), from the window or from its search field, which passes
+    /// the arrows on: ↑↓ go along the styles across the groups and stop at the ends, Home/End and Page Up/Down
+    /// further; a move is what a click on the row is (in the dialog it looks, in the settings it chooses), and
+    /// the list scrolls to it. Enter in the dialog is 用这个样式. False when no list of styles has the keys.
+    pub(crate) fn style_nav(&mut self, nav: Nav, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let (browser, at, follow, pick): (&StyleBrowser, String, bool, fn(String) -> Cmd) = match &self.modal {
+            Some(Modal::CiteStyle { browser, chosen }) => (browser, chosen.clone(), true, Cmd::LookCiteStyle),
+            None => match &self.settings_view {
+                Some(view) if view.page == crate::settings::SettingsPage::Writing => (&view.styles, self.settings.cite_style.clone(), false, Cmd::DefaultCiteStyle),
+                _ => return false,
+            },
+            _ => return false,
+        };
+        if nav == Nav::Open {
+            if follow { self.run(Cmd::SubmitModal, window, cx) }
+            return true;
+        }
+        let keys: Vec<String> = self.style_lines(browser, &at, follow, cx).into_iter().filter_map(|line| match line { Line::Style { key, .. } => Some(key), Line::Caption(_) => None }).collect();
+        if keys.is_empty() { return true }
+        let here = keys.iter().position(|key| *key == at || (!follow && at.is_empty() && key == "author-year"));
+        let last = keys.len() - 1;
+        // A screenful: as many rows as the list shows.
+        let page = ((f32::from(browser.scroll.bounds().size.height) / f32::from(text_px(30.))).floor() as usize).saturating_sub(1).max(1);
+        let to = match (nav, here) {
+            (Nav::First, _) => 0,
+            (Nav::Last, _) => last,
+            // None on show (it is not among what the field found): the first or the last of what is.
+            (Nav::Down | Nav::PageDown, None) => 0,
+            (Nav::Up | Nav::PageUp, None) => last,
+            (Nav::Down, Some(at)) => (at + 1).min(last),
+            (Nav::Up, Some(at)) => at.saturating_sub(1),
+            (Nav::PageDown, Some(at)) => (at + page).min(last),
+            (Nav::PageUp, Some(at)) => at.saturating_sub(page),
+            _ => return true,
+        };
+        if here == Some(to) { return true }
+        // Over two frames, as on opening: the caption over a group's first style comes into view with it.
+        browser.reveal.set(2);
+        self.run(pick(keys[to].clone()), window, cx);
+        cx.notify();
+        true
+    }
+
     // ---- what is done with a style
 
     /// 设置 › 写作: the style of every manuscript that chose none of its own.
@@ -151,12 +197,13 @@ impl Workspace {
     /// 「导出」 › 引用样式: the dialog, on the style the manuscript now has.
     pub(crate) fn open_cite_styles(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(chosen) = self.lib.as_ref().and_then(|lib| lib.writing.current()).map(|manuscript| manuscript.cite_style.clone()) else { return };
-        let (browser, heard) = self.style_browser_new(cx);
+        let (browser, heard) = self.style_browser_new(window, cx);
         self.modal_error.clear();
         self.modal_subscriptions.clear();
         self.modal_subscriptions.push(heard);
+        // The keyboard is in the search field: what is typed looks for a style, the arrows move in the list (`style_nav`).
+        browser.search.read(cx).focus(window);
         self.modal = Some(Modal::CiteStyle { browser, chosen });
-        window.focus(&self.focus);
         cx.notify();
     }
 
