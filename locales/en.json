@@ -231,6 +231,8 @@
   "文献库": "Library",
   "打开设置": "Open settings",
   "回到所有文献库": "Back to all libraries",
+  "一层层退出，最后回到所有文献库": "Step back out, layer by layer, to all libraries",
+  "助手的输入框里还有没发出的字：发出或删掉之后，Esc 才回到所有文献库": "The assistant’s box still holds words not sent: send or delete them, then Esc goes back to all libraries",
   "搜索文献": "Search papers",
   "通过 DOI / PMID 添加文献": "Add paper by DOI / PMID",
   "导入 PDF 文件": "Import PDF files",

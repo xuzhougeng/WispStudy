@@ -789,6 +789,25 @@ impl Workspace {
         if let Some(view) = &self.settings_view { view.font_search.update(cx, |input, cx| input.set_text(query, cx)) }
     }
 
+    /// Esc in 设置: one level up on the page on show, if it is a level down (design.md rule 53): an opened skill or
+    /// MCP back to its list, a command's fields or a library's parts folded up again. False on a page's top level.
+    pub fn settings_up(&mut self, cx: &mut Context<Self>) -> bool {
+        use crate::custom::Tab;
+        let Some(view) = self.settings_view.as_mut() else { return false };
+        let up = match view.page {
+            SettingsPage::Customize if view.custom_tab == Tab::Skills => view.skill.take().is_some(),
+            SettingsPage::Customize => view.connector.take().is_some(),
+            SettingsPage::Ai if view.ai_tab == AiTab::Commands => view.command.take().is_some(),
+            SettingsPage::Storage => view.storage_open.take().is_some(),
+            _ => false,
+        };
+        if up {
+            view.reset_scroll();
+            cx.notify();
+        }
+        up
+    }
+
     pub fn dismiss_font_picker(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let Some(view) = self.settings_view.as_mut().filter(|view| view.font_picker.is_some() && view.page == SettingsPage::Appearance) else { return false };
         view.font_picker = None;
