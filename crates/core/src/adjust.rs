@@ -542,8 +542,7 @@ mod tests {
             if let Some(initials) = &offered.initials { tried.push(Knobs { initials: Some(if initials.contains('.') { " " } else { "." }.to_string()), ..Default::default() }) }
             // A numbered style offers its number, one by author and year its "et al."; both offer the list's.
             assert!(offered.brackets.is_some() != offered.cited.is_some(), "{}: {offered:?}", style.key);
-            // All but the one whose entries come out without authors here (Vancouver names them with no `<name>` of its own).
-            assert!(offered.listed.is_some() || style.key == "csl:nlm-citation-sequence", "{}", style.key);
+            assert!(offered.listed.is_some(), "{}", style.key);
             for wanted in tried {
                 let changed = write(&xml, &wanted);
                 let now = read(&changed);
