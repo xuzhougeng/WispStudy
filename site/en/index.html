@@ -30,6 +30,7 @@
       <a href="tutorials/index.html">Tutorials</a>
       <a href="#ideas">Ideas</a>
       <a href="#tools">Tools</a>
+      <a href="#faq">FAQ</a>
       <a href="#download">Download</a>
     </nav>
     <a class="lang" href="../index.html" lang="zh-CN" hreflang="zh-CN">中文</a>
@@ -414,8 +415,66 @@
 </section>
 
 <!-- §4 -->
+<section class="sec wrap" id="faq">
+  <div class="rail" aria-hidden="true"><span class="no">§4</span><span class="v">FAQ</span></div>
+  <div class="sec-main">
+    <h2>Questions people ask</h2>
+    <p class="sec-lead">A few questions from people who use it. Most of the answers are “this is deliberate”, and here is why.</p>
+
+    <div class="faq">
+      <details id="faq-notes">
+        <summary><span class="q">Q1</span><h3>Can one paper be in several libraries? If I take notes in library A, can I see them in library B?</h3></summary>
+        <div class="a">
+          <p>It can be in both, but the notes are not shared. Each library is an independent folder and deduplication happens within a library, so the same paper can be imported into A and into B. Each side holds a record of its own: notes, annotations, tags, reading status and the inclusion decision belong to the library they were made in and are not synchronised.</p>
+          <p>This is deliberate. A library stands for one topic, and the same paper is read differently under different topics: the notes you took on it in A may be of no use in B, and B may not even need its full text, just the abstract. So most of the time one paper belongs in one library.</p>
+          <p>If you cannot decide how to split, start with one library. For example a “Learning” library just for reading papers and picking things up: its topics can be a mix, told apart by tags. When one direction grows into a project of its own, create a new library and use “Move to library…” in a paper's right-click menu to move the relevant papers over; the PDF, the annotations and the conversations about the paper go with it.</p>
+        </div>
+      </details>
+
+      <details id="faq-groups">
+        <summary><span class="q">Q2</span><h3>Why are there no groups (folders, collections) inside a library?</h3></summary>
+        <div class="a">
+          <p>The library itself is the group. Inside it, use tags.</p>
+          <p>A folder asks a paper to live in exactly one place, and papers rarely divide that cleanly: does a paper that studies root hair development with single-cell sequencing go under “single-cell” or under “root hair”? The ugly duckling theorem (Watanabe, 1969) says just this: without prior assumptions, any two objects are in theory equally similar, and how to classify them depends entirely on which features you choose to weigh.</p>
+          <p>Tags do not ask for a single home. A paper can carry several; in the sidebar, hold <kbd>⌘</kbd> / <kbd>Ctrl</kbd> to select more than one tag and keep only the papers that carry all of them, or hold <kbd>⌥</kbd> / <kbd>Alt</kbd> and click a tag to exclude it. On import from Zotero, collection paths become tags as well.</p>
+        </div>
+      </details>
+
+      <details id="faq-links">
+        <summary><span class="q">Q3</span><h3>Can two libraries be linked?</h3></summary>
+        <div class="a">
+          <p>No, and this is deliberate too. From the start, a library was designed as an independent whole, with its own topic, inclusion criteria, tags and custom fields. Two libraries serve different goals and are best kept apart, so that one does not contaminate the other.</p>
+          <p>When a question does span several libraries, give it to the assistant on the home page: it can read every library on the shelf. Say “compare what libraries ‘A’ and ‘B’ have on …”, and it lists papers, searches the full texts and reads the originals in each; every source in its answer says which library it comes from, and a click opens that paper in that library. The libraries are read-only from there: it changes none of them.</p>
+        </div>
+      </details>
+
+      <details id="faq-size">
+        <summary><span class="q">Q4</span><h3>Will a large library burn tokens and give worse answers? How should I set up my libraries?</h3></summary>
+        <div class="a">
+          <p>What one question costs depends on the current list, not on the whole library, and it has a ceiling. When you ask the library, the scope is the papers shown in the list (as set by the view, tags, search and filters): the ones most relevant to the question are given as full records (title, abstract, notes), those that do not fit are given as titles only, and of the full texts only the few dozen pages most relevant to the question are sent. In the run above, 181 of the 313 papers were given as full records and 132 as titles only <a class="cite" href="#step-h" data-step="h">Fig. 3h</a>. So the cost does not grow without limit as the library grows, though a long list does cost more than a short one. When the material is not enough, the assistant goes on to search the full texts and read pages itself.</p>
+          <p>Saving tokens and getting better answers are the same thing: narrow the scope first, then ask.</p>
+          <ul>
+            <li>Click a tag, switch to a view or search for a word, then ask: the model is given only that part of the library.</li>
+            <li>If you care about one paper, ask in that paper's “Ask”: the model reads its full text.</li>
+            <li>When the list is long, put words the papers themselves would use into the question (English terms for papers in English): which papers get a full record is ranked by how often those words appear in the title, abstract, tags and notes.</li>
+            <li>To check, open “Papers” at the top of the conversation: it says for each paper whether the model was given the full record or only the title, and how many pages of full text. Sources in an answer can be opened, and the sentences the assistant quotes are compared word for word with the original. With a DeepSeek model, the line below an answer also says how many tokens the question used and roughly what it cost.</li>
+          </ul>
+          <p>Some advice on setting up libraries:</p>
+          <ul>
+            <li><b>One library, one goal</b>: a project, a review, a field you want to learn. Whether to split depends on whether the goals and inclusion criteria differ, not on the number of papers.</li>
+            <li><b>Write the topic well.</b> The assistant reads it when it drafts queries, screens and answers.</li>
+            <li><b>Import broadly first, then screen.</b> Under one screening goal each paper is read only once, the irrelevant ones go to the trash, and what remains is the scope of every later question. A clean library matters more than a small one.</li>
+            <li><b>Give the bulk work to a cheap model.</b> Which model screening, translation and tidying full text each use is set separately in “Settings › AI”; keep the strong one for asking.</li>
+          </ul>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- §5 -->
 <section class="sec wrap" id="download">
-  <div class="rail" aria-hidden="true"><span class="no">§4</span><span class="v">Download</span></div>
+  <div class="rail" aria-hidden="true"><span class="no">§5</span><span class="v">Download</span></div>
   <div class="sec-main">
     <h2>Download Wisp Study</h2>
     <p class="sec-lead" id="release-line">The latest version is on the <a href="https://github.com/xuzhougeng/WispStudy/releases/latest">release page</a>.</p>

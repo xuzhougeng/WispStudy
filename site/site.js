@@ -71,6 +71,14 @@
     addEventListener('load', () => setTimeout(() => panels.forEach(panel => $$('img', panel).forEach(img => { new Image().src = img.src; })), 1200));
   }
 
+  // ---- §4: a link to one question opens it ----
+  function asked() {
+    const question = location.hash.length > 1 && document.getElementById(decodeURIComponent(location.hash.slice(1)));
+    if (question && question.tagName === 'DETAILS') question.open = true;
+  }
+  asked();
+  addEventListener('hashchange', asked);
+
   // ---- citations of this page's own figures ----
   $$('a.cite').forEach(link => link.addEventListener('click', event => {
     const target = document.getElementById(link.hash.slice(1));

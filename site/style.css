@@ -294,6 +294,24 @@ html:not(.js) .steps-list { display: none; }
 .limits li { break-inside: avoid; padding: 7px 0 7px 1.3em; position: relative; }
 .limits li::before { content: "–"; position: absolute; left: 0; color: var(--ink-3); }
 
+/* ---------- §4: the questions ---------- */
+/* One row a question, on the grid of the theses: closed it is the question alone, and the page stays short. */
+.faq { margin-top: clamp(40px, 6vw, 72px); border-bottom: 1px solid var(--line-strong); }
+.faq details { border-top: 1px solid var(--line-strong); scroll-margin-top: calc(var(--top) + 12px); }
+.faq summary, .faq .a { display: grid; grid-template-columns: 5.4rem minmax(0, 1fr) 1.4rem; column-gap: clamp(20px, 3.5vw, 52px); }
+.faq summary { align-items: baseline; padding-block: clamp(20px, 2.6vw, 28px); cursor: pointer; list-style: none; }
+.faq summary::-webkit-details-marker { display: none; }
+.faq summary::after { content: "+"; font: 400 1.5rem/1 var(--serif); color: var(--ink-3); justify-self: end; }
+.faq details[open] > summary::after { content: "−"; }
+.faq summary:hover::after { color: var(--accent); }
+.faq .q { font: 600 .8rem/1 var(--mono); color: var(--accent); letter-spacing: .08em; }
+.faq h3 { font-size: clamp(1.12rem, 1.9vw, 1.32rem); font-weight: 700; }
+.faq .a { padding-bottom: clamp(28px, 4vw, 44px); row-gap: 14px; }
+.faq .a > * { grid-column: 2; max-width: 41em; }
+.faq .a li { padding: 5px 0 5px 1.3em; position: relative; }
+.faq .a li::before { content: "–"; position: absolute; left: 0; color: var(--ink-3); }
+.faq kbd { font: .8em/1 var(--mono); padding: .22em .5em; border: 1px solid var(--line-strong); border-bottom-width: 2px; border-radius: 5px; background: var(--surface); white-space: nowrap; }
+
 /* ---------- §3: tools ---------- */
 .code-cols { margin-top: clamp(36px, 5vw, 56px); display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 20px; align-items: stretch; }
 .code { background: var(--term-bg); color: var(--term-ink); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
@@ -354,6 +372,7 @@ html:not(.js) .steps-list { display: none; }
   .thesis { grid-template-columns: 4rem minmax(0, 1fr); }
   .proof { grid-column: 2; padding-top: 14px; }
   .limits { grid-template-columns: 4rem minmax(0, 1fr); }
+  .faq summary, .faq .a { grid-template-columns: 4rem minmax(0, 1fr) 1.4rem; }
   .try { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 900px) {
@@ -380,6 +399,8 @@ html:not(.js) .steps-list { display: none; }
 @media (max-width: 600px) {
   .guides { grid-template-columns: minmax(0, 1fr); }
   .top nav a { padding: 6px 8px; }
+  /* Five links are what a phone's bar holds beside the icon and the other language; the questions are a scroll away. */
+  .top nav a[href="#faq"] { display: none; }
   .gh { display: none; }
   .lang { margin-inline: 0; }
   :lang(en) .top nav { gap: 0; }
@@ -397,6 +418,10 @@ html:not(.js) .steps-list { display: none; }
   .thesis, .limits { grid-template-columns: minmax(0, 1fr); }
   .proof, .cite-demo, .limits h3, .limits ul { grid-column: 1; }
   .num { margin-bottom: 10px; }
+  .faq summary { grid-template-columns: minmax(0, 1fr) 1.4rem; column-gap: 14px; }
+  .faq .q { grid-column: 1 / -1; margin-bottom: 8px; }
+  .faq .a { grid-template-columns: minmax(0, 1fr); }
+  .faq .a > * { grid-column: 1; }
   .card { padding: 16px; }
   .card-head { flex-direction: column; gap: 10px; }
   .sheet { padding: 20px 20px 40px; }
