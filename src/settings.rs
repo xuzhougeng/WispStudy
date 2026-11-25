@@ -1,4 +1,4 @@
-//! 设置: a view of its own, with a sidebar of pages (通用, 外观, 快捷键, AI,
+//! 设置: a view of its own, with a sidebar of pages (通用, 外观, 快捷键, AI, 写作 (`cite_styles.rs`),
 //! 自定义 (`custom.rs`), 网络, 关于) under 返回 at the top left, where the library has its way back. AI has three tabs: 模型 (the providers,
 //! a list at the left and the one picked at the right), 任务 (which model
 //! does what, with its instructions, and the services that are no model: 网页搜索, 文字识别, 朗读) and 命令 (the person's own slash commands).
@@ -44,6 +44,7 @@ pub enum SettingsPage {
     Appearance,
     Shortcuts,
     Ai,
+    Writing,
     Customize,
     Network,
     Storage,
@@ -51,7 +52,7 @@ pub enum SettingsPage {
 }
 
 impl SettingsPage {
-    pub(crate) const ALL: [SettingsPage; 8] = [SettingsPage::General, SettingsPage::Appearance, SettingsPage::Shortcuts, SettingsPage::Ai, SettingsPage::Customize, SettingsPage::Network, SettingsPage::Storage, SettingsPage::About];
+    pub(crate) const ALL: [SettingsPage; 9] = [SettingsPage::General, SettingsPage::Appearance, SettingsPage::Shortcuts, SettingsPage::Ai, SettingsPage::Writing, SettingsPage::Customize, SettingsPage::Network, SettingsPage::Storage, SettingsPage::About];
 
     pub(crate) fn title(self) -> &'static str {
         match self {
@@ -59,6 +60,7 @@ impl SettingsPage {
             SettingsPage::Appearance => t("外观"),
             SettingsPage::Shortcuts => t("快捷键"),
             SettingsPage::Ai => "AI",
+            SettingsPage::Writing => t("写作"),
             SettingsPage::Customize => t("自定义"),
             SettingsPage::Network => t("网络"),
             SettingsPage::Storage => t("存储空间"),
@@ -72,6 +74,7 @@ impl SettingsPage {
             SettingsPage::Appearance => "palette",
             SettingsPage::Shortcuts => "keyboard",
             SettingsPage::Ai => "sparkle",
+            SettingsPage::Writing => "pen-line",
             SettingsPage::Customize => "plug",
             SettingsPage::Network => "globe",
             SettingsPage::Storage => "hard-drive",
@@ -129,7 +132,9 @@ pub struct SettingsView {
     /// that a field being emptied does not leave under the caret.
     deepseek_fields: [bool; 2],
     /// Whose name the comments and tracked changes of a Word export carry.
-    author: Entity<TextInput>,
+    pub(crate) author: Entity<TextInput>,
+    /// 写作's list of citation styles (cite_styles.rs).
+    pub(crate) styles: crate::cite_styles::StyleBrowser,
     translation_prompt: Entity<TextInput>,
     font_search: Entity<TextInput>,
     font_names: Vec<String>,
@@ -519,9 +524,11 @@ impl Workspace {
                         cx.notify();
                     }));
                 }
+                let (styles, heard) = self.style_browser_new(cx);
+                subscriptions.push(heard);
                 let kept = |keys: &std::collections::BTreeMap<String, String>| keys.get("deepseek").is_some_and(|key| !key.trim().is_empty());
                 let deepseek_fields = [kept(&self.settings.web_search.keys), kept(&self.settings.ocr.keys)];
-                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, contact_email, ncbi_key, reach: None, reach_asked: 0, typed: 0, search_keys, ocr_keys, deepseek_fields, author, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, skill: None, recording: None, shortcut_error: None, balance: None, storage: None, measuring: false, storage_open: None, _subscriptions: subscriptions });
+                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, contact_email, ncbi_key, reach: None, reach_asked: 0, typed: 0, search_keys, ocr_keys, deepseek_fields, author, styles, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, skill: None, recording: None, shortcut_error: None, balance: None, storage: None, measuring: false, storage_open: None, _subscriptions: subscriptions });
                 self.read_balance_shown(cx);
             }
         }
@@ -1186,6 +1193,8 @@ impl Workspace {
     // ---- drawing
 
     pub fn render_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        // 写作 shows a style on works of its own: read once, before the page is drawn.
+        if self.settings_view.as_ref().is_some_and(|view| view.page == SettingsPage::Writing) { self.tend_style_browser() }
         let Some(view) = &self.settings_view else { return div().into_any_element() };
         let page = view.page;
         let nav = |id: &'static str, icon: &'static str, label: &'static str, active: bool, cmd: Cmd, this: &Self, cx: &mut Context<Self>| {
@@ -1226,10 +1235,11 @@ impl Workspace {
             .children(pages);
 
         let body = match page {
-            SettingsPage::General => self.general_page(window, cx),
+            SettingsPage::General => self.general_page(cx),
             SettingsPage::Appearance => self.appearance_page(window, cx),
             SettingsPage::Shortcuts => self.shortcuts_page(cx),
             SettingsPage::Ai => self.ai_page(window, cx),
+            SettingsPage::Writing => self.writing_page(window, cx),
             SettingsPage::Customize => self.customize_page(window, cx),
             SettingsPage::Network => self.network_page(window, cx),
             SettingsPage::Storage => self.storage_page(cx),
@@ -1280,10 +1290,10 @@ impl Workspace {
     /// to be told its width, since every width above it is a share of its parent's.
     pub(crate) fn column_width(&self, window: &Window) -> f32 {
         let page = self.settings_view.as_ref().map(|view| view.page);
-        (f32::from(window.viewport_size().width) - SIDEBAR_W - 65.).min(if matches!(page, Some(SettingsPage::Ai | SettingsPage::Customize)) { AI_COLUMN_W } else { COLUMN_W })
+        (f32::from(window.viewport_size().width) - SIDEBAR_W - 65.).min(if matches!(page, Some(SettingsPage::Ai | SettingsPage::Writing | SettingsPage::Customize)) { AI_COLUMN_W } else { COLUMN_W })
     }
 
-    fn general_page(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+    fn general_page(&self, cx: &mut Context<Self>) -> AnyElement {
         let custom = !self.settings.data_dir.trim().is_empty();
         let reveal = if cfg!(target_os = "macos") { t("在访达中显示") } else if cfg!(target_os = "windows") { t("在资源管理器中显示") } else { t("在文件管理器中显示") };
         let folder = div()
@@ -1303,7 +1313,6 @@ impl Workspace {
                 group(Some(t("数据")), vec![row(t("数据目录"), Some(self.root.display().to_string().into()), folder).into_any_element()])
                     .child(note(t("所有文献库都在这个文件夹下，每个文献库是其中的一个子文件夹。改到别的目录后，首页显示那个目录里的文献库；原目录里的文献库不会被移动。"))),
             )
-            .children(self.settings_view.as_ref().map(|view| group(Some(t("写作")), vec![row(t("署名"), Some(t("导出到 Word 的批注和修订用这个名字；留空用这台电脑的用户名。").into()), div().w(px(INPUT_W)).child(ui::field(&view.author, window, cx))).into_any_element()])))
             .child(group(Some(t("启动")), vec![row(t("回到上次的界面"), Some(t("打开应用时回到上次离开的文献库、页面和文献；关闭后总是从首页开始。").into()), switch("restore-session", self.settings.restore_session).on_click(self.on(Cmd::ToggleRestoreSession, cx))).into_any_element()]))
             .when(crate::background::SUPPORTED, |d| {
                 let detail = if cfg!(target_os = "macos") { t("关闭窗口后应用留在程序坞中，检索同步、筛选和导入照常进行；点程序坞图标回到窗口，⌘Q 退出。") } else { t("关闭窗口后应用留在通知区域，检索同步、筛选和导入照常进行；点托盘图标回到窗口，在它的菜单里退出。") };

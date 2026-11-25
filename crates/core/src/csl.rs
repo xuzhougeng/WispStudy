@@ -3,12 +3,12 @@
 //! manuscript exported to Word cites in a journal's own form.
 //!
 //! A style is one of three: built in (`csl:<name>`, the set `hayagriva`
-//! carries), a file the person added to `styles/` in the data folder
-//! (`file:<file name>`), or one Zotero itself has installed
-//! (`zotero:<file name>`, read where it is, never written). A dependent
-//! style, which only names its parent, is that parent when it can be found
-//! among the three. Styles that cite in footnotes are refused: a manuscript
-//! here has no footnotes.
+//! carries and the few shipped beside it, `SHIPPED`), a file the person
+//! added to `styles/` in the data folder (`file:<file name>`), or one Zotero
+//! itself has installed (`zotero:<file name>`, read where it is, never
+//! written). A dependent style, which only names its parent, is that parent
+//! when it can be found among the three. Styles that cite in footnotes are
+//! refused: a manuscript here has no footnotes.
 //!
 //! The records keep no volume, issue or pages, so an entry has none in any
 //! style. `render` gives the text of each citation and of the list with
@@ -33,8 +33,81 @@ use std::sync::OnceLock;
 /// The folder of the data root that holds the styles the person added.
 pub const FOLDER: &str = "styles";
 
-/// The built-in styles offered first: the ones most manuscripts are asked for.
-pub const COMMON: [&str; 8] = ["apa", "nature", "cell", "vancouver", "ieee", "gb-7714-2015-numeric", "gb-7714-2015-author-date", "chicago-author-date"];
+/// Styles that come with the app beside the ones `hayagriva` carries: the name a key says (`csl:<name>`) and the
+/// file as the CSL project's style repository has it (CC BY-SA 3.0, THIRD_PARTY.md).
+const SHIPPED: [(&str, &str); 3] = [
+    ("science", include_str!("../styles/science.csl")),
+    ("pnas", include_str!("../styles/pnas.csl")),
+    ("the-new-england-journal-of-medicine", include_str!("../styles/the-new-england-journal-of-medicine.csl")),
+];
+
+/// The built-in styles offered first, the ones most manuscripts are asked for: those that number the works in the
+/// order they are cited.
+pub const NUMBERED: [&str; 19] = [
+    "nature",
+    "science",
+    "cell",
+    "pnas",
+    "the-lancet",
+    "the-new-england-journal-of-medicine",
+    "american-medical-association",
+    "british-medical-journal",
+    "american-chemical-society",
+    "vancouver",
+    "ieee",
+    "elsevier-vancouver",
+    "elsevier-with-titles",
+    "springer-basic",
+    "springer-vancouver",
+    "public-library-of-science",
+    "multidisciplinary-digital-publishing-institute",
+    "biomed-central",
+    "gb-7714-2015-numeric",
+];
+
+/// And those that cite by author and year.
+pub const BY_AUTHOR: [&str; 6] = ["apa", "chicago-author-date", "elsevier-harvard", "springer-basic-author-date", "frontiers", "gb-7714-2015-author-date"];
+
+/// The name a built-in style is listed by where its own title is long or says little (three styles begin
+/// 「China National Standard GB/T 7714-2015」 and are cut off alike in a menu): by the name its key says. In
+/// Chinese; a place that shows one translates it, as with the label tables of `model`.
+const SHORT: [(&str, &str); 26] = [
+    ("nature", "Nature"),
+    ("science", "Science"),
+    ("pnas", "PNAS"),
+    ("cell", "Cell"),
+    ("the-lancet", "The Lancet"),
+    ("the-new-england-journal-of-medicine", "NEJM"),
+    ("american-medical-association", "AMA（JAMA）"),
+    ("british-medical-journal", "BMJ"),
+    ("american-chemical-society", "ACS"),
+    ("vancouver", "Vancouver（NLM）"),
+    ("ieee", "IEEE"),
+    ("elsevier-vancouver", "Elsevier 顺序编码（Vancouver）"),
+    ("elsevier-with-titles", "Elsevier 顺序编码（带题目）"),
+    ("elsevier-harvard", "Elsevier 著者-出版年（Harvard）"),
+    ("springer-basic", "Springer 顺序编码"),
+    ("springer-vancouver", "Springer 顺序编码（Vancouver）"),
+    ("springer-basic-author-date", "Springer 著者-出版年"),
+    ("public-library-of-science", "PLOS"),
+    ("frontiers", "Frontiers"),
+    ("multidisciplinary-digital-publishing-institute", "MDPI"),
+    ("biomed-central", "BMC"),
+    ("apa", "APA 第 7 版"),
+    ("chicago-author-date", "Chicago 著者-出版年"),
+    ("gb-7714-2015-numeric", "GB/T 7714-2015 顺序编码"),
+    ("gb-7714-2015-author-date", "GB/T 7714-2015 著者-出版年"),
+    ("gb-7714-2005-numeric", "GB/T 7714-2005 顺序编码"),
+];
+
+/// The built-in styles that cite in footnotes, which a manuscript here has none of (`load` refuses them): known by
+/// name, so that a list of styles to choose from leaves them out without reading every style.
+const IN_NOTES: [&str; 5] = ["chicago-notes", "chicago-shortened-notes", "gb-7714-2015-note", "modern-humanities-research-association-notes", "turabian-fullnote-8"];
+
+/// Whether a key names a built-in style that cites in footnotes (`IN_NOTES`).
+pub fn in_notes(key: &str) -> bool {
+    key.strip_prefix("csl:").and_then(Builtin::by_name).is_some_and(|style| IN_NOTES.contains(&style.name()))
+}
 
 /// A style that can be chosen: the key the settings keep, and its name.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,6 +123,16 @@ pub struct Loaded {
     style: IndependentStyle,
 }
 
+impl Loaded {
+    /// Whether it numbers the works it cites, as its file says of itself (`citation-format`).
+    pub fn numbered(&self) -> bool {
+        matches!(self.style.info.category.iter().find_map(|category| match category {
+            citationberg::StyleCategory::CitationFormat { format } => Some(*format),
+            _ => None,
+        }), Some(citationberg::CitationFormat::Numeric))
+    }
+}
+
 impl std::fmt::Debug for Loaded {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Loaded({})", self.key)
@@ -62,20 +145,95 @@ impl PartialEq for Loaded {
     }
 }
 
-fn listed(style: ArchivedStyle) -> Listed {
-    Listed { key: format!("csl:{}", style.names()[0]), name: style.display_name().to_string() }
+/// A built-in style: one `hayagriva` carries, or one shipped beside them (its place in `SHIPPED`).
+#[derive(Clone, Copy)]
+enum Builtin {
+    Archived(ArchivedStyle),
+    Shipped(usize),
 }
 
-/// `COMMON`, as they are listed.
+impl Builtin {
+    /// By the name a key says: any of the names `hayagriva` knows a style by (`apa`), or a shipped one's.
+    fn by_name(name: &str) -> Option<Builtin> {
+        ArchivedStyle::by_name(name).map(Builtin::Archived).or_else(|| SHIPPED.iter().position(|(shipped, _)| *shipped == name).map(Builtin::Shipped))
+    }
+
+    /// By the `<id>` a style's file gives itself.
+    fn by_id(id: &str) -> Option<Builtin> {
+        ArchivedStyle::by_id(id).map(Builtin::Archived).or_else(|| SHIPPED.iter().position(|(_, xml)| tagged(xml, "id").as_deref() == Some(id)).map(Builtin::Shipped))
+    }
+
+    fn all() -> Vec<Builtin> {
+        ArchivedStyle::all().iter().copied().map(Builtin::Archived).chain((0..SHIPPED.len()).map(Builtin::Shipped)).collect()
+    }
+
+    /// The one name its key says.
+    fn name(self) -> &'static str {
+        match self {
+            Builtin::Archived(style) => style.names()[0],
+            Builtin::Shipped(n) => SHIPPED[n].0,
+        }
+    }
+
+    /// Its title, as its file gives it.
+    fn title(self) -> String {
+        match self {
+            Builtin::Archived(style) => style.display_name().to_string(),
+            Builtin::Shipped(n) => tagged(SHIPPED[n].1, "title").unwrap_or_else(|| SHIPPED[n].0.to_string()),
+        }
+    }
+
+    fn style(self) -> Option<citationberg::Style> {
+        match self {
+            Builtin::Archived(style) => Some(style.get()),
+            Builtin::Shipped(n) => citationberg::Style::from_xml(SHIPPED[n].1).ok(),
+        }
+    }
+
+    fn xml(self) -> Result<String> {
+        match self {
+            Builtin::Archived(style) => style.get().to_xml().map_err(|err| anyhow!("内置样式 {} 写不出来：{err}", self.name())),
+            Builtin::Shipped(n) => Ok(SHIPPED[n].1.to_string()),
+        }
+    }
+
+    fn listed(self) -> Listed {
+        Listed { key: format!("csl:{}", self.name()), name: self.title() }
+    }
+}
+
+fn named(names: &[&str]) -> Vec<Listed> {
+    names.iter().filter_map(|name| Builtin::by_name(name)).map(Builtin::listed).collect()
+}
+
+/// `NUMBERED`, as they are listed.
+pub fn common_numbered() -> Vec<Listed> {
+    named(&NUMBERED)
+}
+
+/// `BY_AUTHOR`, as they are listed.
+pub fn common_by_author() -> Vec<Listed> {
+    named(&BY_AUTHOR)
+}
+
+/// The built-in styles offered first: `NUMBERED`, then `BY_AUTHOR`.
 pub fn common() -> Vec<Listed> {
-    COMMON.iter().filter_map(|name| ArchivedStyle::by_name(name)).map(listed).collect()
+    let mut all = common_numbered();
+    all.extend(common_by_author());
+    all
 }
 
 /// Every built-in style, by name.
 pub fn bundled() -> Vec<Listed> {
-    let mut all: Vec<Listed> = ArchivedStyle::all().iter().copied().map(listed).collect();
+    let mut all: Vec<Listed> = Builtin::all().into_iter().map(Builtin::listed).collect();
     all.sort_by_key(|style| style.name.to_lowercase());
     all
+}
+
+/// The short name a built-in style is listed by (`SHORT`), in Chinese; none for a style listed by its own title.
+pub fn short_name(key: &str) -> Option<&'static str> {
+    let name = Builtin::by_name(key.strip_prefix("csl:")?)?.name();
+    SHORT.iter().find(|(short, _)| Builtin::by_name(short).is_some_and(|style| style.name() == name)).map(|(_, said)| *said)
 }
 
 /// Where Zotero keeps the styles it has installed, unless the person moved its data.
@@ -114,7 +272,7 @@ fn added_from(root: &Path, zotero: Option<&Path>) -> Vec<Listed> {
     let ids: Vec<String> = own.iter().filter_map(|(_, xml)| tagged(xml, "id")).collect();
     for (file, xml) in zotero.map(files).unwrap_or_default() {
         let id = tagged(&xml, "id").unwrap_or_default();
-        if ArchivedStyle::by_id(&id).is_some() || ids.contains(&id) || own.iter().any(|(mine, _)| *mine == file) { continue }
+        if Builtin::by_id(&id).is_some() || ids.contains(&id) || own.iter().any(|(mine, _)| *mine == file) { continue }
         out.push(Listed { key: format!("zotero:{file}"), name: name(&file, &xml) });
     }
     out
@@ -123,7 +281,7 @@ fn added_from(root: &Path, zotero: Option<&Path>) -> Vec<Listed> {
 /// The name a key is shown by; none for a key that names no style any more.
 pub fn name_of(key: &str, root: &Path) -> Option<String> {
     match key.strip_prefix("csl:") {
-        Some(name) => ArchivedStyle::by_name(name).map(|style| style.display_name().to_string()),
+        Some(name) => Builtin::by_name(name).map(Builtin::title),
         None => added(root).into_iter().find(|style| style.key == key).map(|style| style.name),
     }
 }
@@ -149,8 +307,8 @@ fn independent(xml: &str, root: &Path, zotero: Option<&Path>) -> Result<Independ
             let parent = dependent.parent_link.href.clone();
             let file = format!("{}.csl", parent.trim_end_matches('/').rsplit('/').next().unwrap_or_default());
             let beside = [Some(root.join(FOLDER)), zotero.map(Path::to_path_buf)].into_iter().flatten().find_map(|folder| std::fs::read_to_string(folder.join(&file)).ok());
-            let found = match (ArchivedStyle::by_id(&parent), beside) {
-                (Some(archived), _) => Some(archived.get()),
+            let found = match (Builtin::by_id(&parent), beside) {
+                (Some(builtin), _) => builtin.style(),
                 (None, Some(xml)) => citationberg::Style::from_xml(&xml).ok(),
                 (None, None) => None,
             };
@@ -171,10 +329,10 @@ pub fn load(key: &str, root: &Path) -> Result<Loaded> {
 
 fn load_from(key: &str, root: &Path, zotero: Option<&Path>) -> Result<Loaded> {
     if let Some(name) = key.strip_prefix("csl:") {
-        let archived = ArchivedStyle::by_name(name).ok_or_else(|| anyhow!("没有这个内置引用样式：{name}"))?;
-        let citationberg::Style::Independent(style) = archived.get() else { bail!("内置样式 {name} 读不了") };
+        let builtin = Builtin::by_name(name).ok_or_else(|| anyhow!("没有这个内置引用样式：{name}"))?;
+        let Some(citationberg::Style::Independent(style)) = builtin.style() else { bail!("内置样式 {name} 读不了") };
         if style.settings.class == StyleClass::Note { bail!("这是脚注式的引用样式，稿件里没有脚注，暂不支持。") }
-        return Ok(Loaded { key: key.to_string(), name: archived.display_name().to_string(), style });
+        return Ok(Loaded { key: key.to_string(), name: builtin.title(), style });
     }
     let path = file_of(key, root, zotero).ok_or_else(|| anyhow!("不认识这个引用样式：{key}"))?;
     let xml = std::fs::read_to_string(&path).with_context(|| format!("引用样式文件不在了：{}", path.display()))?;
@@ -209,11 +367,27 @@ pub fn save(root: &Path, name: &str, xml: &str) -> Result<Listed> {
     Ok(Listed { key: format!("file:{name}"), name: tagged(xml, "title").unwrap_or_else(|| name.trim_end_matches(".csl").to_string()) })
 }
 
+/// Take a style the person added out of the list: its file goes to `styles/removed/`, and what it said is
+/// given back, so that `save` under the same name puts it back as it was.
+pub fn remove(root: &Path, key: &str) -> Result<(String, String)> {
+    let name = key.strip_prefix("file:").ok_or_else(|| anyhow!("只有自己添加的引用样式可以移除。"))?;
+    let file = file_of(key, root, None).ok_or_else(|| anyhow!("不认识这个引用样式：{key}"))?;
+    let xml = std::fs::read_to_string(&file).with_context(|| format!("引用样式文件不在了：{}", file.display()))?;
+    let kept = root.join(FOLDER).join("removed");
+    std::fs::create_dir_all(&kept)?;
+    std::fs::rename(&file, kept.join(format!("{}-{name}", crate::time::now_iso().replace(':', "-")))).with_context(|| format!("无法移走 {name}"))?;
+    Ok((name.to_string(), xml))
+}
+
+/// The file of a style the person added, to show it where it is kept.
+pub fn file(root: &Path, key: &str) -> Option<PathBuf> {
+    key.starts_with("file:").then(|| file_of(key, root, None)).flatten()
+}
+
 /// A style's definition as its file says it, a built-in one written out: what a changed style starts from.
 pub fn xml_of(key: &str, root: &Path) -> Result<String> {
     if let Some(name) = key.strip_prefix("csl:") {
-        let archived = ArchivedStyle::by_name(name).ok_or_else(|| anyhow!("没有这个内置引用样式：{name}"))?;
-        return archived.get().to_xml().map_err(|err| anyhow!("内置样式 {name} 写不出来：{err}"));
+        return Builtin::by_name(name).ok_or_else(|| anyhow!("没有这个内置引用样式：{name}"))?.xml();
     }
     let path = file_of(key, root, zotero_folder().as_deref()).ok_or_else(|| anyhow!("不认识这个引用样式：{key}"))?;
     std::fs::read_to_string(&path).with_context(|| format!("引用样式文件不在了：{}", path.display()))
@@ -634,13 +808,75 @@ mod tests {
     #[test]
     fn the_common_styles_are_all_built_in_and_cite_in_the_text() {
         let root = temp("common");
-        assert_eq!(common().len(), COMMON.len());
-        for one in common() { assert!(load_from(&one.key, &root, None).is_ok(), "{}", one.key) }
+        assert_eq!(common().len(), NUMBERED.len() + BY_AUTHOR.len());
+        // Each is in the group that says how it cites, and none is listed twice.
+        for one in common_numbered() { assert!(load_from(&one.key, &root, None).unwrap().numbered(), "{}", one.key) }
+        for one in common_by_author() { assert!(!load_from(&one.key, &root, None).unwrap().numbered(), "{}", one.key) }
+        let mut keys: Vec<String> = common().into_iter().map(|one| one.key).collect();
+        keys.sort();
+        keys.dedup();
+        assert_eq!(keys.len(), NUMBERED.len() + BY_AUTHOR.len());
         assert!(bundled().len() > 50);
         // A style that cites in footnotes is said to be one.
         assert!(load_from("csl:chicago-notes", &root, None).unwrap_err().to_string().contains("脚注"));
         assert!(load_from("csl:nothing", &root, None).is_err());
         assert!(load_from("file:../x.csl", &root, None).is_err());
+    }
+
+    #[test]
+    fn the_built_in_styles_that_cite_in_footnotes_are_known_by_name() {
+        let found: Vec<&str> = Builtin::all().into_iter().filter(|style| matches!(style.style(), Some(citationberg::Style::Independent(read)) if read.settings.class == StyleClass::Note)).map(Builtin::name).collect();
+        assert_eq!(found, IN_NOTES);
+        assert!(in_notes("csl:chicago-notes") && !in_notes("csl:nature") && !in_notes("file:chicago-notes.csl") && !in_notes("numeric"));
+    }
+
+    #[test]
+    fn a_built_in_style_has_a_short_name_that_tells_it_apart() {
+        // Every short name is of a style there is, and no two styles share one.
+        let mut said: Vec<&str> = SHORT.iter().map(|(name, said)| { assert!(Builtin::by_name(name).is_some(), "{name}"); *said }).collect();
+        said.sort();
+        said.dedup();
+        assert_eq!(said.len(), SHORT.len());
+        // Every style offered first has one: its own title may be long (GB/T) or a manual's (APA).
+        for one in common() { assert!(short_name(&one.key).is_some(), "{}", one.key) }
+        // By whichever name the key says it, and the three GB/T styles apart.
+        assert_eq!(short_name("csl:apa"), short_name("csl:american-psychological-association"));
+        assert_eq!((short_name("csl:gb-7714-2015-numeric"), short_name("csl:gb-7714-2015-author-date"), short_name("csl:gb-7714-2005-numeric")), (Some("GB/T 7714-2015 顺序编码"), Some("GB/T 7714-2015 著者-出版年"), Some("GB/T 7714-2005 顺序编码")));
+        assert_eq!((short_name("csl:alphanumeric"), short_name("file:nature.csl"), short_name("numeric")), (None, None, None));
+    }
+
+    #[test]
+    fn the_styles_shipped_beside_hayagriva_s_cite_like_the_built_in_ones() {
+        let root = temp("shipped");
+        let (a, b) = (paper("a", "Zhang, Wei; Li, Qiang; Wang, Fang", 2024, "Single-cell atlas of roots", "Nature Plants"), paper("b", "Smith, John", 2019, "Second", "Cell"));
+        for (name, _) in SHIPPED {
+            let key = format!("csl:{name}");
+            let style = load_from(&key, &root, None).unwrap();
+            assert!(style.numbered() && !style.name.is_empty(), "{name}");
+            let (cited, list) = render(&style, &[vec![&a], vec![&a, &b]], "en");
+            assert!(cited[0].text.contains('1') && cited[1].text.contains('2'), "{name}: {:?}", cited);
+            assert!(list.len() == 2 && list[0].1.text.contains("Zhang") && list[0].1.text.contains("Single-cell atlas of roots"), "{name}: {}", list[0].1.text);
+            // Listed among the built-in ones under its own title, written out as its file, and found by the id a copy of it in Zotero's folder carries.
+            assert!(bundled().iter().any(|one| one.key == key && one.name == style.name));
+            assert_eq!(xml_of(&key, &root).unwrap(), SHIPPED.iter().find(|(shipped, _)| *shipped == name).unwrap().1);
+            assert!(Builtin::by_id(&format!("http://www.zotero.org/styles/{name}")).is_some(), "{name}");
+        }
+        assert_eq!(load_from("csl:the-new-england-journal-of-medicine", &root, None).unwrap().name, "The New England Journal of Medicine");
+    }
+
+    #[test]
+    fn a_style_the_person_added_is_removed_and_can_be_put_back() {
+        let root = temp("remove");
+        let xml = xml_of("csl:nature", &root).unwrap();
+        let saved = save(&root, "mine", &xml).unwrap();
+        assert_eq!((saved.key.as_str(), file(&root, &saved.key)), ("file:mine.csl", Some(root.join(FOLDER).join("mine.csl"))));
+        let (name, said) = remove(&root, &saved.key).unwrap();
+        assert_eq!((name.as_str(), said == xml), ("mine.csl", true));
+        assert!(added_from(&root, None).is_empty() && std::fs::read_dir(root.join(FOLDER).join("removed")).unwrap().count() == 1);
+        assert_eq!(save(&root, &name, &said).unwrap().key, "file:mine.csl");
+        // Only what the person added: a built-in style and one of Zotero's stay.
+        assert!(remove(&root, "csl:nature").is_err() && remove(&root, "zotero:x.csl").is_err() && remove(&root, "file:../x.csl").is_err());
+        assert_eq!(file(&root, "csl:nature"), None);
     }
 
     #[test]

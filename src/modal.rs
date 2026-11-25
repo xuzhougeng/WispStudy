@@ -76,6 +76,9 @@ pub struct IdRun {
 }
 
 pub enum Modal {
+    /// 引用样式 of the manuscript being written (cite_styles.rs): the list, and the key of the style it is on;
+    /// none is to follow the one the settings keep.
+    CiteStyle { browser: crate::cite_styles::StyleBrowser, chosen: String },
     ExportNote(Box<crate::notes::Form>),
     /// A library new or edited; one that is a conversation not yet made a library is made one (建成文献库).
     /// `proposing` while the model proposes its name and topic (the sparkle).
@@ -439,6 +442,7 @@ impl Workspace {
         let Some(modal) = self.modal.as_mut() else { return };
         match modal {
             Modal::ExportNote(_) => {}
+            Modal::CiteStyle { .. } => self.submit_cite_style(cx),
             Modal::Confirm { cmd, .. } => {
                 let cmd = cmd.clone();
                 self.run(cmd, window, cx);

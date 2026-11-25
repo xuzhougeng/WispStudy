@@ -26,6 +26,7 @@ mod dev;
 mod background;
 mod chat;
 mod cite;
+mod cite_styles;
 mod comments;
 mod context;
 mod custom;

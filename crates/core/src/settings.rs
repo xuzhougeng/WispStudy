@@ -171,7 +171,8 @@ pub struct Settings {
     pub agent_manuscript_width: f32,
     /// Whose comments and tracked changes a manuscript exported to Word carries; empty is the name this computer knows the person by.
     pub author: String,
-    /// How a manuscript exported to Word cites: `numeric`, else author-year (`cite::Style::from_key`).
+    /// How a manuscript that chose no style of its own cites (`Manuscript::cite_style`), by the style's key
+    /// (`csl::style`): `numeric`, `csl:nature`, …; empty is author-year.
     pub cite_style: String,
     /// 写作 shows no card under the citation the pointer is on; ⌘/Ctrl and a click still open the paper.
     pub citation_cards_hidden: bool,

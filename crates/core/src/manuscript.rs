@@ -107,6 +107,9 @@ pub struct Manuscript {
     pub title: String,
     /// A code of `LANGUAGES`.
     pub language: String,
+    /// The key of the style its citations are written in (`csl::style`); empty, it follows the one the settings
+    /// keep for manuscripts that chose none.
+    pub cite_style: String,
     pub created_at: String,
     pub updated_at: String,
     /// In the order they are written.
@@ -1300,14 +1303,14 @@ impl Store {
 
     /// The manuscripts of the library that were not removed, oldest first, with their sections.
     pub fn manuscripts(&self) -> Result<Vec<Manuscript>> {
-        let mut stmt = self.db.prepare("SELECT id, title, language, created_at, updated_at FROM manuscripts WHERE removed_at = '' ORDER BY created_at, id")?;
-        let mut list = stmt.query_map([], |r| Ok(Manuscript { id: r.get(0)?, title: r.get(1)?, language: r.get(2)?, created_at: r.get(3)?, updated_at: r.get(4)?, sections: vec![] }))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut stmt = self.db.prepare("SELECT id, title, language, created_at, updated_at, cite_style FROM manuscripts WHERE removed_at = '' ORDER BY created_at, id")?;
+        let mut list = stmt.query_map([], |r| Ok(Manuscript { id: r.get(0)?, title: r.get(1)?, language: r.get(2)?, created_at: r.get(3)?, updated_at: r.get(4)?, cite_style: r.get(5)?, sections: vec![] }))?.collect::<rusqlite::Result<Vec<_>>>()?;
         for manuscript in &mut list { manuscript.sections = self.sections_of(&manuscript.id)? }
         Ok(list)
     }
 
     pub fn manuscript(&self, id: &str) -> Result<Option<Manuscript>> {
-        let found = self.db.query_row("SELECT id, title, language, created_at, updated_at FROM manuscripts WHERE id = ?1 AND removed_at = ''", [id], |r| Ok(Manuscript { id: r.get(0)?, title: r.get(1)?, language: r.get(2)?, created_at: r.get(3)?, updated_at: r.get(4)?, sections: vec![] })).optional()?;
+        let found = self.db.query_row("SELECT id, title, language, created_at, updated_at, cite_style FROM manuscripts WHERE id = ?1 AND removed_at = ''", [id], |r| Ok(Manuscript { id: r.get(0)?, title: r.get(1)?, language: r.get(2)?, created_at: r.get(3)?, updated_at: r.get(4)?, cite_style: r.get(5)?, sections: vec![] })).optional()?;
         let Some(mut manuscript) = found else { return Ok(None) };
         manuscript.sections = self.sections_of(id)?;
         Ok(Some(manuscript))
@@ -1349,6 +1352,13 @@ impl Store {
     pub fn set_manuscript_language(&mut self, id: &str, language: &str) -> Result<()> {
         if !is_language(language) { bail!("不认识这种语言：{language}") }
         self.db.execute("UPDATE manuscripts SET language = ?2, updated_at = ?3 WHERE id = ?1", params![id, language, now_iso()])?;
+        Ok(())
+    }
+
+    /// The style a manuscript's citations are written in, by its key; empty, it follows the settings' again.
+    /// The words stay as they are: only how they read changes, so it is no change to the manuscript's date.
+    pub fn set_manuscript_cite_style(&mut self, id: &str, key: &str) -> Result<()> {
+        self.db.execute("UPDATE manuscripts SET cite_style = ?2 WHERE id = ?1", params![id, key.trim()])?;
         Ok(())
     }
 
@@ -1630,6 +1640,24 @@ mod tests {
 
     fn store() -> Store {
         Store::in_memory(Path::new("/tmp/wisp-manuscript-test")).unwrap()
+    }
+
+    #[test]
+    fn a_manuscript_keeps_the_style_it_cites_in() {
+        let mut store = store();
+        let made = store.create_manuscript("Roots", "en").unwrap();
+        // None of its own to begin with: it follows the settings'.
+        assert_eq!(made.cite_style, "");
+        let before = store.manuscript(&made.id).unwrap().unwrap().updated_at;
+        store.set_manuscript_cite_style(&made.id, " csl:nature ").unwrap();
+        let now = store.manuscript(&made.id).unwrap().unwrap();
+        assert_eq!((now.cite_style.as_str(), now.updated_at == before), ("csl:nature", true));
+        assert_eq!(store.manuscripts().unwrap().iter().find(|m| m.id == made.id).unwrap().cite_style, "csl:nature");
+        // Another manuscript of the library is left with its own.
+        let other = store.create_manuscript("Shoots", "en").unwrap();
+        assert_eq!(store.manuscript(&other.id).unwrap().unwrap().cite_style, "");
+        store.set_manuscript_cite_style(&made.id, "").unwrap();
+        assert_eq!(store.manuscript(&made.id).unwrap().unwrap().cite_style, "");
     }
 
     #[test]

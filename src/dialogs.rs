@@ -38,6 +38,7 @@ fn option_chip(id: impl Into<ElementId>, label: impl Into<SharedString>, chosen:
 impl Workspace {
     pub fn render_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         self.tend_figure_dialog(window, cx);
+        if matches!(self.modal, Some(Modal::CiteStyle { .. })) { self.tend_style_browser() }
         self.tend_excerpt_dialog(window, cx);
         // 资料库 reads its cards' pictures as it draws them: it is drawn before anything of the dialogs is borrowed.
         if matches!(self.modal, Some(Modal::WriteFigures)) {
@@ -71,6 +72,7 @@ impl Workspace {
             Modal::Extract(_) => self.render_extract_dialog(cx)?,
             Modal::Headings(_) => self.render_headings_dialog(cx)?,
             Modal::MoveTo { .. } => self.render_move_dialog(cx)?,
+            Modal::CiteStyle { .. } => self.render_cite_style_dialog(window, cx)?,
             Modal::FileInto { .. } => self.render_file_into_dialog(cx)?,
             Modal::Zotero { open } => ui::dialog(560.)
                 .child(ui::dialog_title(t("从 Zotero 导入")))
