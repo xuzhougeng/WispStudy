@@ -365,6 +365,8 @@ impl Workspace {
             }
             return cx.notify();
         }
+        // The list of citation styles, in its dialog or on 设置 › 写作.
+        if self.style_nav(nav, window, cx) { return }
         if self.modal.is_some() || self.settings_view.is_some() { return }
         let Some(lib) = self.lib.as_ref() else { return };
         // A PDF on show: left and right turn its pages.
