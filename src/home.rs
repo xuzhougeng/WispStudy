@@ -18,6 +18,8 @@ impl Render for Workspace {
             self.render_settings(window, cx)
         } else if self.lib.is_some() {
             self.render_library(window, cx)
+        } else if self.tutorials.is_some() {
+            self.render_tutorials(window, cx)
         } else if self.home.open {
             // The assistant's page with nothing said yet: the box of a first question and the conversations (`draft.rs`).
             self.render_start_page(window, cx)
@@ -464,6 +466,8 @@ impl Workspace {
                                     // Only while a newer release is on offer.
                                     .when_some(new_version, |d, version| d.child(ui::primary_button("home-update", tf!("新版本 {version}", "New version {version}")).h(text_px(28.)).px(px(10.)).rounded_full().text_size(text_px(12.)).on_click(self.on(Cmd::OpenSettings(SettingsPage::About), cx))))
                                     .children(bell)
+                                    // 教程: the tutorials of the project page, read here (`tutorial.rs`). Beside the bell, apart from the switch after it.
+                                    .child(ui::ghost_button("home-tutorials", Some("book-open"), None).mr(px(8.)).tooltip(ui::tip(t("教程"))).on_click(self.on(Cmd::Tutorial(crate::tutorial::Do::Open), cx)))
                                     // How the libraries are laid out, once there is one: the two ways side by side, the one in force lit.
                                     .when(!empty, |d| {
                                         let mut way = |id: &'static str, icon: &'static str, rows: bool, name: &'static str| div().id(id).flex().flex_none().items_center().justify_center().size(text_px(28.)).rounded(px(6.)).cursor_pointer().when(listed == rows, |d| d.bg(Theme::pressed())).hover(|s| s.bg(Theme::hover())).child(ui::icon(icon, 15., if listed == rows { Theme::text() } else { Theme::text_tertiary() })).tooltip(ui::tip(t(name))).on_click(self.on(Cmd::HomeList(rows), cx));

@@ -111,6 +111,7 @@ pub mod time;
 pub mod transfer;
 pub mod tools;
 pub mod tour;
+pub mod tutorial;
 pub mod translation;
 pub mod update;
 pub mod usage;

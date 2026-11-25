@@ -324,6 +324,15 @@ pub fn default_root() -> PathBuf {
     home_override().unwrap_or_else(|| app_folder(&dirs::document_dir().or_else(dirs::home_dir).unwrap_or_else(|| PathBuf::from("."))))
 }
 
+/// Where what can be fetched again is kept (the screenshots of the tutorials): the system's cache folder, or
+/// `cache/` under `WISP_STUDY_HOME`, so a run kept apart leaves nothing behind elsewhere.
+pub fn cache_folder() -> PathBuf {
+    match home_override() {
+        Some(home) => home.join("cache"),
+        None => dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join(FOLDER),
+    }
+}
+
 pub fn settings_file() -> PathBuf {
     match home_override() {
         Some(home) => home.join("settings.json"),

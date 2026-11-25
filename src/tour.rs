@@ -160,7 +160,7 @@ impl Workspace {
         let small = |button: Stateful<Div>| button.h(text_px(28.)).px(px(12.));
         let mut actions: Vec<AnyElement> = vec![];
         if unconfigured { actions.push(small(ui::secondary_button("tour-model", t("配置模型"))).on_click(self.on(Cmd::OpenSettings(SettingsPage::Ai), cx)).into_any_element()) }
-        if last { actions.push(small(ui::secondary_button("tour-tutorials", t("图文教程"))).on_click(self.on(Cmd::OpenUrl(tour::tutorials_url(crate::i18n::is_english()).to_string()), cx)).into_any_element()) }
+        if last { actions.push(small(ui::secondary_button("tour-tutorials", t("图文教程"))).on_click(self.on(Cmd::Tutorial(crate::tutorial::Do::Open), cx)).into_any_element()) }
         if !step.done_by_doing() { actions.push(small(ui::primary_button("tour-next", if last { t("完成") } else { t("下一步") })).on_click(self.on(Cmd::Tour(Do::Next), cx)).into_any_element()) }
         let mut card = div()
             .occlude()

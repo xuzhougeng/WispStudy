@@ -284,10 +284,9 @@ impl Workspace {
         .size_full();
         let tip = if unseen > 0 { tf!("后台任务：{unseen} 件新的", "Background work: {unseen} new") } else { t("后台任务").to_string() };
         Some(
-            // Apart from the two ways of laying out the libraries beside it, which are one control.
+            // The book of the tutorials stands after it (`home.rs`).
             ui::ghost_button("home-bell", Some("bell"), None)
                 .relative()
-                .mr(px(8.))
                 .when(self.bell.open, |d| d.bg(Theme::pressed()))
                 .tooltip(ui::tip(tip))
                 .on_click(self.on(Cmd::Bell(Do::Open), cx))
@@ -300,7 +299,7 @@ impl Workspace {
     /// The list under the bell: a row for each thing that ended, its library first, then when; what came of it under.
     pub(crate) fn render_bell_list(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let bell = &self.bell;
-        if !bell.open || self.lib.is_some() || self.settings_view.is_some() { return None }
+        if !bell.open || self.lib.is_some() || self.settings_view.is_some() || self.tutorials.is_some() { return None }
         let room = LIST_WIDTH - 8. - 16.;
         let rows: Vec<AnyElement> = bell.done.iter().enumerate().map(|(n, done)| {
             let fresh = bell.fresh.contains(&done.id);

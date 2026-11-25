@@ -87,11 +87,6 @@ pub fn shown(reached: usize, seen: Seen) -> Step {
     at
 }
 
-/// The tutorials of the project page, in the interface's language: where the last card sends whoever wants more.
-pub fn tutorials_url(english: bool) -> &'static str {
-    if english { "https://xuzhougeng.github.io/WispStudy/en/tutorials/" } else { "https://xuzhougeng.github.io/WispStudy/tutorials/" }
-}
-
 /// A place and size in the window.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rect {
