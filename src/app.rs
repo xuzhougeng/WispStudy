@@ -928,11 +928,15 @@ impl Workspace {
     /// Leave the open library. One at work (`Library::at_work`: a conversation answering, a run going through its
     /// papers) is kept, off screen, until that is over: leaving a library does not stop what it is doing.
     pub(crate) fn close_library(&mut self, cx: &mut App) {
+        // A conversation left waiting for a yes keeps a row in the bell, the way back to it.
+        self.bell_leaving();
         let Some(mut lib) = self.lib.take() else { return };
         lib.keep_places(cx);
         // A paper's own window belongs to its library.
         for open in lib.windows.drain(..) { open.window.update(cx, |_, window, _| window.remove_window()).ok(); }
         if lib.at_work() { self.parked.push(lib) }
+        // A wait answered before leaving is over.
+        self.bell_prune();
     }
 
     /// Run `f` with the library `id` as the open one: the open library itself, or one answering off screen (`parked`),
