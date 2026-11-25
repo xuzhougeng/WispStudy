@@ -742,14 +742,14 @@ pub fn language(pages: &[String]) -> &'static str {
     COMMON_WORDS[best].0
 }
 
-const STOP_WORDS: [&str; 70] = [
+pub(crate) const STOP_WORDS: [&str; 70] = [
     "the", "and", "for", "are", "was", "were", "with", "that", "this", "from", "have", "has", "had", "which", "what", "how", "why", "who", "does", "did", "can", "could", "about", "into", "their", "there", "these", "those", "any", "all", "not", "but", "its", "our", "you",
     "your", "they", "them", "than", "then", "been", "being", "of", "in", "on", "to", "is", "as", "by", "be", "we", "it", "an", "at", "or", "also", "such", "may", "more", "most", "between", "both", "however", "here", "using", "used", "use", "study", "show", "shown",
 ];
 
 /// Words as common in the other languages of `COMMON_WORDS` as `the` is in
 /// English, and no word of English.
-const OTHER_STOP_WORDS: [&str; 52] = [
+pub(crate) const OTHER_STOP_WORDS: [&str; 52] = [
     "der", "das", "und", "den", "dem", "ist", "nicht", "mit", "von", "zu", "werden", "wird", "sich", "auf", "eine", "einer", "eines", "für", "auch", "les", "des", "et", "est", "une", "dans", "pour", "sur", "du", "aux", "sont", "le", "la", "el", "los", "las", "del", "por", "una",
     "para", "con", "se", "al", "como", "os", "dos", "das", "não", "em", "da", "il", "della", "che",
 ];

@@ -215,6 +215,8 @@ impl Workspace {
         let Some(lib) = self.lib.as_mut() else { return false };
         // The papers the paper's conversation is about: the one on show and those kept beside it.
         let about = lib.talk_papers();
+        // The libraries' names in a question say nothing of the language it is asked in.
+        let names: Vec<String> = std::iter::once(lib.info.name.clone()).chain(shelf.iter().map(|info| info.name.clone())).collect();
         let chat = chat_of!(lib, talk);
         let (question, again, files) = match again {
             Some((text, images, files)) => (text, Some(images), files),
@@ -240,7 +242,10 @@ impl Workspace {
             return false;
         }
         // `/search …` and the like stand for a longer request, a skill's name for its instructions; the bubble shows what was typed.
-        let prompt = match ai::read_input(if question.is_empty() && !asked_again && !chat.quotes.is_empty() { t("这段原文说了什么？在这篇文献里起什么作用？") } else { &question }, &self.settings.commands, &skills) {
+        let asked = if question.is_empty() && !asked_again && !chat.quotes.is_empty() { t("这段原文说了什么？在这篇文献里起什么作用？") } else { question.as_str() };
+        // The language the answer is to be in, by the person's words: everything else the model reads is in Chinese.
+        let reply = ai::reply_language(asked, &names.iter().map(String::as_str).collect::<Vec<_>>(), crate::i18n::is_english());
+        let prompt = match ai::read_input(asked, &self.settings.commands, &skills) {
             Ok(ai::Input::Ask(prompt)) => prompt,
             Ok(ai::Input::NewChat) => {
                 chat.reset(cx);
@@ -379,6 +384,7 @@ impl Workspace {
         // The files that came with the question: the assistant is told where they are and what it can do with them.
         let prompt = if words.is_empty() { prompt } else { format!("{prompt}\n\n{}", wisp_core::restyle::note(&words)) };
         let prompt = if decks.is_empty() { prompt } else { format!("{prompt}\n\n{}", wisp_core::slideref::note(&decks)) };
+        let prompt = match reply { Some(reply) => format!("{prompt}\n\n{reply}"), None => prompt };
         let images = match again {
             Some(images) => images,
             None => std::mem::take(&mut chat.attachments),

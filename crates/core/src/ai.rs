@@ -249,6 +249,37 @@ const RULES: &str = "回答时遵循：\n\
 - 人物之间的合作、方法的步骤、时间先后、分类这类关系，画成图比文字清楚时，用 ```mermaid 代码块写一张图（flowchart、sequenceDiagram、mindmap、timeline、pie 等），窗口会把它画出来。图里只放材料里有的内容，节点不宜过多；节点文字含括号、引号或标点时用双引号包起来，例如 A[\"张伟 (2021)\"]。不要给图指定颜色（classDef、style 里的 fill、stroke、color）：窗口按浅色或深色主题上色，写死的颜色换了主题可能看不清；要突出某些节点，用不同的形状或粗线（==>、===）。图只是辅助：结论和引用标签仍写在文字里。\n\
 - 用用户提问的语言回答，直接回答问题，不必复述材料。";
 
+/// What goes with a question so that the answer is in its language: the instructions, the tools, a skill's
+/// wrapping and the libraries' names are in Chinese and draw an answer into Chinese, though the person asked in
+/// English. `input` is what the person typed (a slash command's or a skill's name is not counted), `names` the
+/// libraries' names, which say nothing of the language asked in, as words in quotation marks do not. A question
+/// in Chinese, Japanese or Korean needs nothing (`RULES` says to answer in the question's language); one with
+/// no words to tell by is answered in the interface's language (`english`).
+pub fn reply_language(input: &str, names: &[&str], english: bool) -> Option<&'static str> {
+    let input = input.trim();
+    // `/name task`: the task is the person's words; `/name` alone has none.
+    let words = match input.strip_prefix('/') { Some(rest) => rest.split_once(char::is_whitespace).map_or("", |(_, task)| task), None => input };
+    let mut words = names.iter().filter(|name| !name.trim().is_empty()).fold(words.to_string(), |words, name| words.replace(name.trim(), " "));
+    for (open, close) in [('「', '」'), ('『', '』'), ('“', '”'), ('"', '"')] {
+        while let Some(start) = words.find(open) {
+            let Some(len) = words[start + open.len_utf8()..].find(close) else { break };
+            words.replace_range(start..start + open.len_utf8() + len + close.len_utf8(), " ");
+        }
+    }
+    let cjk = words.chars().filter(|&c| crate::structure::is_cjk(c)).count();
+    // Words of two letters or more: a label (P3) or a page (p.5) is no word.
+    let latin: Vec<String> = words.split(|c: char| !c.is_alphabetic() || crate::structure::is_cjk(c)).filter(|word| word.chars().count() >= 2).map(str::to_lowercase).collect();
+    if cjk > 0 && cjk >= latin.len() { return None }
+    if latin.is_empty() { return english.then_some(REPLY_ENGLISH) }
+    // English by its commonest words, or by plain letters with none of another language's.
+    let count = |list: &[&str]| latin.iter().filter(|word| list.contains(&word.as_str())).count();
+    let plain = latin.iter().filter(|word| word.is_ascii()).count() * 2 > latin.len();
+    Some(if plain && count(&crate::structure::STOP_WORDS) >= count(&crate::structure::OTHER_STOP_WORDS) { REPLY_ENGLISH } else { REPLY_OWN })
+}
+
+const REPLY_ENGLISH: &str = "(Reply in English, though the instructions, the tools and the names of the libraries are in Chinese. Text written into a manuscript or a file keeps that document's language; a language asked for above comes first.)";
+const REPLY_OWN: &str = "(Reply in the language this question is written in, not in Chinese, though the instructions, the tools and the names of the libraries are in Chinese. Text written into a manuscript or a file keeps that document's language; a language asked for above comes first.)";
+
 /// What a conversation started from the home page is told (`LibraryInfo::draft`): there is no library yet, so
 /// the person's idea or file is where it starts and the literature databases are where papers are found. Takes
 /// the place of `Context::instructions` once the context is built; the rules on citing stay the same.
@@ -2743,6 +2774,35 @@ mod tests {
         let problem = |name: &str| command_name_problem(name, own.iter().map(|command| command.name.as_str()));
         for good in ["methods-check", "检查方法", "a_1"] { assert_eq!(problem(good), None, "{good}") }
         for bad in ["", "a b", "a/b", "{}", "Style", "new", "cite", "润色", "style-check", &"a".repeat(33)] { assert!(problem(bad).is_some(), "{bad}") }
+    }
+
+    #[test]
+    fn the_answer_follows_the_language_of_the_question() {
+        let english = |input: &str, names: &[&str], ui: bool| reply_language(input, names, ui) == Some(REPLY_ENGLISH);
+        // English words ask for an English answer, whatever the interface; names of libraries and quoted words do not count.
+        assert!(english("How do the two libraries differ on auxin transport?", &[], false));
+        assert!(english("Compare 拟南芥根发育 and 水稻抗病 on WOX5", &["拟南芥根发育", "水稻抗病"], false));
+        assert!(english("Explain the role of 生长素 in root development", &[], false));
+        assert!(english("What does “生长素极性运输” mean in P3 p.5?", &[], false));
+        // Chinese words need no note: the instructions already say to answer in the question's language.
+        for chinese in ["比较 WOX5 和 PLT 的作用", "用 single-cell RNA-seq 做的研究有哪些？", "请用英文回答 what is auxin"] { assert_eq!(reply_language(chinese, &[], true), None, "{chinese}") }
+        // Another language in Latin letters is its own; nothing to tell by is the interface's language.
+        assert_eq!(reply_language("Quels sont les gènes étudiés dans ces articles ?", &[], true), Some(REPLY_OWN));
+        assert_eq!(reply_language("Какие гены изучались?", &[], true), Some(REPLY_OWN));
+        assert_eq!(reply_language("P3?", &[], true), Some(REPLY_ENGLISH));
+        assert_eq!(reply_language("P3?", &[], false), None);
+        assert_eq!(reply_language("水稻抗病", &["水稻抗病"], false), None);
+
+        // A skill called by name: the task after the name is the person's words, its Chinese wrapping is not.
+        let skill = Skill { name: "outline".into(), description: "Outline a review".into(), body: "Write a three-level outline of the topic.".into(), dir: Default::default() };
+        let typed = "/outline root hair development in Arabidopsis";
+        let Ok(Input::Ask(prompt)) = read_input(typed, &[], std::slice::from_ref(&skill)) else { panic!() };
+        assert!(prompt.contains("要做的事：root hair development"));
+        assert_eq!(reply_language(typed, &[], false), Some(REPLY_ENGLISH));
+        assert_eq!(reply_language("/outline 根毛发育", &[], true), None);
+        assert_eq!(reply_language("/outline", &[], true), Some(REPLY_ENGLISH));
+        assert_eq!(reply_language("/outline", &[], false), None);
+        assert!(REPLY_ENGLISH.starts_with("(Reply in English"));
     }
 
     #[test]
