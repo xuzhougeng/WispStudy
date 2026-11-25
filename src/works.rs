@@ -10,7 +10,7 @@
 //!
 //! What is seen of it: the mark on a library's card or row of the home page (`Workspace::off_screen_mark`),
 //! an entry at the foot of the sidebar of the library on show for each run elsewhere (`render_elsewhere`),
-//! and a line said when a run ends off screen (`Work::ended`).
+//! a line said when a run ends off screen (`Work::ended`), and a row of the home page's bell (`bell.rs`).
 
 use crate::app::{Cmd, Library, Workspace};
 use crate::i18n::t;
@@ -83,6 +83,18 @@ impl Work {
         if done < total { return tf!("「{name}」的{label}已停止：{done} / {total}", "{label} in “{name}” was stopped at {done} of {total}") }
         if failed > 0 { return tf!("「{name}」的{label}做完了：{total} {unit}，其中 {failed} {unit}没有成", "{label} in “{name}” is done: {total}, {failed} of them failed") }
         tf!("「{name}」的{label}做完了：{total} {unit}", "{label} in “{name}” is done: {total}")
+    }
+
+    /// The same without the library, under its name in the bell's list (`bell.rs`).
+    pub(crate) fn outcome(&self) -> String {
+        let (label, unit, done, total, failed) = (t(self.kind.label()), self.kind.unit(), self.done, self.total, self.failed);
+        if done < total && !self.error.is_empty() {
+            let error = crate::i18n::reasons(&self.error);
+            return tf!("{label}停了（{done} / {total}）：{error}", "{label} stopped at {done} of {total}: {error}");
+        }
+        if done < total { return tf!("{label}已停止：{done} / {total}", "{label} was stopped at {done} of {total}") }
+        if failed > 0 { return tf!("{label}做完了：{total} {unit}，其中 {failed} {unit}没有成", "{label} is done: {total}, {failed} of them failed") }
+        tf!("{label}做完了：{total} {unit}", "{label} is done: {total}")
     }
 }
 
@@ -179,5 +191,8 @@ mod tests {
         assert_eq!(work(12, 0, "").ended("根毛"), "「根毛」的筛选已停止：12 / 80");
         assert_eq!(work(12, 5, "连续 5 篇没有得到可用的回答，已停止。").ended("根毛"), "「根毛」的筛选停了（12 / 80）：连续 5 篇没有得到可用的回答，已停止。");
         assert_eq!(Work { running: true, ..work(12, 0, "") }.brief(), "筛选 12 / 80");
+        // Under the library's name in the bell's list.
+        assert_eq!(work(80, 3, "").outcome(), "筛选做完了：80 篇，其中 3 篇没有成");
+        assert_eq!(work(12, 0, "").outcome(), "筛选已停止：12 / 80");
     }
 }

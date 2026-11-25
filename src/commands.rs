@@ -112,6 +112,8 @@ pub enum Cmd {
     AnswerStar(bool),
     /// 新手引导: begun, moved on, or closed (`tour.rs`).
     Tour(crate::tour::Do),
+    /// 铃铛 on the home page: its list, and a row of it (`bell.rs`).
+    Bell(crate::bell::Do),
     /// The line that offers a contact email where a search starts (`Workspace::contact_hint`), closed for good.
     DismissContactHint,
     NoteOpen(Option<Talk>, bool),
@@ -781,6 +783,7 @@ impl Workspace {
                 // The database must be closed before its folder can move; one answering off screen goes with it.
                 if self.lib.as_ref().is_some_and(|l| l.info.id == id) { self.lib = None }
                 self.parked.retain(|lib| lib.info.id != id);
+                self.bell.forget(Some(&id));
                 let Some(info) = self.libraries.iter().find(|l| l.id == id).cloned() else { return };
                 match libraries::remove(&self.root, &info) {
                     Ok(target) => self.say(tf!("已移到 {}", "Moved to {}", target.display()), cx),
@@ -802,6 +805,7 @@ impl Workspace {
                 self.save_settings(cx);
             }
             Cmd::Tour(what) => self.tour_do(what, window, cx),
+            Cmd::Bell(what) => self.bell_do(what, window, cx),
             Cmd::DismissContactHint => {
                 self.settings.contact_hint_dismissed = true;
                 self.save_settings(cx);
@@ -2320,6 +2324,9 @@ impl Workspace {
 
     pub fn dismiss(&mut self, action: &Dismiss, window: &mut Window, cx: &mut Context<Self>) {
         if self.menu.take().is_some() {
+        } else if self.bell.open {
+            self.bell.open = false;
+            cx.notify();
         } else if self.palette.is_some() {
             self.close_palette(window, cx);
         } else if self.modal.as_ref().is_some_and(|modal| matches!(modal, Modal::Figure(form) if form.beside_page())) && !self.figure_dialog_focused(window, cx) {

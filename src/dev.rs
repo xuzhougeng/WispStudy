@@ -105,6 +105,12 @@ impl Workspace {
                 // `homelist` / `homelist:cards`: the home page's libraries as rows, or as cards again.
                 "homelist" => Some(Cmd::HomeList(arg != "cards")),
                 // The home page's invitation to star the project, due in this run; nothing is written until it is answered.
+                // 铃铛 on the home page: `bell` opens its list as a click on it does, `bell:<n>` is a click on its n-th row from 0, `bell:close` puts it away.
+                "bell" => match arg {
+                    "" => Some(Cmd::Bell(crate::bell::Do::Open)),
+                    "close" => Some(Cmd::Bell(crate::bell::Do::Close)),
+                    n => n.parse::<usize>().ok().and_then(|n| self.bell.done.get(n)).map(|done| Cmd::Bell(crate::bell::Do::Go(done.id))),
+                },
                 "starask" => {
                     self.star_ask = true;
                     cx.notify();
