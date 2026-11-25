@@ -48,7 +48,7 @@ pub const OFF: &str = "off";
 /// What DeepSeek is asked for (`purpose`): a PDF is read page by page either way, and this is the one meant for text.
 const PURPOSE: &str = "text_recognition";
 
-/// 设置 › 网络 › 文字识别.
+/// 设置 › AI › 任务 › 文字识别.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct OcrSettings {
@@ -103,7 +103,7 @@ pub fn ready(settings: &Settings, asked: &str) -> Result<Ready, String> {
 
 fn ready_from(settings: &Settings, asked: &str, env: &dyn Fn(&str) -> Option<String>) -> Result<Ready, String> {
     let chosen = settings.ocr.engine.trim();
-    if asked.trim().is_empty() && chosen == OFF { return Err("文字识别已在「设置 › 网络」关闭。".into()) }
+    if asked.trim().is_empty() && chosen == OFF { return Err("文字识别已在「设置 › AI › 任务」关闭。".into()) }
     let wanted = if asked.trim().is_empty() { chosen } else { asked.trim() };
     let one = |engine: &'static Engine| -> Result<Ready, String> {
         if engine.key == MODEL {
@@ -114,14 +114,14 @@ fn ready_from(settings: &Settings, asked: &str, env: &dyn Fn(&str) -> Option<Str
             };
         }
         let (key, proxy, base) = key_from(settings, engine, env);
-        if key.is_empty() { return Err(format!("{} 需要 API Key：在「设置 › 网络 › 文字识别」填写，或设置环境变量 {}（在 {} 申请）。", engine.name, engine.key_env, engine.site)) }
+        if key.is_empty() { return Err(format!("{} 需要 API Key：在「设置 › AI › 模型」的 DeepSeek 服务里填写，或设置环境变量 {}（在 {} 申请）。", engine.name, engine.key_env, engine.site)) }
         Ok(Ready { engine, key, proxy, base })
     };
     if !wanted.is_empty() {
         let Some(engine) = engine(wanted) else { return Err(format!("没有这个文字识别引擎：{wanted}。可用的有 {}。", names())) };
         return one(engine);
     }
-    ENGINES.iter().find_map(|engine| one(engine).ok()).ok_or_else(|| "文字识别需要 DeepSeek 的 API Key（在「设置 › 网络 › 文字识别」填写，或用「设置 › AI」里 DeepSeek 服务的 Key），或一个能看图的模型（「设置 › AI」）。".to_string())
+    ENGINES.iter().find_map(|engine| one(engine).ok()).ok_or_else(|| "文字识别需要「设置 › AI › 模型」里 DeepSeek 服务的 API Key，或一个能看图的模型（「设置 › AI › 任务」的「整理全文」）。".to_string())
 }
 
 fn names() -> String {
@@ -674,7 +674,7 @@ mod tests {
         assert_eq!((found.engine.key, found.key.as_str(), found.base.as_str()), ("deepseek", "dk", ""));
         assert_eq!(ready(&settings_with(AUTO, &[]), "", &[("DEEPSEEK_API_KEY", "env")]).unwrap().key, "env");
         let none = ready(&settings_with(AUTO, &[]), "", &[]).unwrap_err();
-        assert!(none.contains("设置 › 网络 › 文字识别") && none.contains("能看图的模型"), "{none}");
+        assert!(none.contains("设置 › AI › 模型") && none.contains("能看图的模型"), "{none}");
         // Asked by name, whatever settings chose; an unknown name says which there are.
         assert!(ready(&settings_with(MODEL, &[]), "DeepSeek", &[]).unwrap_err().contains("DEEPSEEK_API_KEY"));
         assert!(ready(&stored, "tesseract", &[]).unwrap_err().contains("deepseek、model"));

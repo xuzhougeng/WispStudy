@@ -45,4 +45,4 @@
 
 ## API Key
 
-API Key 以明文保存在 `settings.json`。留空则读取环境变量：预设的服务读它自己的那个（`DEEPSEEK_API_KEY`、`MOONSHOT_API_KEY`、`ZHIPUAI_API_KEY`、`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GEMINI_API_KEY`、`ARK_API_KEY`、`TYPESAFE_API_KEY`），自己填地址的服务按接口读 `ANTHROPIC_API_KEY` 或 `OPENAI_API_KEY`。「设置 › 网络 › 文献数据库」的联系邮箱和 NCBI API Key 同样以明文保存在这里（`contactEmail`、`ncbiApiKey`）；邮箱只随请求发给 PubMed（NCBI）、Crossref 和 Europe PMC，Key 只发给 NCBI，留空时读 `NCBI_API_KEY`。
+API Key 以明文保存在 `settings.json`。留空则读取环境变量：预设的服务读它自己的那个（`DEEPSEEK_API_KEY`、`MOONSHOT_API_KEY`、`ZHIPUAI_API_KEY`、`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GEMINI_API_KEY`、`ARK_API_KEY`、`TYPESAFE_API_KEY`），自己填地址的服务按接口读 `ANTHROPIC_API_KEY` 或 `OPENAI_API_KEY`。「设置 › 网络」的代理地址（`proxy`，暂时停用时 `proxyOff` 为 true）、「文献数据库」的联系邮箱和 NCBI API Key 同样以明文保存在这里（`contactEmail`、`ncbiApiKey`）；邮箱只随请求发给 PubMed（NCBI）、Crossref 和 Europe PMC，Key 只发给 NCBI，留空时读 `NCBI_API_KEY`。

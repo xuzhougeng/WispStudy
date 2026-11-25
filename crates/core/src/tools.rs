@@ -83,7 +83,7 @@ pub fn catalog() -> Vec<ToolDef> {
         ToolDef {
             name: "web_search",
             title: "搜索网页",
-            description: "用网页搜索引擎（DeepSeek、Jina 或 You.com，在「设置 › 网络 › 网页搜索」选择并填写 Key）搜索互联网，返回每条结果的标题、网址、摘要、站点和发布时间。用于文献数据库之外的信息：软件和数据库的文档、指南与政策、机构和项目的页面、新闻。找学术文献先用 search_online；网页结果不是文献库里的文献，引用时写出网址，只读到摘要时不要当作读过全文。想把一篇文献的页面收进文献库，用 import_url。不改动文献库。",
+            description: "用网页搜索引擎（DeepSeek、Jina 或 You.com，在「设置 › AI › 任务 › 网页搜索」选择并填写 Key）搜索互联网，返回每条结果的标题、网址、摘要、站点和发布时间。用于文献数据库之外的信息：软件和数据库的文档、指南与政策、机构和项目的页面、新闻。找学术文献先用 search_online；网页结果不是文献库里的文献，引用时写出网址，只读到摘要时不要当作读过全文。想把一篇文献的页面收进文献库，用 import_url。不改动文献库。",
             input_schema: json!({"type": "object", "properties": {
                 "query": {"type": "string", "description": "搜索词。可以用 site:域名 限定站点、\"短语\" 精确匹配、-词 排除；DeepSeek 还支持 lang:zh、after:2025、before:2026-06-01；You.com 还支持 filetype:pdf、AND、OR、NOT。DeepSeek 的搜索词最多 128 个字符。"},
                 "count": {"type": "integer", "description": "返回多少条，默认 8；DeepSeek 和 You.com 最多 50，Jina 最多 20。"},
@@ -349,7 +349,7 @@ pub fn catalog() -> Vec<ToolDef> {
         scoped(
             "ocr_pdf",
             "识别 PDF 页面上的文字",
-            "文字识别（OCR）：为读不出文字的 PDF（扫描件、字体没有文字编码的文件；list_papers 的 fulltext 为 textless）读出页面上的文字，按页保存，之后提问、找句子和写作都用得上，并记下是哪个引擎读的。引擎在「设置 › 网络 › 文字识别」选择：DeepSeek OCR 把整个文件上传到 DeepSeek 识别，每个文件最多 1000 页、100 MB，按页计费。只处理没有读出文字的 PDF，已有文字的不动；例外是点名的文件（给了 resourceId 或 paperId）识别过、却有页面没读出文字时，只把这些页再送去读一次，读出的文字放回原处（结果里的 retriedPages、filledPages 是送去几页、读出几页）。设了打开密码的读不了。给 resourceId 只读这个附件，给 paperId 读这篇文献的 PDF，都不给时处理文献库里所有读不出文字的 PDF（一次最多 limit 个，结果里的 remaining 是还剩几个）。",
+            "文字识别（OCR）：为读不出文字的 PDF（扫描件、字体没有文字编码的文件；list_papers 的 fulltext 为 textless）读出页面上的文字，按页保存，之后提问、找句子和写作都用得上，并记下是哪个引擎读的。引擎在「设置 › AI › 任务 › 文字识别」选择：DeepSeek OCR 把整个文件上传到 DeepSeek 识别，每个文件最多 1000 页、100 MB，按页计费。只处理没有读出文字的 PDF，已有文字的不动；例外是点名的文件（给了 resourceId 或 paperId）识别过、却有页面没读出文字时，只把这些页再送去读一次，读出的文字放回原处（结果里的 retriedPages、filledPages 是送去几页、读出几页）。设了打开密码的读不了。给 resourceId 只读这个附件，给 paperId 读这篇文献的 PDF，都不给时处理文献库里所有读不出文字的 PDF（一次最多 limit 个，结果里的 remaining 是还剩几个）。",
             json!({
                 "resourceId": {"type": "string", "description": "要识别的 PDF 附件 ID，见 get_paper 的 files。"},
                 "paperId": {"type": "string", "description": "识别这篇文献里读不出文字的 PDF。"},

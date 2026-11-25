@@ -119,6 +119,8 @@ pub struct Settings {
     /// The proxy every request goes through, as a URL (`http://127.0.0.1:7890`,
     /// `socks5://…`); empty leaves it to the environment (`HTTPS_PROXY` and the like).
     pub proxy: String,
+    /// The proxy above is kept and not used (设置 › 网络's switch): requests go as if none were set.
+    pub proxy_off: bool,
     /// The address the literature databases may write to (设置 › 网络 › 文献数据库): sent to NCBI, Crossref and
     /// Europe PMC with every request (`Settings::contact`), and to nobody else. Empty asks without one.
     pub contact_email: String,
@@ -126,9 +128,9 @@ pub struct Settings {
     pub ncbi_api_key: String,
     /// The line that offers the two fields above where a search starts was closed: it does not come back.
     pub contact_hint_dismissed: bool,
-    /// Which engine the tool `web_search` asks and the keys of the engines (设置 › 网络 › 网页搜索).
+    /// Which engine the tool `web_search` asks and the keys of the engines (设置 › AI › 任务 › 网页搜索).
     pub web_search: crate::websearch::WebSearchSettings,
-    /// Which engine reads the pages of a file that gives no text, and the keys of the engines (设置 › 网络 › 文字识别).
+    /// Which engine reads the pages of a file that gives no text, and the keys of the engines (设置 › AI › 任务 › 文字识别).
     pub ocr: crate::ocr::OcrSettings,
     /// Changed shortcuts by id; an empty key means the shortcut is removed.
     pub shortcuts: BTreeMap<String, String>,
@@ -193,7 +195,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let providers = provider::DEFAULT_PRESETS.iter().filter_map(|key| provider::preset(key)).map(Provider::from_preset).collect();
-        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), play_speed: 1., commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), contact_email: String::new(), ncbi_api_key: String::new(), contact_hint_dismissed: false, web_search: Default::default(), ocr: Default::default(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, pdf_split_free: false, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, library_order: vec![], days_used: 0, last_used_day: String::new(), star_answered: false, home_list: false, tour_step: 0, tour_done: false };
+        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), play_speed: 1., commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), proxy_off: false, contact_email: String::new(), ncbi_api_key: String::new(), contact_hint_dismissed: false, web_search: Default::default(), ocr: Default::default(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, pdf_split_free: false, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, library_order: vec![], days_used: 0, last_used_day: String::new(), star_answered: false, home_list: false, tour_step: 0, tour_done: false };
         settings.tidy();
         settings
     }
@@ -366,18 +368,42 @@ impl Session {
 /// The schemes a proxy address may have.
 pub const PROXY_SCHEMES: [&str; 6] = ["http", "https", "socks4", "socks4a", "socks5", "socks5h"];
 
+/// A proxy address as it is kept and used: one written without its scheme (`127.0.0.1:7890`, the way proxy
+/// tools show it) is an HTTP proxy. Anything else, `direct` included, is left as typed.
+pub fn proxy_address(value: &str) -> String {
+    let value = value.trim();
+    if value.is_empty() || value.eq_ignore_ascii_case("direct") || value.contains(":/") { return value.to_string() }
+    format!("http://{value}")
+}
+
 /// What is wrong with a proxy address, if anything. Empty is fine: it means
 /// "not set". `direct` (no proxy at all) is only meaningful for one model
-/// service, so it is accepted only where `allow_direct` says so.
+/// service, so it is accepted only where `allow_direct` says so. An address without a scheme is read as
+/// `proxy_address` reads it.
 pub fn proxy_problem(value: &str, allow_direct: bool) -> Option<String> {
     let value = value.trim();
     if value.is_empty() || (allow_direct && value.eq_ignore_ascii_case("direct")) { return None }
-    let Some((scheme, rest)) = value.split_once("://") else { return Some("代理地址要写完整，例如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080。".into()) };
+    let address = proxy_address(value);
+    let Some((scheme, rest)) = address.split_once("://") else { return Some("代理地址不完整，例如 http://127.0.0.1:7890。".into()) };
     if !PROXY_SCHEMES.contains(&scheme.to_lowercase().as_str()) { return Some(format!("不支持 {scheme}:// 代理。可用：{}。", PROXY_SCHEMES.join("、"))) }
     // What stands after any `user:password@`, up to the port or a path.
     let host = rest.rsplit('@').next().unwrap_or("").split(['/', ':']).next().unwrap_or("");
     if host.is_empty() || value.contains(char::is_whitespace) { return Some("代理地址里缺少主机名，或者含有空格。".into()) }
+    // A scheme's name alone is an address half typed (`socks5` on the way to `socks5://…`), not a host.
+    if address.len() != value.len() && PROXY_SCHEMES.contains(&host.to_lowercase().as_str()) { return Some("代理地址不完整，例如 http://127.0.0.1:7890。".into()) }
     None
+}
+
+/// The variables a proxy is read from when the settings name none, in the order they are tried (`ureq`'s).
+pub const PROXY_VARIABLES: [&str; 6] = ["ALL_PROXY", "all_proxy", "HTTPS_PROXY", "https_proxy", "HTTP_PROXY", "http_proxy"];
+
+/// The variable whose proxy requests take while the settings name none: the first that holds an address.
+pub fn env_proxy() -> Option<&'static str> {
+    env_proxy_from(&|name| std::env::var(name).ok())
+}
+
+fn env_proxy_from(env: &dyn Fn(&str) -> Option<String>) -> Option<&'static str> {
+    PROXY_VARIABLES.into_iter().find(|name| env(name).is_some_and(|value| !value.trim().is_empty() && proxy_problem(&value, false).is_none()))
 }
 
 /// What is wrong with a contact address, if anything. Empty is fine: it means "not given". No more is asked
@@ -413,6 +439,12 @@ impl Settings {
         let named = self.author.trim();
         if !named.is_empty() { return named.to_string() }
         ["USER", "USERNAME"].iter().find_map(|key| std::env::var(key).ok()).map(|name| name.trim().to_string()).filter(|name| !name.is_empty()).unwrap_or_else(|| "作者".to_string())
+    }
+
+    /// The proxy every request goes through (`wisp_net::set_proxy`): the one set, unless it is switched off or
+    /// cannot be an address; empty leaves it to the environment.
+    pub fn global_proxy(&self) -> String {
+        if self.proxy_off || proxy_problem(&self.proxy, false).is_some() { String::new() } else { proxy_address(&self.proxy) }
     }
 
     /// Who the literature databases are told is asking: the address when it could be one (a half-typed one
@@ -1059,13 +1091,36 @@ mod tests {
 
     #[test]
     fn proxy_addresses() {
-        for good in ["", "  ", "http://127.0.0.1:7890", "HTTPS://proxy.example", "socks5://user:pass@10.0.0.1:1080", "socks5h://localhost:1080/"] {
+        for good in ["", "  ", "http://127.0.0.1:7890", "HTTPS://proxy.example", "socks5://user:pass@10.0.0.1:1080", "socks5h://localhost:1080/", "127.0.0.1:7890", "user:pass@proxy.example:8080", "proxy"] {
             assert_eq!(proxy_problem(good, false), None, "{good}");
         }
-        for bad in ["127.0.0.1:7890", "ftp://x", "http://", "http://:8080", "http://a b:1", "direct"] {
+        // A scheme's name alone, or half of `://`, is an address still being typed.
+        for bad in ["ftp://x", "http://", "http://:8080", "http://a b:1", "a b:1", "direct", "socks5", "socks5:", "http:/", "HTTP"] {
             assert!(proxy_problem(bad, false).is_some(), "{bad}");
         }
         assert_eq!(proxy_problem(" Direct ", true), None);
+        // Written the way proxy tools show it, it is an HTTP proxy.
+        assert_eq!(proxy_address(" 127.0.0.1:7890 "), "http://127.0.0.1:7890");
+        for kept in ["", "direct", "socks5://127.0.0.1:1080", "http://h:1", "http:/"] { assert_eq!(proxy_address(kept), kept) }
+    }
+
+    #[test]
+    fn the_proxy_in_force() {
+        let mut settings = Settings { proxy: " 127.0.0.1:7890 ".into(), ..Default::default() };
+        assert_eq!(settings.global_proxy(), "http://127.0.0.1:7890");
+        // Switched off, the address stays and is not used; an old file has no switch and uses it.
+        settings.proxy_off = true;
+        assert_eq!(settings.global_proxy(), "");
+        let kept: Settings = serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(kept.proxy_off && kept.proxy == settings.proxy);
+        let old: Settings = serde_json::from_str(r#"{"proxy":"socks5://127.0.0.1:1080"}"#).unwrap();
+        assert_eq!((old.proxy_off, old.global_proxy().as_str()), (false, "socks5://127.0.0.1:1080"));
+        // One that cannot be an address is not handed on.
+        assert_eq!(Settings { proxy: "ftp://x".into(), ..Default::default() }.global_proxy(), "");
+        // The environment's: the first variable that holds an address, in the order they are tried.
+        let env = |name: &str| match name { "ALL_PROXY" => Some(" ".to_string()), "https_proxy" => Some("http://127.0.0.1:1082".to_string()), "HTTP_PROXY" => Some("http://other:1".to_string()), _ => None };
+        assert_eq!(env_proxy_from(&env), Some("https_proxy"));
+        assert_eq!(env_proxy_from(&|_| None), None);
     }
 
     #[test]

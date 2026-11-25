@@ -48,7 +48,7 @@ pub const CONTENT_CHARS: usize = 6000;
 /// The most of a summary made of an engine's passages (You.com's `highlights`).
 const SUMMARY_CHARS: usize = 1200;
 
-/// 设置 › 网络 › 网页搜索.
+/// 设置 › AI › 任务 › 网页搜索.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct WebSearchSettings {
@@ -95,19 +95,19 @@ pub fn ready(settings: &Settings, asked: &str) -> Result<Ready, String> {
 
 fn ready_from(settings: &Settings, asked: &str, env: &dyn Fn(&str) -> Option<String>) -> Result<Ready, String> {
     let chosen = settings.web_search.engine.trim();
-    if asked.trim().is_empty() && chosen == OFF { return Err("网页搜索已在「设置 › 网络」关闭。".into()) }
+    if asked.trim().is_empty() && chosen == OFF { return Err("网页搜索已在「设置 › AI › 任务」关闭。".into()) }
     let wanted = if asked.trim().is_empty() { chosen } else { asked.trim() };
     if !wanted.is_empty() {
         let Some(engine) = engine(wanted) else { return Err(format!("没有这个网页搜索引擎：{wanted}。可用的有 {}。", names())) };
         let (key, proxy) = key_from(settings, engine, env);
-        if key.is_empty() { return Err(format!("{} 网页搜索需要 API Key：在「设置 › 网络 › 网页搜索」填写，或设置环境变量 {}（在 {} 申请）。", engine.name, engine.key_env, engine.site)) }
+        if key.is_empty() { return Err(format!("{} 网页搜索需要 API Key：在{}填写，或设置环境变量 {}（在 {} 申请）。", engine.name, if engine.key == "deepseek" { "「设置 › AI › 模型」的 DeepSeek 服务里" } else { "「设置 › AI › 任务 › 网页搜索」" }, engine.key_env, engine.site)) }
         return Ok(Ready { engine, key, proxy });
     }
     ENGINES.iter().find_map(|engine| {
         let (key, proxy) = key_from(settings, engine, env);
         (!key.is_empty()).then_some(Ready { engine, key, proxy })
     })
-    .ok_or_else(|| format!("网页搜索需要 {} 之一的 API Key：在「设置 › 网络 › 网页搜索」填写；DeepSeek 也可以用「设置 › AI」里 DeepSeek 服务的 Key。", names()))
+    .ok_or_else(|| format!("网页搜索需要 {} 之一的 API Key：在「设置 › AI › 任务 › 网页搜索」填写；DeepSeek 用的是「设置 › AI › 模型」里 DeepSeek 服务的 Key。", names()))
 }
 
 fn names() -> String {
@@ -271,7 +271,7 @@ mod tests {
         assert_eq!(ready(&jina, "deepseek", &[("DEEPSEEK_API_KEY", "dk")]).unwrap().key, "dk");
         assert!(ready(&jina, "google", &[]).unwrap_err().contains("deepseek、jina、you"));
         assert_eq!(ready(&settings_with(AUTO, &[]), "", &[("YDC_API_KEY", "yk")]).unwrap().engine.key, "you");
-        assert!(ready(&settings_with(AUTO, &[]), "", &[]).unwrap_err().contains("设置 › 网络"));
+        assert!(ready(&settings_with(AUTO, &[]), "", &[]).unwrap_err().contains("设置 › AI › 任务 › 网页搜索"));
         // The engine chosen in settings, even with another's key at hand.
         assert!(ready(&settings_with("deepseek", &[("jina", "jk")]), "", &[]).is_err());
         assert_eq!(ready(&settings_with("jina", &[]), "", &[("JINA_API_KEY", "env")]).unwrap().key, "env");

@@ -1,7 +1,8 @@
 //! 设置: a view of its own, with a sidebar of pages (通用, 外观, 快捷键, AI,
 //! 自定义 (`custom.rs`), 网络, 关于) under 返回 at the top left, where the library has its way back. AI has three tabs: 模型 (the providers,
 //! a list at the left and the one picked at the right), 任务 (which model
-//! does what, with its instructions) and 命令 (the person's own slash commands). The library that was open stays open
+//! does what, with its instructions, and the services that are no model: 网页搜索, 文字识别, 朗读) and 命令 (the person's own slash commands).
+//! 网络 is the way out and who is asking: the proxy and what the literature databases are told. The library that was open stays open
 //! underneath. Every change is saved at once; there is no 保存 button.
 //!
 //! The layout follows quiet-md's settings (MIT): grouped rows in rounded
@@ -72,7 +73,7 @@ impl SettingsPage {
             SettingsPage::Shortcuts => "keyboard",
             SettingsPage::Ai => "sparkle",
             SettingsPage::Customize => "plug",
-            SettingsPage::Network => "link",
+            SettingsPage::Network => "globe",
             SettingsPage::Storage => "hard-drive",
             SettingsPage::About => "info",
         }
@@ -112,10 +113,21 @@ pub struct SettingsView {
     /// The address the literature databases may write to, and the key of the person's NCBI account (文献数据库).
     contact_email: Entity<TextInput>,
     ncbi_key: Entity<TextInput>,
+    /// What 测试 found of the way out, for the proxy as it now is, and how many times it was asked or the
+    /// proxy changed: an answer that comes late is of another way out.
+    reach: Option<Reach>,
+    reach_asked: usize,
+    /// How many times the proxy, the email or the NCBI key was typed into: what they hold is put to use once
+    /// the typing has paused (`settle`).
+    typed: usize,
     /// The key of each web search engine, in the order of `websearch::ENGINES`.
     search_keys: Vec<Entity<TextInput>>,
     /// The key of each engine of 文字识别 that has one of its own (`ocr_engines_with_keys`), in the order of `ocr::ENGINES`.
     ocr_keys: Vec<Entity<TextInput>>,
+    /// DeepSeek's key is the model service's (模型): a field of its own is shown, for 网页搜索 and for 文字识别,
+    /// only where an earlier build kept one, so that it can be seen and taken away. Decided on opening, so
+    /// that a field being emptied does not leave under the caret.
+    deepseek_fields: [bool; 2],
     /// Whose name the comments and tracked changes of a Word export carry.
     author: Entity<TextInput>,
     translation_prompt: Entity<TextInput>,
@@ -142,6 +154,21 @@ pub struct SettingsView {
     /// The library whose parts 存储空间 shows, by id.
     storage_open: Option<String>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// Where a person makes the key of their NCBI account.
+const NCBI_KEY_PAGE: &str = "https://account.ncbi.nlm.nih.gov/settings/";
+
+/// Where 网络's 测试 goes: a database every search asks, which answers anyone.
+const REACH_URL: &str = "https://api.crossref.org/works?rows=0";
+const REACH_HOST: &str = "api.crossref.org";
+
+/// What 网络's 测试 found of the way out.
+enum Reach {
+    Asking,
+    /// An answer came, after this long.
+    Reached(Duration),
+    Failed(String),
 }
 
 /// What is known of an account's balance.
@@ -274,6 +301,12 @@ pub(crate) fn group(title: Option<&'static str>, rows: Vec<AnyElement>) -> Div {
 
 /// One setting: its name and an optional explanation on the left, the control on the right.
 pub(crate) fn row(title: impl Into<SharedString>, detail: Option<SharedString>, control: impl IntoElement) -> Div {
+    row_said(title, detail.map(|detail| (detail, Theme::text_tertiary())), control)
+}
+
+/// A row whose line under the name says how things stand, in the colour of that: what is wrong in
+/// `Theme::danger()`, so that it is not read past as one more explanation.
+pub(crate) fn row_said(title: impl Into<SharedString>, detail: Option<(SharedString, Hsla)>, control: impl IntoElement) -> Div {
     div()
         .flex()
         .flex_wrap()
@@ -284,8 +317,13 @@ pub(crate) fn row(title: impl Into<SharedString>, detail: Option<SharedString>, 
         .min_h(px(48.))
         .px(px(16.))
         .py(px(10.))
-        .child(div().flex().flex_col().flex_1().min_w(px(120.)).gap(px(2.)).child(div().child(title.into())).children(detail.map(|d| div().text_size(text_px(12.)).line_height(text_px(17.)).text_color(Theme::text_tertiary()).child(d))))
+        .child(div().flex().flex_col().flex_1().min_w(px(120.)).gap(px(2.)).child(div().child(title.into())).children(detail.map(|(said, color)| div().text_size(text_px(12.)).line_height(text_px(17.)).text_color(color).child(said))))
         .child(div().flex().flex_none().max_w_full().items_center().gap(px(8.)).child(control))
+}
+
+/// A text field in a row, `width` wide; one whose text cannot be used wears the colour of that.
+fn field_of(input: &Entity<TextInput>, width: f32, wrong: bool, window: &Window, cx: &App) -> Div {
+    div().flex_none().w(px(width)).child(ui::field(input, window, cx).when(wrong, |d| d.border_color(Theme::danger())))
 }
 
 /// The small print under a group.
@@ -298,7 +336,7 @@ pub(crate) fn switch(id: impl Into<ElementId>, on: bool) -> Stateful<Div> {
 }
 
 /// A choice among a few: a groove with the chosen one raised.
-/// The engines of 文字识别 that are asked with a key of their own: the ones 设置 › 网络 shows a field for.
+/// The engines of 文字识别 that are asked with a key of their own.
 fn ocr_engines_with_keys() -> impl Iterator<Item = &'static ocr::Engine> {
     ocr::ENGINES.iter().filter(|engine| !engine.key_env.is_empty())
 }
@@ -398,7 +436,7 @@ impl Workspace {
                 let fields = ProviderFields::new(&shown, cx);
                 let proxy = cx.new(|cx| TextInput::new("http://127.0.0.1:7890", cx).with_text(&self.settings.proxy));
                 let contact_email = cx.new(|cx| TextInput::new("name@university.edu", cx).with_text(&self.settings.contact_email));
-                let ncbi_key = cx.new(|cx| TextInput::new(tf!("留空则读取环境变量 {}", "Leave blank to read {}", "NCBI_API_KEY"), cx).with_text(&self.settings.ncbi_api_key));
+                let ncbi_key = cx.new(|cx| TextInput::new(t("可以不填"), cx).with_text(&self.settings.ncbi_api_key));
                 ncbi_key.update(cx, |input, _| input.masked = true);
                 let author = cx.new(|cx| TextInput::new(wisp_core::settings::Settings::default().author_name(), cx).with_text(&self.settings.author));
                 let translation_prompt = cx.new(|cx| TextInput::new("留空则使用默认要求：译成简体中文，保留术语、基因名、物种学名和数字原样，只输出译文。", cx).multiline(3).with_text(&self.settings.translation_prompt));
@@ -407,18 +445,16 @@ impl Workspace {
                 let search_keys: Vec<Entity<TextInput>> = websearch::ENGINES
                     .iter()
                     .map(|engine| {
-                        let placeholder = if engine.key == "deepseek" { t("留空则使用「AI」页 DeepSeek 服务的 Key").to_string() } else { tf!("留空则读取环境变量 {}", "Leave blank to read {}", engine.key_env) };
                         let stored = self.settings.web_search.keys.get(engine.key).cloned().unwrap_or_default();
-                        let input = cx.new(|cx| TextInput::new(placeholder, cx).with_text(&stored));
+                        let input = cx.new(|cx| TextInput::new("API Key", cx).with_text(&stored));
                         input.update(cx, |input, _| input.masked = true);
                         input
                     })
                     .collect();
                 let ocr_keys: Vec<Entity<TextInput>> = ocr_engines_with_keys()
                     .map(|engine| {
-                        let placeholder = if engine.key == "deepseek" { t("留空则使用「AI」页 DeepSeek 服务的 Key").to_string() } else { tf!("留空则读取环境变量 {}", "Leave blank to read {}", engine.key_env) };
                         let stored = self.settings.ocr.keys.get(engine.key).cloned().unwrap_or_default();
-                        let input = cx.new(|cx| TextInput::new(placeholder, cx).with_text(&stored));
+                        let input = cx.new(|cx| TextInput::new("API Key", cx).with_text(&stored));
                         input.update(cx, |input, _| input.masked = true);
                         input
                     })
@@ -436,13 +472,13 @@ impl Workspace {
                         }
                     }),
                     cx.subscribe(&proxy, |this, _, event: &InputEvent, cx| {
-                        if *event == InputEvent::Changed { this.save_proxy(cx) }
+                        if *event == InputEvent::Changed { this.settle(cx) }
                     }),
                     cx.subscribe(&contact_email, |this, _, event: &InputEvent, cx| {
-                        if *event == InputEvent::Changed { this.save_contact(cx) }
+                        if *event == InputEvent::Changed { this.settle(cx) }
                     }),
                     cx.subscribe(&ncbi_key, |this, _, event: &InputEvent, cx| {
-                        if *event == InputEvent::Changed { this.save_contact(cx) }
+                        if *event == InputEvent::Changed { this.settle(cx) }
                     }),
                     cx.subscribe(&author, |this, input, event: &InputEvent, cx| {
                         if *event == InputEvent::Changed {
@@ -464,6 +500,8 @@ impl Workspace {
                         let key = input.read(cx).text().trim().to_string();
                         let keys = &mut this.settings.web_search.keys;
                         if key.is_empty() { keys.remove(engine.key); } else { keys.insert(engine.key.to_string(), key); }
+                        // The engine picked has lost its key: the choice goes back to whichever has one.
+                        if this.settings.web_search.engine.trim() == engine.key && websearch::key_for(&this.settings, engine).0.is_empty() { this.settings.web_search.engine = websearch::AUTO.into() }
                         this.save_settings(cx);
                         cx.notify();
                     }));
@@ -474,11 +512,14 @@ impl Workspace {
                         let key = input.read(cx).text().trim().to_string();
                         let keys = &mut this.settings.ocr.keys;
                         if key.is_empty() { keys.remove(engine.key); } else { keys.insert(engine.key.to_string(), key); }
+                        if this.settings.ocr.engine.trim() == engine.key && ocr::ready(&this.settings, engine.key).is_err() { this.settings.ocr.engine = ocr::AUTO.into() }
                         this.save_settings(cx);
                         cx.notify();
                     }));
                 }
-                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, contact_email, ncbi_key, search_keys, ocr_keys, author, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, recording: None, shortcut_error: None, balance: None, storage: None, measuring: false, storage_open: None, _subscriptions: subscriptions });
+                let kept = |keys: &std::collections::BTreeMap<String, String>| keys.get("deepseek").is_some_and(|key| !key.trim().is_empty());
+                let deepseek_fields = [kept(&self.settings.web_search.keys), kept(&self.settings.ocr.keys)];
+                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, contact_email, ncbi_key, reach: None, reach_asked: 0, typed: 0, search_keys, ocr_keys, deepseek_fields, author, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, recording: None, shortcut_error: None, balance: None, storage: None, measuring: false, storage_open: None, _subscriptions: subscriptions });
                 self.read_balance_shown(cx);
             }
         }
@@ -491,6 +532,9 @@ impl Workspace {
     /// Back to where 设置 was opened from.
     pub fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.stop_recording(cx);
+        // What was typed a moment ago and has not settled yet is kept before its fields go.
+        self.save_proxy(cx);
+        self.save_contact(cx);
         self.settings_view = None;
         window.focus(&self.focus);
         cx.notify();
@@ -1037,16 +1081,75 @@ impl Workspace {
         self.save_settings(cx);
     }
 
-    /// Keep the global proxy as typed, and put it to use once it is an
-    /// address that can work; until then the last good one stays in force.
-    fn save_proxy(&mut self, cx: &mut Context<Self>) {
-        let Some(view) = &self.settings_view else { return };
-        let address = view.proxy.read(cx).text().trim().to_string();
+    /// The proxy, the email and the NCBI key are put to use once the typing has paused, not at every letter:
+    /// an address on its way to another passes through ones that could be addresses too (`http://1`), and one
+    /// of those kept would be "the last good one" a text that cannot be used falls back to.
+    fn settle(&mut self, cx: &mut Context<Self>) {
+        let Some(view) = self.settings_view.as_mut() else { return };
+        view.typed += 1;
+        let typed = view.typed;
         cx.notify();
-        if wisp_core::settings::proxy_problem(&address, false).is_some() || self.settings.proxy == address { return }
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(Duration::from_millis(600)).await;
+            this.update(cx, |this, cx| {
+                if this.settings_view.as_ref().is_none_or(|view| view.typed != typed) { return }
+                this.save_proxy(cx);
+                this.save_contact(cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// Keep the global proxy as typed, and put it to use once it is an
+    /// address that can work; until then the last good one stays in force, and the page says so. An address
+    /// written without its scheme is kept as the HTTP proxy it is read as.
+    fn save_proxy(&mut self, cx: &mut Context<Self>) {
+        let Some(view) = self.settings_view.as_mut() else { return };
+        let typed = view.proxy.read(cx).text().trim().to_string();
+        cx.notify();
+        if wisp_core::settings::proxy_problem(&typed, false).is_some() { return }
+        let address = wisp_core::settings::proxy_address(&typed);
+        if self.settings.proxy == address { return }
+        (view.reach, view.reach_asked) = (None, view.reach_asked + 1);
         self.settings.proxy = address;
-        wisp_net::set_proxy(&self.settings.proxy);
+        // An address taken away takes its switch with it: the next one typed is in use.
+        if self.settings.proxy.is_empty() { self.settings.proxy_off = false }
+        wisp_net::set_proxy(&self.settings.global_proxy());
         self.save_settings(cx);
+    }
+
+    /// 网络's switch: the address stays, and requests go as if none were set, or take it again.
+    pub fn toggle_proxy(&mut self, cx: &mut Context<Self>) {
+        self.settings.proxy_off = !self.settings.proxy_off;
+        if let Some(view) = self.settings_view.as_mut() { (view.reach, view.reach_asked) = (None, view.reach_asked + 1) }
+        wisp_net::set_proxy(&self.settings.global_proxy());
+        self.save_settings(cx);
+        cx.notify();
+    }
+
+    /// 网络's 测试: one request the way requests now go, and whether an answer came.
+    pub fn test_reach(&mut self, cx: &mut Context<Self>) {
+        let Some(view) = self.settings_view.as_mut() else { return };
+        if matches!(view.reach, Some(Reach::Asking)) { return }
+        (view.reach, view.reach_asked) = (Some(Reach::Asking), view.reach_asked + 1);
+        let asked = view.reach_asked;
+        cx.notify();
+        let reply = cx.background_executor().spawn(async move { wisp_net::try_reach(REACH_URL) });
+        cx.spawn(async move |this, cx| {
+            let reply = reply.await;
+            this.update(cx, |this, cx| {
+                // The proxy was changed meanwhile, or the settings are closed: the answer is of another way out.
+                let Some(view) = this.settings_view.as_mut().filter(|view| view.reach_asked == asked) else { return };
+                view.reach = Some(match reply {
+                    Ok(took) => Reach::Reached(took),
+                    Err(err) => Reach::Failed(err),
+                });
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Keep who the literature databases are told is asking, and tell them so from the next request on. An
@@ -1519,15 +1622,17 @@ impl Workspace {
         };
         let input_w = px(INPUT_W - 40.);
         let field = |input: &Entity<TextInput>| div().w(input_w).child(ui::field(input, window, cx));
-        let proxy_detail = wisp_core::settings::proxy_problem(fields.proxy.read(cx).text(), true).unwrap_or_else(|| t("留空则使用「网络」页的全局代理；填 direct 表示不走代理。").to_string());
+        let proxy_problem = wisp_core::settings::proxy_problem(fields.proxy.read(cx).text(), true).map(|problem| crate::i18n::phrase(&problem));
+        let proxy_wrong = proxy_problem.is_some();
+        let proxy_detail = proxy_problem.unwrap_or_else(|| t("留空则使用「网络」页的全局代理；填 direct 表示不走代理。").to_string());
         let key_detail = if !provider.api_key.trim().is_empty() { t("已保存在本机。").to_string() } else if provider.key().is_empty() { tf!("还没有填写，环境变量 {} 也是空的。", "Not set, and {} is empty too.", provider.key_env()) } else { tf!("正在使用环境变量 {}。", "Using environment variable {}.", provider.key_env()) };
-        let (name, base_url, api_key, proxy) = (field(&fields.name), field(&fields.base_url), field(&fields.api_key), field(&fields.proxy));
+        let (name, base_url, api_key, proxy) = (field(&fields.name), field(&fields.base_url), field(&fields.api_key), field_of(&fields.proxy, INPUT_W - 40., proxy_wrong, window, cx));
         let settings_rows = [
             row(t("名称"), None, name),
             row(t("接口"), None, segmented("protocol", vec![("Claude API", Cmd::PickProtocol(Protocol::Anthropic)), (t("OpenAI 兼容"), Cmd::PickProtocol(Protocol::OpenAI)), ("Responses", Cmd::PickProtocol(Protocol::Responses))], match view.protocol { Protocol::Anthropic => 0, Protocol::OpenAI => 1, Protocol::Responses => 2 }, self, cx)),
             row(t("服务地址"), None, base_url),
             row("API Key", Some(key_detail.into()), api_key),
-            row(t("代理"), Some(proxy_detail.into()), proxy),
+            row_said(t("代理"), Some((proxy_detail.into(), if proxy_wrong { Theme::danger() } else { Theme::text_tertiary() })), proxy),
         ];
         let console = provider.preset().map(|p| p.console);
         let header = div()
@@ -1722,7 +1827,8 @@ impl Workspace {
             .child(card(vec![head(2, Task::Translate, "scan-text", "翻译题目、摘要、PDF 里选中的文字和对照译文的全文；写作页把你写的话变成候选句的检索词也用它。翻译用不着思考：可以给它一个把「思考」设为关闭的小模型。", self, cx), sub(row(t("同时翻译的篇数"), Some(t("批量翻译标题、摘要，或对照翻译全文的段落时同时发出的请求数。服务限速时调小。").into()), segmented("translate-workers", translators, WORKERS.iter().position(|count| *count == settings.translate_workers).unwrap_or(usize::MAX), self, cx))), prompt]))
             .child(card(vec![head(3, Task::Structure, "file-text", "写作页的准备工作：把全文按导言、方法、结果、讨论分开，以及读出扫描件页面上的文字（需要能看图的模型）。", self, cx)]))
             .child(card(vec![head(4, Task::Image, "image", "按一段描述画图：图片库里的「生成图片」。只能用带「生图」标记的模型，比如 OpenAI 的 gpt-image、Gemini 的图像模型、火山方舟的 Seedream；在「模型」里给一个服务添加这样的模型。", self, cx)]))
-            // 朗读 is no model of these: DeepSeek's speech service, with the key of the DeepSeek service set up here.
+            // What follows is no model of these: the engines of 网页搜索 and 文字识别, and DeepSeek's speech service.
+            .children(self.service_cards(view, column, window, cx))
             .child(card(vec![row(t("朗读的声音"), Some(match self.settings.speech_provider() { Some(p) if !p.key().is_empty() => tf!("「朗读」（PDF 工具栏和选中的文字）用这个声音读；「播客」不用它，两位主持人一女一男，各有自己的声音。都用 DeepSeek 的语音服务，Key 取自「{}」；按字数计费。", "Read aloud (PDF toolbar and selected text) uses this voice. Podcasts don't: their two hosts, a woman and a man, keep their own voices. Both use DeepSeek's speech service with the key of “{}”; billed by characters.", p.title()), _ => t("「朗读」（PDF 工具栏和选中的文字）用这个声音读；「播客」不用它，两位主持人一女一男，各有自己的声音。都要用 DeepSeek 的语音服务：先在「模型」里添加 DeepSeek 并填写 API Key。").to_string() }.into()), segmented("speech-voice", voices, wisp_core::speech::VOICES.iter().position(|(key, _)| *key == wisp_core::speech::voice(&settings.speech_voice)).unwrap_or(0), self, cx)).into_any_element()]))
             .child(note(t("没有单独指定模型的任务，使用助手的模型；助手没有指定时，用第一个填好了 API Key 的模型。生图除外：它只用生图模型。译过的文字保存在文献库里，不会再次请求。")))
             .into_any_element()
@@ -1799,12 +1905,6 @@ impl Workspace {
 
     fn network_page(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let Some(view) = &self.settings_view else { return div().into_any_element() };
-        let problem = wisp_core::settings::proxy_problem(view.proxy.read(cx).text(), false);
-        let (state, colors) = match (&problem, self.settings.proxy.trim().is_empty()) {
-            (Some(_), _) => (t("地址有误，未启用"), theme::status_colors("uncertain")),
-            (None, true) => (t("未设置，跟随系统环境变量"), theme::status_colors("pending")),
-            (None, false) => (t("已启用"), theme::status_colors("included")),
-        };
         // The page is given its width in pixels: under widths that are shares its height is guessed at another
         // width, short of what its wrapped notes take, and the last group could not be scrolled to.
         div()
@@ -1812,76 +1912,175 @@ impl Workspace {
             .flex_col()
             .w(px(self.column_width(window)))
             .gap(px(24.))
-            .child(
-                group(
-                    Some(t("代理")),
-                    vec![
-                        row(t("全局代理"), Some(t("文献检索、元数据查询、检查更新和模型请求都经过它。修改会自动保存，下一次请求起生效。").into()), ui::chip(state, colors.0, colors.1)).into_any_element(),
-                        row(t("代理地址"), Some(problem.unwrap_or_else(|| t("支持 http、https、socks4、socks4a、socks5、socks5h，例如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080。").to_string()).into()), div().w(px(INPUT_W)).child(ui::field(&view.proxy, window, cx))).into_any_element(),
-                    ],
-                )
-                .child(note(t("留空时使用环境变量 ALL_PROXY、HTTPS_PROXY、HTTP_PROXY（NO_PROXY 同样有效）。模型服务可以在「AI」页单独指定代理，或者填 direct 不走代理。命令行 wisp 使用同一个设置。代理地址连同其中的用户名和密码以明文保存在本机的 settings.json 里。"))),
-            )
+            .child(self.proxy_group(view, window, cx))
             .child(self.databases_group(view, window, cx))
-            .child(self.web_search_group(view, window, cx))
-            .child(self.ocr_group(view, window, cx))
+            // Said once for the page, not under every group.
+            .child(note(t("这一页填的内容以明文保存在这台电脑的 settings.json 里，命令行 wisp 用的是同一份。")))
             .into_any_element()
+    }
+
+    /// 代理: the address, with what requests take right now said under its name, and a way to try it. What is
+    /// said is what is in force (`Settings::global_proxy`), not what the field holds: an address that cannot
+    /// be used leaves the last good one in use, and the line says that one.
+    fn proxy_group(&self, view: &SettingsView, window: &Window, cx: &mut Context<Self>) -> Div {
+        let typed = view.proxy.read(cx).text().trim().to_string();
+        let problem = wisp_core::settings::proxy_problem(&typed, false).map(|problem| crate::i18n::phrase(&problem));
+        let in_force = self.settings.global_proxy();
+        let environment = wisp_core::settings::env_proxy();
+        let said: (String, Hsla) = match (&problem, in_force.is_empty(), self.settings.proxy_off && !self.settings.proxy.is_empty()) {
+            (Some(problem), false, _) => (tf!("{problem}仍在使用 {in_force}。", "{problem} Still using {in_force}."), Theme::danger()),
+            (Some(problem), true, _) => (problem.clone(), Theme::danger()),
+            (None, false, _) => (tf!("正在使用 {in_force}。", "Using {in_force}."), Theme::success()),
+            (None, true, off) => (
+                match (off, environment) {
+                    (true, Some(name)) => tf!("已停用，正在使用环境变量 {name}。", "Off: using the environment variable {name}."),
+                    (true, None) => t("已停用，直接连接。").to_string(),
+                    (false, Some(name)) => tf!("没有填写，正在使用环境变量 {name}。", "Not set: using the environment variable {name}."),
+                    (false, None) => t("没有填写，直接连接。").to_string(),
+                },
+                Theme::text_tertiary(),
+            ),
+        };
+        // The switch is of an address that is kept: with none there is nothing to switch.
+        let address = div()
+            .flex()
+            .items_center()
+            .gap(px(10.))
+            .child(field_of(&view.proxy, if self.settings.proxy.is_empty() { INPUT_W } else { INPUT_W - 44. }, problem.is_some(), window, cx))
+            .when(!self.settings.proxy.is_empty(), |d| d.child(switch("proxy-on", !self.settings.proxy_off).on_click(self.on(Cmd::ToggleProxy, cx))));
+        let asking = matches!(view.reach, Some(Reach::Asking));
+        let found: (String, Hsla) = match &view.reach {
+            None => (tf!("按现在的设置访问一次 {REACH_HOST}，看能不能连上。", "Asks {REACH_HOST} once the way requests now go, to see whether it answers."), Theme::text_tertiary()),
+            Some(Reach::Asking) => (tf!("正在连接 {REACH_HOST}…", "Connecting to {REACH_HOST}…"), Theme::text_tertiary()),
+            Some(Reach::Reached(took)) => (tf!("连上了 {REACH_HOST}，用时 {:.1} 秒。", "Reached {REACH_HOST} in {:.1} s.", took.as_secs_f32()), Theme::success()),
+            // Through a proxy, the reason is most often the proxy's: it is named.
+            Some(Reach::Failed(err)) if !in_force.is_empty() => (tf!("经 {in_force} 没有连上 {REACH_HOST}。{}", "Could not reach {REACH_HOST} through {in_force}. {}", crate::i18n::reasons(err)), Theme::danger()),
+            Some(Reach::Failed(err)) => (tf!("没有连上 {REACH_HOST}。{}", "Could not reach {REACH_HOST}. {}", crate::i18n::reasons(err)), Theme::danger()),
+        };
+        let test = button("proxy-test", t("测试")).when(asking, |d| d.opacity(0.5).cursor_default()).when(!asking, |d| d.on_click(self.on(Cmd::TestReach, cx)));
+        group(Some(t("代理")), vec![row_said(t("代理地址"), Some((said.0.into(), said.1)), address).into_any_element(), row_said(t("连接测试"), Some((found.0.into(), found.1)), test).into_any_element()])
+            .child(note(t("文献检索、检查更新和模型请求都经过它。模型服务可以在「AI › 模型」里另设代理。")))
     }
 
     /// 文献数据库: who PubMed, Crossref and Europe PMC are told is asking. Nothing here is needed to search;
     /// each field says what it buys.
     fn databases_group(&self, view: &SettingsView, window: &Window, cx: &mut Context<Self>) -> Div {
         let problem = wisp_core::settings::email_problem(view.contact_email.read(cx).text()).map(|problem| crate::i18n::phrase(&problem));
+        // The address the databases are told now: the last one that could be an address.
+        let contact = self.settings.contact();
+        let email: (String, Hsla) = match &problem {
+            Some(problem) if !contact.email.is_empty() => (tf!("{problem}仍在使用 {}。", "{problem} Still using {}.", contact.email), Theme::danger()),
+            Some(problem) => (problem.clone(), Theme::danger()),
+            None => (t("留了邮箱，Crossref 和 PubMed 放得更宽。").to_string(), Theme::text_tertiary()),
+        };
+        let from_environment = self.settings.ncbi_api_key.trim().is_empty() && !contact.ncbi_key.is_empty();
+        let key = if from_environment { tf!("正在使用环境变量 {}。", "Using environment variable {}.", "NCBI_API_KEY") } else { t("PubMed 每秒可请求 10 次，而不是 3 次。").to_string() };
+        let key_field = div().flex().items_center().gap(px(4.)).w(px(INPUT_W)).child(div().flex_1().min_w_0().child(ui::field(&view.ncbi_key, window, cx))).child(link_button("ncbi-key-get", t("获取 API Key")).on_click(self.on(Cmd::OpenUrl(NCBI_KEY_PAGE.into()), cx)));
         let rows = vec![
-            row(t("联系邮箱"), Some(problem.unwrap_or_else(|| t("随检索和元数据查询发给 PubMed（NCBI）、Crossref 和 Europe PMC。留了邮箱，Crossref 给的限额更高，NCBI 在请求过多时先来信而不是直接封掉。").to_string()).into()), div().w(px(INPUT_W)).child(ui::field(&view.contact_email, window, cx))).into_any_element(),
-            row(tf!("NCBI API Key", "NCBI API key"), Some(tf!("有了它，PubMed 每秒可以请求 10 次而不是 3 次。登录 NCBI 账户，在 Account Settings 里生成；留空时读取环境变量 {}。", "With it PubMed takes 10 requests a second instead of 3. Sign in to your NCBI account and create one under Account Settings; blank reads {}.", "NCBI_API_KEY").into()), div().w(px(INPUT_W)).child(ui::field(&view.ncbi_key, window, cx))).into_any_element(),
+            row_said(t("联系邮箱"), Some((email.0.into(), email.1)), field_of(&view.contact_email, INPUT_W, problem.is_some(), window, cx)).into_any_element(),
+            row(tf!("NCBI API Key", "NCBI API key"), Some(key.into()), key_field).into_any_element(),
         ];
-        group(Some(t("文献数据库")), rows).child(note(t("这两项都可以不填：不填也能检索，只是数据库对不知道是谁的请求限得更紧，一次取回很多文献、几条检索式一起运行时容易被要求稍后再试。邮箱只是联系方式，不用注册，也只发给上面三个数据库，不发给出版社和别的网站。修改会自动保存，下一次请求起生效；命令行 wisp 使用同一个设置。邮箱和 Key 以明文保存在本机的 settings.json 里。")))
+        group(Some(t("文献数据库")), rows).child(note(t("两项都可以不填，不填也能检索。邮箱只发给 PubMed、Crossref 和 Europe PMC，不用注册。")))
     }
 
-    /// 文字识别: which engine reads the pages of a file that gives no text, and the key of each engine that has one.
-    fn ocr_group(&self, view: &SettingsView, window: &Window, cx: &mut Context<Self>) -> Div {
-        let chosen = self.settings.ocr.engine.trim();
-        let (state, colors) = match ocr::ready(&self.settings, "") {
-            Ok(ready) => (tf!("使用 {}", "Using {}", t(ready.engine.name)), theme::status_colors("included")),
-            Err(_) if chosen == ocr::OFF => (t("已关闭").to_string(), theme::status_colors("pending")),
-            Err(_) if chosen == ocr::MODEL => (t("缺少模型").to_string(), theme::status_colors("uncertain")),
-            Err(_) => (t("缺少 API Key").to_string(), theme::status_colors("uncertain")),
+    /// 网页搜索 and 文字识别 on 任务: services that are no model of 模型, each a card as a task has one, with
+    /// its engines under it. An engine is a row: its name, whether it is the one asked, and its key or where
+    /// its key comes from. There is no list to pick from beside the rows: the rows are the list.
+    fn service_cards(&self, view: &SettingsView, column: f32, window: &Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let settings = &self.settings;
+        let warn = theme::status_colors("uncertain");
+        let small = |text: SharedString| div().flex_none().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(text);
+        // Whether an engine is the one asked, could be, or was picked and cannot be.
+        let mark = |n: usize, key: &'static str, lacks: &'static str, in_use: Option<&'static str>, picked: &str, usable: bool, pick: Cmd, this: &Self, cx: &mut Context<Self>| -> Option<AnyElement> {
+            if in_use == Some(key) { return Some(ui::chip(t("使用中"), Theme::accent(), Theme::accent_soft()).into_any_element()) }
+            if picked == key { return Some(ui::chip(t(lacks), warn.0, warn.1).into_any_element()) }
+            usable.then(|| link_button(("engine-pick", n), t("改用它")).on_click(this.on(pick, cx)).into_any_element())
         };
-        let mut choices = vec![(t("自动"), Cmd::SetOcrEngine(ocr::AUTO.into()))];
-        choices.extend(ocr::ENGINES.iter().map(|engine| (t(engine.name), Cmd::SetOcrEngine(engine.key.into()))));
-        choices.push((t("关闭"), Cmd::SetOcrEngine(ocr::OFF.into())));
-        let at = if chosen == ocr::OFF { choices.len() - 1 } else { ocr::ENGINES.iter().position(|engine| engine.key == chosen).map_or(0, |i| i + 1) };
-        let mut rows = vec![
-            row(t("识别引擎"), Some(t("「自动」用第一个能用的引擎。").into()), div().flex().items_center().gap(px(8.)).child(ui::chip(state, colors.0, colors.1)).child(segmented("ocr-engine", choices, at, self, cx))).into_any_element(),
-        ];
-        for (engine, input) in ocr_engines_with_keys().zip(&view.ocr_keys) {
-            let detail = if engine.key == "deepseek" { tf!("与 DeepSeek 模型共用一个 Key：留空时使用「AI」页 DeepSeek 服务的 Key 或环境变量 {}。", "Shares the key of DeepSeek's models: blank uses the DeepSeek service's key on the AI page, or {}.", engine.key_env) } else { tf!("在 {} 申请；留空时读取环境变量 {}。", "Get one at {}; blank reads {}.", engine.site, engine.key_env) };
-            rows.push(row(tf!("{} API Key", "{} API key", engine.name), Some(detail.into()), div().w(px(INPUT_W)).child(ui::field(input, window, cx))).into_any_element());
-        }
-        group(Some(t("文字识别")), rows).child(note(t("读不出文字的 PDF（扫描件、字体没有文字编码的文件）靠它读出页面上的文字：在文献详情的「文件」里点「识别页面文字」，或让助手和 wisp 命令用 ocr_pdf 工具。DeepSeek OCR 会把整个文件上传到 DeepSeek，每个文件最多 1000 页、100 MB，按页计费；看图模型是「AI」页里「整理全文」这项任务的模型，把页面画成图片一页一页地读。Key 以明文保存在本机的 settings.json 里。")))
-    }
+        // DeepSeek is asked with the key of its model service: said, with the way there while there is none.
+        let borrowed = |n: usize, has_key: bool, this: &Self, cx: &mut Context<Self>| -> AnyElement {
+            match settings.speech_provider().filter(|provider| !provider.key().is_empty()) {
+                Some(provider) => small(tf!("用「模型」里 {} 的 Key", "Uses the key of {} under Models", provider.title()).into()).into_any_element(),
+                None if has_key => small(tf!("正在使用环境变量 {}", "Using environment variable {}", "DEEPSEEK_API_KEY").into()).into_any_element(),
+                None => div().flex().flex_none().items_center().gap(px(8.)).child(small(t("用「模型」里 DeepSeek 服务的 Key").into())).child(button(("engine-add", n), if settings.speech_provider().is_some() { t("去填写") } else { t("去添加") }).on_click(this.on(Cmd::AiTab(AiTab::Models), cx))).into_any_element(),
+            }
+        };
+        let own = |n: usize, input: &Entity<TextInput>, site: &'static str, this: &Self, cx: &mut Context<Self>| -> AnyElement {
+            div().flex().flex_none().items_center().gap(px(4.)).child(field_of(input, INPUT_W - 60., false, window, cx)).child(link_button(("engine-key-get", n), t("获取 API Key")).on_click(this.on(Cmd::OpenUrl(site.to_string()), cx))).into_any_element()
+        };
+        let engine = |name: SharedString, about: Option<SharedString>, mark: Option<AnyElement>, key: AnyElement| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(16.))
+                .w_full()
+                .min_h(px(48.))
+                .pl(px(64.))
+                .pr(px(16.))
+                .py(px(8.))
+                .child(div().flex().flex_col().flex_1().min_w_0().gap(px(2.)).child(div().flex().items_center().gap(px(8.)).min_h(text_px(22.)).child(div().flex_none().child(name)).children(mark)).children(about.map(|about| div().text_size(text_px(12.)).line_height(text_px(17.)).text_color(Theme::text_tertiary()).child(about))))
+                .child(key)
+                .into_any_element()
+        };
+        let head = |icon: &'static str, title: &'static str, about: &'static str, hint: Option<&'static str>, id: &'static str, on: bool, toggle: Cmd, this: &Self, cx: &mut Context<Self>| {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(14.))
+                .w_full()
+                .px(px(16.))
+                .py(px(14.))
+                .child(div().flex().flex_none().items_center().justify_center().size(px(34.)).rounded(px(9.)).bg(Theme::accent_soft()).child(ui::icon(icon, 17., Theme::accent())))
+                .child(div().flex().flex_col().flex_1().min_w_0().gap(px(2.)).child(div().font_weight(FontWeight::SEMIBOLD).child(t(title))).child(div().text_size(text_px(12.)).line_height(text_px(17.)).text_color(Theme::text_tertiary()).child(t(about))))
+                .children(hint.filter(|_| on).map(|hint| small(t(hint).into())))
+                .child(switch(id, on).on_click(this.on(toggle, cx)))
+                .into_any_element()
+        };
+        let card = |rows: Vec<AnyElement>| group(None, rows).w(px(column)).into_any_element();
 
-    /// 网页搜索: which engine the tool `web_search` asks, and each engine's key.
-    fn web_search_group(&self, view: &SettingsView, window: &Window, cx: &mut Context<Self>) -> Div {
-        let chosen = self.settings.web_search.engine.trim();
-        let (state, colors) = match websearch::ready(&self.settings, "") {
-            Ok(ready) => (tf!("使用 {}", "Using {}", ready.engine.name), theme::status_colors("included")),
-            Err(_) if chosen == websearch::OFF => (t("已关闭").to_string(), theme::status_colors("pending")),
-            Err(_) => (t("缺少 API Key").to_string(), theme::status_colors("uncertain")),
-        };
-        let mut choices = vec![(t("自动"), Cmd::SetWebSearchEngine(websearch::AUTO.into()))];
-        choices.extend(websearch::ENGINES.iter().map(|engine| (engine.name, Cmd::SetWebSearchEngine(engine.key.into()))));
-        choices.push((t("关闭"), Cmd::SetWebSearchEngine(websearch::OFF.into())));
-        let at = if chosen == websearch::OFF { choices.len() - 1 } else { websearch::ENGINES.iter().position(|engine| engine.key == chosen).map_or(0, |i| i + 1) };
-        let mut rows = vec![
-            row(t("搜索引擎"), Some(t("「自动」用第一个有 Key 的引擎。关闭后助手不再搜索网页。").into()), div().flex().items_center().gap(px(8.)).child(ui::chip(state, colors.0, colors.1)).child(segmented("web-search-engine", choices, at, self, cx))).into_any_element(),
-        ];
-        for (engine, input) in websearch::ENGINES.iter().zip(&view.search_keys) {
-            let detail = if engine.key == "deepseek" { tf!("与 DeepSeek 模型共用一个 Key：留空时使用「AI」页 DeepSeek 服务的 Key 或环境变量 {}。", "Shares the key of DeepSeek's models: blank uses the DeepSeek service's key on the AI page, or {}.", engine.key_env) } else { tf!("在 {} 申请；留空时读取环境变量 {}。", "Get one at {}; blank reads {}.", engine.site, engine.key_env) };
-            rows.push(row(tf!("{} API Key", "{} API key", engine.name), Some(detail.into()), div().w(px(INPUT_W)).child(ui::field(input, window, cx))).into_any_element());
+        // 网页搜索.
+        let picked = settings.web_search.engine.trim();
+        let on = picked != websearch::OFF;
+        let in_use = websearch::ready(settings, "").ok().map(|ready| ready.engine.key);
+        let mut search = vec![head("search", "网页搜索", "助手查文献库以外的信息时用它：软件文档、指南、新闻。搜索词发给所选的服务，按它的价格计费。", (in_use.is_none() && picked.is_empty()).then_some("填上一个引擎的 Key 就能用"), "web-search-on", on, Cmd::SetWebSearchEngine(if on { websearch::OFF } else { websearch::AUTO }.into()), self, cx)];
+        if on {
+            for (n, (searcher, input)) in websearch::ENGINES.iter().zip(&view.search_keys).enumerate() {
+                let has_key = !websearch::key_for(settings, searcher).0.is_empty();
+                let stored = settings.web_search.keys.get(searcher.key).is_some_and(|key| !key.trim().is_empty());
+                let shared = searcher.key == "deepseek";
+                let field = !shared || view.deepseek_fields[0];
+                let about = if shared && field { Some(t("这里的 Key 只用于网页搜索；清空后用「模型」里 DeepSeek 服务的 Key。").into()) } else if !shared && has_key && !stored { Some(tf!("正在使用环境变量 {}。", "Using environment variable {}.", searcher.key_env).into()) } else { None };
+                let key = if field { own(n, input, searcher.site, self, cx) } else { borrowed(n, has_key, self, cx) };
+                search.push(engine(searcher.name.into(), about, mark(n, searcher.key, "缺少 API Key", in_use, picked, has_key, Cmd::SetWebSearchEngine(searcher.key.into()), self, cx), key));
+            }
         }
-        group(Some(t("网页搜索")), rows).child(note(t("助手和 wisp 命令的 web_search 工具用它搜索互联网，查文献数据库之外的信息（软件文档、指南、机构页面、新闻）。搜索词会发给所选的服务，按它的价格计费。Key 以明文保存在本机的 settings.json 里。")))
+
+        // 文字识别.
+        let picked = settings.ocr.engine.trim();
+        let on = picked != ocr::OFF;
+        let in_use = ocr::ready(settings, "").ok().map(|ready| ready.engine.key);
+        let mut reading = vec![head("scan", "文字识别", "读出扫描件这类没有文字的 PDF 页面：文献详情「文件」里的「识别页面文字」。", (in_use.is_none() && picked.is_empty()).then_some("配好下面任一种就能用"), "ocr-on", on, Cmd::SetOcrEngine(if on { ocr::OFF } else { ocr::AUTO }.into()), self, cx)];
+        if on {
+            let mut keys = view.ocr_keys.iter();
+            for (n, reader) in ocr::ENGINES.iter().enumerate() {
+                let n = n + websearch::ENGINES.len();
+                let usable = ocr::ready(settings, reader.key).is_ok();
+                let (about, key, lacks) = if reader.key == ocr::MODEL {
+                    // The model of 整理全文, whose card above says what it still lacks.
+                    let model = settings.profile_for(Task::Structure).filter(|profile| profile.missing().is_none());
+                    let key = small(model.map_or_else(|| t("「整理全文」的模型还不能用").into(), |profile| profile.title().into())).into_any_element();
+                    (t("上面「整理全文」的模型把页面当图片一页一页地读，要用能看图的模型。"), key, "缺少模型")
+                } else {
+                    let input = keys.next();
+                    let key = match input.filter(|_| view.deepseek_fields[1]) {
+                        Some(input) => own(n, input, reader.site, self, cx),
+                        None => borrowed(n, usable, self, cx),
+                    };
+                    (t("整个文件上传给 DeepSeek，按页计费；每个文件最多 1000 页、100 MB。"), key, "缺少 API Key")
+                };
+                reading.push(engine(t(reader.name).into(), Some(about.into()), mark(n, reader.key, lacks, in_use, picked, usable, Cmd::SetOcrEngine(reader.key.into()), self, cx), key));
+            }
+        }
+        vec![card(search), card(reading)]
     }
 
     fn storage_page(&self, cx: &mut Context<Self>) -> AnyElement {

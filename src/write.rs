@@ -468,7 +468,7 @@ impl Workspace {
                     .when(facts.len() > 1, |d| d.child(ui::hint("write-groundwork-about", facts.join(" · "))))
                     .child(div().flex_1())
                     .when(!running && !configured && open > 0, |d| d.child(ui::icon_action("write-settings", "settings-gear", Theme::text_secondary(), t("配置模型后，可以让模型为没有标题的全文分节、读出没有文字的页面")).on_click(self.on(Cmd::OpenSettings(SettingsPage::Ai), cx))))
-                    .when(!running && reader.is_none() && unread > 0 && (configured || open == 0), |d| d.child(ui::icon_action("write-ocr-settings", "settings-gear", Theme::text_secondary(), t("在「设置 › 网络 › 文字识别」选好引擎后，可以读出没有文字的页面")).on_click(self.on(Cmd::OpenSettings(SettingsPage::Network), cx))))
+                    .when(!running && reader.is_none() && unread > 0 && (configured || open == 0), |d| d.child(ui::icon_action("write-ocr-settings", "settings-gear", Theme::text_secondary(), t("在「设置 › AI › 任务 › 文字识别」选好引擎后，可以读出没有文字的页面")).on_click(self.on(Cmd::AiTab(crate::settings::AiTab::Tasks), cx))))
                     .when(!running && configured && open > 0, |d| d.child(sparkle("write-sort", "sparkle", open, tf!("让模型判断 {open} 篇有段落没有标题可依的全文", "Ask the model to sort {open} papers whose paragraphs have no heading")).on_click(self.on(Cmd::WriteRun(false), cx))))
                     .when_some(reader.filter(|_| !running && unread > 0), |d, reader| d.child(sparkle("write-read", "scan-text", unread, tf!("识别页面文字：{unread} 篇读不出文字或只读了一部分，用{}来读", "Recognise page text: {unread} papers without readable text, read with {}", t(reader.engine.name))).on_click(self.on(Cmd::WriteRun(true), cx))))
                     .when(running, |d| d.child(button("write-stop", t("停止").into()).on_click(self.on(Cmd::WriteStop, cx)))),

@@ -52,7 +52,7 @@ impl Workspace {
     pub(crate) fn write_run_start(&mut self, reading: bool, only: Option<String>, cx: &mut Context<Self>) {
         let profile = self.settings.profile_for_or_default(Task::Structure);
         let workers = self.settings.screen_workers;
-        // Pages are read by the engine of 文字识别 (设置 › 网络), which may be the model that sorts.
+        // Pages are read by the engine of 文字识别 (设置 › AI › 任务), which may be the model that sorts.
         let engine = if reading { Some(wisp_core::ocr::ready(&self.settings, "")) } else { None };
         let by_model = engine.as_ref().is_none_or(|engine| engine.as_ref().is_ok_and(|ready| ready.engine.key == wisp_core::ocr::MODEL));
         let author = match &engine {
