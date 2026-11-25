@@ -96,6 +96,8 @@ impl Workspace {
                 "home" => {
                     self.home.input.update(cx, |input, cx| input.set_text(arg, cx));
                     self.home.input.read(cx).focus(window);
+                    // As if typed: an `@` at its end is offered what it can name.
+                    self.home_input(InputEvent::Changed, window, cx);
                     Some(Cmd::Draft(crate::draft::Do::Begin))
                 }
                 // `assistant` is the home page's corner button; `drafts` 历史 inside a conversation (again: back to it).
@@ -871,16 +873,18 @@ impl Workspace {
                 }
                 // The library's conversation, by places from 0: `retract:<n>` takes back the n-th question, `unretract` puts it back,
                 // `regenerate` asks for the last answer again, `fork:<n>` branches after the n-th answer.
+                // `paper` first in the argument is the paper's conversation instead: `retract:paper;0`, `regenerate:paper`.
                 "retract" | "regenerate" | "fork" | "unretract" => self.lib.as_ref().and_then(|lib| {
-                    let messages = &lib.library_chat.messages;
+                    let (talk, arg) = match arg.strip_prefix("paper") { Some(rest) => (Talk::Paper, rest.trim_start_matches(';')), None => (Talk::Library, arg) };
+                    let messages = &lib.chat(talk).messages;
                     let n: usize = arg.parse().unwrap_or(0);
                     // An answer ends where the next question (or the conversation) begins.
                     let answer_ends: Vec<usize> = (0..messages.len()).filter(|&i| matches!(messages[i], ChatItem::Answer(_)) && !matches!(messages.get(i + 1), Some(ChatItem::Answer(_) | ChatItem::Tool { .. }))).collect();
                     match name {
-                        "retract" => messages.iter().enumerate().filter(|(_, item)| matches!(item, ChatItem::User { .. })).nth(n).map(|(at, _)| Cmd::Retract(Talk::Library, at)),
-                        "regenerate" => Some(Cmd::Regenerate(Talk::Library, messages.len().checked_sub(1)?)),
-                        "fork" => answer_ends.get(n).map(|&at| Cmd::Fork(Talk::Library, at)),
-                        _ => Some(Cmd::Unretract(Talk::Library)),
+                        "retract" => messages.iter().enumerate().filter(|(_, item)| matches!(item, ChatItem::User { .. })).nth(n).map(|(at, _)| Cmd::Retract(talk, at)),
+                        "regenerate" => Some(Cmd::Regenerate(talk, messages.len().checked_sub(1)?)),
+                        "fork" => answer_ends.get(n).map(|&at| Cmd::Fork(talk, at)),
+                        _ => Some(Cmd::Unretract(talk)),
                     }
                 }),
                 // `wfig` opens 写作's 资料库; `wfig:add:<path>` brings a picture file in, `wfig:put:<path>` also puts it into
@@ -948,6 +952,15 @@ impl Workspace {
                     self.chat_input(Talk::Write, InputEvent::Changed, cx);
                     None
                 }
+                // `typepaper:@zh` does the same in the box of the selected paper's conversation (its 提问 tab).
+                "typepaper" => {
+                    if let Some(lib) = self.lib.as_ref() {
+                        lib.paper_chat.input.update(cx, |input, cx| input.set_text(arg, cx));
+                        lib.paper_chat.input.read(cx).focus(window);
+                    }
+                    self.chat_input(Talk::Paper, InputEvent::Changed, cx);
+                    None
+                }
                 // `image:/path/to.png` puts a picture with the next question to the library.
                 "image" => {
                     self.attach_images(Talk::Library, vec![Picture::File(arg.into())], cx);
@@ -958,7 +971,8 @@ impl Workspace {
                     self.attach_documents(Talk::Library, vec![arg.into()], cx);
                     None
                 }
-                "history" => Some(Cmd::ToggleHistory(Talk::Library)),
+                // `history:paper` is the paper's.
+                "history" => Some(Cmd::ToggleHistory(if arg == "paper" { Talk::Paper } else { Talk::Library })),
                 // `openchat:<n>` takes up the n-th conversation 历史 lists (it must be open), as a click on its row does.
                 "openchat" => self.lib.as_ref().and_then(|lib| lib.library_chat.history.as_ref()?.get(arg.parse::<usize>().unwrap_or(0)).map(|c| Cmd::OpenChat(Talk::Library, c.id.clone()))),
                 // The steps below act on the 历史 on show: the library's on its page, else the paper's.

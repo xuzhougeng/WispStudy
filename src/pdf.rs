@@ -91,6 +91,8 @@ pub enum PdfEvent {
     /// 返回刚才位置 to a place in another PDF of the paper: show that file again and `PdfView::restore` it
     /// there, with the places left before it.
     FigureReturn { back: Return, trail: Vec<Return> },
+    /// The file has been read through for its figures (`figure_places`), and what was read is kept for `file_figures`.
+    FiguresRead,
 }
 
 /// The names of the colours, in the order of `annotation::COLORS`.
@@ -335,8 +337,9 @@ type FileFigures = figref::Read;
 static FILE_FIGURES: std::sync::Mutex<Vec<(PathBuf, Arc<FileFigures>)>> = std::sync::Mutex::new(Vec::new());
 const KEEP_FILE_FIGURES: usize = 12;
 
-/// Where a PDF shows its figures (`figref::file_index`), from what was read before or from the file.
-fn file_figures(path: &Path) -> Option<Arc<FileFigures>> {
+/// Where a PDF shows its figures (`figref::file_index`), from what was read before or from the file. Also what
+/// `@` in a paper's conversation offers of its figures (`Workspace::want_figures`).
+pub(crate) fn file_figures(path: &Path) -> Option<Arc<FileFigures>> {
     if let Some(known) = FILE_FIGURES.lock().ok().and_then(|kept| kept.iter().find(|(of, _)| of == path).map(|(_, figures)| figures.clone())) { return Some(known) }
     let figures = Arc::new(figref::file_index(std::fs::read(path).ok()?, FIGURE_PAGES)?);
     if let Ok(mut kept) = FILE_FIGURES.lock() {
@@ -345,6 +348,49 @@ fn file_figures(path: &Path) -> Option<Arc<FileFigures>> {
         if kept.len() > KEEP_FILE_FIGURES { kept.remove(0); }
     }
     Some(figures)
+}
+
+/// Keep what a viewer read of its own file's figures, as `file_figures` keeps what it read: the file is not read again
+/// for them by the viewer of another of the paper's files, or by `@` in the paper's conversation.
+fn keep_file_figures(path: &Path, figures: Arc<FileFigures>) {
+    if let Ok(mut kept) = FILE_FIGURES.lock() {
+        kept.retain(|(of, _)| of != path);
+        kept.push((path.to_path_buf(), figures));
+        if kept.len() > KEEP_FILE_FIGURES { kept.remove(0); }
+    }
+}
+
+/// The device pixels per point a figure is cut out at for a question: a figure a column wide is then about 700
+/// pixels across, legible to a model, and `picture::prepare` takes a page-wide one down to its limit.
+const FIGURE_CUT_SCALE: f32 = 2.5;
+
+/// A figure of a file as one picture (PNG) for a question: its pieces in reading order (`figref::Place::pieces`, each
+/// a 0-based page and a box in points), each cut from its page drawn at `FIGURE_CUT_SCALE`, one under the other.
+/// For a file no viewer need have open; `None` when a page cannot be drawn.
+pub(crate) fn figure_picture(path: &Path, pieces: &[(usize, [f32; 4])]) -> Option<Vec<u8>> {
+    let mut cut: Vec<image::RgbImage> = vec![];
+    for &(page, [x0, y0, x1, y1]) in pieces {
+        let (width, height, bytes) = page_picture(path, page, FIGURE_CUT_SCALE)?;
+        let edge = |at: f32, most: u32| ((at * FIGURE_CUT_SCALE).round().max(0.) as u32).min(most);
+        let (left, right, top, bottom) = (edge(x0.min(x1), width), edge(x0.max(x1), width), edge(y0.min(y1), height), edge(y0.max(y1), height));
+        if right <= left || bottom <= top { continue }
+        // The page is drawn as BGRA.
+        cut.push(image::RgbImage::from_fn(right - left, bottom - top, |x, y| {
+            let at = (((top + y) * width + left + x) * 4) as usize;
+            image::Rgb([bytes[at + 2], bytes[at + 1], bytes[at]])
+        }));
+    }
+    if cut.is_empty() { return None }
+    let (width, height) = (cut.iter().map(|piece| piece.width()).max()?, cut.iter().map(|piece| piece.height()).sum::<u32>());
+    let mut whole = image::RgbImage::from_pixel(width, height, image::Rgb([255, 255, 255]));
+    let mut down = 0;
+    for piece in &cut {
+        image::imageops::replace(&mut whole, piece, 0, down as i64);
+        down += piece.height();
+    }
+    let mut png = vec![];
+    image::DynamicImage::ImageRgb8(whole).write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok()?;
+    Some(png)
 }
 
 /// A figure a number in the text may mean: the file it is in (`None` the one on show, else its place among
@@ -1235,6 +1281,8 @@ pub struct PdfView {
     models: Vec<(String, String)>,
     paper_id: String,
     resource_id: String,
+    /// The file on show, where it is: what its figures are kept under once read (`keep_file_figures`).
+    path: PathBuf,
     annotations: Vec<Annotation>,
     annotations_open: bool,
     annotation_edit: Option<String>,
@@ -1412,6 +1460,7 @@ impl PdfView {
             models: vec![],
             paper_id: file.paper_id.clone(),
             resource_id: file.id.clone(),
+            path: path.to_path_buf(),
             annotations,
             annotations_open: false,
             annotation_edit: None,
@@ -2636,8 +2685,13 @@ impl PdfView {
                 }
                 match next {
                     Some(next) => { let _ = self.requests.send(Request::Figures(next)); }
-                    // Read through: the legends that stand apart from their figures find them.
-                    None => self.figure_places.settle(),
+                    // Read through: the legends that stand apart from their figures find them. What was read is kept
+                    // for whoever else asks for this file's figures, and the owner hears it (`@` offers them).
+                    None => {
+                        self.figure_places.settle();
+                        keep_file_figures(&self.path, Arc::new(figref::Read { index: self.figure_places.clone(), spoken: self.figure_spoken.clone(), sizes: self.sizes.clone() }));
+                        cx.emit(PdfEvent::FiguresRead);
+                    }
                 }
             }
             Reply::Page(index, scale, width, height, bytes) => {
@@ -3423,6 +3477,21 @@ impl PdfView {
             let gap = PAGE_GAP / self.scale_of(page).max(0.01);
             self.resume((page, (top - gap).max(0.)), cx);
         }
+        cx.notify();
+    }
+
+    /// A figure named in a question was clicked (`Workspace::mention_figure`): the view goes to what stands `top`
+    /// points down a 0-based page, now or once the file has opened, with `mark` marked there (its caption), and the
+    /// place it leaves is kept to come back to, as 前往原位置 keeps it.
+    pub fn show_figure(&mut self, page: usize, top: f32, mark: Vec<[f32; 4]>, cx: &mut Context<Self>) {
+        if !self.sizes.is_empty() {
+            let here = self.here();
+            self.returns.push(here);
+            if self.returns.len() > RETURNS { self.returns.remove(0); }
+        }
+        self.mark_lines(page, mark);
+        let gap = PAGE_GAP / self.scale_of(page).max(0.01);
+        self.resume((page, (top - gap).max(0.)), cx);
         cx.notify();
     }
 

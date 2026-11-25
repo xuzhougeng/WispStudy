@@ -14,11 +14,10 @@
 //! set in the method's dialog (关联图片: the figures as small pictures, and a
 //! list to add one from, the paper's own first); a figure's dialog names the
 //! methods linked to it, each a way to that method. An introduction has no
-//! figures. 用这段提问 hands a passage to the library's conversation, as a
-//! passage selected in a PDF is.
+//! figures. 用这段提问 names a passage in the library's conversation, as `@`
+//! names it (`Workspace::mention_excerpt`).
 
-use crate::app::{Cmd, MenuItem, MenuKind, Modal, Page, Talk, Workspace};
-use crate::chat_state::{ChatQuote, MAX_QUOTES};
+use crate::app::{Cmd, MenuItem, MenuKind, Modal, Workspace};
 use crate::figures::{Thumb, fit, source_line};
 use crate::i18n::{t, tc};
 use crate::input::{InputEvent, TextInput};
@@ -315,32 +314,13 @@ impl Workspace {
         self.run(Cmd::GotoFile(excerpt.paper_id.clone(), attachment, (excerpt.page > 0).then_some(excerpt.page), quote), window, cx);
     }
 
-    /// 用这段提问: the passage's words go over the library's question box, as a passage selected in a PDF does,
-    /// and the box is begun with its name, for the question to say what to compare it with or what to change.
+    /// 用这段提问: the passage is named in 助手's question box as `@` names it (its token at the caret), so the note sent
+    /// with the question carries its words, notes and source, for the question to say what to compare it with or what
+    /// to change. One written down without a paper is named the same way.
     fn ask_excerpt(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(excerpt) = self.lib.as_ref().and_then(|lib| lib.excerpts.excerpt(id)).cloned() else { return };
+        if self.lib.as_ref().and_then(|lib| lib.excerpts.excerpt(id)).is_none() { return }
         self.run(Cmd::CloseModal, window, cx);
-        let Some(lib) = self.lib.as_mut() else { return };
-        let held = !excerpt.paper_id.is_empty() && lib.paper(&excerpt.paper_id).is_some();
-        let method = excerpt.kind == METHOD;
-        let chat = lib.chat_mut(Talk::Library);
-        let begun = if held {
-            if chat.quotes.len() >= MAX_QUOTES { return self.fail(tf!("一个问题最多带 {MAX_QUOTES} 段原文。先发出去，或者去掉一段。", "A question can include at most {MAX_QUOTES} passages. Send it first or remove one."), cx) }
-            let quote = ChatQuote { paper_id: excerpt.paper_id.clone(), file_id: excerpt.resource_id.clone(), page: excerpt.page.max(1), text: excerpt.text.clone() };
-            if !chat.quotes.contains(&quote) { chat.quotes.push(quote) }
-            if method { tf!("关于方法「{}」：", "About the method “{}”: ", excerpt.headline()) } else { tf!("关于这段导言「{}」：", "About the introduction “{}”: ", excerpt.headline()) }
-        } else if method {
-            // One written down without a paper has no page to quote: its words go into the box.
-            tf!("关于我记下的方法「{}」：\n{}\n\n", "About the method I wrote down, “{}”:\n{}\n\n", excerpt.headline(), excerpt.text)
-        } else {
-            tf!("关于我记下的这段导言「{}」：\n{}\n\n", "About the introduction I wrote down, “{}”:\n{}\n\n", excerpt.headline(), excerpt.text)
-        };
-        chat.history = None;
-        let input = chat.input.clone();
-        // Begun as if typed: the caret after it, for the question to follow.
-        input.update(cx, |input, cx| if input.text().trim().is_empty() { input.replace_text(0..input.text().len(), &begun, cx) });
-        lib.focus_box = Some(Talk::Library);
-        self.run(Cmd::SetPage(Page::Ask), window, cx);
+        self.mention_excerpt(id, window, cx);
     }
 
     pub(crate) fn submit_excerpt(&mut self, window: &mut Window, cx: &mut Context<Self>) {

@@ -256,6 +256,8 @@ const RULES: &str = "回答时遵循：\n\
 /// in Chinese, Japanese or Korean needs nothing (`RULES` says to answer in the question's language); one with
 /// no words to tell by is answered in the interface's language (`english`).
 pub fn reply_language(input: &str, names: &[&str], english: bool) -> Option<&'static str> {
+    // A paper or library named with @ is a key, not the person's words (`mention`).
+    let input = crate::mention::without(input);
     let input = input.trim();
     // `/name task`: the task is the person's words; `/name` alone has none.
     let words = match input.strip_prefix('/') { Some(rest) => rest.split_once(char::is_whitespace).map_or("", |(_, task)| task), None => input };
@@ -1573,10 +1575,16 @@ pub struct Transcript {
 }
 
 impl Transcript {
-    /// What the conversation is listed as: the start of its first question.
+    /// What the conversation is listed as: the start of its first question, a thing named with @ by its key or name
+    /// (`mention::readable`), not its token.
     pub fn title(&self) -> String {
+        self.title_by(crate::mention::readable)
+    }
+
+    /// `title` with the first question's words as `shown` writes them: the window names a mention by its short name.
+    pub fn title_by(&self, shown: impl Fn(&str) -> String) -> String {
         let first = self.items.iter().find_map(|item| match item {
-            Said::User { text, images, .. } => Some((text.split_whitespace().collect::<Vec<_>>().join(" "), !images.is_empty())),
+            Said::User { text, images, .. } => Some((shown(text).split_whitespace().collect::<Vec<_>>().join(" "), !images.is_empty())),
             _ => None,
         });
         match first {
@@ -2840,6 +2848,10 @@ mod tests {
         assert_eq!(reply_language("/outline 根毛发育", &[], true), None);
         assert_eq!(reply_language("/outline", &[], true), Some(REPLY_ENGLISH));
         assert_eq!(reply_language("/outline", &[], false), None);
+        // A paper named with @ is its key, not the person's words: the words around it tell.
+        assert_eq!(reply_language("[@Zhang2024] [@Li2019b] 讲了什么", &[], true), None);
+        assert_eq!(reply_language("/compare [@Zhang2024] [@Li2019b]", &[], false), None);
+        assert_eq!(reply_language("what does [@Zhang2024] find", &[], false), Some(REPLY_ENGLISH));
         assert!(REPLY_ENGLISH.starts_with("(Reply in English"));
     }
 

@@ -21,7 +21,7 @@ use wisp_core::settings::Task;
 use wisp_core::time;
 
 /// What the home page's box says while it is empty.
-const PLACEHOLDER: &str = "有个想法，或者一份稿子？直接说";
+pub(crate) const PLACEHOLDER: &str = "有个想法，或者一份稿子？直接说，@ 指文献库";
 /// How wide a column of comments beside a manuscript under review is, and the page it needs beside the other two.
 const COMMENTS_W: f32 = 320.;
 const ROOM_FOR_COMMENTS: f32 = 1120.;
@@ -86,6 +86,8 @@ pub struct Home {
     pub listing: bool,
     /// 稍后 on the card that offers 建成文献库: that conversation, and how many papers it held then. The card is back once more come in.
     pub later: Option<(String, usize)>,
+    /// What the `@` being typed in the box can name (the libraries on the shelf), and how its mentions are drawn (`mention.rs`).
+    pub mentions: crate::mention::Mentions,
     _heard: Subscription,
 }
 
@@ -105,8 +107,8 @@ impl Home {
             input.submit_on_enter = true;
             input
         });
-        let heard = cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| if *event == InputEvent::Submit { this.draft_send(window, cx) });
-        Home { input, files: vec![], collect: false, waiting: None, focus: false, open: false, greeting: None, listing: false, later: None, _heard: heard }
+        let heard = cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| this.home_input(*event, window, cx));
+        Home { input, files: vec![], collect: false, waiting: None, focus: false, open: false, greeting: None, listing: false, later: None, mentions: Default::default(), _heard: heard }
     }
 }
 
@@ -281,7 +283,8 @@ impl Workspace {
         let about = match cited.first() {
             Some(path) => tf!("{} 的参考文献", "References of {}", stem(path)),
             None if text.is_empty() => files.first().or(decks.first()).map(stem).unwrap_or_default(),
-            None => text.clone(),
+            // The things named with @ by their names, not their tokens.
+            None => self.mention_plain(crate::mention::Place::Home, &text),
         };
         let info = match libraries::create_draft(&self.root, &about) {
             Ok(info) => info,
@@ -419,6 +422,9 @@ impl Workspace {
     /// The box of a first question, and the quiet starts under it.
     fn render_home_assistant(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Div {
         if std::mem::take(&mut self.home.focus) { self.home.input.read(cx).focus(window) }
+        // The box draws its mentions folded, given anew when its text changed; over it, what the `@` being typed can name.
+        self.fold_mentions(crate::mention::Place::Home, cx);
+        let mentioning = self.render_mentions(crate::mention::Place::Home, 0., 0., window, cx);
         let input = &self.home.input;
         let focused = input.focus_handle(cx).is_focused(window);
         let ready = !input.read(cx).text().trim().is_empty() || !self.home.files.is_empty();
@@ -454,9 +460,11 @@ impl Workspace {
             div().id(("home-start", n)).flex().flex_none().items_center().gap(px(6.)).h(text_px(28.)).px(px(8.)).rounded(px(6.)).text_size(text_px(12.)).text_color(Theme::text_secondary()).cursor_pointer().hover(|s| s.bg(Theme::hover()).text_color(Theme::text())).active(|s| s.bg(Theme::pressed())).on_click(self.on(Cmd::Draft(Do::Start(n)), cx)).child(ui::icon(icon, 13., Theme::text_tertiary())).child(t(label))
         });
         div()
+            .relative()
             .flex()
             .flex_col()
             .gap(px(6.))
+            .when_some(mentioning, |d, popup| d.child(popup))
             .child(card)
             .child(div().flex().items_center().gap(px(8.)).px(px(4.)).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(div().flex_1().min_w_0().truncate().child(t("Enter 发送，Shift+Enter 换行 · 回答可能有误，请对照原文"))).child(model_button))
             // The starts stand where the box's text begins, not at the card's rounded edge.
@@ -609,6 +617,10 @@ mod tests {
     fn every_line_over_the_box_has_english() {
         let english: std::collections::BTreeMap<String, String> = serde_json::from_str(include_str!("../locales/en.json")).unwrap();
         for line in GREETINGS { assert!(english.contains_key(line), "{line}") }
+        // The boxes' placeholders too, each of which says once what @ does.
+        for line in [crate::draft::PLACEHOLDER, crate::chat::LIBRARY_PLACEHOLDER, crate::chat::WRITE_PLACEHOLDER, crate::chat::PAPER_PLACEHOLDER, crate::chat::paper_placeholder(2)] {
+            assert!(english.contains_key(line) && line.contains('@'), "{line}");
+        }
     }
 
     #[test]

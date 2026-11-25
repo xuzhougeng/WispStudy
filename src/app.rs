@@ -36,6 +36,7 @@ pub use crate::guide::Guide;
 pub use crate::importing::{ImportRow, ImportRun, Imported, ZoteroRun};
 pub(crate) use crate::listening::{podcast_files, podcast_list};
 pub use crate::menus::{Menu, MenuItem, MenuKind, menu_place};
+pub use crate::mention::Place;
 pub use crate::modal::Modal;
 pub use crate::screen_run::{Confirmed, Screen, ScreenMode};
 pub use crate::sorting::Sorting;
@@ -253,6 +254,16 @@ pub struct Library {
     pub fields: Vec<FieldDef>,
     pub files: Vec<PaperFile>,
     pub trash: Vec<TrashEntry>,
+    /// The citation key of every paper, and the paper of every key: what a mention in a question box names (`mention.rs`).
+    pub keys: wisp_core::mention::Keys,
+    /// Every tag of the library and how many papers have it (those judged irrelevant apart, as the sidebar counts),
+    /// the most used first: what `@` offers in the library's conversation (`mention.rs`). Made by `reload`.
+    pub tags: Vec<(String, usize)>,
+    /// The figures and tables of the papers a paper's conversation is about, by paper, as `@` offers them there: read
+    /// off the main thread when first wanted (`Workspace::want_figures`).
+    pub figure_lists: HashMap<String, crate::mention::PaperFigures>,
+    /// The pictures of the figures named in questions, by their token's value: cut out once (`Workspace::question_figures`).
+    pub figure_cuts: HashMap<String, crate::mention::Cut>,
     /// 筛选's rounds, oldest first (`Store::begin_round`).
     pub rounds: Vec<wisp_core::store::ScreeningRound>,
     pub filters: Filters,
@@ -478,6 +489,8 @@ pub struct Workspace {
     pub main_window: AnyWindowHandle,
     /// A paper of the scope panel is held and on its way into the conversation (`chat::PaperDrag`).
     pub pinning: bool,
+    /// The selectable text (its key) whose clickable mention the pointer is over: drawn with the hand (`select.rs`).
+    pub mark_over: Option<SharedString>,
     /// The pointer is over the filters of a list too narrow for them, or over the card that shows them all.
     pub filters_over: [bool; 2],
     /// Those filters were drawn in this frame; a frame without them forgets the pointer.
@@ -715,6 +728,9 @@ impl Library {
         self.fields = self.store.list_fields()?;
         self.files = self.store.list_files()?;
         self.trash = self.store.list_trash()?;
+        let keys = wisp_core::mention::Keys::new(&crate::cite::index(self), &self.papers);
+        self.keys = keys;
+        self.tags = filter::tag_counts(&self.papers);
         // A pinned paper taken away, or its file, goes from its pane.
         let (papers, files) = (&self.papers, &self.files);
         let order = self.pane_order();
@@ -785,7 +801,7 @@ impl Workspace {
         shortcuts::rebuild(&settings.shortcuts, cx);
         let libraries = libraries::list(&root);
         let home = crate::draft::Home::new(window, cx);
-        let mut this = Workspace { focus, settings, settings_path, root, libraries, lib: None, parked: vec![], away: false, stepping: false, main_window: window.window_handle(), settings_view: None, connections: vec![], skills: vec![], update: UpdateState::Idle, update_told: None, session: Session::default(), modal: None, modal_error: String::new(), modal_subscriptions: vec![], figure_at: (0., 0.), figure_drag: None, menu: None, palette: None, toast, home_scroll: ScrollHandle::new(), home, resizing: None, column_drag: None, picked: None, pinning: false, filters_over: [false; 2], filters_drawn: false, star_ask: false, tour: Default::default() };
+        let mut this = Workspace { focus, settings, settings_path, root, libraries, lib: None, parked: vec![], away: false, stepping: false, main_window: window.window_handle(), settings_view: None, connections: vec![], skills: vec![], update: UpdateState::Idle, update_told: None, session: Session::default(), modal: None, modal_error: String::new(), modal_subscriptions: vec![], figure_at: (0., 0.), figure_drag: None, menu: None, palette: None, toast, home_scroll: ScrollHandle::new(), home, resizing: None, column_drag: None, picked: None, pinning: false, mark_over: None, filters_over: [false; 2], filters_drawn: false, star_ask: false, tour: Default::default() };
         // A new day of use is counted once at start; on the fifth the home page asks for a star, until answered.
         // A settings file that could not be read is not written over with defaults for it (the toast says so).
         if this.toast.is_none() && wisp_core::settings::note_use(&mut this.settings, &wisp_core::time::today()) { this.save_settings(cx) }
@@ -1012,9 +1028,9 @@ impl Workspace {
                 }
             }),
         ];
-        let library_chat = Chat::new("交代一件事或提一个问题，输入 / 选择命令，可以粘贴图片", cx);
+        let library_chat = Chat::new(crate::chat::LIBRARY_PLACEHOLDER, cx);
         let paper_chat = Chat::new(crate::chat::PAPER_PLACEHOLDER, cx);
-        let write_chat = Chat::new("告诉助手写什么、改什么", cx);
+        let write_chat = Chat::new(crate::chat::WRITE_PLACEHOLDER, cx);
         let mut subscriptions = subscriptions;
         for (chat, talk) in [(&library_chat, Talk::Library), (&paper_chat, Talk::Paper), (&write_chat, Talk::Write)] {
             subscriptions.push(cx.subscribe(&chat.input, move |this, _, event: &InputEvent, cx| this.chat_input(talk, *event, cx)));
@@ -1083,6 +1099,10 @@ impl Workspace {
             fields: vec![],
             files: vec![],
             trash: vec![],
+            keys: Default::default(),
+            tags: vec![],
+            figure_lists: HashMap::new(),
+            figure_cuts: HashMap::new(),
             rounds: vec![],
             filters,
             shown: vec![],

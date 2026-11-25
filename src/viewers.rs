@@ -722,6 +722,8 @@ impl Workspace {
                 if !self.panel_viewer(&view, cx) { return }
                 if let Some(pdf) = self.read_in_panel(&file, cx) { pdf.update(cx, |pdf, cx| pdf.restore(back.clone(), Some(trail.clone()), cx)) }
             }
+            // A file was read through for its figures: `@` in the paper's conversation offers them now.
+            PdfEvent::FiguresRead => self.want_figures(cx),
             PdfEvent::Reframe { page, bbox, png } => {
                 let resource = view.read(cx).resource_id().to_string();
                 self.reframe_piece(&resource, *page, *bbox, png, cx);

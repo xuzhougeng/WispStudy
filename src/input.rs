@@ -200,7 +200,11 @@ pub struct TextInput {
     link_boxes: Vec<(usize, Bounds<Pixels>)>,
     /// Stretches drawn as other words in a text drawn as Markdown, while the caret is not in them and nothing of them
     /// is selected: a manuscript's citations, as a reader will read them. Each is one citation as the Markdown reads it.
+    /// In a field not drawn as Markdown (the question box's mentions) each is one thing: always drawn so, in the accent,
+    /// the caret never inside it, and Backspace or Delete beside it takes it away whole.
     folds: Vec<(Range<usize>, String)>,
+    /// Counts the changes of the text, so an owner that gives folds for it knows when they are due again (`revision`).
+    revision: u64,
     /// The link under the pointer, and the box of the line of it the pointer is on.
     hovered: Option<(usize, Bounds<Pixels>)>,
     /// Updated during prepaint, so a selection toolbar follows wrapping and scrolling in this frame.
@@ -262,6 +266,7 @@ impl TextInput {
             pictures: HashMap::new(),
             link_boxes: vec![],
             folds: vec![],
+            revision: 0,
             hovered: None,
             selection_geometry: None,
             selection_toolbar_visible: false,
@@ -308,6 +313,7 @@ impl TextInput {
         // What was laid out was the old text: nothing is placed by it until this one is drawn (`top_of`).
         self.layout = None;
         self.folds.clear();
+        self.revision += 1;
         // Another text altogether (a draft of another part): its changes are not this one's.
         (self.undo, self.redo, self.typing) = (vec![], vec![], false);
         cx.notify();
@@ -331,15 +337,25 @@ impl TextInput {
         self.folds = folds;
     }
 
-    /// The stretches drawn as other words that are still a citation in its brackets where they stand.
+    /// How many times the text has changed: the owner gives folds anew when this is not what it was when it last did.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// The stretches drawn as other words that are still a citation in its brackets where they stand: a manuscript's
+    /// citations in a field drawn as Markdown, a question's mentions in a plain one (`mention.rs`). A selection takes
+    /// each whole (`whole_cites`, `stepped`).
     fn cites(&self) -> impl Iterator<Item = Range<usize>> + '_ {
-        let on = self.markdown && !self.masked;
+        let on = !self.masked;
         self.folds.iter().map(|(range, _)| range.clone()).filter(move |range| on && self.text.get(range.clone()).is_some_and(|written| written.starts_with('[') && written.ends_with(']')))
     }
 
-    /// The stretch drawn as other words that ends (`before`) or begins at `o`, while it is drawn so.
+    /// The stretch drawn as other words that ends (`before`) or begins at `o`, while it is drawn so: a citation of a
+    /// manuscript, or a mention in a plain field (`mention.rs`).
     fn fold_beside(&self, o: usize, before: bool) -> Option<Range<usize>> {
-        self.cites().find(|range| if before { range.end == o } else { range.start == o })
+        if self.masked { return None }
+        let text = &self.text;
+        self.folds.iter().map(|(range, _)| range.clone()).find(|range| (if before { range.end == o } else { range.start == o }) && text.get(range.clone()).is_some_and(|written| written.starts_with('[') && written.ends_with(']')))
     }
 
     /// A selection takes a citation whole or lies inside it: an end standing in one that the selection is not
@@ -478,11 +494,19 @@ impl TextInput {
     }
 
     fn prev(&self, o: usize) -> usize {
-        self.text.grapheme_indices(true).rev().find_map(|(i, _)| (i < o).then_some(i)).unwrap_or(0)
+        let p = self.text.grapheme_indices(true).rev().find_map(|(i, _)| (i < o).then_some(i)).unwrap_or(0);
+        self.whole_fold_at(p).map_or(p, |fold| fold.start)
     }
 
     fn next(&self, o: usize) -> usize {
-        self.text.grapheme_indices(true).find_map(|(i, _)| (i > o).then_some(i)).unwrap_or(self.text.len())
+        let n = self.text.grapheme_indices(true).find_map(|(i, _)| (i > o).then_some(i)).unwrap_or(self.text.len());
+        self.whole_fold_at(n).map_or(n, |fold| fold.end)
+    }
+
+    /// The fold of a field not drawn as Markdown that `o` is inside of: the caret goes past it, not into it.
+    fn whole_fold_at(&self, o: usize) -> Option<Range<usize>> {
+        if self.markdown || self.masked { return None }
+        self.folds.iter().map(|(range, _)| range.clone()).find(|range| range.start < o && o < range.end && range.end <= self.text.len())
     }
 
     fn line_start(&self, o: usize) -> usize {
@@ -503,6 +527,7 @@ impl TextInput {
         let s = if self.multiline { s.replace("\r\n", "\n").replace('\r', "\n") } else { s.replace(['\n', '\r'], " ") };
         if keep { self.remember(&range, &s) }
         self.text.replace_range(range.clone(), &s);
+        self.revision += 1;
         let o = range.start + s.len();
         self.sel = o..o;
         self.reversed = false;
@@ -540,6 +565,7 @@ impl TextInput {
     }
 
     fn restore(&mut self, sel: Range<usize>, cx: &mut Context<Self>) {
+        self.revision += 1;
         let end = self.text.len();
         self.sel = sel.start.min(end)..sel.end.min(end);
         (self.reversed, self.marked, self.typing) = (false, None, false);
@@ -549,7 +575,9 @@ impl TextInput {
 
     fn backspace(&mut self, _: &Backspace, _: &mut Window, cx: &mut Context<Self>) {
         // Beside a citation drawn as a reader reads it, the first press selects it whole, as it is drawn, and the next takes it away.
+        // A mention in a plain field goes at once: it is one thing.
         if self.sel.is_empty() && let Some(range) = self.fold_beside(self.cursor(), true) {
+            if !self.markdown { return self.replace(range, "", cx) }
             (self.sel, self.reversed, self.typing) = (range, true, false);
             return cx.notify();
         }
@@ -562,6 +590,7 @@ impl TextInput {
 
     fn delete(&mut self, _: &Delete, _: &mut Window, cx: &mut Context<Self>) {
         if self.sel.is_empty() && let Some(range) = self.fold_beside(self.cursor(), false) {
+            if !self.markdown { return self.replace(range, "", cx) }
             (self.sel, self.reversed, self.typing) = (range, false, false);
             return cx.notify();
         }
@@ -778,7 +807,7 @@ impl TextInput {
         }
         self.selecting = true;
         // A click on a citation drawn as a reader reads it opens it: the caret goes in, before its closing bracket, and it is written out.
-        let i = match self.fold_under(ev.position) {
+        let i = match self.fold_under(ev.position).filter(|_| self.markdown) {
             Some(fold) if ev.click_count == 1 && !ev.modifiers.shift && !ev.modifiers.secondary() => fold.end - 1,
             _ => i,
         };
@@ -905,6 +934,7 @@ impl EntityInputHandler for TextInput {
             self.remember(&r, "");
         }
         self.text.replace_range(r.clone(), s);
+        self.revision += 1;
         self.marked = (!s.is_empty()).then(|| r.start..r.start + s.len());
         self.sel = new_sel
             .map(|ns| {
@@ -1099,6 +1129,7 @@ fn row_of(l: &Layout, o: usize) -> Option<&Row> {
 /// (composing) range underlined; Markdown drawn as it says (`shape_markdown`).
 fn shape(input: &TextInput, style: &TextStyle, window: &mut Window, wrap: Option<Pixels>) -> (Vec<Row>, DisplayMap) {
     if input.markdown && !input.text.is_empty() && !input.masked { return shape_markdown(input, style, window, wrap) }
+    if !input.text.is_empty() && !input.masked && !input.folds.is_empty() { return shape_folded(input, style, window, wrap) }
     let display = input.display_text();
     let (text, color) = if display.is_empty() { (crate::i18n::t(&input.placeholder).to_string(), input.paper_ink.map_or(Theme::text_placeholder(), |ink| ink.opacity(0.4))) } else { (display, style.color) };
     let run = TextRun { len: text.len(), font: style.font(), color, background_color: None, underline: None, strikethrough: None };
@@ -1129,6 +1160,59 @@ fn shape(input: &TextInput, style: &TextStyle, window: &mut Window, wrap: Option
         start += len + 1;
     }
     (rows, plain)
+}
+
+/// A plain text with its folds drawn as their words in the accent (the question box's mentions), always: the caret
+/// never goes inside one (`TextInput::whole_fold_at`). A fold that no longer is a bracketed stretch of the text, or
+/// that overlaps the one before, is drawn as written.
+fn shape_folded(input: &TextInput, style: &TextStyle, window: &mut Window, wrap: Option<Pixels>) -> (Vec<Row>, DisplayMap) {
+    let text = &input.text;
+    let mut folds: Vec<(Range<usize>, &str)> = input.folds.iter().filter(|(range, label)| !label.is_empty() && text.get(range.clone()).is_some_and(|written| written.starts_with('[') && written.ends_with(']'))).map(|(range, label)| (range.clone(), label.as_str())).collect();
+    folds.sort_by_key(|(range, _)| range.start);
+    let mut map = DisplayMap::default();
+    let mut shown = String::new();
+    let mut runs: Vec<TextRun> = vec![];
+    let plain = TextRun { len: 0, font: style.font(), color: style.color, background_color: None, underline: None, strikethrough: None };
+    // Written text, the letters being composed underlined.
+    let written = |src: Range<usize>, shown: &mut String, map: &mut DisplayMap, runs: &mut Vec<TextRun>| {
+        if src.is_empty() { return }
+        let from = shown.len();
+        shown.push_str(&text[src.clone()]);
+        map.segs.push(Seg { src: src.clone(), shown: from..shown.len(), same: true });
+        let m = input.marked.as_ref().map(|m| m.start.clamp(src.start, src.end)..m.end.clamp(src.start, src.end)).filter(|m| !m.is_empty());
+        let underline = Some(UnderlineStyle { color: Some(style.color), thickness: px(1.), wavy: false });
+        let parts = match m { Some(m) => [(m.start - src.start, None), (m.len(), underline), (src.end - m.end, None)], None => [(src.len(), None), (0, None), (0, None)] };
+        for (len, underline) in parts {
+            if len > 0 { runs.push(TextRun { len, underline, ..plain.clone() }) }
+        }
+    };
+    let mut at = 0;
+    for (range, label) in folds {
+        if range.start < at { continue }
+        written(at..range.start, &mut shown, &mut map, &mut runs);
+        let from = shown.len();
+        shown.push_str(label);
+        map.segs.push(Seg { src: range.clone(), shown: from..shown.len(), same: false });
+        map.folds.push((from..shown.len(), range.clone()));
+        let mut font = style.font();
+        font.weight = FontWeight::MEDIUM;
+        runs.push(TextRun { len: label.len(), font, color: Theme::accent(), ..plain.clone() });
+        at = range.end;
+    }
+    written(at..text.len(), &mut shown, &mut map, &mut runs);
+    let font_size = style.font_size.to_pixels(window.rem_size());
+    let line_height = style.line_height_in_pixels(window.rem_size());
+    let shaped = window.text_system().shape_text(shown.into(), font_size, &runs, wrap, None).unwrap_or_default();
+    let mut rows = vec![];
+    let (mut start, mut top) = (0, px(0.));
+    for line in shaped {
+        let len = line.len();
+        let row = Row { line, start, top, x: px(0.), line_height, decor: Decor::None, picture: None };
+        top += row.height();
+        rows.push(row);
+        start += len + 1;
+    }
+    (rows, map)
 }
 
 /// How much larger a heading is set than the text, by its level.

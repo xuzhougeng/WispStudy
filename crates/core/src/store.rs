@@ -393,6 +393,9 @@ pub struct Conversation {
     pub transcript: crate::ai::Transcript,
     pub created_at: String,
     pub updated_at: String,
+    /// What it is listed as when whoever saves it knows better than `Transcript::title` (the window names a paper
+    /// mentioned with @ by its short name); empty: that title. Not read back.
+    pub title: String,
 }
 
 /// A conversation as the history lists it.
@@ -1384,7 +1387,7 @@ impl Store {
         self.db.execute(
             "INSERT INTO conversations(id, paper_id, title, questions, body, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) \
              ON CONFLICT(id) DO UPDATE SET title = excluded.title, questions = excluded.questions, body = excluded.body, updated_at = excluded.updated_at",
-            params![conversation.id, conversation.paper_id, conversation.transcript.title(), conversation.transcript.questions() as i64, body, conversation.created_at, conversation.updated_at],
+            params![conversation.id, conversation.paper_id, if conversation.title.trim().is_empty() { conversation.transcript.title() } else { conversation.title.clone() }, conversation.transcript.questions() as i64, body, conversation.created_at, conversation.updated_at],
         )?;
         Ok(())
     }
@@ -1435,7 +1438,7 @@ impl Store {
             .db
             .query_row("SELECT id, paper_id, body, created_at, updated_at FROM conversations WHERE id = ?1", [id], |r| {
                 // A body this build cannot read shows as an empty conversation, not as an error.
-                Ok(Conversation { id: r.get(0)?, paper_id: r.get(1)?, transcript: serde_json::from_str(&r.get::<_, String>(2)?).unwrap_or_default(), created_at: r.get(3)?, updated_at: r.get(4)? })
+                Ok(Conversation { id: r.get(0)?, paper_id: r.get(1)?, transcript: serde_json::from_str(&r.get::<_, String>(2)?).unwrap_or_default(), created_at: r.get(3)?, updated_at: r.get(4)?, title: String::new() })
             })
             .optional()?)
     }
