@@ -22,7 +22,7 @@ use crate::model::Paper;
 use anyhow::{Context as _, Result, anyhow, bail};
 use hayagriva::archive::ArchivedStyle;
 use hayagriva::citationberg::json as csl_json;
-use hayagriva::citationberg::{self, FontStyle, FontVariant, FontWeight, IndependentStyle, Locale, LocaleCode, StyleClass, TextDecoration, VerticalAlign};
+use hayagriva::citationberg::{self, DatePartName, FontStyle, FontVariant, FontWeight, IndependentStyle, LayoutRenderingElement, Locale, LocaleCode, NamesChild, StyleClass, TextDecoration, VerticalAlign};
 use hayagriva::types::{Date, EntryType, FormatString, MaybeTyped, Numeric, PageRanges, Person};
 use hayagriva::{BibliographyDriver, BibliographyRequest, CitationItem, CitationRequest, ElemChild, ElemChildren, ElemMeta, Entry, Formatting, LocatorPayload, SpecificLocator};
 use std::collections::HashMap;
@@ -320,7 +320,68 @@ fn independent(xml: &str, root: &Path, zotero: Option<&Path>) -> Result<Independ
         }
     };
     if style.settings.class == StyleClass::Note { bail!("这是脚注式的引用样式，稿件里没有脚注，暂不支持。") }
-    Ok(style)
+    Ok(mended(style))
+}
+
+/// A style with the two things `hayagriva` (0.10.1) reads wrong said another way that means the same, so that what
+/// is written is what the style says. Every style cited with goes through here, built in or a file.
+///
+/// A `<names>` with child elements and no `<name>` among them (`<names variable="author"><label/><substitute>…`,
+/// which CSL allows: the names are then written with the options inherited from `<style>`) is taken for one that
+/// writes nothing (`Names::will_have_info`), so NLM's entries had no authors, and where such names were written
+/// all the same (their `<substitute>` had something to say) the label stood before them (`, editorJones M`). It
+/// gets a `<name/>` in front. One with no child elements at all is left alone: in a `<substitute>` that is the
+/// short form that takes the `<name>` of the element it stands in for.
+///
+/// A date's `delimiter` is written before a part the date turns out not to have (`2024 ;10(3)` of a year alone
+/// in a form of year, month and day): `spaced` says it as affixes of the parts.
+fn mended(mut style: IndependentStyle) -> IndependentStyle {
+    for one in &mut style.macros { mend(&mut one.children) }
+    mend(&mut style.citation.layout.elements);
+    if let Some(list) = &mut style.bibliography { mend(&mut list.layout.elements) }
+    for locale in &mut style.locale { locale.date.iter_mut().for_each(spaced) }
+    style
+}
+
+fn mend(elements: &mut [LayoutRenderingElement]) {
+    for element in elements {
+        match element {
+            LayoutRenderingElement::Names(names) => {
+                if !names.children.is_empty() && names.name().is_none() { names.children.insert(0, NamesChild::Name(Default::default())) }
+                for child in &mut names.children {
+                    if let NamesChild::Substitute(instead) = child { mend(&mut instead.children) }
+                }
+            }
+            // One that names a form of the locale takes that form's delimiter, not its own.
+            LayoutRenderingElement::Date(date) if !date.is_localized() => spaced(date),
+            LayoutRenderingElement::Group(group) => mend(&mut group.children),
+            LayoutRenderingElement::Choose(choose) => {
+                mend(&mut choose.if_.children);
+                for branch in &mut choose.else_if { mend(&mut branch.children) }
+                if let Some(otherwise) = &mut choose.otherwise { mend(&mut otherwise.children) }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A date's delimiter as affixes of its parts, on the side of each that faces the coarsest one: a date that has a
+/// part has the coarser ones too (a day comes with its month, and every date has a year), so each part that is
+/// written brings the one delimiter between it and its neighbour, and a part that is missing brings none. A part
+/// set in a look of its own (bold, say) now has its delimiter in that look.
+fn spaced(date: &mut citationberg::Date) {
+    let Some(delimiter) = date.delimiter.clone().filter(|delimiter| !delimiter.is_empty() && date.date_part.len() > 1) else { return };
+    let rank = |name: DatePartName| match name {
+        DatePartName::Year => 0,
+        DatePartName::Month => 1,
+        DatePartName::Day => 2,
+    };
+    let Some(coarsest) = (0..date.date_part.len()).min_by_key(|n| rank(date.date_part[*n].name)) else { return };
+    for (n, part) in date.date_part.iter_mut().enumerate() {
+        if n < coarsest { part.affixes.suffix = Some(format!("{}{delimiter}", part.affixes.suffix.as_deref().unwrap_or_default())) }
+        if n > coarsest { part.affixes.prefix = Some(format!("{delimiter}{}", part.affixes.prefix.as_deref().unwrap_or_default())) }
+    }
+    date.delimiter = None;
 }
 
 /// The style a key names.
@@ -333,7 +394,7 @@ fn load_from(key: &str, root: &Path, zotero: Option<&Path>) -> Result<Loaded> {
         let builtin = Builtin::by_name(name).ok_or_else(|| anyhow!("没有这个内置引用样式：{name}"))?;
         let Some(citationberg::Style::Independent(style)) = builtin.style() else { bail!("内置样式 {name} 读不了") };
         if style.settings.class == StyleClass::Note { bail!("这是脚注式的引用样式，稿件里没有脚注，暂不支持。") }
-        return Ok(Loaded { key: key.to_string(), name: builtin.title(), style });
+        return Ok(Loaded { key: key.to_string(), name: builtin.title(), style: mended(style) });
     }
     let path = file_of(key, root, zotero).ok_or_else(|| anyhow!("不认识这个引用样式：{key}"))?;
     let xml = std::fs::read_to_string(&path).with_context(|| format!("引用样式文件不在了：{}", path.display()))?;
@@ -408,7 +469,12 @@ pub fn style(key: &str, root: &Path) -> Result<crate::cite::Style> {
 
 fn locales() -> &'static [Locale] {
     static LOCALES: OnceLock<Vec<Locale>> = OnceLock::new();
-    LOCALES.get_or_init(hayagriva::archive::locales)
+    // A locale's date forms are mended as a style's own are (`mended`): Lithuanian and Latvian ones have a delimiter.
+    LOCALES.get_or_init(|| {
+        let mut all = hayagriva::archive::locales();
+        for locale in &mut all { locale.date.iter_mut().for_each(spaced) }
+        all
+    })
 }
 
 /// The locale a manuscript's language asks a style's terms in (`et al.`, `and`); the style's own for English.
@@ -979,6 +1045,62 @@ mod tests {
         assert!(add(&root, &elsewhere.join("missing.csl")).is_err());
         std::fs::write(elsewhere.join("not.csl"), "<html/>").unwrap();
         assert!(add(&root, &elsewhere.join("not.csl")).is_err());
+    }
+
+    #[test]
+    fn every_built_in_style_names_the_authors_in_its_list() {
+        let root = temp("authors");
+        let mut without_a_list = vec![];
+        for one in bundled().into_iter().filter(|one| !in_notes(&one.key)) {
+            let style = load_from(&one.key, &root, None).unwrap();
+            // A style may say how to cite and nothing of a list, and its list is then empty: Typst's own `alphanumeric`, which only makes the labels (`[Zha+24]`), is the one built in.
+            if style.style.bibliography.is_none() { without_a_list.push(one.key); continue }
+            let sample = crate::cite::sample(&crate::cite::Style::Csl(std::sync::Arc::new(style)));
+            // Zhang is an author of the first work alone, so the entry that says the name is that work's, wherever a list by author puts it and in whatever case the style sets a name.
+            let entries: Vec<&str> = sample.list.iter().map(|entry| entry.text.as_str()).collect();
+            assert!(entries.len() == 3 && entries.iter().any(|entry| entry.to_lowercase().contains("zhang")), "{}: {entries:?}", one.key);
+            // And no year has a space left after it, before the mark that follows, where the date's form had a month to say.
+            let left_over = |entry: &&str| ["2024", "2019", "2021"].iter().any(|year| [';', ',', '.', ':', ')'].iter().any(|mark| entry.contains(&format!("{year} {mark}"))));
+            assert!(!entries.iter().any(left_over), "{}: {entries:?}", one.key);
+        }
+        assert_eq!(without_a_list, ["csl:alphanumeric"]);
+    }
+
+    /// A style as a person might add one, written the two ways the processor reads wrong: the authors without a `<name>`, the date with a delimiter.
+    const BARE: &str = r#"<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" class="in-text" version="1.0" initialize-with="" name-as-sort-order="all" sort-separator=" " name-delimiter=", ">
+  <info><title>Bare Names</title><id>http://www.zotero.org/styles/bare-names</id><updated>2024-01-01T00:00:00+00:00</updated></info>
+  <macro name="author"><names variable="author"><label form="long" prefix=", "/><substitute><names variable="editor"/></substitute></names></macro>
+  <citation><layout prefix="(" suffix=")" delimiter=","><text variable="citation-number"/></layout></citation>
+  <bibliography><layout suffix="."><text variable="citation-number" suffix=". "/><group delimiter=". "><text macro="author"/><text variable="title"/><group delimiter=";"><date variable="issued" delimiter=" ">PARTS</date><text variable="volume"/></group></group></layout></bibliography>
+</style>"#;
+
+    #[test]
+    fn names_without_a_name_are_written_and_a_date_leaves_no_delimiter_over() {
+        let root = temp("mended");
+        // Vancouver as NLM has it, the style both were found in: the authors (six of seven, as it says), and no space before the semicolon after a year alone.
+        let nlm = crate::cite::sample(&crate::cite::Style::Csl(std::sync::Arc::new(load_from("csl:nlm-citation-sequence", &root, None).unwrap())));
+        assert_eq!(nlm.list[0].text, "1. Zhang W, Li Q, Wang F, Smith J, Müller A, Tanaka H, et al. A single-cell atlas of root development. Nature Plants. 2024;10(3):357–62.");
+        assert_eq!(nlm.list[2].text, "3. 王芳, 李强, 张伟. 水稻根系发育的单细胞转录组研究. 中国科学：生命科学. 2021;51(8):912–25.");
+        assert_eq!(crate::cite::sample(&crate::cite::Style::Csl(std::sync::Arc::new(load_from("csl:vancouver-superscript", &root, None).unwrap()))).list[1].text, "2. Smith JA, Jones M. Auxin transport shapes the root tip. The Plant Cell. 2019;31(4):1021–33.");
+
+        // A file of the person's is read the same way. A paper has a year alone; a record may say the month and the day.
+        let mut atlas = paper("a", "Zhang, Wei; Li, Qiang", 2024, "Atlas", "Cell");
+        atlas.volume = "12".into();
+        let records: Vec<Record> = serde_json::from_str(r#"[{"id": "month", "type": "article-journal", "title": "Month", "volume": "3", "author": [{"family": "Smith", "given": "John"}], "issued": {"date-parts": [[2017, 3]]}},
+            {"id": "day", "type": "book", "title": "Day", "editor": [{"family": "Jones", "given": "Mary"}, {"family": "Garcia", "given": "Maria"}], "issued": {"date-parts": [[2019, 6, 5]]}}]"#).unwrap();
+        let cites = [vec![Cite { id: "month".into(), ..Default::default() }, Cite { id: "day".into(), ..Default::default() }]];
+        let entries = |parts: &str| {
+            let key = save(&root, "bare", &BARE.replace("PARTS", parts)).unwrap().key;
+            let style = load_from(&key, &root, None).unwrap();
+            let mut said: Vec<String> = render(&style, &[vec![&atlas]], "en").1.into_iter().map(|(_, entry)| entry.text).collect();
+            said.extend(render_records(&style, &cites, &[], &records, "en").1.into_iter().map(|(_, entry)| entry.text));
+            said
+        };
+        // The label stands after the names it is of, and editors who stand in for the authors are written as the authors would be.
+        assert_eq!(entries(r#"<date-part name="year"/><date-part name="month" form="numeric"/><date-part name="day"/>"#), ["1. Zhang W, Li Q. Atlas. 2024;12.", "1. Smith J. Month. 2017 3;3.", "2. Jones M, Garcia M, editors. Day. 2019 6 5."]);
+        // The year last: what comes before it brings the delimiter after itself.
+        assert_eq!(entries(r#"<date-part name="day"/><date-part name="month" form="numeric"/><date-part name="year"/>"#), ["1. Zhang W, Li Q. Atlas. 2024;12.", "1. Smith J. Month. 3 2017;3.", "2. Jones M, Garcia M, editors. Day. 5 6 2019."]);
     }
 
     #[test]
