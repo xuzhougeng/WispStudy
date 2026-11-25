@@ -6,7 +6,7 @@
 <link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/pdf.html">
 <link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/pdf.html">
 <title>Just one PDF to read · Wisp Study tutorials</title>
-<meta name="description" content="Drag a PDF onto the home page, or open it with Open With › Wisp Study, and you go straight into reading mode. After reading, decide whether to make it a library or move it to an existing one.">
+<meta name="description" content="Drag a PDF onto the home page, or open it with Open With › Wisp Study, and you go straight into reading mode. After reading, decide whether to make it a library or move it to an existing one, and export a copy with your annotations to send on.">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
@@ -38,11 +38,11 @@
   <header class="doc-head">
     <p class="kicker">Tutorial 04 · Read</p>
     <h1>Just one PDF to read: drop it in and read</h1>
-    <p class="lead">A colleague sends a PDF in the group chat. You only want to read it right away and mark a few lines. You have not decided which library it belongs in, and you may not even have a library yet. Drag it onto the home page and you are in reading mode, with your annotations and reading position remembered. After reading, decide whether to keep it and where.</p>
+    <p class="lead">A colleague sends a PDF in the group chat. You only want to read it right away and mark a few lines. You have not decided which library it belongs in, and you may not even have a library yet. Drag it onto the home page and you are in reading mode, with your annotations and reading position remembered. After reading, decide whether to keep it and where; to send it on, export a copy of the PDF with your annotations written in.</p>
     <dl class="facts">
       <div><dt>Scenario</dt><dd>You receive a BMC Biology paper on chromatin accessibility in rice root tips. You read it first, then file it in “Plant single-cell transcriptomics”.</dd></div>
       <div><dt>Needs</dt><dd>One PDF. No model is needed. You only need to set one up in “Settings › AI” when you want to ask questions or see a translation.</dd></div>
-      <div><dt>Time</dt><dd>About 5 minutes, not counting the reading itself.</dd></div>
+      <div><dt>Time</dt><dd>About 10 minutes, not counting the reading itself.</dd></div>
     </dl>
   </header>
 
@@ -55,6 +55,7 @@
         <li><a href="#s3">Keep it: make a library, or move it to an existing one</a></li>
         <li><a href="#s4">Open the same file again</a></li>
         <li><a href="#s5">Open from Finder or File Explorer</a></li>
+        <li><a href="#s6">Send it on with your marks: export the PDF with annotations</a></li>
         <li class="plain"><a href="#recap">Recap</a></li>
       </ol>
     </nav>
@@ -137,6 +138,35 @@
         <aside class="note"><b>Tip</b>On Windows this entry is registered by the installer, and the portable version does not have it. Wisp Study does not set itself as the default app for PDFs, so double-clicking a PDF still uses your usual reader. This section has no screenshot: the Finder menu was not captured. In this example the step was simulated in a development build, and opening another PDF while the window was on a library's list went straight into its reading mode in the same way.</aside>
       </section>
 
+      <section id="s6">
+        <h2><i>6</i>Send it on with your marks: export the PDF with annotations</h2>
+        <p>The highlights and notes you make in Wisp Study are stored in the library, and the PDF file itself does not change: open the original in another reader and they are not there. To send the paper to a collaborator, or to go on in other software, from v0.19.0 you can save a copy of the PDF with your marks written into it.</p>
+        <p>This section uses another paper of the library: the maize ligular region paper in “Plant single-cell transcriptomics” (Nature Communications, 2026, 17 pages), not the rice root tip paper above. In its reading mode, with the page set to “Fit page”, four marks went onto the abstract on page 1:</p>
+        <ul>
+          <li>select the sentence “In this study, we generate…” and, in the row of buttons that comes up (“Copy”, “Underline”, “Highlight”, “Add to chat”, “Translate”, “Add to map”, “Read aloud”), click “Highlight”;</li>
+          <li>select the next sentence, “By integrating cellular and transcriptomic analyses…”, and click “Underline”;</li>
+          <li>click the sticky-note icon in the toolbar, then the margin by the top right of the abstract. A card “Page 1 · Note” opens; write “Starting point: a single-nucleus atlas of the ligular region” and click “Save”;</li>
+          <li>click the text box icon (a T), drag a box in the empty left column and write “BR → adaxial cell elongation → larger leaf angle”. Click elsewhere and the message “PDF annotations saved” comes up.</li>
+        </ul>
+        <p>Click “Annotations (4)” at the top right and the four marks are listed on the right, each with “Locate” and “Delete”. At the bottom of the list is “Export PDF with annotations…”:</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/pdf-08-marks.jpg" width="1372" height="867" loading="lazy" alt="Page 1 of the maize ligular region paper in reading mode, Fit page · 69%: one sentence of the abstract highlighted in yellow, the next underlined in blue, a sticky-note icon in the margin by the top right of the abstract, and a yellow text box in the empty left column reading BR → adaxial cell elongation → larger leaf angle. On the right the open “Annotations (4)” list: Page 1 · Highlight, Page 1 · Underline, Page 1 · Text box, Page 1 · Note (Starting point: a single-nucleus atlas of the ligular region), each with Locate, Note or Text, and Delete on its right; at the bottom of the list a green “Export PDF with annotations…”.">
+          <figcaption><b>Figure 8.</b> The four marks and the “Annotations” list. The way to export is at the bottom of the list.</figcaption>
+        </figure>
+
+        <p>Click “Export PDF with annotations…” and choose where to save it. The message at the top reads “Exported the PDF with 4 marks to …”, followed by the file's path. According to the feature description, the same entry is in the “⋯” menu when the toolbar has no room for it, and in the right-click menu of the PDF file's row; the latter was seen in this run on a file row unfolded in the list. What is exported is the file on show: the main text, or one of the attachments.</p>
+        <p>Now open the exported file with another program. Here it is the independent PDF library PyMuPDF, drawing page 1:</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/pdf-09-exported.jpg" width="1372" height="1028" loading="lazy" alt="The top half of page 1 of the exported PDF, drawn by PyMuPDF: the title and authors, the same sentence of the abstract highlighted in yellow, the next underlined in blue, a yellow sticky-note icon in the margin, and in the left column a text box with yellow fill and border reading BR → adaxial cell elongation → larger leaf angle.">
+          <figcaption><b>Figure 9.</b> The exported file opened in another program: the highlight, underline, note and text box are all there, in the colours they have in Wisp Study.</figcaption>
+        </figure>
+
+        <p>Reading the file's annotations back with PyMuPDF: page 1 holds 4 standard PDF annotations, of the types Highlight, Underline, Text (the note) and FreeText (the text box). The note's content is the sentence written in it, and the text box's content is the words in the box. The exported file still has 17 pages and all 239 links of the original; the original in the library was not touched (in the Chinese run its checksum was the same before and after).</p>
+        <aside class="note warn"><b>Note</b>Cut-out marks are for yourself and are not written into the export; a file with no marks at all only gets a message and no copy. A PDF protected by a password or permissions cannot be exported, because saving a copy would remove the protection. Chinese text in a text box is shown with the reader's own Chinese font (Song); a few readers without one (Wisp Study among them, when it opens the exported file again) show only the English in it, and hovering over or opening the annotation still shows all of it. These three points come from the feature description and were not each tried in this run.</aside>
+      </section>
+
       <section id="recap" class="recap">
         <h2>Recap</h2>
         <ul>
@@ -144,6 +174,7 @@
           <li>A PDF that is in no library sits in a conversation named after it, which you can find under “Recent conversations”.</li>
           <li>When it is worth keeping, “Make it a library” starts a new library, or “Move to library…” puts it into an existing one. The PDF, annotations and reading position go along.</li>
           <li>The app recognizes a file by its contents, so opening the same PDF again takes you back to where it lives.</li>
+          <li>“Export PDF with annotations…” saves a copy of the PDF with the highlights, underlines, notes and text boxes written in as standard annotations, which other readers show too. The original file is not changed.</li>
           <li>Next: read one paper closely in a library, see <a href="read.html">Read one paper closely</a>.</li>
         </ul>
       </section>
@@ -168,7 +199,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> The screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface and no model set up, so the numbers in this tutorial are those of that run. The text uses the labels of the English interface (Settings › General › Interface language).</p>
+      <p><b>About this tutorial.</b> Figures 1–7 were retaken in November 2026 on macOS with v0.18.0, with the English interface and no model set up, so the numbers in this tutorial are those of that run. Figures 8 and 9 come from a run on November 24, 2026 with v0.19.0, with the English interface, on a library of 40 papers, “Plant single-cell transcriptomics”; no model was used, and Figure 9 is page 1 of the exported file drawn by PyMuPDF. The text uses the labels of the English interface (Settings › General › Interface language).</p>
       <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation. Check key numbers and conclusions against the original text.</p>
     </div>
   </div>

@@ -6,7 +6,7 @@
 <link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/mindmap.html">
 <link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/mindmap.html">
 <title>Turn a paper into a mind map · Wisp Study tutorials</title>
-<meta name="description" content="Open a mind map in a column beside the PDF: have the model read the full text and draft it, click a page number on a node to get back to that sentence, add a sentence from the PDF as a node, add, fold and edit your own, put it beside the translation as three columns, and copy the outline as Markdown.">
+<meta name="description" content="Open a mind map in a column beside the PDF: have the model read the full text and draft it, click a page number on a node to get back to that sentence, add a sentence from the PDF as a node, add, fold and edit your own, put it beside the translation as three columns, copy the outline as Markdown, and zoom, move and drag nodes onto others.">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
@@ -57,6 +57,7 @@
         <li><a href="#s5">Add a sentence from the text, write your own</a></li>
         <li><a href="#s6">Original · Translation · Map</a></li>
         <li><a href="#s7">Take the map with you: copy the outline</a></li>
+        <li><a href="#s8">Move, zoom, drag nodes</a></li>
         <li class="plain"><a href="#recap">Recap</a></li>
       </ol>
     </nav>
@@ -85,7 +86,7 @@
 
         <p>The draft of this run has 7 branches: Problem, Atlas construction, BR and cell fate transitions, Early emergence, Late elongation, Lignification explains LA diversity, and Significance and limits, with 33 points under them. The root node was replaced by a short summary as well. The model was asked through the English interface, and its draft came back in English.</p>
         <p>A green page number to the right of a point is its source: the model gives a sentence of the paper, and the app finds it word for word in the full text before it adds the page. When it is not found, no page is added. In this run only 2 of the 33 points have one; in the run with the Chinese interface the draft gave 14 of 35. A point without a page is the model's own summary, to be checked against the text.</p>
-        <aside class="note"><b>Tip</b>The map is laid out at its own size. When it is wider than the column or taller than the window, scroll on it. Choosing a node scrolls the map to it.</aside>
+        <aside class="note"><b>Tip</b>When the map is larger than the column, hold the empty ground and drag, or move it with the wheel or the trackpad; the small bar at the bottom right zooms out and in and fits the whole map in the column, see section 8. Choosing a node moves the map to it.</aside>
         <aside class="note warn"><b>Note</b>The draft sends the paper's full text to the model service you set up. A paper whose full text could not be read is drafted from its abstract only.</aside>
       </section>
 
@@ -173,6 +174,27 @@
         <p>The command line and MCP read the same outline: <code>wisp mind_map --id &lt;paper ID&gt;</code> returns the number of nodes and the same Markdown, and an outside AI client can carry on from it; see the MCP section of <a href="follow.html#s6">Keep up with new papers</a>.</p>
       </section>
 
+      <section id="s8">
+        <h2><i>8</i>Move, zoom, drag nodes</h2>
+        <p>Since v0.19.0 the whole map can be moved and zoomed, and a node can be dragged somewhere else. This section goes back to the two columns “Original · Map”, with the map as it was after section 5.</p>
+        <p>At the bottom right of the map column is a small bar: <code>−</code>, the current scale, <code>+</code> and an icon of four corners. With the pointer on the corners icon the tip says “Fit the whole map in this column”; click it and the map shrinks to 55% so that every branch is in view. <code>−</code> and <code>+</code> zoom out and in, and a click on the percentage goes back to 100%. Turning the wheel while holding <kbd>⌘</kbd> (<kbd>Ctrl</kbd> on Windows) zooms too.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/mindmap-09-zoom.jpg" width="1372" height="867" loading="lazy" alt="Two columns, Original and Map: the whole map shrunk into its column, the root on the left; “Problem” open with four points, “Atlas construction”, “BR and cell fate transitions” and “Early emergence: GELP2/3/6” folded, “Late elongation: LG1-BZR1 module” open with seven points, then “Lignification explains LA diversity” folded, “Significance and limits” open, and at the very bottom “Ask at group meeting: BR doses and timing of treatment”. The small bar at the bottom right reads −, 55%, + and the corners icon.">
+          <figcaption><b>Figure 9</b>　Click the corners icon at the bottom right and the whole map fits in the column; the bar shows the scale, 55%.</figcaption>
+        </figure>
+
+        <p>Without zooming you can still move it: hold an empty spot of the map and drag, and the whole map follows; the wheel alone, with no key held, moves the map up and down.</p>
+        <p>Nodes can be dragged too. “Ask at group meeting: BR doses and timing of treatment”, added in section 5, hangs under the root, but what it asks is about the paper's limits, so it belongs under “Significance and limits”. Hold the node and drag it up: its place fades, and a see-through copy follows the pointer. Over the middle of “Significance and limits” a green ring appears around that node.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/mindmap-10-drag.jpg" width="1372" height="867" loading="lazy" alt="The map at 55%: a see-through copy of “Ask at group meeting: BR doses and timing of treatment” with a green border lies below and right of “Significance and limits”, which has a green ring around it; at the bottom the same node in its old place is pale grey.">
+          <figcaption><b>Figure 10</b>　Held over the middle of “Significance and limits”, the node shows a green ring there: let go and it hangs under it.</figcaption>
+        </figure>
+
+        <p>Let go, and the node becomes the last point under “Significance and limits”, chosen, with a green border. Over the top or bottom edge of a node, a green line shows instead of a ring, and letting go puts the node before or after that one, on the same level. A node's branches go with it. If you change your mind halfway, and the map has the keyboard (you clicked its empty ground before), <kbd>Esc</kbd> puts the node down and nothing changes; a wrong move is undone with <kbd>⌘</kbd>+<kbd>Z</kbd>.</p>
+      </section>
+
       <section id="recap" class="recap">
         <h2>Recap</h2>
         <ul>
@@ -181,6 +203,7 @@
           <li>The small dots fold and open branches; after a click on an empty spot of the map, the keyboard adds, writes in, deletes and moves nodes, and <kbd>⌘</kbd>+<kbd>Z</kbd> undoes.</li>
           <li>A page number leads back to its sentence; select a passage in the PDF and “Add to map” hangs it under the chosen node, with its page.</li>
           <li>The map and the translation can stand side by side as three columns; “Copy the outline” copies the whole map as Markdown.</li>
+          <li>The small bar at the bottom right zooms out, zooms in and fits the whole map in the column; drag the empty ground to move the map, and drag a node onto another: in the middle it hangs under it, at an edge it goes before or after it.</li>
           <li>Next: read several papers side by side, see <a href="compare.html">Read several papers side by side</a>.</li>
         </ul>
       </section>
@@ -205,7 +228,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> The screenshots come from one real run in November 2026 on macOS with v0.18.0, with the English interface; the Chinese page shows a separate run with the Chinese interface, whose draft differs. The draft was made by Claude Sonnet 5.5 and the translation by GPT-6 Luna, both called through a local gateway. A model drafts a different map each time, so the branches, the wording and the number of points with a page will differ when you follow along; the steps are the same.</p>
+      <p><b>About this tutorial.</b> Figures 1 to 8 come from one real run in November 2026 on macOS with v0.18.0, with the English interface; Figures 9 and 10 in section 8 were taken on November 24, 2026 with v0.19.0 on the map of that run, with no model involved; the Chinese page shows a separate run with the Chinese interface, whose draft differs. The draft was made by Claude Sonnet 5.5 and the translation by GPT-6 Luna, both called through a local gateway. A model drafts a different map each time, so the branches, the wording and the number of points with a page will differ when you follow along; the steps are the same.</p>
       <p><b>The assistant can be wrong.</b> The points it drafts are for you to check; check key numbers and conclusions against the original text.</p>
     </div>
   </div>

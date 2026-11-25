@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/compare-writing.html">
+<link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/compare-writing.html">
+<title>Writing directly or in Wisp Study · Wisp Study tutorials</title>
+<meta name="description" content="The same introduction paragraph, written twice with the same model: once by asking it directly for a paragraph with references, as in a chat app, and once on the Writing page of Wisp Study. Every citation on both sides is checked on Crossref and Europe PMC: does the paper exist, is the reference right, and does the paper say what the sentence claims.">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../../app-icon.png">
+<link rel="stylesheet" href="../../style.css">
+<link rel="stylesheet" href="../../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="Site">
+      <a href="index.html" aria-current="page">Tutorials</a>
+      <a href="../index.html#ideas">Ideas</a>
+      <a href="../index.html#tools">Tools</a>
+      <a href="../index.html#download">Download</a>
+    </nav>
+    <a class="lang" href="../../tutorials/compare-writing.html" lang="zh-CN" hreflang="zh-CN">中文</a>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="Location"><a href="index.html">Tutorials</a><span>›</span>Write</nav>
+
+  <header class="doc-head">
+    <p class="kicker">Tutorial 15 · Write</p>
+    <h1>Writing directly, or writing in Wisp Study</h1>
+    <p class="lead">Ask a chat model for an introduction paragraph with references and you have a presentable paragraph in half a minute. The questions come afterwards: do these papers exist, are the references right, and does each sentence say what the cited paper says? This tutorial writes the same paragraph twice with the same model, once by asking directly and once on the Writing page, and then checks every citation on both sides the way a careful reader would, so that the difference is shown rather than claimed.</p>
+    <dl class="facts">
+      <div><dt>Scenario</dt><dd>Write one introduction paragraph (5–8 sentences, with citations) on single-cell and single-nucleus atlases of plant organs, with the library “Plant single-cell transcriptomics” beside you.</dd></div>
+      <div><dt>Needs</dt><dd>A library; a model provider set up in “Settings › AI”. Asking directly needs nothing.</dd></div>
+      <div><dt>Time</dt><dd>Each paragraph takes under a minute to write; the time goes into checking.</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="Sections of this tutorial">
+      <h2>Contents</h2>
+      <ol>
+        <li><a href="#s1">The task and the two ways</a></li>
+        <li><a href="#s2">Ask the model directly</a></li>
+        <li><a href="#s3">Check its references one by one</a></li>
+        <li><a href="#s4">Let the assistant write on the Writing page</a></li>
+        <li><a href="#s5">The sentence behind each citation</a></li>
+        <li><a href="#s6">Find citations for a sentence of your own</a></li>
+        <li><a href="#s7">References and export</a></li>
+        <li><a href="#s8">The two ways side by side</a></li>
+        <li class="plain"><a href="#recap">Recap</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>The task and the two ways</h2>
+        <p>The task is one English introduction paragraph of 5 to 8 sentences on single-cell and single-nucleus transcriptome atlases of plant organs, with a citation for each claim. Both runs use the same model, Claude Sonnet 5.5 (<code>claude/claude-sonnet-5-5</code>), called through a local gateway.</p>
+        <ul>
+          <li><b>Directly</b>: one message, as in a chat app. The model has no papers at hand.</li>
+          <li><b>In Wisp Study</b>: the demo library “Plant single-cell transcriptomics”, 40 papers from a PubMed search, published in 2026–2027. Only the maize ligular region paper (Wang et al., 2026, Nat Commun) has its full text; the others have their record and abstract.</li>
+        </ul>
+        <p>Both sides are checked by the same standard: can the paper be found on Crossref; are authors, year, journal, volume and pages right; does the abstract of the cited paper say what the citing sentence claims.</p>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>Ask the model directly</h2>
+        <p>This one message went to the model, with no file attached:</p>
+        <blockquote><cite>Question</cite><p>Write one introduction paragraph for my paper (5-8 sentences) on single-cell and single-nucleus transcriptome atlases of plant organs, with citations, and list the references at the end.</p></blockquote>
+        <p>The answer came back in 28 seconds. Here it is word for word (the asterisks are its Markdown):</p>
+        <blockquote><cite>The model's answer (verbatim)</cite>
+<p>Plant organs are built from many cell types whose identities and responses are blurred in bulk RNA-seq, and single-cell approaches now resolve this heterogeneity (Rich-Griffin et al., 2020; Seyfferth et al., 2021). Protoplast-based single-cell RNA sequencing (scRNA-seq) of the Arabidopsis root provided the first atlases of cell types and developmental trajectories (Jean-Baptiste et al., 2019; Ryu et al., 2019; Shulse et al., 2019; Zhang et al., 2019; Denyer et al., 2019). The approach was soon extended to aerial organs, including the vegetative shoot apex and leaf vascular and mesophyll tissues (Kim et al., 2021; Zhang et al., 2021; Procko et al., 2022), and to crop species such as maize ears (Xu et al., 2021). Protoplasting, however, can bias cell-type recovery and induce stress-related transcriptional artifacts, and it is difficult to apply in tissues with rigid or lignified walls. Single-nucleus RNA sequencing (snRNA-seq) avoids enzymatic wall digestion and can be paired with chromatin accessibility profiling, linking regulatory landscapes to cell identity (Farmer et al., 2021). Atlases have since been used to reconstruct gene regulatory networks and cell-type-specific responses to hormonal and nutrient cues at cellular resolution (Wendrich et al., 2020; Nolan et al., 2023). Despite this progress, integrating atlases across organs, species, and technologies remains a major challenge, and it motivates the present study.<br>
+<br>
+**References**<br>
+<br>
+- Denyer T, Ma X, Klesen S, Scacchi E, Nieselt K, Timmermans MCP (2019). Spatiotemporal developmental trajectories in the Arabidopsis root revealed using high-throughput single-cell RNA sequencing. *Developmental Cell* 48:840–852.<br>
+- Farmer A, Thibivilliers S, Ryu KH, Schiefelbein J, Libault M (2021). Single-nucleus RNA and ATAC sequencing reveals the impact of chromatin accessibility on gene expression in Arabidopsis roots at the single-cell level. *Molecular Plant* 14:372–383.<br>
+- Jean-Baptiste K, McFaline-Figueroa JL, Alexandre CM, et al. (2019). Dynamics of gene expression in single root cells of *Arabidopsis thaliana*. *Plant Cell* 31:993–1011.<br>
+- Kim JY, Symeonidi E, Pang TY, et al. (2021). Distinct identities of leaf phloem cells revealed by single cell transcriptomics. *Plant Cell* 33:511–530.<br>
+- Nolan TM, Vukašinović N, Hsu CW, et al. (2023). Brassinosteroid gene regulatory networks at cellular resolution in the Arabidopsis root. *Science* 379:eadf4721.<br>
+- Procko C, Lee T, Borsuk A, et al. (2022). Leaf cell-specific and single-cell transcriptional profiling reveals a role for the palisade layer in UV light protection. *Plant Cell* 34:3261–3279.<br>
+- Rich-Griffin C, Stechemesser A, Finch J, Lucas E, Ott S, Schäfer P (2020). Single-cell transcriptomics: a high-resolution avenue for plant functional genomics. *Trends in Plant Science* 25:186–197.<br>
+- Ryu KH, Huang L, Kang HM, Schiefelbein J (2019). Single-cell RNA sequencing resolves molecular relationships among individual plant cells. *Plant Physiology* 179:1444–1456.<br>
+- Seyfferth C, Renema J, Wendrich JR, et al. (2021). Advances and opportunities in single-cell transcriptomics for plant research. *Annual Review of Plant Biology* 72:847–866.<br>
+- Shulse CN, Cole BJ, Ciobanu D, et al. (2019). High-throughput single-cell transcriptome profiling of plant cell types. *Cell Reports* 27:2241–2247.<br>
+- Wendrich JR, Yang B, Vandamme N, et al. (2020). Vascular transcription factors guide plant epidermal responses to limiting phosphate conditions. *Science* 370:eaay4970.<br>
+- Xu X, Crow M, Rice BR, et al. (2021). Single-cell RNA sequencing of developing maize ears facilitates functional analysis and trait candidate gene discovery. *Developmental Cell* 56:557–568.<br>
+- Zhang TQ, Chen Y, Wang JW (2021). A single-cell analysis of the Arabidopsis vegetative shoot apex. *Developmental Cell* 56:1056–1074.<br>
+- Zhang TQ, Xu ZG, Shang GD, Wang JW (2019). A single-cell RNA sequencing profiles the developmental landscape of Arabidopsis root. *Molecular Plant* 12:648–660.<br>
+<br>
+I wrote these citations from memory and had no way to look them up here, so please check volume and page numbers (and add DOIs) against PubMed or Crossref before submission. I can adjust the focus, for example toward a specific species or toward methods, if you tell me your paper's angle.</p>
+        </blockquote>
+        <p>First what it does well: the text is fluent and the structure is clear. It goes from bulk RNA-seq blurring cell identities, to the first Arabidopsis root atlases from protoplasts, to aerial organs and maize, to single-nucleus sequencing, and on to regulatory networks. The papers it cites are well-known work in the field. It also says that it “wrote these citations from memory” and asks you to check them against PubMed or Crossref.</p>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>Check its references one by one</h2>
+        <p>Do as it says. Each reference was sent as it stands to Crossref’s public API, taking the first 3 results:</p>
+        <figure class="code">
+          <figcaption>The two queries sent for each reference</figcaption>
+<pre><code>https://api.crossref.org/works?query.bibliographic=<span class="c">&lt;the whole reference as written&gt;</span>&amp;rows=3
+https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=DOI:"…"&amp;resultType=core   <span class="c"># then the abstract, by DOI</span></code></pre>
+        </figure>
+        <p>For each paper found, its abstract was fetched from Europe PMC by DOI (the second line above) to see whether the citing sentence is borne out. The 14 references:</p>
+        <figure class="code">
+          <figcaption>Asking directly: the 14 references checked</figcaption>
+<pre><code>Reference · On Crossref · Details · Is the citing sentence in the abstract?
+Rich-Griffin 2020 · Found · Right · In part: a review; the abstract speaks of single-cell resolution, not of bulk RNA-seq blurring cell types
+Seyfferth 2021 · Found · Right · In part: the same, a review
+Jean-Baptiste 2019 · Found · Right · Yes: Arabidopsis root cells, trajectories in pseudotime
+Ryu 2019 · Found · Right · Yes: root protoplasts, cell types, trajectories
+Shulse 2019 · Found · Right · Yes: Drop-seq of Arabidopsis roots
+Zhang 2019 · Found · Right · Yes: Arabidopsis root, differentiation trajectory
+Denyer 2019 · Found · Right · Yes: root atlas, pseudotime trajectories
+Kim 2021 · Found · Right · Yes: leaf vasculature and phloem cells
+Zhang 2021 · Found · Right · Yes: vegetative shoot apex
+Procko 2022 · Found · Right · Yes: palisade mesophyll of the leaf
+Xu 2021 · Found · Right · Yes: developing maize ears
+Farmer 2021 · Found · Right · Yes: single-nucleus RNA and ATAC sequencing
+Wendrich 2020 · Found · Right · Yes: phosphate response from a root atlas
+Nolan 2023 · Found · Right · Yes: brassinosteroid networks at cellular resolution</code></pre>
+        </figure>
+        <p>All 14 exist, and authors, year, journal, volume and pages are all right. Of the 14 citations, 12 are borne out by the abstract of the paper cited; the two reviews in the first sentence support it only in general terms. Two sentences have no citation: the fourth (protoplasting biases which cells are recovered) and the last (integrating atlases remains a challenge).</p>
+        <p>Two things only the checking shows. All 14 papers are from 2019–2023, and not one of them is among the 40 in the library; the 2026 atlas of the maize ligular region is unknown to it. And no citation tells you which sentence of the paper it rests on: for each one you read the paper yourself.</p>
+        <aside class="note"><b>Tip</b>The same request was also asked in Chinese (see the Chinese version of this tutorial). That time the answer had 10 references: 9 exist, 3 of them with a wrong issue number, and one, the one the model itself flagged, does not exist as written. It joins two papers: the authors, year and the start of the title of a 2021 <i>PLOS ONE</i> paper, and the journal and subject of a 2022 <i>Development</i> paper by the same group, with an article number that belongs to an unrelated paper. Whether a reference is made up shows only when you look it up.</aside>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>Let the assistant write on the Writing page</h2>
+        <p>Open the library, go to “Writing” and make a new manuscript, titled “Single-cell atlases of plant organs”. Select Introduction and click the star icon beside the outline heading to switch to “Assistant writes”. Type the same request:</p>
+        <blockquote><cite>Instruction</cite><p>Write one introduction paragraph in Introduction (5-8 sentences) on single-cell and single-nucleus transcriptome atlases of plant organs with citations.</p></blockquote>
+        <p>In under a minute the manuscript on the right has an English paragraph of 9 sentences with 8 citations, with a green background and a bar on the left; below it, “The assistant made 1 change in this section” with “Undo all” and “Keep”. The conversation begins:</p>
+        <blockquote><cite>Assistant</cite><p>I wrote the Introduction paragraph. It has 8 sentences and 8 citations, which you can check on the right.</p></blockquote>
+        <figure class="shot">
+          <img src="../../img/en/t/compare-writing-01-agent.jpg" width="1372" height="867" loading="lazy" alt="Assistant writes on the Writing page: in the middle the assistant’s answer, with Structure, Sources, Style reference and Weak points; on the right the new English paragraph with a green bar and green citations such as (Phua et al., 2026) and (Terenzi et al., 2027); below the manuscript “The assistant made 1 change in this section”, “Undo all” and “Keep”.">
+          <figcaption><b>Fig. 1</b>　The paragraph the assistant wrote into the manuscript. The answer lists the papers it cited and the points it is unsure of.</figcaption>
+        </figure>
+        <p>It says “8 sentences”; counting gives 9, one more than asked for. Check such things in the manuscript itself. The rest of the answer is worth reading:</p>
+        <ul>
+          <li>“Style reference”: only P40 (the maize ligular paper) has introduction sentences in the library, so it could model the structure on one paper only; “The wording is my own.”</li>
+          <li>“Weak points”: several claims rest on abstracts; the claim that scRNA-seq lacks spatial context comes from P5, whose abstract says its own spatial approach “outperforms” single-cell profiling; the library has no source for the general statement that atlases exist across many species and organs, so that sentence has no citation; and the library has no foundational paper on scRNA-seq or snRNA-seq methods.</li>
+        </ul>
+        <p>Click the grey line above the answer, “Read manuscript · Find candidate sentences ×2 · Write manuscript”, to unfold its steps. “Find candidate sentences: en · introduction · limit 10” is where it looked at how the papers in the library write their introductions before writing. “Write manuscript” ends with “Wrote “Introduction””, with no note that a sentence matches the cited papers word for word.</p>
+        <figure class="shot">
+          <img src="../../img/en/t/compare-writing-02-steps.jpg" width="1372" height="867" loading="lazy" alt="The unfolded tool lines: Read manuscript: Introduction, Read 1 section; Find candidate sentences: en · introduction · limit 10, 10 sentences; Find candidate sentences: en · introduction · limit 15, 3 sentences; Write manuscript: Introduction · 2188 characters in all, Wrote “Introduction”.">
+          <figcaption><b>Fig. 2</b>　The steps unfolded. Writing the manuscript raised no note about copied sentences.</figcaption>
+        </figure>
+        <p>The last sentence needs your attention: “Here we review single-cell and single-nucleus atlases of plant organs …”. It took the manuscript for a review (it says it ends “with a sentence on the scope of the review”). If yours is a research paper, that sentence has to change.</p>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>The sentence behind each citation</h2>
+        <p>Click “I write” to go back to editing, then the “References” tab on the right. “8 papers cited in this section”, and under each paper one sentence of its own: the sentence the assistant took when it cited it, marked “Abstract”. That is the source, and it is the layer that asking directly does not give you.</p>
+        <figure class="shot">
+          <img src="../../img/en/t/compare-writing-03-sources.jpg" width="1372" height="867" loading="lazy" alt="The Writing page: the manuscript in the middle; on the right the References tab, “8 papers cited in this section”, with the full entries of Chen 2026b, Li 2026, Phua 2026 and Terenzi 2027, each with an English sentence on a grey background below it, marked Abstract.">
+          <figcaption><b>Fig. 3</b>　Under each cited paper is the sentence the citing sentence rests on.</figcaption>
+        </figure>
+        <p>Click a source and the paper opens beside it. These sources are all in abstracts, so what opens is its “Info” page with the abstract below, to read against the sentence. The alfalfa root paper has no PDF; its tab reads “PDF (none)”.</p>
+        <figure class="shot">
+          <img src="../../img/en/t/compare-writing-04-abstract.jpg" width="1372" height="867" loading="lazy" alt="After clicking a source, the paper by Zhang et al. 2026 in Horticulture Research on single-nucleus RNA-seq and ATAC-seq of alfalfa roots under cadmium stress opens on the far right: authors, journal, DOI and PMID, then the abstract, which says Eight major root cell types were annotated, with significant remodeling under Cd stress.">
+          <figcaption><b>Fig. 4</b>　Click a source and the cited paper’s Info page opens beside it, the sentence in its abstract.</figcaption>
+        </figure>
+        <p>A source only tells you that the sentence is in the paper; whether the citation is right still has to be read. By the standard of section 3, the 8 citations:</p>
+        <ul>
+          <li>All 8 papers are in the library, and their DOIs are found on Crossref with the same authors, year and journal as the library’s records.</li>
+          <li>All 8 are borne out by the abstract. The alfalfa roots, maize ligular region, soybean anthers, maize ovule and Arabidopsis trichome papers say what the sentences say. Phua 2026 is a review that calls tissue context “a key determinant of cell state and function”. Terenzi 2027 is a methods chapter on cell sorting in roots that calls whole-root analyses insufficient, which the manuscript widens to “whole organs”. Wu 2026 is a spatial transcriptomics paper speaking of its own method, as the assistant itself pointed out.</li>
+          <li>Two sentences have no citation: the third, as the assistant said, and the last, the one about a review.</li>
+          <li>Against the cited abstracts, the longest run of identical words is 4.</li>
+        </ul>
+        <p>One thing never comes up when asking directly: the 40 papers in the library are all from around 2026, so the paragraph lists recent examples organ by organ, and none of the founding atlases since 2019 is there, because the library does not have them. The assistant said so in its answer.</p>
+      </section>
+
+      <section id="s6">
+        <h2><i>6</i>Find citations for a sentence of your own</h2>
+        <p>When asked directly, the sentence on protoplasts biasing the cells recovered had no citation. Write a sentence of the same meaning yourself, as a new paragraph at the end of the manuscript:</p>
+        <blockquote><cite>Written by hand</cite><p>Protoplast isolation can bias which cell types are recovered and isolating nuclei instead reaches tissues whose walls resist enzymatic digestion.</p></blockquote>
+        <p>With the caret in that paragraph, click “Find citations” below the manuscript. In under a minute a card appears on the right: the sentence is marked “Background”, and two reviews are ticked, each with the model’s reason. At the foot of the card: “Searched: the records, abstracts and every part of the full text (introduction, methods, results, discussion) of 40 papers; 39 of them have no full text and were searched by record and abstract only.”</p>
+        <figure class="shot">
+          <img src="../../img/en/t/compare-writing-05-citefind.jpg" width="1372" height="867" loading="lazy" alt="The Find citations card: sentence 1, marked Background; ticked are Hsieh et al., 2026 (Review, Protoplast-Based Functional Genomics and Genome Editing, reason: Review of protoplast-based genomics that discusses the challenges and limitations of protoplast isolation) and Chen et al., 2026 (Review, Single-Cell and Spatial Omics Technologies in Rice Abiotic Stress Biology, reason: Methodological review of single-cell and spatial omics in rice, covering protoplast versus nuclei isolation tradeoffs); then “3 more similar papers”, what was searched, “Insert 2 citations”, “Discard” and “Adds citations at sentence ends; no words change”.">
+          <figcaption><b>Fig. 5</b>　Find citations ticked two papers. A tick is only the model’s judgement; click to untick or pick another.</figcaption>
+        </figure>
+        <p>Click “Insert 2 citations”: (Hsieh et al., 2026; Chen et al., 2026a) is added at the end of the sentence, and the words stay as they were. The library now holds two Chen et al. 2026 papers in the citations, so they become 2026a and 2026b. On the References tab, Hsieh 2026 has no sentence under it, and a star button with a 1 appears above the list: 1 citation has no source yet. Click it, and within a minute Hsieh 2026 reads, in the warning colour:</p>
+        <blockquote><cite>References tab</cite><p>No support found in this paper for: Protoplast isolation can bias which cell types are recovered and isolating nuclei instead reaches tissues whose walls resist enzymatic digestion.</p></blockquote>
+        <figure class="shot">
+          <img src="../../img/en/t/compare-writing-06-nosupport.jpg" width="1372" height="867" loading="lazy" alt="The last paragraph of the manuscript ends with the green citation (Hsieh et al., 2026; Chen et al., 2026a); on the right, References 10: Chen 2026 with a sentence marked with a star and Abstract, Chen 2026b with its sentence, and under Hsieh 2026 an orange line: No support found in this paper for, followed by the sentence.">
+          <figcaption><b>Fig. 6</b>　Hsieh 2026, ticked by Find citations, is flagged when its source is looked for: nothing in it bears the sentence out.</figcaption>
+        </figure>
+        <p>Reading Hsieh 2026’s abstract confirms it: it is about protoplasts for delivery, regeneration and genome editing, and says nothing about protoplasts biasing cell types or about using nuclei instead. Chen 2026’s sentence (found by the model, hence the star) says only that the review treats each platform’s “dominant biases”, and its reason on the card, “protoplast versus nuclei isolation tradeoffs”, says more than the abstract does. The paper that does say this is the 2021 <i>PLOS ONE</i> paper by Conde et al. that came up in the Chinese direct run: secondary cell walls hinder enzymatic digestion and leave cell types unequally represented among protoplasts. It is not in the library, so Find citations cannot find it. The fix is to add it to the library and cite it.</p>
+        <aside class="note warn"><b>Note</b>Find citations looks for the closest papers in the library. When the library has no fitting paper, it still ticks some that are only near. No warning colour does not mean a citation is right; a warning colour always needs dealing with.</aside>
+      </section>
+
+      <section id="s7">
+        <h2><i>7</i>References and export</h2>
+        <p>Click the eye icon above the manuscript to preview it as a reader will see it. At the end is “References” with “10 papers”, each a full entry with its DOI; sections with nothing written say “This section is empty.”</p>
+        <figure class="shot">
+          <img src="../../img/en/t/compare-writing-07-preview.jpg" width="1372" height="867" loading="lazy" alt="The preview: after the last sentence of Introduction come Methods, Results and Discussion, each saying This section is empty; below is References, 10 papers, with the full entries of Chen 2026a, Chen 2026b, Hsieh 2026, Li 2026, Phua 2026, Terenzi 2027 and Wang 2026, with DOIs.">
+          <figcaption><b>Fig. 7</b>　The references in the preview, made from the library’s records.</figcaption>
+        </figure>
+        <p>Exported from “Export” as a Word file (.docx) and opened in LibreOffice: the text has author–year citations such as (Hsieh et al., 2026; Chen et al., 2026a), and under References are the same 10 entries as in the preview. Journal names are written as PubMed writes them (for example “International journal of molecular sciences”); adjust them to the journal’s style before you submit.</p>
+      </section>
+
+      <section id="s8">
+        <h2><i>8</i>The two ways side by side</h2>
+        <p>Every row comes from this run.</p>
+        <div class="scroll">
+          <table>
+            <caption><b>Table 1</b>　One introduction paragraph, written two ways.</caption>
+            <thead><tr><th></th><th>Asking the model directly</th><th>Writing in Wisp Study</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">Where citations come from</th><td>The model’s memory: 14 well-known papers from 2019–2023, none of them in the library</td><td>Only the 40 papers in the library, all from around 2026</td></tr>
+              <tr><th scope="row">Do the papers exist</th><td>All 14 here; in the Chinese run, 1 of 10 did not, made of two papers</td><td>10 papers cited, all in the library, all found on Crossref</td></tr>
+              <tr><th scope="row">Reference details</th><td>All right here; in the Chinese run 3 of 9 real ones had a wrong issue number</td><td>From the PubMed records, formatted in the style chosen at export</td></tr>
+              <tr><th scope="row">Is the claim in the cited paper</th><td>You read each abstract: 12 of 14 yes, 2 reviews only in general</td><td>Each citation keeps a sentence of the paper, one click away: the assistant’s 8 all hold, one widened from roots to organs; of the 2 papers ticked by Find citations, looking for sources flagged 1 as unsupported</td></tr>
+              <tr><th scope="row">Sentences without a citation</th><td>2, not mentioned in the answer</td><td>2, both pointed out in the assistant’s answer</td></tr>
+              <tr><th scope="row">Copied wording</th><td>Longest run of words identical to a cited abstract: 4</td><td>Also 4; each sentence is compared with the cited papers as it is written, and nothing was flagged</td></tr>
+              <tr><th scope="row">Prose and structure</th><td>Fluent and complete, with the founding papers of the field</td><td>Fluent, but its examples are what the library holds; no founding papers; it took the paper for a review</td></tr>
+              <tr><th scope="row">Left to you</th><td>Look up each reference, find the paper, check each claim, then add the papers to your library</td><td>Read the sources and judge each citation; add missing papers to the library first; count the sentences it says it wrote</td></tr>
+              <tr><th scope="row">Time</th><td>28 s for the answer; checking means one Crossref query and one abstract per reference</td><td>Under a minute for the paragraph, for Find citations and for the sources; the checking is on the References tab</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Each way has its strength. Asked directly, the model writes from the whole field it has read, founding papers your library does not have included, and Wisp Study cannot do that: what is not in the library, it does not cite. But every reference it gives has to be looked up, and in one of the two runs one did not exist. In Wisp Study, citations come only from papers you have collected, each with the sentence it rests on, and those that do not hold are flagged. Still, “the sentence is in the paper” is not the same as “this is the right citation”: the last judgement stays yours.</p>
+        <aside class="note"><b>Tip</b>The two ways connect: check the reference list a direct answer gives you, add the papers to the library by DOI (see <a href="migrate.html">Bring in the papers you already have</a>), then cite them on the Writing page, where they get sources.</aside>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>Recap</h2>
+        <ul>
+          <li>Asked directly, the model gives a fluent paragraph with references in half a minute; none of the citations says which sentence it rests on, and whether a reference is real shows only when you look it up.</li>
+          <li>With “Assistant writes” on the Writing page, citations come only from the library, each with the sentence it rests on, one click from the abstract.</li>
+          <li>A source only shows that the sentence is in the paper; widened claims and near-miss papers are for you to judge.</li>
+          <li>“Find citations” picks the closest papers in the library, and looking for sources flags those with no support; when the library has no fitting paper, add one first.</li>
+          <li>For writing a paper step by step, see <a href="write.html">Write a paper: candidate sentences, citations and sources</a>; to go back and forth with co-authors, read <a href="revise.html">Revise with co-authors</a>.</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="Previous and next">
+    <a class="prev" href="write.html"><small>Previous · 14</small><strong>Write a paper</strong></a>
+    <a class="next" href="revise.html"><small>Next · 16</small><strong>Revise with co-authors</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>References</h2>
+      <ol>
+        <li><a href="index.html">All tutorials</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">Features: what each page can do (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">Data and privacy: where files live and what leaves your machine (in Chinese)</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">Questions and ideas: Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>About this tutorial.</b> The screenshots, answers and numbers come from a run on November 24, 2026 on macOS with v0.19.0 and the English interface, in the demo library “Plant single-cell transcriptomics”. Both ways used the same model, Claude Sonnet 5.5, called through a local gateway; the direct question had no system prompt and no file attached. The references were checked the same day with Crossref’s <code>query.bibliographic</code> search and Europe PMC abstracts fetched by DOI. The Chinese version of this tutorial is its own run, with other answers and numbers. A model answers differently each time, so the papers and numbers will differ when you follow along; the way to check them is the same.</p>
+      <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation; check key numbers and conclusions against the original.</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

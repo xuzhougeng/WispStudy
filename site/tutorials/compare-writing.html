@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="alternate" hreflang="zh-CN" href="https://xuzhougeng.github.io/WispStudy/tutorials/compare-writing.html">
+<link rel="alternate" hreflang="en" href="https://xuzhougeng.github.io/WispStudy/en/tutorials/compare-writing.html">
+<title>直接写与在 Wisp Study 里写 · Wisp Study 教程</title>
+<meta name="description" content="同一段引言、同一个模型，写两遍：一遍像在聊天软件里那样直接让模型写并给参考文献，一遍在 Wisp Study 的写作页里写。逐条到 Crossref 和 Europe PMC 核对两边的引用：文献在不在，题录对不对，论断在不在被引的文献里。">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F5F4F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1A1B1D" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="../app-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../app-icon.png">
+<link rel="stylesheet" href="../style.css">
+<link rel="stylesheet" href="../tutorial.css">
+</head>
+<body class="doc">
+<a class="skip" href="#main">跳到正文</a>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="../index.html" aria-label="Wisp Study"><img src="../app-icon.svg" width="26" height="26" alt=""><span>Wisp Study</span></a>
+    <nav aria-label="站点">
+      <a href="index.html" aria-current="page">教程</a>
+      <a href="../index.html#ideas">理念</a>
+      <a href="../index.html#tools">工具</a>
+      <a href="../index.html#download">下载</a>
+    </nav>
+    <a class="lang" href="../en/tutorials/compare-writing.html" lang="en" hreflang="en">English</a>
+    <a class="gh" href="https://github.com/xuzhougeng/WispStudy">GitHub<span aria-hidden="true"> ↗</span></a>
+  </div>
+</header>
+
+<main id="main" class="wrap doc-wrap">
+  <nav class="crumbs" aria-label="位置"><a href="index.html">教程</a><span>›</span>写作</nav>
+
+  <header class="doc-head">
+    <p class="kicker">教程 15　·　写作</p>
+    <h1>直接写，还是在 Wisp Study 里写</h1>
+    <p class="lead">让聊天模型写一段带参考文献的引言，几十秒就有一段像样的文字。问题在后面：这些文献在不在，题录对不对，句子说的是不是那篇文献的内容。这一篇用同一个模型、同一个题目写两遍，一遍直接问，一遍在写作页里写，然后像一个仔细的读者那样逐条核对两边的引用，把差别摆出来。</p>
+    <dl class="facts">
+      <div><dt>场景</dt><dd>为一篇讲植物器官单细胞 / 单细胞核图谱的论文写一段引言（5–8 句，带引用），文献库「植物单细胞转录组」在旁边。</dd></div>
+      <div><dt>需要</dt><dd>一个文献库；在「设置 › AI」里配好的模型服务。直接问的那一遍什么都不用。</dd></div>
+      <div><dt>用时</dt><dd>两边各写一段都不到一分钟；时间花在核对上。</dd></div>
+    </dl>
+  </header>
+
+  <div class="doc-cols">
+    <nav class="toc" aria-label="本篇的小节">
+      <h2>本篇</h2>
+      <ol>
+        <li><a href="#s1">题目和两种写法</a></li>
+        <li><a href="#s2">直接问模型</a></li>
+        <li><a href="#s3">逐条核对它给的文献</a></li>
+        <li><a href="#s4">在写作页让助手写</a></li>
+        <li><a href="#s5">每处引用依据的原句</a></li>
+        <li><a href="#s6">自己写的一句，配引用</a></li>
+        <li><a href="#s7">参考文献与导出</a></li>
+        <li><a href="#s8">两种写法对照</a></li>
+        <li class="plain"><a href="#recap">回顾</a></li>
+      </ol>
+    </nav>
+
+    <article class="prose">
+      <section id="s1">
+        <h2><i>1</i>题目和两种写法</h2>
+        <p>要写的是一段英文引言，5 到 8 句，讲植物器官的单细胞和单细胞核转录组图谱，每个论断带引用。两遍用的是同一个模型 Claude Sonnet 5.5（<code>claude/claude-sonnet-5-5</code>），经本机的网关调用。</p>
+        <ul>
+          <li><b>直接写</b>：像在聊天软件里那样，只发一句话，模型手边没有任何文献。</li>
+          <li><b>在 Wisp Study 里写</b>：演示库「植物单细胞转录组」，40 篇文献来自一次 PubMed 检索，发表在 2026—2027 年；只有玉米叶舌区那篇（Wang et al., 2026，Nat Commun）带全文，其余只有题录和摘要。</li>
+        </ul>
+        <p>核对的标准两边一样：文献在 Crossref 上查不查得到；作者、年份、期刊、卷期对不对；句子说的事，被引文献的摘要里有没有。</p>
+      </section>
+
+      <section id="s2">
+        <h2><i>2</i>直接问模型</h2>
+        <p>发给模型的就是这一句，没有附任何文件：</p>
+        <blockquote><cite>提问</cite><p>帮我写一段论文引言（英文，5–8 句），主题是植物器官的单细胞 / 单细胞核转录组图谱，要带引用，文末列出参考文献。</p></blockquote>
+        <p>30 秒后回答回来了。下面是它的原文，一字未改（星号是它用的 Markdown 记号）：</p>
+        <blockquote><cite>模型的回答（原文）</cite>
+<p>下面是引言段落（7 句），之后是参考文献。<br>
+<br>
+**Introduction**<br>
+<br>
+Plant organs are built from diverse cell types whose identities, positions, and transcriptional states change continuously during development and in response to the environment, yet bulk transcriptomic profiling averages these differences away (Seyfferth et al., 2021). Single-cell RNA sequencing (scRNA-seq) overcomes this limitation, and early applications to *Arabidopsis thaliana* roots resolved major cell types and reconstructed developmental trajectories at unprecedented resolution (Denyer et al., 2019; Ryu et al., 2019). These efforts have since grown into comprehensive atlases, such as an integrated root atlas that defined developmental trajectories in wild-type plants and cell-identity mutants (Shahan et al., 2022). Atlas-building has also extended to aerial organs, including the vegetative shoot apex (Zhang et al., 2021), leaf phloem (Kim et al., 2021), and the stem-cell niches of maize (Satterlee et al., 2020), as well as to developing maize ears, where single-cell data facilitated trait-candidate gene discovery (Xu et al., 2021). Protoplast-based workflows, however, remain limited by cell-wall digestion, which can induce stress responses and under-represent cell types that are difficult to dissociate. Single-nucleus RNA sequencing (snRNA-seq) avoids this step and enables profiling of tissues that are woody, lignified, or otherwise recalcitrant, as demonstrated in the *Populus* shoot apex vascular system (Conde et al., 2021). Single-nucleus approaches can also be combined with chromatin accessibility profiling to link gene regulation to cell identity (Farmer et al., 2021), which positions cross-organ, cross-species single-cell and single-nucleus atlases as a foundation for plant functional genomics.<br>
+<br>
+**References**<br>
+<br>
+1. Conde, D., Triozzi, P. M., Balmant, K. M., et al. (2021). A robust method of nuclei isolation for single-cell RNA sequencing solves a key challenge in plant biology. *Development*, 148(18), dev199903. *(Please check the title; I cite it from memory.)*<br>
+2. Denyer, T., Ma, X., Klesen, S., Scacchi, E., Nieselt, K., &amp; Timmermans, M. C. P. (2019). Spatiotemporal developmental trajectories in the Arabidopsis root revealed using high-throughput single-cell RNA sequencing. *Developmental Cell*, 48(6), 840–852.<br>
+3. Farmer, A., Thibivilliers, S., Ryu, K. H., Schiefelbein, J., &amp; Libault, M. (2021). Single-nucleus RNA and ATAC sequencing reveals the impact of chromatin accessibility on gene expression in Arabidopsis roots at the single-cell level. *Molecular Plant*, 14(2), 372–383.<br>
+4. Kim, J.-Y., Symeonidi, E., Pang, T. Y., et al. (2021). Distinct identities of leaf phloem cells revealed by single cell transcriptomics. *The Plant Cell*, 33(3), 511–530.<br>
+5. Ryu, K. H., Huang, L., Kang, H. M., &amp; Schiefelbein, J. (2019). Single-cell RNA sequencing resolves molecular relationships among individual plant cells. *Plant Physiology*, 179(4), 1444–1456.<br>
+6. Satterlee, J. W., Strable, J., &amp; Scanlon, M. J. (2020). Plant stem-cell organization and differentiation at single-cell resolution. *PNAS*, 117(52), 33689–33699.<br>
+7. Seyfferth, C., Renema, J., Wendrich, J. R., et al. (2021). Advances and opportunities in single-cell transcriptomics for plant research. *Annual Review of Plant Biology*, 72, 847–866.<br>
+8. Shahan, R., Hsu, C.-W., Nolan, T. M., et al. (2022). A single-cell Arabidopsis root atlas reveals developmental trajectories in wild-type and cell identity mutants. *Developmental Cell*, 57(5), 543–560.<br>
+9. Xu, X., Crow, M., Rice, B. R., et al. (2021). Single-cell RNA sequencing of developing maize ears facilitates functional analysis and trait candidate gene discovery. *Developmental Cell*, 56(4), 557–568.<br>
+10. Zhang, T.-Q., Chen, Y., &amp; Wang, J.-W. (2021). A single-cell analysis of the Arabidopsis vegetative shoot apex. *Developmental Cell*, 56(8), 1056–1074.<br>
+<br>
+**Notes**<br>
+- 我是凭记忆列出这些文献的，没有联网核对。投稿前请在 PubMed 或 Crossref 上核对作者列表、标题和 DOI，尤其是第 1 条。<br>
+- 如果你的论文聚焦特定物种（如水稻、番茄）或特定器官（如根、叶、花），告诉我，我可以改写并换成更贴合的引用。<br>
+- 如果需要，我也可以把参考文献转成特定格式（如 Nature、Cell 或 GB/T 7714）。</p>
+        </blockquote>
+        <p>先说它做得好的地方：文字流畅，7 句的结构清楚，从「bulk 测序把差异平均掉」讲到原生质体 scRNA-seq 的拟南芥根图谱，再到地上器官、玉米，最后讲单细胞核测序能做原生质体做不了的组织。引的都是领域里常被引的工作。它还主动说了「凭记忆列出这些文献」「没有联网核对」，并点名第 1 条要查。</p>
+      </section>
+
+      <section id="s3">
+        <h2><i>3</i>逐条核对它给的文献</h2>
+        <p>照它说的去查。每条参考文献原样作为检索词发给 Crossref 的公开接口，取前 3 条结果：</p>
+        <figure class="code">
+          <figcaption>对每条参考文献发出的两个查询</figcaption>
+<pre><code>https://api.crossref.org/works?query.bibliographic=<span class="c">&lt;这一条参考文献的全文&gt;</span>&amp;rows=3
+https://www.ebi.ac.uk/europepmc/webservices/rest/search?query=DOI:"…"&amp;resultType=core   <span class="c"># 查到之后，按 DOI 取摘要</span></code></pre>
+        </figure>
+        <p>查到的文献再用 DOI 到 Europe PMC 取摘要（上面第二行），看引它的那句话在摘要里有没有。10 条的结果：</p>
+        <figure class="code">
+          <figcaption>直接问的那一遍：10 条参考文献的核对</figcaption>
+<pre><code>文献 · Crossref 上 · 题录 · 引它的那句，摘要里有没有
+Conde 2021 · 查无此文 · 拼起来的，见下文 · 一半：2021 年那篇讲杨树茎尖和木质化茎的细胞核分离；「茎尖维管系统」是另一篇
+Denyer 2019 · 有 · 对 · 有：拟南芥根图谱、拟时序轨迹
+Farmer 2021 · 有 · 期号错：写 14(2)，实为 14(3) · 有：单细胞核 RNA 与 ATAC 测序结合
+Kim 2021 · 有 · 对 · 有：拟南芥叶片维管、韧皮部细胞
+Ryu 2019 · 有 · 对 · 有：拟南芥根的原生质体，表皮细胞的发育轨迹
+Satterlee 2020 · 有 · 对 · 有：玉米茎尖干细胞龛
+Seyfferth 2021 · 有 · 对 · 没有：这是一篇综述，摘要没说 bulk 会把差异平均掉
+Shahan 2022 · 有 · 期号错：写 57(5)，实为 57(4) · 有：拟南芥根图谱、野生型和突变体的轨迹
+Xu 2021 · 有 · 对 · 有：玉米穗、性状候选基因
+Zhang 2021 · 有 · 期号错：写 56(8)，实为 56(7) · 有：拟南芥营养期茎尖</code></pre>
+        </figure>
+        <p>10 条里 9 条确有其文，作者、年份、题目、期刊都对，其中 3 条期号写错。第 1 条，也就是它自己提醒的那条，查不到。它是两篇文献拼起来的：作者、年份和题目前半句来自 Conde 等 2021 年在 <i>PLOS ONE</i> 16(5): e0251149 的一篇（A robust method of nuclei isolation for single-cell RNA sequencing of solid tissues from the plant genus <i>Populus</i>）；期刊 <i>Development</i> 和正文里说的「杨树茎尖维管系统」，属于同一组作者 2022 年在 <i>Development</i> 149(21): dev200632 的另一篇；而它写的文章号 dev199903，在 <i>Development</i> 上是一篇讲免疫细胞与再生的文章。再看句子：10 处引用里 8 处，被引文献的摘要说的就是这件事；Seyfferth 2021 是综述，这句泛泛的话摘要里没有，综述正文有没有这次没查；Conde 那处半对。第 5 句（原生质体会引起胁迫反应、漏掉难解离的细胞）没有引用。</p>
+        <p>两件事回答里看不出来，要核对才知道。一是这 10 篇都是 2019—2022 年的工作，和文献库里的 40 篇一篇也不重合，库里 2026 年那篇玉米叶舌区的图谱它不知道。二是没有一篇引用带着「依据是哪一句」：每处都要你自己去读原文。</p>
+        <aside class="note"><b>提示</b>同一个模型，用英文把同样的要求再问了一次（见本篇的英文版）：那次给了 14 条，在 Crossref 上都查得到，作者、年份、期刊、卷和页码都对，有 2 句没有引用。查不到的文献不是每次都有，有没有只能逐条查了才知道。</aside>
+      </section>
+
+      <section id="s4">
+        <h2><i>4</i>在写作页让助手写</h2>
+        <p>在文献库里进入「写作」，新建一份稿件，标题「植物器官的单细胞图谱」，选中 Introduction，点大纲标题旁的星形图标切到「助手写」。对话框上方写着「读文献库的 40 篇文献，写进右边的稿件」。输入和直接问时意思一样的一句：</p>
+        <blockquote><cite>交代</cite><p>在 Introduction 写一段英文引言（5–8 句），主题是植物器官的单细胞 / 单细胞核转录组图谱，要带引用。</p></blockquote>
+        <p>不到一分钟，右边的稿件里出现一段英文，9 句，9 处引用，带绿色底和左侧竖线；稿件下方是「助手在这一节改了 1 处」和「全部撤销」「保留」。对话里它先说：</p>
+        <blockquote><cite>助手</cite><p>我已把 Introduction 写进稿件，共 8 句，每处论断都带了摘要原句作出处。请在右边核对。</p></blockquote>
+        <figure class="shot">
+          <img src="../img/t/compare-writing-01-agent.jpg" width="1372" height="867" loading="lazy" alt="写作页的助手写：中间是交代和助手的回答，回答分结构、引用的文献、写法参照、一个小问题、需要你确认、还缺的内容几条；右边稿件里新写的英文段落有绿色竖线，引用显示为绿色的 (Chen et al., 2026)、(Jiang &amp; Le, 2026) 等；稿件上方「版本 2/2」，下方「助手在这一节改了 1 处」「全部撤销」「保留」。">
+          <figcaption><b>图 1</b>　助手写进稿件的一段。回答里列出引了哪几篇，也列出它没把握的地方。</figcaption>
+        </figure>
+        <p>它说「共 8 句」，数一下是 9 句，比要求的多一句，这类出入要自己看稿件。回答后半有几条值得读：</p>
+        <ul>
+          <li>「写法参照」：库里只有 P40（玉米叶舌区那篇）有导言部分的句子，所以组织方式主要参考它；其他文献只有摘要，「所有引用都出自摘要，没有页码」。</li>
+          <li>「需要你确认」：最后一句「缺少跨器官的整体视角」是稿件自己的论断，没有配文献。</li>
+        </ul>
+        <p>点回答上方那行灰字「读取稿件 ×2 · 查找候选句 ×2 · 写稿件 ×3」，展开是它做的每一步。「查找候选句：en · introduction · limit 10」是动笔前看库里论文的导言怎么写；第一次「写稿件」写入全文，第二次改一处时「「Introduction」的 1 处没有对上原文，没有改」，它重读稿件后又写了一次。三次写稿件后面都没有「和所引文献原文大段相同」的提示，逐句比对没有找到照抄的句子。</p>
+        <figure class="shot">
+          <img src="../img/t/compare-writing-02-steps.jpg" width="1372" height="867" loading="lazy" alt="展开的工具行：读取稿件 读了 1 节；查找候选句 en · introduction · limit 10，10 句；查找候选句 en · introduction · limit 15，3 句；写稿件 全文 2358 字，已写入「Introduction」；写稿件 1 处，「Introduction」的 1 处没有对上原文，没有改；读取稿件；写稿件 1 处，已写入「Introduction」。">
+          <figcaption><b>图 2</b>　展开的几步。第二次写稿件没改成，它重读后再写；没有哪一步提示照抄。</figcaption>
+        </figure>
+        <p>回答里还有一条「还缺的内容」：库里没有讲植物单细胞方法的综述，比如原生质体和细胞核分离的技术背景，要补得先收几篇进库。第 6 节会遇到这一点。</p>
+      </section>
+
+      <section id="s5">
+        <h2><i>5</i>每处引用依据的原句</h2>
+        <p>点「自己写」回到编辑，再点右边的「参考文献」页。「本节引用 9 篇」，每篇下面是一句原文：助手引用时摘下的那一句，标着「摘要」。这就是出处，直接问的那一遍没有这一层。</p>
+        <figure class="shot">
+          <img src="../img/t/compare-writing-03-sources.jpg" width="1372" height="867" loading="lazy" alt="写作页：中间是稿件，右边参考文献页「本节引用 9 篇」，列出 Chen 2026、Jiang &amp; Le 2026、Li 2026、Phua 2026 的完整条目，每条下面是一句灰底的英文原句，标着「摘要」。">
+          <figcaption><b>图 3</b>　每篇被引文献下面，是引它的那句话依据的原句。</figcaption>
+        </figure>
+        <p>点一条出处，右边打开那篇文献。这些出处都在摘要里，打开的是它的「信息」页，摘要就在下面，可以对着读；水稻叶片那篇没有 PDF，标签上写着「PDF（无）」。</p>
+        <figure class="shot">
+          <img src="../img/t/compare-writing-04-abstract.jpg" width="1372" height="867" loading="lazy" alt="点出处后，最右边打开 Robertson 等 2026 年 New Phytologist 那篇水稻干旱和盐胁迫叶片发育的文献，信息页上有作者、期刊、DOI、PMID，下面是摘要，其中有 we identified transcriptome signatures of developmental trajectories for each of the major tissue systems 一句。">
+          <figcaption><b>图 4</b>　点一条出处，被引文献的信息页在旁边打开，摘要里就有那句原文。</figcaption>
+        </figure>
+        <p>出处只说明「这句原文在文献里」，引得对不对还要读。照第 3 节的标准把 9 处读一遍：</p>
+        <ul>
+          <li>9 篇都在库里，DOI 在 Crossref 上都查得到，作者、年份、期刊和库里的记录一致。</li>
+          <li>7 处站得住：大豆花药、玉米胚珠、水稻浆片、玉米叶舌区、水稻叶片这 5 篇研究，摘要说的就是句子说的事；Chen 2026 那句「组织水平的测量把单个细胞的程序平均掉」，原句在一篇水稻非生物胁迫的方法综述里顺带说到；Wu 2026 那句「单细胞缺少时空信息」，是这篇空间转录组论文对自己方法的评价。水稻浆片那处，摘下的是一句讲取样的方法句，结论要看同一摘要的后文。</li>
+          <li>2 处说得比原文重：Jiang &amp; Le 2026 是药用植物的综述，原句说单细胞测序「定义了这些细胞群、重建了发育轨迹」，稿件写成「已经成为常规手段」；Phua 2026 的原句是「单细胞和空间转录组让组织间协调可以用实验研究」，稿件写成空间转录组「越来越多地和这些方法一起用」。</li>
+          <li>最后一句没有引用，助手自己说了。和所引摘要相比，最长一段连续相同的词是 6 个（atlas of the maize ligular region），出自玉米叶舌区那句。</li>
+        </ul>
+        <p>还有一件事直接问时不会遇到：库里的 40 篇都是 2026 年前后的研究，这段于是按器官罗列近期的例子，2019 年以来那批奠基性的图谱一篇也没有，因为库里没有。助手在回答里也说了这一点。</p>
+      </section>
+
+      <section id="s6">
+        <h2><i>6</i>自己写的一句，配引用</h2>
+        <p>直接问的那一遍，「原生质体会带来偏差」那句没有引用。在稿件末尾自己写下同样意思的一句，另起一段：</p>
+        <blockquote><cite>自己写</cite><p>Protoplast isolation can bias which cell types are recovered and isolating nuclei instead reaches tissues whose walls resist enzymatic digestion.</p></blockquote>
+        <p>光标留在这一段，点稿件下方的「配引用」。不到 40 秒，右边出现一张卡片：句子旁标着「背景」，下面勾了两篇综述，各带模型的理由，卡片底部写着查找范围：「40 篇文献的题录、摘要和全文的各个部分（导言、方法、结果、讨论）；其中 39 篇没有全文，只查了题录和摘要。」</p>
+        <figure class="shot">
+          <img src="../img/t/compare-writing-05-citefind.jpg" width="1372" height="867" loading="lazy" alt="配引用的卡片：句子 1 标着背景；勾选了 Chen et al., 2026（综述，理由：方法学综述，比较液滴、核测序等平台的适用组织与主要偏差，下面一句英文原文，标着摘要）和 Hsieh et al., 2026（综述，Protoplast-Based Functional Genomics and Genome Editing，理由：综述以原生质体为主题，涉及其制备的局限与挑战）；下面「还有 2 篇相近的」，查找范围的说明，「插入 2 条引用」「放弃」和「只在句末加引用，不改文字」。">
+          <figcaption><b>图 5</b>　配引用勾了两篇。勾选只是模型的判断，点一下可以取消或另选。</figcaption>
+        </figure>
+        <p>点「插入 2 条引用」，句末加上 (Chen et al., 2026; Hsieh et al., 2026)，文字不变。参考文献页随即多了 Hsieh 2026，它下面没有原句，列表上方出现带 1 的星形按钮：1 处引用还没有出处。点它，不到半分钟，Hsieh 2026 下面用提醒色写着：</p>
+        <blockquote><cite>参考文献页</cite><p>这篇文献里没有找到这句话的依据：Protoplast isolation can bias which cell types are recovered and isolating nuclei instead reaches tissues whose walls resist enzymatic digestion.</p></blockquote>
+        <figure class="shot">
+          <img src="../img/t/compare-writing-06-nosupport.jpg" width="1372" height="867" loading="lazy" alt="稿件末段句末是绿色的 (Chen et al., 2026; Hsieh et al., 2026)；右边参考文献 10 篇，Chen 2026 下面有两句原文，Hsieh 2026 下面是一行橙色提醒：这篇文献里没有找到这句话的依据，后接那句英文。">
+          <figcaption><b>图 6</b>　配引用挑的 Hsieh 2026，找出处时被标了出来：摘要里没有这句话的依据。</figcaption>
+        </figure>
+        <p>读一下 Hsieh 2026 的摘要，这个判断是对的：它讲原生质体用于递送、再生和基因编辑，没说分离原生质体会让细胞类型有偏差，也没说改用细胞核。Chen 2026 那句原句只说这篇综述逐类讨论各平台的「主要偏差」，也没有直接说出这件事。这句话真正的依据，是第 3 节那篇 <i>PLOS ONE</i> 的摘要：次生细胞壁妨碍酶解，原生质体里各类细胞的比例因此不均。它不在库里，所以配引用找不到它。该做的是把它收进库，再引用。</p>
+        <aside class="note warn"><b>注意</b>配引用是在库里「找最接近的」，库里没有合适的文献时，它也会勾上几篇沾边的。没有提醒色不等于引得对，有提醒色的一定要处理。</aside>
+      </section>
+
+      <section id="s7">
+        <h2><i>7</i>参考文献与导出</h2>
+        <p>点稿件上方的眼睛图标「预览」，稿件按读者看到的样子排出来，文末是「参考文献 10 篇」，每条是完整的条目，带 DOI；没写的节写着「这一节还没有写。」。</p>
+        <figure class="shot">
+          <img src="../img/t/compare-writing-07-preview.jpg" width="1372" height="867" loading="lazy" alt="预览：Introduction 末句之后是 Methods、Results、Discussion 三节，各写着这一节还没有写；下面是「参考文献 10 篇」，列出 Chen 2026、Hsieh 2026、Jiang &amp; Le 2026、Li 2026、Phua 2026、Robertson 2026 等完整条目，带 DOI。">
+          <figcaption><b>图 7</b>　预览里的参考文献，条目来自文献库的记录。</figcaption>
+        </figure>
+        <p>从「导出」存成 Word（.docx），用 LibreOffice 打开：正文里是 (Chen et al., 2026; Hsieh et al., 2026) 这样的作者-年份引用，文末 References 下 10 条，和预览一致。条目里的期刊名照 PubMed 的写法（如 International journal of molecular sciences），投稿前按期刊要求调整。</p>
+      </section>
+
+      <section id="s8">
+        <h2><i>8</i>两种写法对照</h2>
+        <p>表里每一行都来自这一次的操作。</p>
+        <div class="scroll">
+          <table>
+            <caption><b>表 1</b>　同一段引言，两种写法。</caption>
+            <thead><tr><th></th><th>直接问模型</th><th>在 Wisp Study 里写</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">引用从哪里来</th><td>模型的记忆：10 篇 2019—2022 年的常被引文献，库里一篇也没有</td><td>只从文献库的 40 篇里引，都是 2026 年前后的研究</td></tr>
+              <tr><th scope="row">文献在不在</th><td>10 条有 1 条查无此文，是两篇拼起来的</td><td>引了 10 篇，都在库里，Crossref 上都查得到</td></tr>
+              <tr><th scope="row">题录</th><td>9 条真文献里 3 条期号错</td><td>来自 PubMed 的记录，导出时按选的格式排</td></tr>
+              <tr><th scope="row">论断在不在被引文献里</th><td>要自己读摘要：10 处 8 处在，1 处摘要里没有，1 处半对</td><td>每处记下一句原文，点开就能对：助手写的 9 处 7 处站得住、2 处说重了；配引用勾的 2 篇，找出处时自己标出 1 篇没有依据</td></tr>
+              <tr><th scope="row">没有引用的句子</th><td>1 句，回答里没提</td><td>1 句，助手在回答里点了出来</td></tr>
+              <tr><th scope="row">照抄</th><td>和所引摘要最长连续相同 4 个词</td><td>最长 6 个词；写进稿件时逐句比对，这次没有提示照抄</td></tr>
+              <tr><th scope="row">文字和结构</th><td>流畅，结构完整，有领域的奠基文献</td><td>流畅，但只能拿库里有的举例，缺奠基文献</td></tr>
+              <tr><th scope="row">还要你做的</th><td>逐条查题录、找原文、核对论断，再把文献收进自己的库</td><td>读出处判断引得对不对；库里缺的文献先收进来；数一数它说的句数</td></tr>
+              <tr><th scope="row">花的时间</th><td>回答 30 秒；核对要对每条各查一次 Crossref、读一次摘要</td><td>写一段不到 1 分钟，配引用不到 40 秒，找出处不到半分钟；核对就在参考文献页</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>两种写法各有长处。直接问，模型能写出它读过的整个领域，包括你库里还没有的奠基文献，这一点 Wisp Study 做不到：库里没有的，它不会引。可它给的每条文献都要你查，这一次就有一条查无此文。在 Wisp Study 里写，引用只来自你收进库的文献，每处带着依据的原句，引不上的会标出来；但「原句在文献里」不等于「这样引是对的」，最后的判断仍然是你的。</p>
+        <aside class="note"><b>提示</b>两种方式可以接起来：直接问得来的文献清单，逐条查过之后按 DOI 添加进库（做法见<a href="migrate.html">把已有的文献搬进来</a>），再在写作页里引用，就有了出处。</aside>
+      </section>
+
+      <section id="recap" class="recap">
+        <h2>回顾</h2>
+        <ul>
+          <li>直接问模型，30 秒就有一段流畅、带参考文献的引言；10 条里 1 条查无此文、3 条期号错，没有一处告诉你依据是哪一句。</li>
+          <li>在写作页让「助手写」，引用只来自文献库，每处记下依据的原句，点一下就能对着摘要读。</li>
+          <li>出处只说明原句在文献里；说重了的句子、沾边的文献，要你读了再定。</li>
+          <li>「配引用」在库里找最接近的文献，找出处时会把没有依据的标出来；库里没有合适的文献，就先收进库。</li>
+          <li>回头看怎样一步步写一篇论文，见<a href="write.html">写论文：候选句、配引用与出处</a>；和合作者来回改稿，接着读<a href="revise.html">和合作者改稿</a>。</li>
+        </ul>
+      </section>
+    </article>
+  </div>
+
+  <nav class="pager" aria-label="上一篇和下一篇">
+    <a class="prev" href="write.html"><small>上一篇 · 14</small><strong>写论文</strong></a>
+    <a class="next" href="revise.html"><small>下一篇 · 16</small><strong>和合作者改稿</strong></a>
+  </nav>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <div class="refs">
+      <h2>参考</h2>
+      <ol>
+        <li><a href="index.html">全部教程</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/FEATURES.md">功能详解：每个页面能做什么</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/blob/main/docs/DATA.md">数据与隐私：文件放在哪里，哪些数据会离开本机</a></li>
+        <li><a href="https://github.com/xuzhougeng/WispStudy/issues">问题与想法：Issues</a></li>
+      </ol>
+    </div>
+    <div class="colophon">
+      <p><b>关于这篇教程</b>　截图、回答和数字来自 2026 年 11 月 24 日在 macOS 上用 v0.19.0 的一次实际操作，文献库是演示库「植物单细胞转录组」。两种写法用的是同一个模型 Claude Sonnet 5.5，经本机的网关调用；直接问的那一遍没有系统提示，也没有附文件。参考文献的核对在同一天进行：Crossref 的 <code>query.bibliographic</code> 检索，Europe PMC 按 DOI 取摘要。模型每次的回答不一样，你照做时文献和数字会有出入，核对的办法是一样的。</p>
+      <p><b>助手可能出错</b>　它的建议和回答都要你确认；关键的数字和结论请对照原文。</p>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
