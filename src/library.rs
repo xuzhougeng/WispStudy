@@ -16,6 +16,9 @@ const SIDEBAR_W: f32 = 224.;
 /// How narrow and how wide the sidebar is dragged. Pulled in past half its narrowest, it is put away.
 const SIDEBAR_MIN: f32 = 176.;
 const SIDEBAR_MAX: f32 = 420.;
+/// The sidebar lists this many of the most used tags until a search is typed; the search shows past `TAGS_FIND_FROM`.
+const TAGS_LISTED: usize = 30;
+const TAGS_FIND_FROM: usize = 12;
 pub const DETAIL_W: f32 = 448.;
 /// The narrowest the detail panel is dragged to, and what the list beside it keeps.
 const DETAIL_MIN: f32 = 320.;
@@ -540,7 +543,7 @@ impl Workspace {
         div()
             .flex()
             .size_full()
-            .when(shown, |d| d.child(self.render_sidebar(sidebar_width, cx)))
+            .when(shown, |d| d.child(self.render_sidebar(sidebar_width, window, cx)))
             .child(div().relative().flex().flex_col().flex_1().min_w_0().h_full().bg(Theme::bg_body()).when(shown, |d| d.border_l_1().border_color(Theme::line())).child(strip).children(self.render_batch_translation(cx)).child(div().flex().flex_col().flex_1().min_h_0().child(main)).when(shown || dragging, |d| d.child(edge)))
             .when(detail_width > 0., |d| d.child(self.render_detail(detail_width, window, cx)))
             .into_any_element()
@@ -584,7 +587,7 @@ impl Workspace {
             .on_click(self.on(Cmd::ShowFetch, cx)).into_any_element())
     }
 
-    fn render_sidebar(&mut self, width: f32, cx: &mut Context<Self>) -> AnyElement {
+    fn render_sidebar(&mut self, width: f32, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         // While writing, the tags and counts are of no use: the manuscript's outline takes their place.
         if self.outline_shown() { return self.render_outline(width, cx) }
         let lib = self.lib.as_ref().unwrap();
@@ -645,9 +648,20 @@ impl Workspace {
             );
         }
         let tags = filter::tag_counts(&lib.papers);
-        let tag_rows: Vec<AnyElement> = tags
+        // Past a dozen tags a field beside the caption, seen while the pointer is over them, finds one by its words, and every tag holding them is listed.
+        // Unsearched, the most used are listed and the tags chosen or excluded besides; a last line says how many are not.
+        let words = lib.tag_find.read(cx).text().to_string();
+        let finding = !words.trim().is_empty();
+        let find_shown = tags.len() > TAGS_FIND_FROM || finding;
+        let listed: Vec<&(String, usize)> = tags
             .iter()
-            .take(30)
+            .enumerate()
+            .filter(|(i, (tag, _))| if finding { filter::tag_matches(tag, &words) } else { *i < TAGS_LISTED || (on_papers && (lib.filters.chosen(tag) || lib.filters.excluded(tag))) })
+            .map(|(_, tag)| tag)
+            .collect();
+        let unlisted = if finding { 0 } else { tags.len() - listed.len() };
+        let mut tag_rows: Vec<AnyElement> = listed
+            .into_iter()
             .enumerate()
             .map(|(i, (tag, _))| {
                 // Listed in the order of the whole library, so the rows stay put while the search is typed.
@@ -681,6 +695,33 @@ impl Workspace {
                     .into_any_element()
             })
             .collect();
+        if unlisted > 0 {
+            tag_rows.push(div().id("tags-more").flex().items_center().h(text_px(26.)).px(px(8.)).rounded(px(6.)).text_size(text_px(12.)).text_color(Theme::text_tertiary()).cursor_pointer().hover(|s| s.bg(Theme::hover()).text_color(Theme::text_secondary())).on_click(self.on(Cmd::FindTag(false), cx)).child(tn!("还有 {n} 个标签，输入以查找", "{n} not listed: type to find one", unlisted, "tag")).into_any_element());
+        }
+        if finding && tag_rows.is_empty() {
+            tag_rows.push(div().px(px(8.)).py(px(4.)).text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(tf!("没有含「{}」的标签", "No tag holds “{}”", words.trim())).into_any_element());
+        }
+        let find_focused = lib.tag_find.focus_handle(cx).is_focused(window);
+        let tag_find = find_shown.then(|| {
+            div()
+                .flex()
+                .flex_1()
+                .min_w_0()
+                .items_center()
+                .gap(px(5.))
+                .h(text_px(24.))
+                .px(px(6.))
+                .rounded(px(6.))
+                .text_size(text_px(12.))
+                .bg(Theme::bg_sunken())
+                .border_1()
+                .border_color(if find_focused { Theme::accent() } else { Theme::bg_sunken() })
+                // Out of sight until the pointer is over the tags; it stays while it has the keyboard or words.
+                .when(!find_focused && !finding, |d| d.opacity(0.).group_hover("tags-area", |s| s.opacity(1.)))
+                .child(ui::icon("search", 13., Theme::text_tertiary()))
+                .child(div().flex().flex_1().min_w_0().child(lib.tag_find.clone()))
+                .when(finding, |d| d.child(ui::ghost_button("tags-find-clear", Some("x"), None).h(text_px(18.)).min_w(px(18.)).on_click(self.on(Cmd::FindTag(true), cx))))
+        });
         let tags_set = on_papers && !(lib.filters.tags.is_empty() && lib.filters.not_tags.is_empty());
         let trash_count = lib.trash.len();
         div()
@@ -716,6 +757,7 @@ impl Workspace {
             .child(div().flex().flex_col().gap(px(1.)).child(nav("page-ask", "sparkle", t("助手"), None, lib.page == Page::Ask, Cmd::SetPage(Page::Ask), self, cx)).child(nav("page-sources", "search", t("检索与导入"), (!lib.searches.is_empty()).then_some(lib.searches.len()), matches!(lib.page, Page::Sources | Page::Guide), Cmd::SetPage(Page::Sources), self, cx)).child(nav("page-screen", "list-todo", t("筛选"), Some(lib.papers.iter().filter(|p| p.screening == "pending").count()).filter(|n| *n > 0), lib.page == Page::Screen, Cmd::SetPage(Page::Screen), self, cx)).child(nav("page-extract", "scan-text", t("提取"), Some(lib.extract_rows().len()).filter(|n| *n > 0), lib.page == Page::Extract, Cmd::SetPage(Page::Extract), self, cx)).child(nav("page-write", "pen-line", t("写作"), None, lib.page == Page::Write, Cmd::SetPage(Page::Write), self, cx)))
             .child(
                 div()
+                    .group("tags-area")
                     .flex()
                     .flex_col()
                     .flex_1()
@@ -724,14 +766,15 @@ impl Workspace {
                     // The caption says on hover what the keys held with a click do; while tags are chosen or excluded, 清除 lets them all go.
                     .child(
                         div()
-                            .id("tags-head")
                             .flex()
                             .items_center()
                             .justify_between()
+                            .gap(px(8.))
                             .px(px(8.))
-                            .py(px(4.))
-                            .tooltip(ui::tip(tf!("{}多选 · {}排除", "{} to add · {} to exclude", crate::context::held_click(false), crate::context::held_click(true))))
-                            .child(ui::caption(t("标签")))
+                            .when(find_shown, |d| d.pr(px(2.)).h(text_px(28.)))
+                            .when(!find_shown, |d| d.py(px(4.)))
+                            .child(div().id("tags-head").flex_none().tooltip(ui::tip(tf!("{}多选 · {}排除", "{} to add · {} to exclude", crate::context::held_click(false), crate::context::held_click(true)))).child(ui::caption(t("标签"))))
+                            .children(tag_find)
                             .when(tags_set, |d| d.child(div().id("tags-clear").text_size(text_px(11.)).text_color(Theme::text_tertiary()).cursor_pointer().hover(|s| s.text_color(Theme::text_secondary())).on_click(self.on(Cmd::SetFilter(FilterKey::Tag, String::new()), cx)).child(t("清除")))),
                     )
                     .child(div().id("tags").flex().flex_col().flex_1().min_h_0().overflow_y_scroll().gap(px(1.)).children(tag_rows).when(tags.is_empty(), |d| d.child(div().px(px(8.)).text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(t("编辑文献时添加标签")))))

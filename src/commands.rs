@@ -242,6 +242,8 @@ pub enum Cmd {
     ClickTag(String, bool),
     /// Exclude a tag, or let an excluded one go (⌥ / Alt-click, the tag's menu).
     ExcludeTag(String),
+    /// The keyboard to the sidebar's tag search; true empties it first (its ×).
+    FindTag(bool),
     ClearFilters,
     SetSort(String),
     Select(String),
@@ -1250,6 +1252,12 @@ impl Workspace {
                     if lib.page == Page::Papers || !lib.filters.excluded(&tag) { lib.filters.exclude_tag(&tag) }
                     lib.page = Page::Papers;
                     lib.refilter();
+                }
+            }
+            Cmd::FindTag(empty) => {
+                if let Some(lib) = self.lib.as_ref() {
+                    if empty { lib.tag_find.update(cx, |input, cx| input.set_text("", cx)) }
+                    lib.tag_find.read(cx).focus(window);
                 }
             }
             Cmd::ClearFilters => {

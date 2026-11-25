@@ -381,6 +381,12 @@ pub fn tag_counts(papers: &[Paper]) -> Vec<(String, usize)> {
     tally(active(papers).flat_map(|p| p.tags.iter().map(String::as_str)))
 }
 
+/// Whether a tag holds every word typed into the sidebar's tag search, case aside, in any order.
+pub fn tag_matches(tag: &str, words: &str) -> bool {
+    let tag = tag.to_lowercase();
+    words.split_whitespace().all(|word| tag.contains(&word.to_lowercase()))
+}
+
 pub fn source_counts(papers: &[Paper]) -> Vec<(String, usize)> {
     tally(active(papers).map(|p| p.source.as_str()))
 }
@@ -671,5 +677,14 @@ mod tests {
         assert_eq!((titles(&papers, &both), both.active()), (vec!["Zebra fish atlas".to_string()], 3));
         assert_eq!(counts(&papers, &both, 0).view(View::All), 1);
         assert_eq!((count_with(&papers, |f| f.impact = "10-".into(), 0), count_with(&papers, |f| f.zone = "cas:3".into(), 0), count_with(&papers, |_| {}, 0)), (1, 2, 3));
+    }
+
+    #[test]
+    fn tags_found_by_their_words() {
+        assert!(tag_matches("单细胞转录组", "转录"));
+        assert!(tag_matches("BiblioCell已纳入", "bibliocell"));
+        assert!(tag_matches("细胞分化与谱系", "谱系 分化"));
+        assert!(!tag_matches("细胞分化与谱系", "谱系 图谱"));
+        assert!(tag_matches("atlas", "  "));
     }
 }

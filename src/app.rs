@@ -278,6 +278,8 @@ pub struct Library {
     /// What the sidebar counts beside its views and tags, under the search and filters set (`filter::counts`).
     pub counts: filter::Counts,
     pub search: Entity<TextInput>,
+    /// The field beside the sidebar's 标签 caption, shown once the tags are many: it narrows the tags listed under it.
+    pub tag_find: Entity<TextInput>,
     /// What the search box holds looked for through the whole library, on show in the list's place (`library_find.rs`).
     pub finding: crate::library_find::Finding,
     pub page: Page,
@@ -690,6 +692,11 @@ impl Library {
         Ok(())
     }
 
+    /// The library's tags holding the words typed into the sidebar's tag search, most used first, with how many papers hold each.
+    pub fn tags_found(&self, words: &str) -> Vec<(String, usize)> {
+        filter::tag_counts(&self.papers).into_iter().filter(|(tag, _)| filter::tag_matches(tag, words)).collect()
+    }
+
     pub fn refilter(&mut self) {
         let now = time::now_millis();
         self.shown = filter::filter_papers(&self.papers, &self.filters, now);
@@ -1014,6 +1021,7 @@ impl Workspace {
         let search = cx.new(|cx| TextInput::new("搜索题目、作者、DOI、标签、词条、笔记…", cx));
         let notes = cx.new(|cx| TextInput::new("读这篇文献时想到的…", cx).multiline(4));
         let scope_find = cx.new(|cx| TextInput::new("在这些文献里找：题目、作者、标签、摘要…", cx));
+        let tag_find = cx.new(|cx| TextInput::new("找标签", cx));
         let subscriptions = vec![
             // The panel over the conversation searches the papers in scope as it is typed into.
             cx.subscribe(&scope_find, |this, input, event: &InputEvent, cx| {
@@ -1029,6 +1037,13 @@ impl Workspace {
                 }
                 // Enter: the words looked for through the whole library.
                 if *event == InputEvent::Submit { this.run(Cmd::LibraryFind(crate::library_find::Do::Open), window, cx) }
+            }),
+            // Enter chooses the first tag found, as a plain click on it would; Esc empties the field.
+            cx.subscribe_in(&tag_find, window, |this, input, event: &InputEvent, window, cx| match event {
+                InputEvent::Changed => cx.notify(),
+                InputEvent::Submit => if let Some(tag) = this.lib.as_ref().filter(|_| !input.read(cx).text().trim().is_empty()).and_then(|lib| lib.tags_found(input.read(cx).text()).into_iter().next()) { this.run(Cmd::ClickTag(tag.0, false), window, cx) },
+                InputEvent::Cancel => input.update(cx, |input, cx| input.set_text("", cx)),
+                _ => {}
             }),
             cx.subscribe(&notes, |this, input, event: &InputEvent, cx| {
                 if *event == InputEvent::Changed {
@@ -1122,6 +1137,7 @@ impl Workspace {
             folding: HashSet::new(),
             counts: filter::Counts::default(),
             search,
+            tag_find,
             finding: Default::default(),
             page: Page::Papers,
             selected: None,
