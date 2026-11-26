@@ -47,6 +47,17 @@ pub struct Beside {
     pub first: bool,
 }
 
+/// What a page had open in the detail panel when another page was turned to (`Workspace::turn_page`): the paper,
+/// how it was read and the papers kept beside it, opened again when the page is come back to.
+pub struct LeftOpen {
+    pub page: Page,
+    pub paper: String,
+    pub tab: Tab,
+    pub wide: bool,
+    pub pins: Vec<Pinned>,
+    pub main_at: usize,
+}
+
 impl Library {
     /// The stored PDF to preview and read: the one chosen (`read_file`), else the first full-text PDF, else any PDF.
     pub fn pdf_file(&self, id: &str) -> Option<&PaperFile> {
@@ -357,6 +368,43 @@ impl Workspace {
         self.ensure_pdf(cx);
         self.translate_selected(false, cx);
         cx.notify();
+    }
+
+    /// The page becomes `to`, and the detail panel stays with the page it was opened on: what the page left had
+    /// open is put away for it (`Library::left_open`), and `to` shows `show`, or else what it had open when it was
+    /// left. A page turned is no paper left: neither is a step of 后退 / 前进. A conversation about the paper that
+    /// is answering or waits for a yes is not cut off by it: that paper stays on show.
+    pub(crate) fn turn_page(&mut self, to: Page, show: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        if lib.page == to { return }
+        let enter = |lib: &mut Library| if to == Page::Write { lib.enter_write() } else { lib.page = to };
+        let talking = lib.paper_chat.busy || lib.paper_chat.pending.is_some();
+        // A conversation not yet made a library has one page, which it is brought back to (`Workspace::run`).
+        if lib.info.draft || (talking && show.is_none()) { return enter(lib) }
+        let from = lib.page;
+        let (open, tab, wide) = (lib.selected.clone(), lib.tab, lib.wide);
+        let back = lib.left_open.iter().position(|left| left.page == to).map(|at| lib.left_open.remove(at));
+        lib.left_open.retain(|left| left.page != from);
+        enter(lib);
+        self.stepping = true;
+        self.select(None, window, cx);
+        self.stepping = false;
+        let Some(lib) = self.lib.as_mut() else { return };
+        if let Some(paper) = open { lib.left_open.push(LeftOpen { page: from, paper, tab, wide, pins: std::mem::take(&mut lib.pins), main_at: std::mem::take(&mut lib.main_at) }) }
+        let shown = match show {
+            Some(id) => Some(id),
+            None => back.filter(|left| lib.paper(&left.paper).is_some()).map(|left| {
+                let pins: Vec<Pinned> = left.pins.into_iter().filter(|pin| lib.paper(&pin.paper).is_some()).collect();
+                (lib.tab, lib.wide, lib.main_at) = (left.tab, left.wide, left.main_at.min(pins.len()));
+                lib.pins = pins;
+                left.paper
+            }),
+        };
+        if shown.is_none() { return }
+        self.stepping = true;
+        self.select(shown, window, cx);
+        self.stepping = false;
+        self.room_for_panes(window, cx);
     }
 
     /// Papers kept beside need the window: beside the table a panel has room for one. On the PDF tab, outside

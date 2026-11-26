@@ -665,12 +665,12 @@ impl Workspace {
     }
 
     /// A tag's mention clicked: the papers' list kept to that tag, as a click on the tag in the sidebar away from the list does.
-    pub(crate) fn mention_tag(&mut self, tag: String) {
+    pub(crate) fn mention_tag(&mut self, tag: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
         lib.filters.not_tags.retain(|known| *known != tag);
         lib.filters.tags = vec![tag];
-        lib.page = Page::Papers;
         lib.refilter();
+        self.turn_page(Page::Papers, None, window, cx);
     }
 
     /// A section's mention clicked: 写作 at that section (in a conversation not yet made a library, the manuscript

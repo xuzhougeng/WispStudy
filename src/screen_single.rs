@@ -138,8 +138,9 @@ impl Workspace {
     }
 
     /// 筛选 is come back to on 逐篇 with a paper open (the sidebar, the palette): the paper beside the round is the
-    /// round's. One of its papers opened meanwhile is where the round goes, as a round opens on the paper that was
-    /// open; any other gives way to the round's paper, and to none past its last one.
+    /// round's. The page's own paper comes back with it (`turn_page`), and one of the round's is where the round
+    /// goes; any other (a paper whose conversation was still answering) gives way to the round's paper, and to none
+    /// past its last one.
     pub(crate) fn round_arrived(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
         if lib.page != Page::Screen || lib.screen.mode != ScreenMode::Single { return }
