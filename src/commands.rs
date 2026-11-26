@@ -179,6 +179,8 @@ pub enum Cmd {
     SelectProvider(usize),
     /// Ask again what the account of the provider on show holds.
     ReadBalance,
+    /// 设置 › AI › 模型's 连接测试: one short question to each model of the provider on show.
+    TestModels,
     /// One more provider, from a `provider::Preset` key; empty is a service set up by hand.
     AddProvider(String),
     AskRemoveProvider(usize),
@@ -968,6 +970,7 @@ impl Workspace {
             Cmd::AiTab(tab) => self.open_ai_tab(tab, window, cx),
             Cmd::SelectProvider(index) => self.select_provider(index, cx),
             Cmd::ReadBalance => self.read_balance_shown(cx),
+            Cmd::TestModels => self.test_models(cx),
             Cmd::AddProvider(preset) => self.add_provider(&preset, cx),
             Cmd::AskRemoveProvider(index) => {
                 let Some(provider) = self.settings.providers.get(index) else { return };

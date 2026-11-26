@@ -339,6 +339,55 @@ pub fn complete(request: HttpRequest, protocol: Protocol) -> Result<String, Stri
     Ok(text)
 }
 
+/// How long 连接测试 waits for a model to answer its one question.
+const TEST_WAIT: Duration = Duration::from_secs(60);
+
+/// What 连接测试 says of a model that did not answer within `TEST_WAIT`.
+pub const TEST_TIMED_OUT: &str = "一分钟内没有答完，没有再等。";
+
+/// 设置 › AI › 模型's 连接测试: ask a model its one question (`ai::test_request`, or `judge::test_request` for a
+/// model that judges) the way its requests go, through its service's proxy, and wait for the whole answer. What it
+/// said, cut to a line, and how long that took. A service too busy to answer is not asked again, and none is waited
+/// for past a minute: what is asked is how things stand now.
+pub fn test_model(profile: &ai::Profile) -> Result<(String, Duration), String> {
+    let request = if profile.judges() { wisp_core::judge::test_request(profile)? } else { ai::test_request(profile)? };
+    let started = std::time::Instant::now();
+    let timed_out = |err: String| if started.elapsed() >= TEST_WAIT { TEST_TIMED_OUT.to_string() } else { err };
+    let mut call = agent(Some(TEST_WAIT), &request.proxy)?.post(&request.url);
+    for (name, value) in &request.headers {
+        call = call.header(name, value);
+    }
+    let mut response = call.send(request.body.to_string().as_str()).map_err(|err| if matches!(err, ureq::Error::Timeout(_)) { TEST_TIMED_OUT.to_string() } else { network_error(err) })?;
+    let status = response.status().as_u16();
+    if !(200..300).contains(&status) {
+        let body = response.body_mut().read_to_string().unwrap_or_default();
+        return Err(ai::error_message(status, &body));
+    }
+    if profile.judges() {
+        let reply = response.body_mut().with_config().limit(1 << 20).read_json::<Value>().map_err(|e| timed_out(format!("无法解析模型服务的返回内容：{e}")))?;
+        return Ok((wisp_core::judge::read_test(&reply)?, started.elapsed()));
+    }
+    let mut reader = TurnReader::new(profile.protocol);
+    let (mut text, mut stray) = (String::new(), String::new());
+    for line in BufReader::new(response.body_mut().as_reader()).lines() {
+        let line = line.map_err(|err| timed_out(format!("连接中断：{err}")))?;
+        // What is no line of a stream is kept, to show what came instead of an answer.
+        if !line.trim().is_empty() && !line.starts_with("data:") && !line.starts_with("event:") && !line.starts_with(':') && stray.len() < 300 { stray.push_str(line.trim()) }
+        if let Some(more) = reader.line(&line)? { text.push_str(&more) }
+    }
+    // A model that thought and said nothing still answered, saying why it stopped; one that refused did not.
+    let turn = reader.finish();
+    if text.trim().is_empty() {
+        if let Some(note) = ai::stop_note(&turn.stop) { return Err(note.to_string()) }
+        // Not a word and no end of an answer: something else answered at that address.
+        if turn.stop == "end" { return Err(if stray.is_empty() { NOT_A_MODEL.to_string() } else { format!("{NOT_A_MODEL}收到的是：{}", stray.chars().take(200).collect::<String>()) }) }
+    }
+    Ok((ai::test_reply(&text), started.elapsed()))
+}
+
+/// What 连接测试 says when the service answered with no stream of a model's answer: a wrong address or interface.
+pub const NOT_A_MODEL: &str = "服务有回应，但不是模型的回答，请检查服务地址和接口。";
+
 /// How long a service may take over one picture: the large ones take minutes.
 const PICTURE_WAIT: Duration = Duration::from_secs(300);
 
@@ -525,6 +574,36 @@ mod tests {
         let refused = balance(&wisp_core::usage::balance_request(&Profile { base_url: base, ..profile }).unwrap()).unwrap_err();
         server.join().unwrap();
         assert!(refused.contains("401") && refused.contains("Authentication Fails"), "{refused}");
+    }
+
+    #[test]
+    fn a_model_tested() {
+        let (base, server) = serve("HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n\
+data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"One word.\"}}]}\n\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"rea\"}}]}\n\n\
+data: {\"choices\":[{\"delta\":{\"content\":\"dy\"},\"finish_reason\":\"stop\"}]}\n\n\
+data: [DONE]\n\n");
+        let profile = Profile { protocol: Protocol::OpenAI, base_url: format!("{base}/v1"), api_key: "k".into(), model: "m".into(), effort: "high".into(), proxy: "direct".into(), ..Default::default() };
+        let (reply, _) = test_model(&profile).unwrap();
+        assert_eq!(reply, "ready");
+        let asked = server.join().unwrap();
+        assert!(asked.starts_with("POST /v1/chat/completions ") && asked.contains(ai::TEST_QUESTION) && asked.contains("\"reasoning_effort\":\"high\""), "{asked}");
+        // A refusal in the service's words, with what it most often means.
+        let (base, server) = serve("HTTP/1.1 404 Not Found\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{\"error\": {\"message\": \"Model Not Exist\"}}");
+        let refused = test_model(&Profile { base_url: base.clone(), ..profile.clone() }).unwrap_err();
+        server.join().unwrap();
+        assert_eq!(refused, "地址或模型名称不存在（HTTP 404）：Model Not Exist");
+        // Something that is no model answering at the address.
+        let (base, server) = serve("HTTP/1.1 200 OK\r\ncontent-type: text/html\r\nconnection: close\r\n\r\n<html>Welcome</html>");
+        let stranger = test_model(&Profile { base_url: base, ..profile.clone() }).unwrap_err();
+        server.join().unwrap();
+        assert_eq!(stranger, format!("{NOT_A_MODEL}收到的是：<html>Welcome</html>"));
+        // A model that judges is asked a question with two answers.
+        let (base, server) = serve("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{\"answers\": {\"test\": {\"type\": \"choice\", \"choice\": \"true\", \"confidence\": 0.98}}}");
+        let (choice, _) = test_model(&Profile { base_url: format!("{base}/v1"), kind: wisp_core::judge::KIND.into(), ..profile }).unwrap();
+        let asked = server.join().unwrap();
+        assert!(asked.starts_with("POST /v1/systemone ") && asked.contains("\"questions\""), "{asked}");
+        assert_eq!(choice, "true");
     }
 
     #[test]

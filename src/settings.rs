@@ -154,6 +154,10 @@ pub struct SettingsView {
     shortcut_error: Option<(String, String)>,
     /// What the account of the provider on show holds, by the provider's id: asked of a service that says (DeepSeek's `/user/balance`).
     balance: Option<(String, Held)>,
+    /// What 模型's 连接测试 last asked a provider's models and what came back, and how many tests were begun: the
+    /// answer of a test begun before the last is not wanted.
+    trial: Option<Trial>,
+    trials: usize,
     /// What 存储空间 last measured, and of which data folder.
     storage: Option<(PathBuf, storage::Space)>,
     /// 存储空间 is measuring the data folder.
@@ -176,6 +180,58 @@ enum Reach {
     /// An answer came, after this long.
     Reached(Duration),
     Failed(String),
+}
+
+/// What 模型's 连接测试 asked of one provider's models, and what came back. It stands for the provider only while it
+/// is set up as it was when asked (`stands`), and for a model only while that model is (`of`): a result of
+/// another key or address is no longer how things are.
+struct Trial {
+    run: usize,
+    /// The provider when asked, and the proxy for everything then.
+    asked: Provider,
+    proxy: String,
+    /// Each model asked, by id, in the order of `asked.models`.
+    models: Vec<(String, Tried)>,
+}
+
+/// What came of asking one model.
+enum Tried {
+    Asking,
+    /// It answered, after this long, and said this (cut to a line).
+    Answered(Duration, String),
+    Failed(String),
+}
+
+impl Trial {
+    /// Whether it is of `provider` as it is now, through the same proxy.
+    fn stands(&self, provider: &Provider, proxy: &str) -> bool {
+        let asked = &self.asked;
+        (asked.id.as_str(), asked.protocol, asked.base_url.trim(), asked.api_key.trim(), asked.proxy.trim(), self.proxy.as_str()) == (provider.id.as_str(), provider.protocol, provider.base_url.trim(), provider.api_key.trim(), provider.proxy.trim(), proxy)
+    }
+
+    /// What came of `model`, while it is still the model that was asked: its name, thinking and kind.
+    fn of(&self, model: &provider::Model) -> Option<&Tried> {
+        let asked = self.asked.models.iter().find(|asked| asked.id == model.id)?;
+        if (asked.model.trim(), &asked.effort, &asked.kind) != (model.model.trim(), &model.effort, &model.kind) { return None }
+        self.models.iter().find(|(id, _)| *id == model.id).map(|(_, tried)| tried)
+    }
+}
+
+/// The models 连接测试 asks: every one with a name, but those that draw, which would draw a picture.
+fn testable(provider: &Provider) -> impl Iterator<Item = &provider::Model> {
+    provider.models.iter().filter(|model| !model.draws() && !model.model.trim().is_empty())
+}
+
+/// How much of why a model could not be asked is said in a row: a service may answer a wrong name with every name it
+/// knows. More of it is under the pointer on the model's mark.
+const BRIEF: usize = 160;
+
+/// Why a model could not be asked, in the interface's language, as a sentence: in English the service's hint
+/// (`ai::error_message`) comes first and would begin in lower case.
+fn failure(err: &str) -> String {
+    let said = crate::i18n::reasons(err);
+    let mut chars = said.chars();
+    chars.next().map_or_else(String::new, |first| first.to_uppercase().chain(chars).collect())
 }
 
 /// What is known of an account's balance.
@@ -528,7 +584,7 @@ impl Workspace {
                 subscriptions.push(heard);
                 let kept = |keys: &std::collections::BTreeMap<String, String>| keys.get("deepseek").is_some_and(|key| !key.trim().is_empty());
                 let deepseek_fields = [kept(&self.settings.web_search.keys), kept(&self.settings.ocr.keys)];
-                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, contact_email, ncbi_key, reach: None, reach_asked: 0, typed: 0, search_keys, ocr_keys, deepseek_fields, author, styles, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, skill: None, recording: None, shortcut_error: None, balance: None, storage: None, measuring: false, storage_open: None, _subscriptions: subscriptions });
+                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, contact_email, ncbi_key, reach: None, reach_asked: 0, typed: 0, search_keys, ocr_keys, deepseek_fields, author, styles, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, skill: None, recording: None, shortcut_error: None, balance: None, trial: None, trials: 0, storage: None, measuring: false, storage_open: None, _subscriptions: subscriptions });
                 self.read_balance_shown(cx);
             }
         }
@@ -1181,6 +1237,42 @@ impl Workspace {
         .detach();
     }
 
+    /// 模型's 连接测试: ask each model of the provider on show one short question, as its tasks would ask it (its
+    /// thinking too), all at once, and put each answer beside its model as it comes (`wisp_net::test_model`). A model
+    /// that draws is not asked: that would draw a picture.
+    pub fn test_models(&mut self, cx: &mut Context<Self>) {
+        let proxy = self.settings.global_proxy();
+        let Some(view) = self.settings_view.as_mut() else { return };
+        let Some(provider) = self.settings.providers.get(view.provider).cloned() else { return };
+        // This provider as it is is being asked already.
+        if view.trial.as_ref().is_some_and(|trial| trial.stands(&provider, &proxy) && trial.models.iter().any(|(_, tried)| matches!(tried, Tried::Asking))) { return }
+        let asked: Vec<provider::Model> = testable(&provider).cloned().collect();
+        if asked.is_empty() { return }
+        view.trials += 1;
+        let run = view.trials;
+        view.trial = Some(Trial { run, asked: provider.clone(), proxy, models: asked.iter().map(|model| (model.id.clone(), Tried::Asking)).collect() });
+        cx.notify();
+        for model in asked {
+            let profile = provider.profile(&model);
+            let reply = cx.background_executor().spawn(async move { wisp_net::test_model(&profile) });
+            cx.spawn(async move |this, cx| {
+                let reply = reply.await;
+                this.update(cx, |this, cx| {
+                    // Another test was begun since, or the settings are closed.
+                    let Some(trial) = this.settings_view.as_mut().and_then(|view| view.trial.as_mut()).filter(|trial| trial.run == run) else { return };
+                    let Some((_, tried)) = trial.models.iter_mut().find(|(id, _)| *id == model.id) else { return };
+                    *tried = match reply {
+                        Ok((said, took)) => Tried::Answered(took, said),
+                        Err(err) => Tried::Failed(err),
+                    };
+                    cx.notify();
+                })
+                .ok();
+            })
+            .detach();
+        }
+    }
+
     /// Keep who the literature databases are told is asking, and tell them so from the next request on. An
     /// address still being typed is not kept: the last one that could be an address stays until this one can.
     fn save_contact(&mut self, cx: &mut Context<Self>) {
@@ -1658,12 +1750,33 @@ impl Workspace {
         let proxy_detail = proxy_problem.unwrap_or_else(|| t("留空则使用「网络」页的全局代理；填 direct 表示不走代理。").to_string());
         let key_detail = if !provider.api_key.trim().is_empty() { t("已保存在本机。").to_string() } else if provider.key().is_empty() { tf!("还没有填写，环境变量 {} 也是空的。", "Not set, and {} is empty too.", provider.key_env()) } else { tf!("正在使用环境变量 {}。", "Using environment variable {}.", provider.key_env()) };
         let (name, base_url, api_key, proxy) = (field(&fields.name), field(&fields.base_url), field(&fields.api_key), field_of(&fields.proxy, INPUT_W - 40., proxy_wrong, window, cx));
+        // 连接测试: what came of each model, while the provider and the model are as they were asked.
+        let trial = view.trial.as_ref().filter(|trial| trial.stands(provider, &self.settings.global_proxy()));
+        let tried: Vec<&Tried> = provider.models.iter().filter_map(|model| trial.and_then(|trial| trial.of(model))).collect();
+        let testing = tried.iter().any(|tried| matches!(tried, Tried::Asking));
+        let failures: Vec<&str> = tried.iter().filter_map(|tried| if let Tried::Failed(err) = tried { Some(err.as_str()) } else { None }).collect();
+        // Every model failed for one reason (a key refused, an address out of reach): it is said once, on the test's row.
+        let shared = (!testing && !failures.is_empty() && failures.len() == tried.len() && failures.iter().all(|err| *err == failures[0])).then(|| failures[0]);
+        let askable = testable(provider).count();
+        let (found, found_color): (String, Hsla) = match (tried.is_empty(), testing, shared, failures.len()) {
+            (true, ..) if askable > 0 => (t("给每个模型发一句很短的话，看它能不能回答。").to_string(), Theme::text_tertiary()),
+            (true, ..) if provider.models.iter().any(|model| model.draws()) => (t("生图模型不测试：测试会真的画一张图。").to_string(), Theme::text_tertiary()),
+            (true, ..) => (t("添加模型后可以测试。").to_string(), Theme::text_tertiary()),
+            (_, true, ..) => (tn!("正在测试 {n} 个模型…", "Testing {n}…", tried.len(), "model"), Theme::text_tertiary()),
+            (_, _, Some(reason), _) => (wisp_core::mention::cut(&failure(reason), BRIEF), Theme::danger()),
+            (_, _, None, 0) if tried.len() == 1 => (t("连接正常。").to_string(), Theme::success()),
+            (_, _, None, 0) => (tn!("{n} 个模型都连接正常。", "All {n} answered.", tried.len(), "model"), Theme::success()),
+            (_, _, None, 1) => (t("1 个模型没有连通，原因写在它下面。").to_string(), Theme::danger()),
+            (_, _, None, failed) => (tn!("{n} 个模型没有连通，原因写在各自下面。", "{n} could not be reached; the reasons are under them.", failed, "model"), Theme::danger()),
+        };
+        let test = button("provider-test", t("测试")).when(testing || askable == 0, |d| d.opacity(0.5).cursor_default()).when(!testing && askable > 0, |d| d.on_click(self.on(Cmd::TestModels, cx)));
         let settings_rows = [
             row(t("名称"), None, name),
             row(t("接口"), None, segmented("protocol", vec![("Claude API", Cmd::PickProtocol(Protocol::Anthropic)), (t("OpenAI 兼容"), Cmd::PickProtocol(Protocol::OpenAI)), ("Responses", Cmd::PickProtocol(Protocol::Responses))], match view.protocol { Protocol::Anthropic => 0, Protocol::OpenAI => 1, Protocol::Responses => 2 }, self, cx)),
             row(t("服务地址"), None, base_url),
             row("API Key", Some(key_detail.into()), api_key),
             row_said(t("代理"), Some((proxy_detail.into(), if proxy_wrong { Theme::danger() } else { Theme::text_tertiary() })), proxy),
+            row_said(t("连接测试"), Some((found.into(), found_color)), test),
         ];
         let console = provider.preset().map(|p| p.console);
         let header = div()
@@ -1699,7 +1812,23 @@ impl Workspace {
                 let (draws, judges) = (model.draws(), model.judges());
                 let asked = wisp_core::imagegen::Interface::from_key(&model.interface).map_or(t("自动"), |interface| t(interface.name()));
                 let serves: Vec<&str> = used.iter().filter(|(_, id)| *id == model.id).map(|(task, _)| t(task.label())).collect();
-                div()
+                // What 连接测试 found of it: a mark beside its name, and why it failed under the row unless the test's row says it
+                // for all; what was said in full is under the pointer on the mark.
+                let tested = trial.and_then(|trial| trial.of(model));
+                let mark = tested.map(|tried| {
+                    let id = SharedString::from(format!("model-tested-{}", model.id));
+                    let (icon, text, color, tip) = match tried {
+                        Tried::Asking => return div().flex().flex_none().items_center().child(ui::spinner(id, 13., Theme::text_tertiary())).into_any_element(),
+                        Tried::Answered(took, said) => ("check", tf!("{:.1} 秒", "{:.1} s", took.as_secs_f32()), Theme::success(), if said.is_empty() { t("模型有回应，没有说话。").to_string() } else { tf!("模型回复：{said}", "The model said: {said}") }),
+                        Tried::Failed(err) => ("x", t("失败").to_string(), Theme::danger(), wisp_core::mention::cut(&failure(err), 600)),
+                    };
+                    div().id(id).flex().flex_none().items_center().gap(px(3.)).text_size(text_px(12.)).text_color(color).child(ui::icon(icon, 13., color)).child(text).tooltip(ui::tip(tip)).into_any_element()
+                });
+                let reason = match tested {
+                    Some(Tried::Failed(err)) if shared.is_none() => Some(wisp_core::mention::cut(&failure(err), BRIEF)),
+                    _ => None,
+                };
+                let line = div()
                     .flex()
                     .items_center()
                     .gap(px(8.))
@@ -1708,6 +1837,7 @@ impl Workspace {
                     .py(px(6.))
                     // A field's width has to be given here: under these widths it would be measured as narrow.
                     .child(div().flex_none().w(px(MODEL_W)).child(ui::field(input, window, cx)))
+                    .children(mark)
                     .when(draws, |d| d.child(div().id(("model-draws", i)).flex().flex_none().items_center().gap(px(4.)).h(text_px(22.)).px(px(7.)).rounded(px(6.)).bg(Theme::accent_soft()).text_size(text_px(11.)).text_color(Theme::accent()).child(ui::icon("image", 12., Theme::accent())).child(t("生图模型")).tooltip(|_, cx| cx.new(|_| crate::write_assist::Tip(t("这个模型按描述画图，不回答问题。").to_string())).into())))
                     .when(judges, |d| d.child(div().id(("model-judges", i)).flex().flex_none().items_center().gap(px(4.)).h(text_px(22.)).px(px(7.)).rounded(px(6.)).bg(Theme::accent_soft()).text_size(text_px(11.)).text_color(Theme::accent()).child(ui::icon("list-todo", 12., Theme::accent())).child(t("判断模型")).tooltip(|_, cx| cx.new(|_| crate::write_assist::Tip(t("这个模型只在给定的选项里作判断并给出概率，不写文字。").to_string())).into())))
                     .child(div().flex_1().min_w_0().truncate().text_size(text_px(12.)).text_color(Theme::accent()).child(if draws && !serves.is_empty() { t("在用").to_string() } else { serves.join(" · ") }))
@@ -1730,8 +1860,11 @@ impl Workspace {
                             .child(if judges { t("类型").to_string() } else if draws { tf!("接口 · {asked}", "Interface · {asked}") } else if model.context > 0 { tf!("思考 · {effort} · {}", "Thinking · {effort} · {}", context_label(model.context)) } else { tf!("思考 · {effort}", "Thinking · {effort}") })
                             .child(ui::icon("chevron-down", 12., Theme::text_tertiary())),
                     )
-                    .child(ui::ghost_button(("model-remove", i), Some("x"), None).tooltip(|_, cx| cx.new(|_| crate::write_assist::Tip(t("删除这个模型").to_string())).into()).on_click(self.on(Cmd::RemoveModel(i), cx)))
-                    .into_any_element()
+                    .child(ui::ghost_button(("model-remove", i), Some("x"), None).tooltip(|_, cx| cx.new(|_| crate::write_assist::Tip(t("删除这个模型").to_string())).into()).on_click(self.on(Cmd::RemoveModel(i), cx)));
+                match reason {
+                    Some(reason) => div().flex().flex_col().w_full().child(line).child(div().px(px(16.)).pb(px(6.)).text_size(text_px(12.)).line_height(text_px(17.)).text_color(Theme::danger()).child(reason)).into_any_element(),
+                    None => line.into_any_element(),
+                }
             })
             .collect();
         let typed = !fields.new_model.read(cx).text().trim().is_empty();
