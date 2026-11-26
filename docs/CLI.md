@@ -98,6 +98,7 @@ wisp search_fulltext --help             # 一个工具的参数
 | `list_introductions` | 导言库：从文献的引言里收藏的段落（别人怎样开篇、引入问题），各自的名称（引入方式）、原文、备注、标签和出处；可按 `--query`、`--tag`、`--paper-id` 筛选 |
 | `search_fulltext` | 在已保存的全文里找短语或关键词，返回页码和逐字片段。整个短语不分大小写，跨行和行末连字符断开的词也算。`--in all` 还查附件的正文、PDF 上的标注（标出的原文和写在标注上的话）、笔记、题目和摘要，每处多一个 `kind`（`fulltext`、`mark`、`notes`、`title`、`abstract`），标注的还有 `mark`（种类）和 `written`（是否在写上去的话里），附件的有 `file`（`S1`…）；题目、摘要和笔记没有 `page`。不给 `--in` 时和以前一样只查全文 |
 | `read_fulltext` | 按页读取全文，一次最多 8 页 |
+| `read_table` | 读一个表格文件里的行：文献的表格附件（副表、补充表格，`--resourceId`，ID 见 `get_paper` 的 `files`）或本机文件（`--path`）；`.xlsx`（`--sheet` 按名称或序号选表）、`.csv`、`.tsv`。`--find FLC` 只取含这个词的行，`--columns '["Gene","padj"]'` 只取这几列（列名或字母），`--from` / `--rows` 翻页（默认 50 行，最多 500）。返回 `sheets`、`rowCount`、猜出的表头 `header`、`rows`，没读完时有 `next`。只读 |
 | `find_citations` | 为一段文字逐句找出库里可能支持它的文献和它自己最贴近的一句原文（按词语找出的候选；文字和文献语言不同时用 `queries` 给各句配检索词） |
 | `find_passages` | 在一篇文献里找出最贴近给定句子的原文：稿件里引用它的那句话依据的是哪一句（摘要和全文里的句子，全文里的带页码；语言不同时用 `queries` 给出检索词） |
 | `find_sentences` | 写作参考：库里各篇文献在同一部分（摘要、导言、方法、结果、讨论）的句子；给 `--query` 时按相近程度排，不给时返回各篇这一部分的开头 |
