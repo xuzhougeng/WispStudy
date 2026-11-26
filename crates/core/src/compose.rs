@@ -8,7 +8,8 @@
 //! is kept as a snapshot before the assistant's first change to it, so a
 //! version can always be gone back to. `note` is what each question of
 //! such a conversation tells the model about the manuscript, `label_citations`
-//! turns the citations of a conversation (`[P3 p.5 "…"]`) into the
+//! turns the citations of a conversation (`[P3 p.5 "…"]`, and a key written
+//! with such a sentence, `[@Key p.5 "…"]`) into the
 //! manuscript's before a tool runs and `keep_quoted` keeps the sentences
 //! they quoted as the passages those citations rest on, `copied` finds the
 //! sentences written that repeat the paper they cite, and `hunks` is what
@@ -379,18 +380,22 @@ fn by_example(written_in: &str) -> String {
 pub struct Piece {
     pub text: String,
     pub quoted: Vec<Quoted>,
+    /// The sentences quoted after a key no paper has, each with that key: in neither the text nor `quoted`.
+    pub dropped: Vec<(String, String)>,
 }
 
 /// Before `edit_section` or `write_section` runs for a conversation: the citations of the
 /// words to be written (`text`, and every `new` of `edits`) are turned from
 /// the conversation's (`[P3 p.5 "…"]`) into the manuscript's (`[@Key, p. 5]`)
-/// in `args`. The pieces written, each with what it quoted, for `keep_quoted`.
+/// in `args`. A key written with the sentence a label has (`[@Key p.5 "…"]`)
+/// is read the same way, so that no paper's sentence stays in a citation.
+/// The pieces written, each with what it quoted, for `keep_quoted`.
 pub fn label_citations(args: &mut Value, sources: &[Source], index: &Index) -> Vec<Piece> {
     let mut pieces = vec![];
     let mut convert = |value: &mut Value| {
         let Some(text) = value.as_str() else { return };
         let converted = cite::convert_ai_citations(text, sources, index);
-        pieces.push(Piece { text: converted.text.clone(), quoted: converted.quoted });
+        pieces.push(Piece { text: converted.text.clone(), quoted: converted.quoted, dropped: converted.dropped });
         *value = json!(converted.text);
     };
     // Only what the call has: asking a JSON object for a key it lacks would put the key there.
@@ -426,6 +431,12 @@ pub fn call_with(store: &mut Store, info: &crate::libraries::LibraryInfo, name: 
     if !stray.is_empty() {
         value["unknownLabels"] = json!(stray);
         value["labelsHint"] = json!("unknownLabels 里的标签在这次对话里不对应任何文献，已原样留在稿件里。用 edit_section 把它们改成正确的文献标签，或去掉这几处引用。");
+    }
+    // A sentence quoted after a key no paper has is in neither the manuscript nor the passages: the model is told, or it would be gone without a word.
+    let dropped: Vec<Value> = pieces.iter().flat_map(|piece| &piece.dropped).map(|(citation, quote)| json!({"citation": citation, "quote": quote})).collect();
+    if !dropped.is_empty() {
+        value["quotesDropped"] = json!(dropped);
+        value["droppedHint"] = json!("quotesDropped 里的原句（quote）写在引用键（citation）后面，而文献库里没有文献用这个引用键：引用已留在稿件里，原句没有写进稿件，也没有记为出处。用 edit_section 把这几处引用改成这次对话里的文献标签加原句（如 [P3 p.5 \"原句\"]），或去掉这几处引用。");
     }
     let (Some(manuscript), Some(section)) = (value["manuscript"].as_str().map(str::to_string), value["section"]["id"].as_str().map(str::to_string)) else { return Ok(value) };
     let body = store.manuscript(&manuscript).ok().flatten().and_then(|m| m.section(&section).map(|s| s.body.clone())).unwrap_or_default();
@@ -800,6 +811,45 @@ mod tests {
         assert!(done["copied"].is_null() && done["edited"] == 1);
         // Any other tool goes as the table has it.
         assert!(call(&mut store, &info, "list_manuscripts", &json!({}), &sources, &nothing, &none).unwrap()["manuscripts"].is_array());
+    }
+
+    #[test]
+    fn a_key_with_its_sentence_is_read_as_a_label_with_its_sentence() {
+        let (mut store, made, paper) = library();
+        let section = made.sections[1].id.clone();
+        let sources = vec![Source { label: "P1".into(), paper_id: paper.id.clone(), title: paper.title.clone(), ..Default::default() }];
+        let info = crate::libraries::LibraryInfo::default();
+        let nothing = |_: &str| -> Result<String, String> { Err("no network".into()) };
+        let none = |_: &str| -> Result<Vec<u8>, String> { Err("no network".into()) };
+        let body = |store: &Store| store.manuscript(&made.id).unwrap().unwrap().section(&section).unwrap().body.clone();
+        // The key where the label goes, the sentence after it: the manuscript has the citation alone, and the sentence is what it rests on.
+        let done = call(&mut store, &info, "edit_section", &json!({"section": section, "edits": [{"old": "", "new": "WOX5 维持静止中心 [@Zhang2021 \"WOX5 maintains the quiescent centre of the root.\"]。"}]}), &sources, &nothing, &none).unwrap();
+        assert_eq!(body(&store), "WOX5 维持静止中心 [@Zhang2021]。");
+        assert_eq!((done["passagesKept"].as_u64(), done["quotesNotFound"].is_null(), done["quotesDropped"].is_null(), done["unknownCitations"].is_null(), done["unknownLabels"].is_null()), (Some(1), true, true, true, true));
+        let kept = store.passages(&made.id).unwrap();
+        assert_eq!((kept.len(), kept[0].paper_id.as_str(), kept[0].passage.as_str(), kept[0].claim.as_str(), kept[0].origin.as_str()), (1, paper.id.as_str(), "WOX5 maintains the quiescent centre of the root.", "WOX5 维持静止中心。", passage::CITED));
+        // With a page: `p.0` is none, `p.5` and `, p. 5` are the manuscript's `, p. 5`. A sentence the paper does not hold is said, not kept.
+        let done = call(&mut store, &info, "edit_section", &json!({"section": section, "edits": [{"old": "", "new": "\n\n它在根里 [@Zhang2021 p.0 \"WOX5 maintains the quiescent centre\"]，也有人这样说 [@Zhang2021 p.5 \"The paper never says this sentence at all.\"]，还有 [@Zhang2021, p. 5 “Nor does it say this one.”]。"}]}), &sources, &nothing, &none).unwrap();
+        assert!(body(&store).ends_with("它在根里 [@Zhang2021]，也有人这样说 [@Zhang2021, p. 5]，还有 [@Zhang2021, p. 5]。"));
+        assert_eq!((done["passagesKept"].as_u64(), &done["quotesNotFound"]), (Some(1), &json!(["The paper never says this sentence at all.", "Nor does it say this one."])));
+        assert!(done["quotesHint"].is_string() && done["quotesDropped"].is_null());
+        // A key no paper has: the citation is reported as any unknown one, and its sentence is in neither the manuscript nor the passages, which is said.
+        let done = call(&mut store, &info, "edit_section", &json!({"section": section, "edits": [{"old": "", "new": "\n\n别处的说法 [@Nobody1999 p.3 \"Somebody else said this.\"]。"}]}), &sources, &nothing, &none).unwrap();
+        assert!(body(&store).ends_with("别处的说法 [@Nobody1999, p. 3]。") && !body(&store).contains("Somebody"));
+        assert_eq!((done["unknownCitations"][0].as_str(), &done["quotesDropped"]), (Some("@Nobody1999"), &json!([{"citation": "@Nobody1999", "quote": "Somebody else said this."}])));
+        assert!(done["droppedHint"].as_str().unwrap().contains("没有写进稿件") && done["passagesKept"].is_null() && done["quotesNotFound"].is_null());
+        assert_eq!(store.passages(&made.id).unwrap().len(), 2);
+        // A whole section goes the same way, and the citations a manuscript writes itself stay as they are: a key alone, a key with a page, words before the key.
+        let whole = "本来的写法 [@Zhang2021]、[@Zhang2021, p. 5] 和 [see @Zhang2021, p. 5] 不变，新写的一句 [@Zhang2021 \"WOX5 maintains the quiescent centre of the root.\"]。";
+        let mut args = json!({"section": section, "text": whole});
+        let pieces = {
+            let (papers, kept) = (store.list_papers().unwrap(), store.cite_keys().unwrap());
+            label_citations(&mut args, &sources, &Index::new(&papers, std::iter::empty(), &kept))
+        };
+        assert_eq!(args["text"], "本来的写法 [@Zhang2021]、[@Zhang2021, p. 5] 和 [see @Zhang2021, p. 5] 不变，新写的一句 [@Zhang2021]。");
+        assert_eq!((pieces[0].quoted.len(), pieces[0].dropped.len()), (1, 0));
+        let done = call(&mut store, &info, "write_section", &json!({"section": section, "text": whole}), &sources, &nothing, &none).unwrap();
+        assert_eq!((body(&store), done["passagesKept"].as_u64()), (args["text"].as_str().unwrap().to_string(), Some(1)));
     }
 
     #[test]
