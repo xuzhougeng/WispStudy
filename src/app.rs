@@ -41,7 +41,7 @@ pub use crate::modal::Modal;
 pub use crate::screen_run::{Confirmed, Screen, ScreenMode};
 pub use crate::sorting::Sorting;
 pub use crate::translate::Translated;
-pub use crate::viewers::{Beside, MAX_PINS, PaperWindow, Pinned};
+pub use crate::viewers::{Beside, LeftOpen, MAX_PINS, PaperWindow, Pinned};
 
 /// What the middle of an open library shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -284,6 +284,9 @@ pub struct Library {
     pub finding: crate::library_find::Finding,
     pub page: Page,
     pub selected: Option<String>,
+    /// What the pages other than the one on show had open in the detail panel when they were left (`Workspace::turn_page`):
+    /// a page opens its own again, and none shows what another one had open.
+    pub left_open: Vec<LeftOpen>,
     /// The papers marked in the list with Shift or ⌘ / Ctrl, for doing something with all of them.
     pub marked: Vec<String>,
     /// Where a stretch marked with Shift starts, and where it reaches to.
@@ -494,8 +497,8 @@ pub struct Workspace {
     pub column_drag: Option<ColumnDrag>,
     /// What is selected in a text of the window that is not an answer or a text field.
     pub picked: Option<crate::select::Picked>,
-    /// The next `select` is a step through the papers read (`step_history`), not a paper chosen.
-    stepping: bool,
+    /// The next `select` is a step through the papers read (`step_history`) or a page turned (`turn_page`), not a paper chosen.
+    pub(crate) stepping: bool,
     /// The library's window: a paper's own window shows its paper there (`show_in_library`).
     pub main_window: AnyWindowHandle,
     /// A paper of the scope panel is held and on its way into the conversation (`chat::PaperDrag`).
@@ -1152,6 +1155,7 @@ impl Workspace {
             finding: Default::default(),
             page: Page::Papers,
             selected: None,
+            left_open: vec![],
             tab: Tab::Info,
             wide: false,
             reading: false,

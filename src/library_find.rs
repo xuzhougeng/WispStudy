@@ -84,7 +84,8 @@ impl Workspace {
             Do::Open => {
                 let query = lib.search.read(cx).text().trim().to_string();
                 if query.is_empty() { return lib.search.read(cx).focus(window) }
-                lib.page = Page::Papers;
+                self.turn_page(Page::Papers, None, window, cx);
+                let Some(lib) = self.lib.as_mut() else { return };
                 // Enter on a row the arrows chose goes there; else the words are looked for (again).
                 if lib.finding.open && lib.finding.asked == query && !lib.finding.running && let Some(at) = lib.finding.cursor { return self.run_find(Do::Go(at), window, cx) }
                 self.find_start(query, false, cx);
@@ -95,7 +96,7 @@ impl Workspace {
                 lib.search.read(cx).focus(window);
                 lib.filters.search = words.clone();
                 lib.refilter();
-                lib.page = Page::Papers;
+                self.turn_page(Page::Papers, None, window, cx);
                 self.find_start(words.trim().to_string(), false, cx);
             }
             Do::Close => {

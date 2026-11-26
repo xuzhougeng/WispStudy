@@ -1111,7 +1111,8 @@ impl Workspace {
             }
             Cmd::OpenImported(id) => {
                 self.run(Cmd::CloseModal, window, cx);
-                if let Some(lib) = self.lib.as_mut() && matches!(lib.page, Page::Trash | Page::Sources | Page::Guide) { lib.page = Page::Papers }
+                // A page without the detail panel shows the paper in the list.
+                if self.lib.as_ref().is_some_and(|lib| matches!(lib.page, Page::Trash | Page::Sources | Page::Guide)) { self.turn_page(Page::Papers, Some(id.clone()), window, cx) }
                 self.select(Some(id), window, cx);
             }
             Cmd::FindPdfs(only) => self.fetch_start(only, cx),
@@ -1131,19 +1132,19 @@ impl Workspace {
             }
             Cmd::ShowTextless => {
                 if matches!(self.modal, Some(Modal::ImportReport)) { self.run(Cmd::CloseModal, window, cx) }
+                self.turn_page(Page::Papers, None, window, cx);
                 if let Some(lib) = self.lib.as_mut() {
                     lib.filters = Filters { fulltext: "textless".into(), sort: crate::library::sort_in_zone(&lib.info.sort, &self.settings), ..Default::default() };
                     lib.search.update(cx, |input, cx| input.set_text("", cx));
-                    lib.page = Page::Papers;
                     lib.refilter();
                 }
             }
 
             Cmd::SetView(view) => {
                 if self.lib.as_ref().is_some_and(|lib| lib.finding.open) { self.run_find(crate::library_find::Do::Close, window, cx) }
+                self.turn_page(Page::Papers, None, window, cx);
                 if let Some(lib) = self.lib.as_mut() {
                     lib.filters.view = view;
-                    lib.page = Page::Papers;
                     lib.refilter();
                 }
             }
@@ -1161,8 +1162,11 @@ impl Workspace {
                 if let Some(lib) = self.lib.as_mut() {
                     // What was chosen in the trash is for that visit: none chosen on coming back, nor after leaving.
                     if lib.page == Page::Trash || page == Page::Trash { (lib.trash_chosen, lib.trash_anchor) = (vec![], None) }
-                    if page == Page::Write { lib.enter_write() } else { lib.page = page }
                     lib.reading = false;
+                }
+                // The paper open here stays with this page, and the one the page had open comes back with it.
+                self.turn_page(page, None, window, cx);
+                if let Some(lib) = self.lib.as_mut() {
                     if page == Page::Ask { lib.library_chat.input.read(cx).focus(window) }
                     if page == Page::Write {
                         lib.writing.editor.read(cx).focus(window);
@@ -1269,9 +1273,9 @@ impl Workspace {
                             if value.is_empty() { f.fields.remove(&id); } else { f.fields.insert(id, value); }
                         }
                     }
-                    lib.page = Page::Papers;
                     lib.refilter();
                 }
+                self.turn_page(Page::Papers, None, window, cx);
             }
             Cmd::FilterRange(key) => {
                 let Some(current) = self.lib.as_ref().map(|lib| if key == FilterKey::Impact { lib.filters.impact.clone() } else { lib.filters.year.clone() }) else { return };
@@ -1292,16 +1296,16 @@ impl Workspace {
                         lib.filters.not_tags.retain(|t| *t != tag);
                         lib.filters.tags = vec![tag];
                     }
-                    lib.page = Page::Papers;
                     lib.refilter();
                 }
+                self.turn_page(Page::Papers, None, window, cx);
             }
             Cmd::ExcludeTag(tag) => {
                 if let Some(lib) = self.lib.as_mut() {
                     if lib.page == Page::Papers || !lib.filters.excluded(&tag) { lib.filters.exclude_tag(&tag) }
-                    lib.page = Page::Papers;
                     lib.refilter();
                 }
+                self.turn_page(Page::Papers, None, window, cx);
             }
             Cmd::FindTag(empty) => {
                 if let Some(lib) = self.lib.as_ref() {
@@ -1897,7 +1901,7 @@ impl Workspace {
                 }
             }
             Cmd::MentionPaper(talk, id) => self.mention_paper(talk, &id, window, cx),
-            Cmd::MentionTag(tag) => self.mention_tag(tag),
+            Cmd::MentionTag(tag) => self.mention_tag(tag, window, cx),
             Cmd::MentionSection(manuscript, section) => self.mention_section(manuscript, section, window, cx),
             Cmd::MentionFigure(value) => self.mention_figure(value, window, cx),
             Cmd::PickSlash(paper, at) => {
@@ -2283,8 +2287,8 @@ impl Workspace {
             Cmd::ConfirmTick(_) | Cmd::ConfirmChoose(..) | Cmd::ConfirmPart(_) | Cmd::ConfirmTickAll(_) | Cmd::ConfirmSort | Cmd::ConfirmCursor(_) | Cmd::ConfirmClose | Cmd::ConfirmApply | Cmd::ConfirmUndo => self.run_confirm(cmd, window, cx),
 
             Cmd::OpenGuide(choosing) => {
+                self.turn_page(Page::Guide, None, window, cx);
                 if let Some(lib) = self.lib.as_mut() {
-                    lib.page = Page::Guide;
                     lib.guide.choosing = choosing;
                     if !choosing { lib.guide.keywords.read(cx).focus(window) }
                 }
@@ -2321,7 +2325,7 @@ impl Workspace {
                 if saved.is_empty() && failure.is_none() { return }
                 // What was saved is on the searches page from here on.
                 lib.guide.ideas.retain(|entry| !entry.chosen);
-                lib.page = Page::Sources;
+                self.turn_page(Page::Sources, None, window, cx);
                 self.change(cx, |_| Ok(()));
                 if let Some(err) = failure { self.fail(err, cx) }
                 for id in saved {
@@ -2512,10 +2516,8 @@ impl Workspace {
             // On the writing page the words are looked for in the manuscript, not among the papers.
             "search" if self.lib.as_ref().is_some_and(|l| l.page == Page::Write && !l.reading) => return self.seek_open(window, cx),
             "search" => {
-                if let Some(lib) = self.lib.as_mut() {
-                    lib.page = Page::Papers;
-                    lib.reading = false;
-                }
+                if let Some(lib) = self.lib.as_mut() { lib.reading = false }
+                self.turn_page(Page::Papers, None, window, cx);
                 // A window too narrow for the list beside a paper asked about: the search box is with the full list.
                 if self.asking(window) && self.ask_list_width(window) <= 0. { self.run(Cmd::LeaveAsk, window, cx) }
                 if let Some(lib) = self.lib.as_ref() {
