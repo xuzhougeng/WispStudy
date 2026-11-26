@@ -1012,6 +1012,7 @@ impl Workspace {
         };
         theme::set_dark(dark);
         theme::set_high_contrast(self.settings.high_contrast);
+        theme::set_work_animation(self.settings.work_animation);
         window.refresh();
     }
 
@@ -1625,6 +1626,7 @@ impl Workspace {
                 row(t("文献列表"), Some(t("紧凑显示更多文献，舒适增加行间留白。").into()), segmented("density", vec![(t("紧凑"), density("compact")), (t("标准"), density("")), (t("舒适"), density("comfortable"))], density_index, self, cx)).into_any_element(),
                 row(t("期刊分区"), Some(tf!("文献列表的「分区」列显示哪一种分区。数据随应用附带：{}。", "Which partition the list's Zone column shows. The data comes with the app: {}.", t(wisp_core::journals::EDITIONS)).into()), segmented("journal-zone", vec![(t("中科院"), zone("")), (t("新锐"), zone("xr")), (t("JCR"), zone("jcr"))], zone_index, self, cx)).into_any_element(),
                 row(t("增强对比度"), Some(t("加深辅助文字和分隔线，在浅色与深色主题下都生效。").into()), switch("high-contrast", self.settings.high_contrast).on_click(self.on(Cmd::ToggleHighContrast, cx))).into_any_element(),
+                row(t("工作动画"), Some(t("等待助手阅读、检索或生成时，显示像素研究员动画。").into()), switch("work-animation", self.settings.work_animation).on_click(self.on(Cmd::ToggleWorkAnimation, cx))).into_any_element(),
             ],
         )
         .child(note(t("标识色属于文献库：在文献库的「编辑名称与主题」里选择，打开文献库后界面随之变色。")));

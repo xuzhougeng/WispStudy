@@ -153,8 +153,9 @@ impl Workspace {
                         .children(row.problems.iter().map(|problem| div().text_size(text_px(12.)).text_color(Theme::warning()).child(crate::i18n::phrase(problem))))
                         .when_some(row.paper_id.clone().filter(|_| !run.running), |d, id| d.cursor_pointer().hover(|s| s.bg(Theme::hover())).on_click(self.on(Cmd::OpenImported(id), cx)))
                 });
+                let zotero_activity = if !run.running && !run.error.is_empty() { crate::mascot::Activity::Paused } else { crate::mascot::Activity::from_run(run.running, run.rows.len(), run.total, crate::mascot::Activity::Importing) };
                 ui::dialog(720.).max_w(relative(0.92)).h(px(620.)).child(ui::dialog_title(t("Zotero 导入")))
-                    .child(ui::progress_overview(run.rows.len(), run.total, if run.running { t("正在导入") } else if !run.error.is_empty() { t("导入失败") } else { t("导入完成") }, run.running, &ui::zotero_segments(run))
+                    .child(ui::progress_overview(run.rows.len(), run.total, if run.running { t("正在导入") } else if !run.error.is_empty() { t("导入失败") } else { t("导入完成") }, run.running, zotero_activity, &ui::zotero_segments(run))
                         .when(run.running && !run.current.is_empty(), |d| d.child(div().p(px(10.)).rounded(px(8.)).bg(theme::accent_of("blue").soft()).line_height(text_px(20.)).child(run.current.clone()))))
                     .child(body().border_t_1().border_color(Theme::line())
                         .when(!run.running, |d| d.child(div().line_height(text_px(21.)).text_color(Theme::text_secondary()).child(run.summary())))
@@ -206,7 +207,7 @@ impl Workspace {
                     .collect();
                 ui::dialog(720.).max_w(relative(0.92)).h(px(620.))
                     .child(ui::dialog_title(match run.ids { 0 => t("PDF 导入"), _ if run.urls == run.total => t("按网址导入"), ids if ids == run.total && run.urls == 0 => t("按 DOI / PMID 导入"), _ => t("导入") }))
-                    .child(ui::progress_overview(run.rows.len(), run.total, if run.running() { t("正在导入") } else { t("导入完成") }, run.running(), &ui::import_segments(run))
+                    .child(ui::progress_overview(run.rows.len(), run.total, if run.running() { t("正在导入") } else { t("导入完成") }, run.running(), crate::mascot::Activity::from_run(run.running(), run.rows.len(), run.total, crate::mascot::Activity::Importing), &ui::import_segments(run))
                         .when(!run.working.is_empty(), |d| d.child(div().flex().flex_col().gap(px(6.)).p(px(10.)).rounded(px(8.)).bg(theme::accent_of("blue").soft())
                             .child(div().text_size(text_px(12.)).text_color(theme::accent_of("blue").strong()).child(if run.ids == 0 { t("正在读取") } else { t("正在处理") }))
                             .children(run.working.iter().map(|name| div().line_height(text_px(19.)).child(name.clone()))))))
@@ -271,23 +272,27 @@ impl Workspace {
                     .collect();
                 let blue = theme::accent_of("blue").strong();
                 let state_color = if run.running() { blue } else { Theme::text_secondary() };
+                let fetch_activity = crate::mascot::Activity::from_run(run.running(), run.rows.len(), run.total, crate::mascot::Activity::Searching);
+                let fetch_summary = div().flex().flex_col().flex_1().min_w_0().gap(px(12.))
+                    .child(div().flex().items_center().gap(px(8.))
+                        .child(div().text_size(text_px(20.)).font_weight(FontWeight::SEMIBOLD).child(format!("{} / {}", run.rows.len(), run.total)))
+                        .child(div().text_color(Theme::text_tertiary()).child(t("篇已处理")))
+                        .child(div().flex_1())
+                        .child(div().text_color(state_color).child(run.status())))
+                    .child(ui::fetch_progress(run).h(px(9.)))
+                    .child(div().flex().flex_wrap().gap(px(14.)).children(ui::fetch_segments(run).into_iter().map(|(count, label, color)| {
+                        div().flex().items_center().gap(px(5.)).text_size(text_px(12.))
+                            .child(div().flex_none().size(px(7.)).rounded_full().bg(color))
+                            .child(div().text_color(Theme::text_secondary()).child(format!("{label} {count}")))
+                    })));
                 ui::dialog(720.).max_w(relative(0.92)).h(px(620.))
                     .child(div().flex().flex_none().items_center()
                         .child(ui::dialog_title(t("全文查找")).flex_1())
                         .child(ui::ghost_button("fetch-dismiss", Some("x"), None).mt(px(10.)).mr(px(16.)).on_click(self.on(Cmd::CloseModal, cx))))
                     .child(div().flex().flex_none().flex_col().gap(px(12.)).px(px(20.)).py(px(14.))
-                        .child(div().flex().items_center().gap(px(8.))
-                            .child(div().text_size(text_px(20.)).font_weight(FontWeight::SEMIBOLD).child(format!("{} / {}", run.rows.len(), run.total)))
-                            .child(div().text_color(Theme::text_tertiary()).child(t("篇已处理")))
-                            .child(div().flex_1())
-                            .when(run.running(), |d| d.child(ui::spinner("fetch-modal-working", 13., state_color)))
-                            .child(div().text_color(state_color).child(run.status())))
-                        .child(ui::fetch_progress(run).h(px(9.)))
-                        .child(div().flex().flex_wrap().gap(px(14.)).children(ui::fetch_segments(run).into_iter().map(|(count, label, color)| {
-                            div().flex().items_center().gap(px(5.)).text_size(text_px(12.))
-                                .child(div().flex_none().size(px(7.)).rounded_full().bg(color))
-                                .child(div().text_color(Theme::text_secondary()).child(format!("{label} {count}")))
-                        })))
+                        .child(div().flex().items_start().gap(px(14.))
+                            .child(crate::mascot::desk("fetch-modal-desk", fetch_activity, Some((run.rows.len(), run.total))))
+                            .child(fetch_summary))
                         .when(!run.working.is_empty(), |d| d.child(div().flex().flex_col().gap(px(6.)).p(px(10.)).rounded(px(8.)).bg(theme::accent_of("blue").soft())
                             .child(div().text_size(text_px(12.)).font_weight(FontWeight::MEDIUM).text_color(blue).child(if run.stopped { t("正在结束当前请求") } else { t("正在处理") }))
                             .children(run.working.iter().map(|id| {

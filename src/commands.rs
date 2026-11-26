@@ -177,6 +177,7 @@ pub enum Cmd {
     SetTextWidth(wisp_core::settings::TextWidth),
     ResetReadingAppearance,
     ToggleHighContrast,
+    ToggleWorkAnimation,
     ResetAppearance,
     RecordShortcut(String),
     ClearShortcut(String),
@@ -940,6 +941,11 @@ impl Workspace {
             }
             Cmd::ToggleHighContrast => {
                 self.settings.high_contrast = !self.settings.high_contrast;
+                self.save_settings(cx);
+                self.apply_appearance(window);
+            }
+            Cmd::ToggleWorkAnimation => {
+                self.settings.work_animation = !self.settings.work_animation;
                 self.save_settings(cx);
                 self.apply_appearance(window);
             }

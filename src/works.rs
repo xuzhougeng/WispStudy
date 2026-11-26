@@ -145,13 +145,13 @@ impl Workspace {
         let mut entries = vec![];
         for lib in &self.parked {
             let (id, name) = (lib.info.id.clone(), ui::one_line(&lib.info.name));
-            let entry = |n: usize, said: String, count: String, bar: Option<(usize, usize)>, waits: bool, this: &Self, cx: &mut Context<Self>| {
+            let entry = |n: usize, said: String, count: String, bar: Option<(usize, usize)>, waits: bool, activity: crate::mascot::Activity, this: &Self, cx: &mut Context<Self>| {
                 let key = SharedString::from(format!("elsewhere-{id}-{n}"));
                 div().id(key.clone()).flex().flex_none().flex_col().gap(px(7.)).px(px(8.)).py(px(10.)).rounded(px(6.)).cursor_pointer().hover(|s| s.bg(Theme::hover()))
                     .tooltip(ui::tip(tf!("在「{name}」里，点击打开", "In “{name}”: click to open")))
                     .on_click(this.on(Cmd::OpenLibrary(id.clone()), cx))
                     .child(div().flex().items_center().gap(px(6.)).text_size(text_px(12.)).line_height(text_px(17.))
-                        .child(if waits { ui::icon("info", 12., Theme::accent()).into_any_element() } else { ui::spinner(key, 12., blue).into_any_element() })
+                        .child(crate::mascot::inline(format!("elsewhere-mascot-{id}-{n}"), activity, 16.))
                         .child(div().flex_1().min_w_0().truncate().text_color(Theme::text_secondary()).child(format!("{said} · {name}")))
                         .child(div().flex_none().text_color(if waits { Theme::accent() } else { Theme::text_tertiary() }).child(count))
                         .child(ui::icon("chevron-right", 12., Theme::text_tertiary())))
@@ -160,10 +160,16 @@ impl Workspace {
             };
             if lib.answering() {
                 let waits = lib.waits_for_yes();
-                entries.push(entry(0, t("助手").to_string(), t(if waits { "等你同意" } else { "回答中" }).to_string(), None, waits, self, cx));
+                let activity = if waits { crate::mascot::Activity::WaitingUser } else { crate::mascot::Activity::Thinking };
+                entries.push(entry(0, t("助手").to_string(), t(if waits { "等你同意" } else { "回答中" }).to_string(), None, waits, activity, self, cx));
             }
             for (n, work) in lib.running().into_iter().enumerate() {
-                entries.push(entry(n + 1, t(work.kind.label()).to_string(), format!("{}/{}", work.done, work.total), Some((work.done, work.total)), false, self, cx));
+                let activity = match work.kind {
+                    Kind::Screen | Kind::Extract => crate::mascot::Activity::Reading,
+                    Kind::Fetch => crate::mascot::Activity::Searching,
+                    Kind::Translate | Kind::Facing => crate::mascot::Activity::Writing,
+                };
+                entries.push(entry(n + 1, t(work.kind.label()).to_string(), format!("{}/{}", work.done, work.total), Some((work.done, work.total)), false, activity, self, cx));
             }
         }
         entries

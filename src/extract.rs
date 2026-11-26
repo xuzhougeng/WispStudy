@@ -688,7 +688,7 @@ impl Workspace {
         if !state.running() { return None }
         let read = state.done - state.failed - state.unread;
         let segments = [(read, t("已读"), Theme::success()), (state.unread, t("没有可读的内容"), Theme::warning()), (state.failed, t("没读成"), Theme::danger()), (state.reading.len(), t("正在阅读"), crate::theme::accent_of("blue").strong()), (state.todo.len(), t("等待中"), Theme::text_placeholder())];
-        Some(ui::progress_entry("extract-progress", t("提取词条"), state.done, state.total, true, &segments).on_click(self.on(Cmd::SetPage(Page::Extract), cx)).into_any_element())
+        Some(ui::progress_entry("extract-progress", t("提取词条"), state.done, state.total, true, crate::mascot::Activity::Reading, &segments).on_click(self.on(Cmd::SetPage(Page::Extract), cx)).into_any_element())
     }
 
     /// The dialog that starts a run: which fields, for how many papers.
@@ -993,17 +993,15 @@ impl Workspace {
         let lib = self.lib.as_ref().unwrap();
         let state = &lib.extract;
         let running = state.running();
+        let activity = crate::mascot::Activity::from_run(running, state.done, state.total, crate::mascot::Activity::Reading);
         let heading = if running { t("助手正在阅读") } else if state.done >= state.total { t("这一轮读完了") } else { t("这一轮停在了这里") };
         let titles: Vec<String> = state.reading.iter().filter_map(|id| lib.paper(id)).map(|paper| paper.title.clone()).collect();
-        div()
+        let content = div()
             .flex()
             .flex_col()
+            .flex_1()
+            .min_w_0()
             .gap(px(8.))
-            .p(px(12.))
-            .rounded(px(10.))
-            .border_1()
-            .border_color(Theme::line())
-            .bg(Theme::bg_sunken())
             .child(
                 div()
                     .flex()
@@ -1011,6 +1009,7 @@ impl Workspace {
                     .gap(px(8.))
                     // Folded, the papers being read are put away and the one line stays.
                     .when(running, |d| d.child(div().id("extract-fold").flex().flex_none().items_center().cursor_pointer().child(ui::icon(if state.folded { "chevron-right" } else { "chevron-down" }, 14., Theme::text_secondary())).on_click(self.on(Cmd::Extract(Do::Fold), cx))))
+                    .when(running && state.folded, |d| d.child(crate::mascot::inline("extract-folded-mascot", activity, 16.)))
                     .child(div().flex_none().font_weight(FontWeight::MEDIUM).child(heading))
                     .child(div().flex_none().text_size(text_px(12.)).text_color(Theme::text_secondary()).child(format!("{} / {}", state.done, state.total)))
                     .when(state.found > 0, |d| d.child(div().flex_none().text_size(text_px(12.)).text_color(Theme::text_secondary()).child(tf!("提出 {} 个取值", "{} values proposed", state.found))))
@@ -1028,7 +1027,13 @@ impl Workspace {
                     // Keyed by the title, so a line that takes another paper's place appears anew.
                     ui::fade_in(SharedString::from(format!("extract-reading-{title}")), line)
                 }))
-            })
+            });
+        let card = div().flex().p(px(12.)).rounded(px(10.)).border_1().border_color(Theme::line()).bg(Theme::bg_sunken());
+        if state.folded {
+            card.child(content)
+        } else {
+            card.items_start().gap(px(14.)).child(crate::mascot::desk("extract-run-desk", activity, Some((state.done, state.total)))).child(content)
+        }
     }
 
     /// Nothing waiting: how to begin, or that everything was dealt with.

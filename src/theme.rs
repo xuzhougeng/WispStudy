@@ -57,9 +57,18 @@ pub fn manuscript_width() -> Pixels {
 }
 
 static HIGH_CONTRAST: AtomicBool = AtomicBool::new(false);
+static WORK_ANIMATION: AtomicBool = AtomicBool::new(true);
 
 pub fn set_high_contrast(enabled: bool) {
     HIGH_CONTRAST.store(enabled, Ordering::Relaxed);
+}
+
+pub fn work_animation() -> bool {
+    WORK_ANIMATION.load(Ordering::Relaxed)
+}
+
+pub fn set_work_animation(enabled: bool) {
+    WORK_ANIMATION.store(enabled, Ordering::Relaxed);
 }
 
 fn contrast() -> bool {

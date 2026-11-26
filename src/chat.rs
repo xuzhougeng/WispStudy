@@ -1283,7 +1283,7 @@ impl Workspace {
                         .gap(px(8.))
                         .h(text_px(22.))
                         .text_color(Theme::text_tertiary())
-                        .child(ui::spinner(SharedString::from(format!("thinking-{side}")), 14., Theme::accent()))
+                        .child(crate::mascot::inline(format!("thinking-{side}"), if chat.steps > 1 { crate::mascot::Activity::Reading } else { crate::mascot::Activity::Thinking }, 18.))
                         .child(if chat.steps > 1 { t("正在整理查到的内容…") } else { t("正在阅读文献并思考…") })
                         .child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(elapsed(chat)))
                         .into_any_element(),
@@ -1479,11 +1479,11 @@ impl Workspace {
         if chat.compacted.as_ref().is_some_and(|compacted| compacted.at >= chat.messages.len()) { items.push(self.render_compacted(talk, chat, cx)) }
         // The summary is being written: the answer waits for it.
         if chat.compacting {
-            items.push(div().flex().items_center().gap(px(8.)).h(text_px(18.)).child(ui::spinner(SharedString::from(format!("compacting-{side}")), 13., Theme::accent())).child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(t("对话太长，正在把较早的部分压缩成摘要…"))).into_any_element());
+            items.push(div().flex().items_center().gap(px(8.)).h(text_px(18.)).child(crate::mascot::inline(format!("compacting-{side}"), crate::mascot::Activity::Compacting, 18.)).child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(t("对话太长，正在把较早的部分压缩成摘要…"))).into_any_element());
         }
         // Text has arrived and more is on its way (a tool call being written, the next piece): the mark keeps turning under it.
         if chat.busy && !chat.compacting && chat.pending.is_none() && matches!(chat.messages.last(), Some(ChatItem::Answer(text)) if !text.is_empty()) {
-            items.push(div().flex().items_center().gap(px(8.)).h(text_px(18.)).child(ui::spinner(SharedString::from(format!("working-{side}")), 13., Theme::accent())).child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(elapsed(chat))).into_any_element());
+            items.push(div().flex().items_center().gap(px(8.)).h(text_px(18.)).child(crate::mascot::inline(format!("working-{side}"), crate::mascot::Activity::Writing, 18.)).child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(elapsed(chat))).into_any_element());
         }
         // A section about to be written anew is asked about where its text is (`render_proposal`): while that is on show the
         // conversation only says so, in a line, and does not ask the same thing a second time.
@@ -1513,7 +1513,7 @@ impl Workspace {
                     .border_1()
                     .border_color(Theme::line_strong())
                     .bg(Theme::bg_sunken())
-                    .child(div().flex().items_center().gap(px(6.)).font_weight(FontWeight::MEDIUM).child(ui::icon("info", 14., Theme::accent())).child(if pending.calls.iter().any(|call| call.confirm && call.outside.is_some()) { t("助手想执行下面的操作，等你同意") } else if pending.calls.iter().filter(|call| call.confirm).all(|call| wisp_core::tools::MANUSCRIPT.contains(&call.name.as_str())) { t("助手想改动稿件，等你同意") } else if draft { t("助手想收进或改动这次对话里的文献，等你同意") } else { t("助手想改动文献库，等你同意") }))
+                    .child(div().flex().items_center().gap(px(6.)).font_weight(FontWeight::MEDIUM).child(crate::mascot::inline(format!("consent-mascot-{side}"), crate::mascot::Activity::WaitingUser, 18.)).child(if pending.calls.iter().any(|call| call.confirm && call.outside.is_some()) { t("助手想执行下面的操作，等你同意") } else if pending.calls.iter().filter(|call| call.confirm).all(|call| wisp_core::tools::MANUSCRIPT.contains(&call.name.as_str())) { t("助手想改动稿件，等你同意") } else if draft { t("助手想收进或改动这次对话里的文献，等你同意") } else { t("助手想改动文献库，等你同意") }))
                     .children(pending.calls.iter().enumerate().filter(|(_, call)| call.confirm).map(|(n, call)| {
                         let line = div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_secondary()).child(crate::i18n::tool_call(&call.line));
                         if call.details.is_empty() { return div().pl(px(20.)).child(line) }
@@ -1770,7 +1770,7 @@ impl Workspace {
                     .gap(px(8.))
                     .h(text_px(22.))
                     .text_color(Theme::text_secondary())
-                    .child(ui::spinner(SharedString::from(format!("tool-{side}-{}", first + n)), 13., Theme::accent()))
+                    .child(crate::mascot::inline(format!("tool-{side}-{}", first + n), crate::mascot::Activity::from_tool_call(call), 18.))
                     .child(div().min_w_0().truncate().child(crate::i18n::tool_call(call)))
                     .child(div().flex_none().text_color(Theme::text_tertiary()).child(elapsed(chat)))
             }))

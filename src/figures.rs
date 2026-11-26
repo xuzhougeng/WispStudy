@@ -860,7 +860,7 @@ impl Workspace {
                 let (w, h) = fit((natural.width.0 as f32 / density, natural.height.0 as f32 / density), (stage.0 - 40., stage.1 - 40.));
                 div().flex_none().bg(gpui::white()).border_1().border_color(Theme::line()).shadow(crate::theme::shadow_card()).when(drawing, |d| d.opacity(0.45)).child(img(image.clone()).w(px(w)).h(px(h))).into_any_element()
             }
-            None if drawing => div().flex().flex_col().items_center().gap(px(10.)).text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(ui::spinner("figure-drawing", 18., Theme::accent())).child(t("正在画，大图可能要一两分钟…")).into_any_element(),
+            None if drawing => div().flex().flex_col().items_center().gap(px(10.)).text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(crate::mascot::desk_large("figure-drawing-desk", crate::mascot::Activity::Drawing, None)).child(t("正在画，大图可能要一两分钟…")).into_any_element(),
             None if form.draw.is_some() && form.png.is_none() => div().flex().flex_col().items_center().gap(px(8.)).max_w(px(320.)).text_color(Theme::text_tertiary()).child(ui::icon("image", 30., Theme::text_placeholder())).child(div().text_color(Theme::text_secondary()).child(t("在下面写下要画什么"))).child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_center().child(t("比如一张机制示意图、图文摘要的草图，或者报告里的配图。画好以后可以再画，满意了再收藏。"))).into_any_element(),
             None if self.modal_error.is_empty() => ui::spinner("figure-large", 18., Theme::text_tertiary()).into_any_element(),
             None => ui::icon("image-broken", 30., Theme::text_placeholder()).into_any_element(),
