@@ -277,6 +277,21 @@ pub fn catalog() -> Vec<ToolDef> {
             &["paperId"],
         ),
         scoped(
+            "read_table",
+            "读取表格",
+            "读一个表格文件里的行：文献的表格附件（副表、补充表格，Table S1 之类），或本机的一个表格文件；.xlsx（里面每个 sheet 是一个表）、.csv、.tsv。resourceId 和 path 给一个。返回文件里有哪些表（sheets）、读的这个表到第几行、有几列（rowCount、columnCount）、表头（header：猜出的列名那一行，表的开头常有一行标题，列名不一定在第 1 行）和一批行（rows：row 是表里的行号，cells 按列从左到右，空单元格是空字符串）。表很大时不要一批批翻到底：用 find 只取含某个词的行（基因名、样本号、化合物名），用 columns 只取要的几列。内容多时返回的行会少于要的，结果里的 next 是接着读的行号。数字是单元格里存的值（不是显示出来的四舍五入），日期写成 年-月-日，公式只有算出的结果。表里没有的数值不要编。只读，不改文件。",
+            json!({
+                "resourceId": {"type": "string", "description": "文献的表格附件的 ID，见 get_paper 的 files（format 是 xlsx、csv、tsv 的那些）。"},
+                "path": {"type": "string", "description": "本机表格文件的路径（.xlsx、.csv、.tsv，或用制表符分列的 .txt），建议用绝对路径。"},
+                "sheet": {"type": "string", "description": "读 .xlsx 里的哪个表：表的名称，或它是第几个（从 1 起）。省略时读第一个。"},
+                "find": {"type": "string", "description": "只返回含这段文字的行（任何一列，不分大小写），例如一个基因名。结果里的 matches 是全表有多少行含它。"},
+                "columns": {"type": "array", "items": {"type": "string"}, "description": "只要这几列：表头里的列名，或列的字母（A、B、AA）。省略时给所有列。"},
+                "from": {"type": "integer", "description": "从表里的第几行读起，默认 1。"},
+                "rows": {"type": "integer", "description": "最多读几行，默认 50，最大 500。"},
+            }),
+            &[],
+        ),
+        scoped(
             "find_citations",
             "查找可引用的文献",
             "为一段文字逐句找出文献库中可能支持它的文献：每句话按文献的题目、摘要、笔记和全文里的句子检索，返回候选文献和它自己最贴近的一句原文（in 是这句所在的部分，全文里的附页码）。只是按词语找出的候选，是否真的支持这句话需要读原文判断。文字和文献不是同一种语言时（返回的 language 是文献的语言），用 queries 给每句配上那种语言的检索词，否则找不到。一句话该引什么看它在做什么，用 intents 说明：转述前人发现、与前人比较或说到方法的句子，优先给出文献自己（导言以外）的原句；讲背景的句子把综述（review 为 true）排在前面；作者自己的话不查。原句里按作者和年份点了名的文献列在 names 里，带 paperId 的是文献库里有的：原句只是在转述时，出处是它们，不是这篇。",
@@ -678,7 +693,7 @@ pub fn library_catalog() -> Vec<ToolDef> {
 
 /// The tools a conversation of the home page may point at a library on the shelf with `library` (跨库提问, #275):
 /// those that read papers and what is kept with them. None of them writes, and none asks for a yes.
-pub const ACROSS: [&str; 10] = ["library_status", "list_papers", "get_paper", "search_fulltext", "read_fulltext", "find_passages", "list_pdf_annotations", "list_figures", "list_methods", "list_introductions"];
+pub const ACROSS: [&str; 11] = ["library_status", "list_papers", "get_paper", "search_fulltext", "read_fulltext", "read_table", "find_passages", "list_pdf_annotations", "list_figures", "list_methods", "list_introductions"];
 
 /// The tools of the home page's assistant, whose conversation is a library of its own that is not on the shelf
 /// yet: those of a library, bound to the conversation's own papers, and beside them `list_libraries` and a
@@ -770,6 +785,8 @@ pub fn describe_call(name: &str, args: &Value) -> String {
     for (key, value) in args.as_object().into_iter().flatten().filter(|(key, _)| key.as_str() != "library") {
         match (key.as_str(), value) {
             ("page", Value::Number(n)) => numbers.push((key, format!("第 {n} 页起"))),
+            ("from", Value::Number(n)) if name == "read_table" => numbers.push((key, format!("第 {n} 行起"))),
+            ("rows", Value::Number(n)) if name == "read_table" => numbers.push((key, format!("最多 {n} 行"))),
             // The words written are for the manuscript, not for the line that says a section is being written.
             ("text", Value::String(text)) if MANUSCRIPT.contains(&name) => numbers.push((key, format!("全文 {}", crate::manuscript::length_said(text)))),
             (_, Value::String(text)) if !text.trim().is_empty() => words.push((key, text.split_whitespace().collect::<Vec<_>>().join(" "))),
@@ -834,6 +851,14 @@ pub fn describe_result(result: &Result<Value, String>) -> String {
                 if failed == 0 { format!("读出了 {read} 个文件的文字") } else { format!("读出了 {read} 个文件的文字，{failed} 个没有读成") }
             } else if let Some(pages) = value["pages"].as_array() {
                 format!("读了 {} 页", pages.len())
+            } else if let (Some(rows), Some(total)) = (value["rows"].as_array(), value["rowCount"].as_u64()) {
+                // A table (`read_table`): how much of it was read, or how many of its rows hold the word looked for.
+                match value["matches"].as_u64() {
+                    Some(0) => "没有找到这样的行".into(),
+                    Some(matches) if matches as usize > rows.len() => format!("找到 {matches} 行，读了 {} 行", rows.len()),
+                    Some(matches) => format!("找到 {matches} 行"),
+                    None => format!("读了 {} 行，共 {total} 行", rows.len()),
+                }
             } else if let Some(sentences) = value["sentences"].as_array() {
                 format!("{} 句", sentences.len())
             } else {
@@ -1087,6 +1112,7 @@ fn dispatch(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fet
         "journal_metrics" => journal_metrics(store, args),
         "search_fulltext" => search_fulltext(store, args),
         "read_fulltext" => read_fulltext(store, args),
+        "read_table" => local::read_table(store, args),
         _ => Err(anyhow!("没有这个工具：{name}")),
     }
 }
@@ -2431,6 +2457,65 @@ pub(crate) mod tests {
         assert!(call(&root, "compress_pdf", &json!({"resourceId": "R-missing"})).unwrap_err().contains("附件不存在"));
         assert!(call(&root, "compress_pdf", &json!({})).is_err());
         assert!(super::CONFIRMING.contains(&"compress_pdf") && super::WRITING.contains(&"compress_pdf"));
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn a_table_kept_with_a_paper_is_read_by_rows_found_by_a_word_and_cut_to_columns() {
+        let (root, paper) = sample();
+        let info = find_library(&root, "").unwrap();
+        let mut store = Store::open(&info.dir).unwrap();
+        // A supplementary table as a journal hands it out: its title, the columns' names, 300 genes; primers on a second sheet.
+        let genes: Vec<Vec<String>> = (1..=300).map(|n| vec![format!("AT1G{n:05}"), format!("={}", n as f64 / 8.0), format!("=1E-{n}"), if n == 7 { "FLOWERING LOCUS C".to_string() } else { format!("gene {n}") }]).collect();
+        let mut rows: Vec<Vec<&str>> = vec![vec!["Table S1. Differentially expressed genes"], vec!["Gene", "log2FC", "padj", "Description"]];
+        rows.extend(genes.iter().map(|row| row.iter().map(String::as_str).collect::<Vec<_>>()));
+        let source = root.join("Table S1.xlsx");
+        std::fs::write(&source, crate::table::tests::workbook(&[("DEGs", rows), ("Primers", vec![vec!["Name", "Sequence"], vec!["FLC-F", "ATGGGA"]])])).unwrap();
+        let file = store.import_file(&paper, &source, "supplement").unwrap();
+        // The paper's record names it; a first call reads from the top and says how far the table goes.
+        let listed = call(&root, "get_paper", &json!({"id": paper})).unwrap();
+        assert!(listed["files"].as_array().unwrap().iter().any(|f| f["id"] == file.id.as_str() && f["format"] == "xlsx" && f["kind"] == "supplement"));
+        let top = call(&root, "read_table", &json!({"resourceId": file.id})).unwrap();
+        assert_eq!((top["file"].as_str(), top["paperId"].as_str(), top["sheet"].as_str(), top["rowCount"].as_u64(), top["columnCount"].as_u64()), (Some("Table S1.xlsx"), Some(paper.as_str()), Some("DEGs"), Some(302), Some(4)));
+        assert_eq!((top["sheets"].clone(), top["rows"].as_array().unwrap().len(), top["next"].as_u64(), top["header"].is_null()), (json!(["DEGs", "Primers"]), 50, Some(51), true));
+        assert_eq!(top["rows"][2], json!({"row": 3, "cells": ["AT1G00001", "0.125", "0.1", "gene 1"]}));
+        // A word is looked for in the whole table, whatever its case; the columns' names come along.
+        let found = call(&root, "read_table", &json!({"resourceId": file.id, "find": "flowering locus"})).unwrap();
+        assert_eq!((found["matches"].as_u64(), found["header"].clone(), found["next"].is_null()), (Some(1), json!({"row": 2, "cells": ["Gene", "log2FC", "padj", "Description"]}), true));
+        assert_eq!(found["rows"], json!([{"row": 9, "cells": ["AT1G00007", "0.875", "1e-7", "FLOWERING LOCUS C"]}]));
+        // Columns by name or by letter, in the order asked; reading goes on where `next` said.
+        let part = call(&root, "read_table", &json!({"resourceId": file.id, "columns": ["PADJ", "a"], "from": 51, "rows": "2"})).unwrap();
+        assert_eq!((part["columns"].clone(), part["header"]["cells"].clone(), part["next"].as_u64()), (json!(["C", "A"]), json!(["padj", "Gene"]), Some(53)));
+        assert_eq!(part["rows"], json!([{"row": 51, "cells": ["1e-49", "AT1G00049"]}, {"row": 52, "cells": ["1e-50", "AT1G00050"]}]));
+        // Another sheet, by its name or by where it stands.
+        for sheet in [json!("primers"), json!(2), json!("2")] {
+            let primers = call(&root, "read_table", &json!({"resourceId": file.id, "sheet": sheet})).unwrap();
+            assert_eq!((primers["sheet"].as_str(), primers["rowCount"].as_u64(), primers["rows"][1]["cells"][1].as_str(), primers["next"].is_null()), (Some("Primers"), Some(2), Some("ATGGGA"), true));
+        }
+        // A file by its path. A long answer is cut, a long cell too, and it says where to go on.
+        let long = root.join("long.csv");
+        std::fs::write(&long, format!("id,text\n{}", (1..=400).map(|n| format!("{n},{}\n", "x".repeat(400))).collect::<String>())).unwrap();
+        let cut = call(&root, "read_table", &json!({"path": long, "rows": 500})).unwrap();
+        let read = cut["rows"].as_array().unwrap();
+        assert!(read.len() > 50 && read.len() < 400 && cut["next"].as_u64() == Some(read.len() as u64 + 1) && cut["note"].as_str().unwrap().contains("from:"));
+        assert!(cut["sheets"].is_null() && cut["file"] == "long.csv" && cut["rowCount"] == 401 && read[1]["cells"][1].as_str().unwrap().ends_with('…') && output_text(&cut).len() < MAX_OUTPUT_BYTES);
+        // Nothing found, and what cannot be read, are said in words.
+        let none = call(&root, "read_table", &json!({"path": long, "find": "nowhere"})).unwrap();
+        assert!(none["matches"] == 0 && none["rows"].as_array().unwrap().is_empty() && none["note"].as_str().unwrap().contains("nowhere") && none["header"]["cells"] == json!(["id", "text"]));
+        assert!(call(&root, "read_table", &json!({})).unwrap_err().contains("resourceId"));
+        assert!(call(&root, "read_table", &json!({"resourceId": file.id, "path": long})).unwrap_err().contains("只给一个"));
+        assert!(call(&root, "read_table", &json!({"resourceId": "R-missing"})).unwrap_err().contains("附件不存在"));
+        assert!(call(&root, "read_table", &json!({"resourceId": file.id, "sheet": "GO"})).unwrap_err().contains("DEGs、Primers"));
+        assert!(call(&root, "read_table", &json!({"resourceId": file.id, "columns": ["pvalue"]})).unwrap_err().contains("Gene、log2FC、padj、Description"));
+        assert!(call(&root, "read_table", &json!({"resourceId": file.id, "from": 900})).unwrap_err().contains("302"));
+        assert!(call(&root, "read_table", &json!({"path": long, "sheet": "x"})).unwrap_err().contains("只有一个表"));
+        // The sample's full text is a text file, and no table.
+        let text = store.paper_files(&paper).unwrap().into_iter().find(|f| f.kind == "fulltext").unwrap();
+        assert!(call(&root, "read_table", &json!({"resourceId": text.id})).unwrap_err().contains("制表符"));
+        // It changes nothing and asks for no yes; the home page's assistant reads the tables of the shelf with it.
+        assert!(catalog().iter().any(|tool| tool.name == "read_table" && !tool.writes && !tool.confirm) && ACROSS.contains(&"read_table"));
+        assert_eq!((describe_result(&Ok(top)), describe_result(&Ok(found)), describe_result(&Ok(none))), ("读了 50 行，共 302 行".to_string(), "找到 1 行".to_string(), "没有找到这样的行".to_string()));
+        assert_eq!(describe_call("read_table", &json!({"resourceId": "R-1", "find": "FLC", "from": 51, "rows": 20})), "读取表格：FLC · R-1 · 第 51 行起 · 最多 20 行");
         std::fs::remove_dir_all(root).ok();
     }
 

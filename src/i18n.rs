@@ -51,6 +51,8 @@ pub fn short_authors(paper: &wisp_core::model::Paper) -> String {
 const PHRASES: &[(&str, &str)] = &[
     // What a tool was called with (`tools::describe_call`).
     ("第 {n} 页起", "from page {0}"),
+    ("第 {n} 行起", "from row {0}"),
+    ("最多 {n} 行", "{0} {0|row|rows} at most"),
     ("全文 {n} 字", "{0} {0|character|characters} in all"),
     ("全文 {n} 词", "{0} {0|word|words} in all"),
     ("{n} 篇", "{0} {0|paper|papers}"),
@@ -80,6 +82,9 @@ const PHRASES: &[(&str, &str)] = &[
     ("读出了 {n} 个文件的文字，{n} 个没有读成", "Read the text of {0} {0|file|files}; {1} could not be read"),
     ("读出了 {n} 个文件的文字", "Read the text of {0} {0|file|files}"),
     ("读了 {n} 页", "Read {0} {0|page|pages}"),
+    ("读了 {n} 行，共 {n} 行", "Read {0} of {1} {1|row|rows}"),
+    ("找到 {n} 行，读了 {n} 行", "Found {0} {0|row|rows}, read {1}"),
+    ("找到 {n} 行", "Found {0} {0|row|rows}"),
     ("{n} 句", "{0} {0|sentence|sentences}"),
     // What a call would change, for the card that asks (`tools::preview_call`).
     ("{}（最多取最新的 {n} 条）", "{0} (the latest {1} at most)"),
@@ -367,6 +372,8 @@ mod tests {
     #[test]
     fn a_tools_call_and_what_came_back_are_read_in_english() {
         assert_eq!(english_call("阅读全文：P-1 · 第 3 页起"), "Read full text: P-1 · from page 3");
+        assert_eq!(english_call("读取表格：FLC · R-1 · 第 51 行起 · 最多 20 行"), "Read table: FLC · R-1 · from row 51 · 20 rows at most");
+        assert_eq!((english_of("读了 50 行，共 302 行").as_deref(), english_of("找到 12 行，读了 5 行").as_deref(), english_of("找到 1 行").as_deref(), english_of("没有找到这样的行").as_deref()), (Some("Read 50 of 302 rows"), Some("Found 12 rows, read 5"), Some("Found 1 row"), Some("No such rows")));
         assert_eq!(english_call(&describe_call("search_fulltext", &json!({"query": "10x  Genomics", "limit": 5}))), "Search full text: 10x Genomics · limit 5");
         assert_eq!(english_call(&describe_call("library_status", &json!({}))), "Library overview");
         assert_eq!(english_call(&describe_call("write_section", &json!({"section": "Methods", "text": "Roots adapt to soil."}))), "Write manuscript: Methods · 4 words in all");

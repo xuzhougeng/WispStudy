@@ -8670,6 +8670,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "dirs 7.0.0",
+ "encoding_rs",
  "flate2",
  "hayagriva",
  "hayro-interpret",

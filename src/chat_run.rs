@@ -429,6 +429,8 @@ impl Workspace {
             let named: Vec<&str> = wisp_core::mention::tokens(&prompt).iter().filter_map(|token| lib.keys.paper(&token.named)).filter_map(|id| lib.papers.iter().find(|paper| paper.id == id)).map(|paper| paper.title.as_str()).collect();
             let ranked = if named.is_empty() { prompt.clone() } else { format!("{prompt}\n{}", named.join("\n")) };
             let mut ctx = ai::build_context(&lib.info.name, &lib.info.topic, &papers, &lib.fields, &fulltext, &attachments, &scope, &ranked, &chat.known);
+            // Its tables kept as files (副表) are named, not handed over: `read_table` reads what a question needs of them.
+            if let Scope::Paper(id) = &scope { ctx.add_tables(id, &lib.files) }
             // The tools reach every paper of the library, so every paper can be cited.
             ctx.add_sources(&lib.papers);
             // What an earlier part of the conversation read in other libraries is among them: `build_context` keeps every known source.

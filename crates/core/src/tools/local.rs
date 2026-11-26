@@ -1,7 +1,7 @@
 //! Local collection tools. The parsers, deduplication and attachment copier
 //! are the same ones used by the window; no network calls are made here.
 
-use super::text;
+use super::{number, text, texts};
 use crate::{fulltext, import, libraries, lookup, zotero};
 use crate::model::{Paper, clean_strings};
 use crate::libraries::LibraryInfo;
@@ -487,6 +487,119 @@ fn reference_layouts(reference: &crate::slideref::Reference) -> Value {
 }
 
 const DRAWN: &str = "参考文件里的大多数页不是用版式里的标题和正文占位符排的（文字是直接画在页面上的文本框）。新幻灯片建在它的母版和版式上，背景和主题是它的，但每一页的排法不会和它原来的页一样。";
+
+/// 副表: rows of a table file (`table`), an attachment of a paper or a file by its path. The whole sheet is passed
+/// through on every call, so that a word is found wherever it stands and the table's size is said; what is handed
+/// back is a batch of rows a model can read, cut where it would get long.
+pub(super) fn read_table(store: &Store, args: &Value) -> Result<Value> {
+    // What the cells of one answer may come to, in bytes, and one cell of them, in characters.
+    const BUDGET: usize = 36_000;
+    const CELL: usize = 300;
+    let (resource, path) = (text(args, "resourceId")?, text(args, "path")?);
+    let (file, mut out) = match (resource.is_empty(), path.is_empty()) {
+        (true, true) => bail!("请给出 resourceId（文献的表格附件，见 get_paper 的 files）或 path（本机表格文件的路径）。"),
+        (false, false) => bail!("resourceId 和 path 只给一个：读文献的附件给 resourceId，读本机的文件给 path。"),
+        (false, true) => {
+            let Some(file) = store.list_files()?.into_iter().find(|file| file.id == resource) else { bail!("附件不存在：{resource}") };
+            (store.file_path(&file), json!({"resourceId": file.id, "paperId": file.paper_id, "file": file.title}))
+        }
+        (true, false) => {
+            let path = input_path(args)?;
+            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            (path.clone(), json!({"path": path, "file": name}))
+        }
+    };
+    let book = crate::table::open(&file).map_err(anyhow::Error::msg)?;
+    // A sheet by its name, or by where it stands among the sheets; a number is taken as written.
+    let wanted = match &args["sheet"] {
+        Value::Number(n) => n.to_string(),
+        _ => text(args, "sheet")?.to_string(),
+    };
+    let named = book.sheets.iter().any(|name| !name.is_empty());
+    let at = if wanted.is_empty() {
+        0
+    } else {
+        let by_name = book.sheets.iter().position(|name| named && name.trim().to_lowercase() == wanted.to_lowercase());
+        let by_place = || wanted.parse::<usize>().ok().filter(|n| (1..=book.sheets.len()).contains(n)).map(|n| n - 1);
+        match by_name.or_else(by_place) {
+            Some(at) => at,
+            None if named => bail!("这个文件里没有表「{wanted}」。它的表：{}", book.sheets.join("、")),
+            None => bail!("这个文件只有一个表，不用给 sheet。"),
+        }
+    };
+    let sheet = book.sheet(at).map_err(anyhow::Error::msg)?;
+    // The names of the columns are among the first rows, if anywhere.
+    let mut first = vec![];
+    sheet.rows(&mut |n, cells| {
+        first.push((n, cells));
+        first.len() < 20
+    });
+    let header = crate::table::header(&first).map(|at| first.swap_remove(at));
+    // The columns asked for: by the name the header gives one, or by its letters.
+    let mut columns = vec![];
+    for name in texts(args, "columns")? {
+        let by_name = header.as_ref().and_then(|(_, cells)| cells.iter().position(|cell| cell.trim().to_lowercase() == name.to_lowercase()));
+        match by_name.or_else(|| crate::table::column_at(&name)) {
+            Some(column) => columns.push(column),
+            None => {
+                let known = header.as_ref().map_or(String::new(), |(n, cells)| format!("表头（第 {n} 行）：{}", cells.iter().filter(|cell| !cell.trim().is_empty()).take(60).map(|cell| cell.trim()).collect::<Vec<_>>().join("、")));
+                bail!("没有名为「{name}」的列。{known}")
+            }
+        }
+    }
+    let clip = |cell: &str| if cell.chars().count() > CELL { format!("{}…", cell.chars().take(CELL).collect::<String>()) } else { cell.to_string() };
+    let pick = |cells: &[String]| -> Vec<String> {
+        if columns.is_empty() { cells.iter().map(|cell| clip(cell)).collect() } else { columns.iter().map(|&column| cells.get(column).map(|cell| clip(cell)).unwrap_or_default()).collect() }
+    };
+    let from = number(args, "from", 1, usize::MAX)?.max(1);
+    let count = number(args, "rows", 50, 500)?.max(1);
+    let find = text(args, "find")?.to_lowercase();
+    let (mut last, mut width, mut matches, mut used) = (0usize, 0usize, 0usize, 0usize);
+    let (mut rows, mut next): (Vec<Value>, Option<usize>) = (vec![], None);
+    sheet.rows(&mut |n, cells| {
+        (last, width) = (n, width.max(cells.len()));
+        if !find.is_empty() {
+            if !cells.iter().any(|cell| cell.to_lowercase().contains(&find)) { return true }
+            matches += 1;
+        }
+        // A full answer still counts the rest of the table.
+        if n < from || next.is_some() { return true }
+        let picked = pick(&cells);
+        let size = 20 + picked.iter().map(|cell| cell.len() + 3).sum::<usize>();
+        if rows.len() >= count || (!rows.is_empty() && used + size > BUDGET) {
+            next = Some(n);
+            return true;
+        }
+        used += size;
+        rows.push(json!({"row": n, "cells": picked}));
+        true
+    });
+    if last == 0 { bail!("这个表是空的。") }
+    if find.is_empty() && from > last { bail!("这个表只到第 {last} 行。") }
+    if named {
+        out["sheets"] = json!(book.sheets);
+        out["sheet"] = json!(book.sheets[at]);
+    }
+    out["rowCount"] = json!(last);
+    out["columnCount"] = json!(width);
+    if !columns.is_empty() { out["columns"] = json!(columns.iter().map(|&column| crate::table::column_name(column)).collect::<Vec<_>>()) }
+    // The header goes along when the rows read do not show it: a row found by a word says nothing without its columns' names.
+    if let Some((n, cells)) = &header
+        && !rows.iter().any(|row| row["row"] == *n)
+    {
+        out["header"] = json!({"row": n, "cells": pick(cells)});
+    }
+    if !find.is_empty() { out["matches"] = json!(matches) }
+    let mut note = String::new();
+    if !find.is_empty() && matches == 0 { note.push_str(&format!("这个表里没有哪一行含「{}」：换一种写法（别名、编号）再找，或看看文件里别的表。", text(args, "find")?)) }
+    if let Some(next) = next {
+        out["next"] = json!(next);
+        note.push_str(&format!("还有行没有读：带 from: {next} 再读一次{}。", if find.is_empty() { "" } else { "（find 不变）" }));
+    }
+    if !note.is_empty() { out["note"] = json!(note) }
+    out["rows"] = json!(rows);
+    Ok(out)
+}
 
 /// What a PowerPoint file says and how it looks, for making slides after it. Nothing is written.
 pub(super) fn read_slides(args: &Value) -> Result<Value> {

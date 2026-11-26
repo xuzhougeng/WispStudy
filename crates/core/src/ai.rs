@@ -188,6 +188,17 @@ pub struct Given {
 }
 
 impl Context {
+    /// 副表: the attachments of the paper being read that are tables, named with the ids `read_table` reads them
+    /// by. Their rows are not among the documents: a table of twenty thousand genes is read for what is asked.
+    pub fn add_tables(&mut self, paper_id: &str, files: &[PaperFile]) {
+        let tables: Vec<&PaperFile> = files.iter().filter(|file| file.paper_id == paper_id && crate::table::is_table(&file.format)).collect();
+        if tables.is_empty() { return }
+        self.documents.push_str("\n## 表格附件（副表）\n这篇文献还有下面的表格文件作附件，内容没有放在这里：问题涉及补充表格、附表里的数据时，用 read_table 按 resourceId 读取。\n");
+        for file in tables {
+            self.documents.push_str(&format!("- {}（resourceId: {}，{}）\n", file.title, file.id, crate::model::file_size(file.size_bytes)));
+        }
+    }
+
     /// Give the papers outside the documents a label too: the tools reach the
     /// whole library, and what they find must be citable. The new labels
     /// continue after the highest one in use.
@@ -244,6 +255,7 @@ const RULES: &str = "回答时遵循：\n\
 - search_online 可以在 PubMed、Europe PMC、Crossref、arXiv 里试检索，不写入文献库。保存或删除检索式、运行导入、撤销导入会改动文献库：只在用户明确要求时使用，并说明做了什么。收录判断由用户本人做出：你可以用 suggest_screening 提出建议，它会出现在筛选页等用户确认。自定义词条也一样由用户写入：你可以用 suggest_field 为一篇文献的一个词条提出取值和原文依据，它会出现在提取页等用户确认。\n\
 - 用户要求整理文献（打标签、加星标、改阅读状态、记一段笔记）时用 organise_papers，一次调用写全所有要改的文献；用户会先看到每一篇要改什么再决定是否允许。标签优先用文献库已有的。没有被要求时不要整理。\n\
 - list_pdf_annotations 读取用户在 PDF 上的下划线、高亮、方框、便签、文本框和笔记；用户提到划线、标注、阅读重点时主动读取。quote 是用户选中的原文，note 是用户自己的理解，不能把笔记当作论文结论。用 resourceId 区分同一文献的不同附件，页码属于该附件；引用前核对原文上下文。\n\
+- read_table 读文献的表格附件（副表、补充表格：.xlsx、.csv、.tsv），附件的 ID 见 get_paper 的 files。用户问到补充表格、附表里的数据（某个基因的表达量、引物序列、样本信息）时主动去读，不要只凭正文里对它的描述作答；表很大时用 find 只取含某个词的行。说到表里的数据时写明出自哪个附件的哪个表和第几行，后面照常跟文献标签；表里没有的数值不要编。\n\
 - list_manuscripts 和 read_manuscript 读用户在写作页的稿件，只读：稿件由用户自己修改，你给出建议或可以直接采用的段落即可。用户要你审阅稿件时，用 comment_manuscript 把意见作为批注留在稿件里对应的原文上，用户逐条决定采纳与否。\n\
 - 工具结果里每篇文献带有 label，就是引用它时用的标签；工具的 paperId、id 和 paper 参数可以直接填标签（如 P3）。没有保存全文的文献只有记录和摘要，回答依据的只是摘要时要说明。\n\
 - 人物之间的合作、方法的步骤、时间先后、分类这类关系，画成图比文字清楚时，用 ```mermaid 代码块写一张图（flowchart、sequenceDiagram、mindmap、timeline、pie 等），窗口会把它画出来。图里只放材料里有的内容，节点不宜过多；节点文字含括号、引号或标点时用双引号包起来，例如 A[\"张伟 (2021)\"]。不要给图指定颜色（classDef、style 里的 fill、stroke、color）：窗口按浅色或深色主题上色，写死的颜色换了主题可能看不清；要突出某些节点，用不同的形状或粗线（==>、===）。图只是辅助：结论和引用标签仍写在文字里。\n\
@@ -2359,6 +2371,24 @@ mod tests {
         text.extend(fulltext("b", &["short"]));
         let ctx = build_context("L", "", &[&a, &b], &[], &text, &[], &Scope::Papers(vec!["a".into(), "b".into()]), "q", &[]);
         assert_eq!((ctx.files[0].pages, ctx.files[0].pages_omitted, ctx.files[1].pages, ctx.pages_omitted), (1, 1, 1, 1));
+    }
+
+    #[test]
+    fn the_tables_kept_with_a_paper_are_named_for_the_tool_that_reads_them() {
+        let (a, b) = (paper("a", "Root", "Abs"), paper("b", "Leaf", "Abs"));
+        let file = |id: &str, paper: &str, title: &str, format: &str| PaperFile { id: id.into(), paper_id: paper.into(), title: title.into(), format: format.into(), kind: "supplement".into(), size_bytes: 2048, ..Default::default() };
+        let files = [file("R-1", "b", "Table S1.xlsx", "xlsx"), file("R-2", "b", "Figures.pdf", "pdf"), file("R-3", "a", "other.csv", "csv"), file("R-4", "b", "counts.TSV", "tsv")];
+        let mut ctx = build_context("L", "", &[&a, &b], &[], &BTreeMap::new(), &[], &Scope::Paper("b".into()), "q", &[]);
+        let before = ctx.documents.clone();
+        ctx.add_tables("b", &files);
+        // The paper's own tables, by the id `read_table` takes; not its PDFs, not another paper's files.
+        assert!(ctx.documents.contains("- Table S1.xlsx（resourceId: R-1，2 KB）") && ctx.documents.contains("resourceId: R-4") && ctx.documents.contains("read_table"));
+        assert!(!ctx.documents.contains("R-2") && !ctx.documents.contains("R-3"));
+        // A paper without one is told nothing; every conversation knows the tool.
+        ctx.documents = before.clone();
+        ctx.add_tables("b", &files[1..3]);
+        assert_eq!(ctx.documents, before);
+        assert!(ctx.instructions.contains("read_table"));
     }
 
     #[test]
