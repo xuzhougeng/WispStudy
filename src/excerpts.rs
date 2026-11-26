@@ -32,12 +32,9 @@ use wisp_core::figure::{self, Figure};
 use wisp_core::model::{Paper, split_list};
 
 /// The height of a row of the page, and the size of a linked figure's picture there and in the dialog.
-const ROW_H: f32 = 112.;
+pub(crate) const ROW_H: f32 = 112.;
 const ROW_THUMB: (f32, f32) = (64., 48.);
 const DIALOG_THUMB: (f32, f32) = (88., 66.);
-
-/// How many linked figures a row shows; the rest are counted.
-const ROW_FIGURES: usize = 3;
 
 /// The width of the dialog, and of its fields.
 const DIALOG_W: f32 = 620.;
@@ -45,6 +42,83 @@ const WIDE: f32 = DIALOG_W - 40.;
 
 /// How many figures the list to link one from shows at a time: the search finds the others.
 const PICK_SHOWN: usize = 40;
+
+/// How many linked figures a row shows; the rest are counted.
+pub(crate) const ROW_FIGURES: usize = 3;
+
+/// A passage's row: its name, where it is from, the start of its words, its tags, and for a method small pictures
+/// of the first figures it is linked to (`thumbs`, of `linked` in all). Drawn the same in a library's 方法库 and
+/// 导言库 and in the list across libraries, where `owner` names the library it is in after the name. What a click
+/// does is the caller's.
+pub(crate) fn excerpt_row(id: SharedString, excerpt: &Excerpt, paper: Option<&Paper>, thumbs: Vec<(String, Thumb)>, linked: usize, owner: Option<String>) -> Stateful<Div> {
+    let method = excerpt.kind == METHOD;
+    let mut source = if excerpt.paper_id.is_empty() { t("我记下的").to_string() } else { source_line(paper) };
+    if excerpt.page > 0 { source = tf!("第 {} 页 · {source}", "Page {} · {source}", excerpt.page) }
+    let said = row_text(excerpt);
+    let name = if !excerpt.name.is_empty() { excerpt.name.clone() } else if method { t("未命名的方法").to_string() } else { t("未命名的导言").to_string() };
+    let tags: Vec<Div> = excerpt.tags.iter().take(5).map(|tag| ui::chip(tag.clone(), Theme::text_secondary(), Theme::bg_sunken()).h(text_px(20.)).text_size(text_px(11.))).collect();
+    let more = linked.saturating_sub(thumbs.len());
+    let pictures: Vec<AnyElement> = thumbs
+        .into_iter()
+        .map(|(figure, thumb)| {
+            let picture = match thumb {
+                Thumb::Ready(image) => {
+                    let natural = image.size(0);
+                    let (w, h) = fit((natural.width.0 as f32, natural.height.0 as f32), (ROW_THUMB.0 - 6., ROW_THUMB.1 - 6.));
+                    img(image).w(px(w)).h(px(h)).into_any_element()
+                }
+                Thumb::Loading => div().into_any_element(),
+                Thumb::Broken => ui::icon("image-broken", 16., Theme::text_placeholder()).into_any_element(),
+            };
+            div().id(SharedString::from(format!("{id}-figure-{figure}"))).flex().flex_none().items_center().justify_center().w(px(ROW_THUMB.0)).h(px(ROW_THUMB.1)).rounded(px(5.)).border_1().border_color(Theme::line()).bg(gpui::white()).overflow_hidden().child(picture).into_any_element()
+        })
+        .collect();
+    // The name has the row's whole width, the pictures stand beside what is under it: whose it is, in a list across
+    // libraries, ends the name's line at the row's edge whether or not the row has pictures.
+    div()
+        .id(id)
+        .flex()
+        .flex_col()
+        .justify_center()
+        .gap(px(3.))
+        .w_full()
+        .h(text_px(ROW_H))
+        .px(px(16.))
+        .border_b_1()
+        .border_color(Theme::line())
+        .cursor_pointer()
+        .hover(|s| s.bg(Theme::hover()))
+        .child(
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(px(10.))
+                .child(div().flex_1().min_w_0().truncate().font_weight(FontWeight::MEDIUM).text_color(if excerpt.name.is_empty() { Theme::text_tertiary() } else { Theme::text() }).child(name))
+                .when_some(owner, |d, owner| d.child(div().flex_none().max_w(px(200.)).truncate().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(owner))),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(px(14.))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w_0()
+                        .gap(px(3.))
+                        .child(div().truncate().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(source))
+                        .child(div().h(text_px(36.)).overflow_hidden().text_size(text_px(12.)).line_height(text_px(18.)).line_clamp(2).text_color(if said.is_empty() { Theme::text_placeholder() } else { Theme::text_secondary() }).child(if said.is_empty() { t("还没有原文").to_string() } else { said }))
+                        .child(div().flex().flex_none().gap(px(4.)).h(text_px(20.)).overflow_hidden().children(tags)),
+                )
+                .when(!pictures.is_empty(), |d| {
+                    d.child(div().flex().flex_none().items_center().gap(px(6.)).children(pictures).when(more > 0, |d| d.child(div().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(format!("+{more}")))))
+                }),
+        )
+}
 
 /// Everything the two pages and the dialog do, as one command (`Cmd::Excerpt`).
 #[derive(Clone, Debug, PartialEq)]
@@ -731,60 +805,12 @@ impl Workspace {
 
     fn render_excerpt_row(&mut self, at: usize, cx: &mut Context<Self>) -> AnyElement {
         let Some(excerpt) = self.lib.as_ref().and_then(|lib| lib.excerpts.items.get(at)).cloned() else { return div().into_any_element() };
-        let method = excerpt.kind == METHOD;
-        let linked: Vec<String> = if method { self.lib.as_ref().map(|lib| lib.excerpts.figures_of(&excerpt.id).into_iter().filter(|id| lib.gallery.figure(id).is_some()).collect()).unwrap_or_default() } else { vec![] };
+        let linked: Vec<String> = if excerpt.kind == METHOD { self.lib.as_ref().map(|lib| lib.excerpts.figures_of(&excerpt.id).into_iter().filter(|id| lib.gallery.figure(id).is_some()).collect()).unwrap_or_default() } else { vec![] };
         let thumbs: Vec<(String, Thumb)> = linked.iter().take(ROW_FIGURES).map(|id| (id.clone(), self.figure_thumb(id, cx))).collect();
-        let lib = self.lib.as_ref().unwrap();
-        let mut source = if excerpt.paper_id.is_empty() { t("我记下的").to_string() } else { source_line(lib.paper(&excerpt.paper_id)) };
-        if excerpt.page > 0 { source = tf!("第 {} 页 · {source}", "Page {} · {source}", excerpt.page) }
-        let said = row_text(&excerpt);
-        let name = if !excerpt.name.is_empty() { excerpt.name.clone() } else if method { t("未命名的方法").to_string() } else { t("未命名的导言").to_string() };
-        let tags: Vec<Div> = excerpt.tags.iter().take(5).map(|tag| ui::chip(tag.clone(), Theme::text_secondary(), Theme::bg_sunken()).h(text_px(20.)).text_size(text_px(11.))).collect();
-        let pictures: Vec<AnyElement> = thumbs
-            .into_iter()
-            .map(|(id, thumb)| {
-                let picture = match thumb {
-                    Thumb::Ready(image) => {
-                        let natural = image.size(0);
-                        let (w, h) = fit((natural.width.0 as f32, natural.height.0 as f32), (ROW_THUMB.0 - 6., ROW_THUMB.1 - 6.));
-                        img(image).w(px(w)).h(px(h)).into_any_element()
-                    }
-                    Thumb::Loading => div().into_any_element(),
-                    Thumb::Broken => ui::icon("image-broken", 16., Theme::text_placeholder()).into_any_element(),
-                };
-                div().id(SharedString::from(format!("excerpt-row-figure-{}-{id}", excerpt.id))).flex().flex_none().items_center().justify_center().w(px(ROW_THUMB.0)).h(px(ROW_THUMB.1)).rounded(px(5.)).border_1().border_color(Theme::line()).bg(gpui::white()).overflow_hidden().child(picture).into_any_element()
-            })
-            .collect();
-        let more = linked.len().saturating_sub(ROW_FIGURES);
-        div()
-            .id(SharedString::from(format!("excerpt-{}", excerpt.id)))
-            .flex()
-            .items_center()
-            .gap(px(14.))
-            .w_full()
-            .h(text_px(ROW_H))
-            .px(px(16.))
-            .border_b_1()
-            .border_color(Theme::line())
-            .cursor_pointer()
-            .hover(|s| s.bg(Theme::hover()))
+        let paper = self.lib.as_ref().and_then(|lib| lib.paper(&excerpt.paper_id));
+        excerpt_row(SharedString::from(format!("excerpt-{}", excerpt.id)), &excerpt, paper, thumbs, linked.len(), None)
             .on_click(self.on(Cmd::Excerpt(Do::Open(excerpt.id.clone())), cx))
             .on_mouse_down(MouseButton::Right, self.on_context(MenuKind::Excerpt(excerpt.id.clone()), cx))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_w_0()
-                    .gap(px(3.))
-                    .child(div().truncate().font_weight(FontWeight::MEDIUM).text_color(if excerpt.name.is_empty() { Theme::text_tertiary() } else { Theme::text() }).child(name))
-                    .child(div().truncate().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(source))
-                    .child(div().h(text_px(36.)).overflow_hidden().text_size(text_px(12.)).line_height(text_px(18.)).line_clamp(2).text_color(if said.is_empty() { Theme::text_placeholder() } else { Theme::text_secondary() }).child(if said.is_empty() { t("还没有原文").to_string() } else { said }))
-                    .child(div().flex().flex_none().gap(px(4.)).h(text_px(20.)).overflow_hidden().children(tags)),
-            )
-            .when(!pictures.is_empty(), |d| {
-                d.child(div().flex().flex_none().items_center().gap(px(6.)).children(pictures).when(more > 0, |d| d.child(div().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(format!("+{more}")))))
-            })
             .into_any_element()
     }
 

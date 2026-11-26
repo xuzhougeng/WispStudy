@@ -116,6 +116,8 @@ pub enum Cmd {
     Bell(crate::bell::Do),
     /// 教程: the book beside the bell, and the tutorials it opens (`tutorial.rs`).
     Tutorial(crate::tutorial::Do),
+    /// 收藏 of every library: the star beside the book, and the page it opens (`collected.rs`).
+    Collected(crate::collected::Do),
     /// The line that offers a contact email where a search starts (`Workspace::contact_hint`), closed for good.
     DismissContactHint,
     NoteOpen(Option<Talk>, bool),
@@ -752,6 +754,8 @@ impl Workspace {
                 self.modal = None;
                 theme::set_accent("blue");
                 self.libraries = libraries::list(&self.root);
+                // Back on 收藏 of every library, when the library was gone to from it: what it holds may have changed there.
+                self.collected_read(cx);
                 window.set_window_title("Wisp Study");
                 window.focus(&self.focus);
             }
@@ -826,6 +830,7 @@ impl Workspace {
             Cmd::Tour(what) => self.tour_do(what, window, cx),
             Cmd::Bell(what) => self.bell_do(what, window, cx),
             Cmd::Tutorial(what) => self.tutorial_do(what, window, cx),
+            Cmd::Collected(what) => self.collected_do(what, window, cx),
             Cmd::DismissContactHint => {
                 self.settings.contact_hint_dismissed = true;
                 self.save_settings(cx);
@@ -2388,6 +2393,9 @@ impl Workspace {
         } else if self.lib.is_none() && self.home.open {
             // The assistant's page goes back to the home page; what is in its box stays.
             self.run(Cmd::GoHome, window, cx);
+        } else if self.collected.is_some() && self.lib.is_none() {
+            // 收藏 of every library: its search first, then the page.
+            self.collected_up(window, cx);
         } else if self.lib.as_ref().is_some_and(|l| l.page == Page::Write && l.writing.seek.open) {
             // The search over the manuscript, from its own field or the manuscript: before a paper beside it is closed.
             self.run(Cmd::Seek(crate::write_seek::Do::Close), window, cx);
@@ -2469,6 +2477,8 @@ impl Workspace {
             "new-library" if !in_settings && self.lib.is_none() => Cmd::NewLibrary,
             // On the home side, "ask the assistant" is its page.
             "ask" if !in_settings && self.lib.is_none() => Cmd::Draft(crate::draft::Do::Begin),
+            // 收藏 of every library has a search of its own.
+            "search" if !in_settings && self.lib.is_none() && self.collected.is_some() && self.tutorials.is_none() && !self.home.open => return self.collected_search(window, cx),
             // The rest act on the open library, when it is the one in view.
             _ if in_settings || self.lib.is_none() => return,
             // The words are looked for in what is read (#328). A paper that has the window (reading mode, the one asked

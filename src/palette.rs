@@ -140,6 +140,7 @@ impl Workspace {
             fixed.push(("sparkle", "助手：新对话", "ask", Cmd::Draft(crate::draft::Do::Begin)));
             fixed.push(("plus", "新建文献库", "new-library", Cmd::NewLibrary));
             fixed.push(("library", "导入文献库", "", Cmd::ImportLibrary));
+            fixed.push(("star", "所有文献库的收藏", "", Cmd::Collected(crate::collected::Do::Open)));
         }
         fixed.push(("folder-open", "数据目录", "", Cmd::RevealFolder));
         // Typed in either language, a fixed label is found.

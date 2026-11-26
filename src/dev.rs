@@ -121,6 +121,8 @@ impl Workspace {
                         Some(Cmd::Tutorial(crate::tutorial::Do::Show(page.to_string(), section)))
                     }
                 },
+                // 收藏 of every library: `collected` opens it as the star on the home page does, `collected:<kind>` shows 文献, 图片, 方法 or 导言 (`papers`, `figures`, `methods`, `intros`), `collected:library:<n>` the n-th library that holds something alone (`collected:library` all again), `collected:go:<n>` is a click on the n-th row on show, `collected:star:<n>` on the n-th paper's star, `collected:close` leaves it.
+                "collected" => self.collected_step(arg, cx),
                 "starask" => {
                     self.star_ask = true;
                     cx.notify();

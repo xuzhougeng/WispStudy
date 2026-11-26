@@ -49,6 +49,7 @@ pub mod annotation;
 pub mod annotpdf;
 pub mod archive;
 pub mod cite;
+pub mod collected;
 pub mod citefind;
 pub mod comment;
 pub mod compact;

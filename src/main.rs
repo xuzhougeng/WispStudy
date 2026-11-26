@@ -71,6 +71,7 @@ mod shortcuts;
 mod theme;
 mod tour;
 mod tutorial;
+mod collected;
 mod transfer;
 mod translate;
 mod ui;
