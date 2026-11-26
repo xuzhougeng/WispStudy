@@ -23,6 +23,9 @@ impl Render for Workspace {
         } else if self.home.open {
             // The assistant's page with nothing said yet: the box of a first question and the conversations (`draft.rs`).
             self.render_start_page(window, cx)
+        } else if self.collected.is_some() {
+            // 收藏 of every library (`collected.rs`): under whatever was opened from it.
+            self.render_collected(window, cx)
         } else {
             self.render_home(cx)
         };
@@ -467,15 +470,18 @@ impl Workspace {
                                     .when_some(new_version, |d, version| d.child(ui::primary_button("home-update", tf!("新版本 {version}", "New version {version}")).h(text_px(28.)).px(px(10.)).rounded_full().text_size(text_px(12.)).on_click(self.on(Cmd::OpenSettings(SettingsPage::About), cx))))
                                     .children(bell)
                                     // 教程: the tutorials of the project page, read here (`tutorial.rs`). Beside the bell, apart from the switch after it.
-                                    .child(ui::ghost_button("home-tutorials", Some("book-open"), None).mr(px(8.)).tooltip(ui::tip(t("教程"))).on_click(self.on(Cmd::Tutorial(crate::tutorial::Do::Open), cx)))
+                                    .child(ui::ghost_button("home-tutorials", Some("book-open"), None).tooltip(ui::tip(t("教程"))).on_click(self.on(Cmd::Tutorial(crate::tutorial::Do::Open), cx)))
+                                    // 收藏 of every library together (`collected.rs`): the star after the book, the last of the three that open something to read.
+                                    .child(ui::ghost_button("home-collected", Some("star"), None).mr(px(8.)).tooltip(ui::tip(t("所有文献库的收藏"))).on_click(self.on(Cmd::Collected(crate::collected::Do::Open), cx)))
                                     // How the libraries are laid out, once there is one: the two ways side by side, the one in force lit.
                                     .when(!empty, |d| {
                                         let mut way = |id: &'static str, icon: &'static str, rows: bool, name: &'static str| div().id(id).flex().flex_none().items_center().justify_center().size(text_px(28.)).rounded(px(6.)).cursor_pointer().when(listed == rows, |d| d.bg(Theme::pressed())).hover(|s| s.bg(Theme::hover())).child(ui::icon(icon, 15., if listed == rows { Theme::text() } else { Theme::text_tertiary() })).tooltip(ui::tip(t(name))).on_click(self.on(Cmd::HomeList(rows), cx));
                                         d.child(div().flex().items_center().gap(px(2.)).mr(px(8.)).child(way("home-as-cards", "layout-grid", false, "卡片视图")).child(way("home-as-rows", "list", true, "列表视图")))
                                     })
-                                    .child(ui::ghost_button("home-import", Some("library"), Some(t("导入文献库").into())).on_click(self.on(Cmd::ImportLibrary, cx)))
-                                    .child(ui::ghost_button("home-folder", Some("folder-open"), Some(t("数据目录").into())).on_click(self.on(Cmd::RevealFolder, cx)))
-                                    .child(ui::ghost_button("home-settings", Some("settings-gear"), Some(t("设置").into())).on_click(self.on(Cmd::OpenSettings(SettingsPage::General), cx))),
+                                    // The whole row is icons, each with its name on hover: none of them is said in words while its neighbours are not.
+                                    // The data folder is opened from 设置 › 通用, where it is set, and from the palette.
+                                    .child(ui::ghost_button("home-import", Some("library"), None).tooltip(ui::tip(t("导入文献库"))).on_click(self.on(Cmd::ImportLibrary, cx)))
+                                    .child(ui::ghost_button("home-settings", Some("settings-gear"), None).tooltip(ui::tip(t("设置"))).on_click(self.on(Cmd::OpenSettings(SettingsPage::General), cx))),
                             ),
                     )
                     // Said by the card of 新手引导 while that is on: one thing is said once.

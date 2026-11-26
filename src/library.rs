@@ -565,7 +565,7 @@ impl Workspace {
     pub(crate) fn render_corner(&self, roomy: bool, asking: bool, cx: &mut Context<Self>) -> Div {
         // A conversation not yet made a library is one level under the home page: no sidebar to bring back, one way back.
         let draft = self.in_draft();
-        let (id, label, cmd) = if draft { ("back-home", t("首页"), Cmd::GoHome) } else if self.outline_shown() { ("back-library", t("文献库"), Cmd::LeaveWrite) } else if asking { ("back-library", t("文献库"), Cmd::LeaveAsk) } else { ("back-home", t("所有文献库"), Cmd::GoHome) };
+        let (id, label, cmd) = if draft { ("back-home", t("首页"), Cmd::GoHome) } else if self.outline_shown() { ("back-library", t("文献库"), Cmd::LeaveWrite) } else if asking { ("back-library", t("文献库"), Cmd::LeaveAsk) } else if self.collected.is_some() { ("back-home", t("收藏"), Cmd::GoHome) } else { ("back-home", t("所有文献库"), Cmd::GoHome) };
         ui::title_strip()
             .when(!ui::custom_titlebar(), |d| d.h(text_px(28.)))
             .pl(px(ui::traffic_lights_width()))

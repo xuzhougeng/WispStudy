@@ -39,15 +39,15 @@ use wisp_core::filter::View;
 use wisp_core::model::{Paper, new_id, split_list};
 
 /// The narrowest a card is drawn, the room between cards, and a card's height with its picture's.
-const CARD_MIN: f32 = 232.;
-const GAP: f32 = 14.;
-const CARD_H: f32 = 292.;
-const PICTURE_H: f32 = 164.;
+pub(crate) const CARD_MIN: f32 = 232.;
+pub(crate) const GAP: f32 = 14.;
+pub(crate) const CARD_H: f32 = 292.;
+pub(crate) const PICTURE_H: f32 = 164.;
 
 /// The longest edge of a card's picture in pixels, how many are kept, and how many are read at a time.
-const THUMB_EDGE: u32 = 560;
-const KEEP_THUMBS: usize = 160;
-const THUMB_WORKERS: usize = 4;
+pub(crate) const THUMB_EDGE: u32 = 560;
+pub(crate) const KEEP_THUMBS: usize = 160;
+pub(crate) const THUMB_WORKERS: usize = 4;
 
 /// The longest edge the dialog's picture is drawn from: beyond it a screen shows no more.
 const LARGE_EDGE: u32 = 2800;
@@ -165,7 +165,7 @@ pub(crate) fn fit(natural: (f32, f32), room: (f32, f32)) -> (f32, f32) {
 }
 
 /// How many cards stand in a row `width` wide, and how wide each is.
-fn grid(width: f32) -> (usize, f32) {
+pub(crate) fn grid(width: f32) -> (usize, f32) {
     let inner = (width - 32.).max(CARD_MIN);
     let columns = (((inner + GAP) / (CARD_MIN + GAP)).floor() as usize).max(1);
     (columns, (inner - GAP * (columns - 1) as f32) / columns as f32)
@@ -177,6 +177,95 @@ pub(crate) fn source_line(paper: Option<&Paper>) -> String {
     let mut who = crate::i18n::short_authors(paper);
     if let Some(year) = paper.year { who = if who.is_empty() { year.to_string() } else { format!("{who} {year}") } }
     if who.is_empty() { paper.title.clone() } else { format!("{who} · {}", paper.title) }
+}
+
+/// The switch of 收藏, in a library and across them: the groove its four sides stand in, a side, and what the
+/// sides say for these counts (文献, 图片, 方法, 导言).
+pub(crate) fn collection_groove() -> Div {
+    div().flex().flex_none().gap(px(2.)).h(text_px(34.)).p(px(3.)).rounded(px(9.)).bg(Theme::groove())
+}
+
+pub(crate) fn collection_side(id: &'static str, label: String, chosen: bool) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex()
+        .items_center()
+        .justify_center()
+        .h_full()
+        .px(px(12.))
+        .rounded(px(7.))
+        .cursor_pointer()
+        .whitespace_nowrap()
+        .when(chosen, |d| d.bg(Theme::segment()).shadow(crate::theme::shadow_card()))
+        .when(!chosen, |d| d.text_color(Theme::text_secondary()).hover(|s| s.text_color(Theme::text())))
+        .child(label)
+}
+
+pub(crate) fn collection_labels(counts: [usize; 4]) -> [String; 4] {
+    [tf!("文献 {}", "Papers {}", counts[0]), tf!("图片 {}", "Figures {}", counts[1]), tf!("方法 {}", "Methods {}", counts[2]), tf!("导言 {}", "Intros {}", counts[3])]
+}
+
+/// A figure's card: its picture, its number or where it is from, what its legend says, its tags. Drawn the same in
+/// a library's 图片库 and in the list across libraries, where `owner` names the library it is in at the foot.
+/// What a click does is the caller's.
+pub(crate) fn figure_card(id: SharedString, figure: &Figure, paper: Option<&Paper>, thumb: Thumb, width: f32, owner: Option<String>) -> Stateful<Div> {
+    let picture = match thumb {
+        Thumb::Ready(image) => {
+            let natural = image.size(0);
+            let (w, h) = fit((natural.width.0 as f32, natural.height.0 as f32), (width - 18., PICTURE_H - 16.));
+            img(image).w(px(w)).h(px(h)).into_any_element()
+        }
+        Thumb::Loading => div().into_any_element(),
+        Thumb::Broken => ui::icon("image-broken", 24., Theme::text_placeholder()).into_any_element(),
+    };
+    // The number the paper gives it; without one, where it is from stands in its place.
+    let source = if figure.uploaded() {
+        if figure.file_name.is_empty() { t("我上传的").to_string() } else { tf!("我上传的 · {}", "Uploaded · {}", figure.file_name) }
+    } else if figure.drawn() {
+        t("模型生成").to_string()
+    } else {
+        source_line(paper)
+    };
+    let (head, below) = if figure.label.is_empty() { (source.clone(), String::new()) } else { (figure.label.clone(), source) };
+    let said = if !figure.legend.is_empty() { figure.legend.clone() } else { figure.notes.clone() };
+    let tags: Vec<Div> = figure.tags.iter().take(4).map(|tag| ui::chip(tag.clone(), Theme::text_secondary(), Theme::bg_sunken()).h(text_px(20.)).text_size(text_px(11.))).collect();
+    div()
+        .id(id)
+        .flex()
+        .flex_col()
+        .flex_none()
+        .w(px(width))
+        .h(px(PICTURE_H) + text_px(CARD_H - PICTURE_H))
+        .rounded(px(10.))
+        .border_1()
+        .border_color(Theme::line())
+        .bg(Theme::bg_body())
+        .overflow_hidden()
+        .cursor_pointer()
+        .hover(|s| s.border_color(Theme::accent()))
+        .child(div().flex().flex_none().items_center().justify_center().h(px(PICTURE_H)).bg(gpui::white()).border_b_1().border_color(Theme::line()).child(picture))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_h_0()
+                .gap(px(4.))
+                .px(px(11.))
+                .py(px(9.))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .child(div().flex_1().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(head))
+                        .when(figure.page > 0, |d| d.child(div().flex_none().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(tf!("第 {} 页", "Page {}", figure.page)))),
+                )
+                .child(div().h(text_px(36.)).overflow_hidden().text_size(text_px(12.)).line_height(text_px(18.)).line_clamp(2).text_color(if said.is_empty() { Theme::text_placeholder() } else { Theme::text_secondary() }).child(if said.is_empty() { t("还没有图注").to_string() } else { said }))
+                .when(!below.is_empty(), |d| d.child(div().truncate().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(below)))
+                // Whose it is, in a list across libraries: after the tags, which give way to it.
+                .child(div().flex().flex_none().items_center().gap(px(6.)).h(text_px(20.)).child(div().flex().flex_1().min_w_0().gap(px(4.)).h_full().overflow_hidden().children(tags)).when_some(owner, |d, owner| d.child(div().flex_none().max_w(px(width * 0.5)).truncate().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(owner)))),
+        )
 }
 
 /// The name a figure's picture is saved under elsewhere: who, when and its number.
@@ -994,34 +1083,9 @@ impl Workspace {
     pub(crate) fn render_collection_switch(&self, cx: &mut Context<Self>) -> Div {
         let Some(lib) = self.lib.as_ref() else { return div() };
         let (figures, methods, intros) = (lib.page == Page::Figures, lib.page == Page::Methods, lib.page == Page::Intros);
-        let side = |id: &'static str, label: String, chosen: bool, cmd: Cmd, this: &Self, cx: &mut Context<Self>| {
-            div()
-                .id(id)
-                .flex()
-                .items_center()
-                .justify_center()
-                .h_full()
-                .px(px(12.))
-                .rounded(px(7.))
-                .cursor_pointer()
-                .whitespace_nowrap()
-                .when(chosen, |d| d.bg(Theme::segment()).shadow(crate::theme::shadow_card()))
-                .when(!chosen, |d| d.text_color(Theme::text_secondary()).hover(|s| s.text_color(Theme::text())))
-                .on_click(this.on(cmd, cx))
-                .child(label)
-        };
-        div()
-            .flex()
-            .flex_none()
-            .gap(px(2.))
-            .h(text_px(34.))
-            .p(px(3.))
-            .rounded(px(9.))
-            .bg(Theme::groove())
-            .child(side("collect-papers", tf!("文献 {}", "Papers {}", lib.papers.iter().filter(|p| p.starred).count()), !figures && !methods && !intros, Cmd::SetView(View::Starred), self, cx))
-            .child(side("collect-figures", tf!("图片 {}", "Figures {}", lib.gallery.items.len()), figures, Cmd::SetPage(Page::Figures), self, cx))
-            .child(side("collect-methods", tf!("方法 {}", "Methods {}", lib.excerpts.count(wisp_core::excerpt::METHOD)), methods, Cmd::SetPage(Page::Methods), self, cx))
-            .child(side("collect-intros", tf!("导言 {}", "Intros {}", lib.excerpts.count(wisp_core::excerpt::INTRO)), intros, Cmd::SetPage(Page::Intros), self, cx))
+        let counts = [lib.papers.iter().filter(|p| p.starred).count(), lib.gallery.items.len(), lib.excerpts.count(wisp_core::excerpt::METHOD), lib.excerpts.count(wisp_core::excerpt::INTRO)];
+        let sides = [("collect-papers", !figures && !methods && !intros, Cmd::SetView(View::Starred)), ("collect-figures", figures, Cmd::SetPage(Page::Figures)), ("collect-methods", methods, Cmd::SetPage(Page::Methods)), ("collect-intros", intros, Cmd::SetPage(Page::Intros))];
+        collection_groove().children(sides.into_iter().zip(collection_labels(counts)).map(|((id, chosen, cmd), label)| collection_side(id, label, chosen).on_click(self.on(cmd, cx))))
     }
 
     pub fn render_figures(&mut self, width: f32, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
@@ -1128,66 +1192,10 @@ impl Workspace {
     fn render_figure_card(&mut self, at: usize, width: f32, cx: &mut Context<Self>) -> AnyElement {
         let Some(figure) = self.lib.as_ref().and_then(|lib| lib.gallery.items.get(at)).cloned() else { return div().into_any_element() };
         let thumb = self.figure_thumb(&figure.id, cx);
-        let lib = self.lib.as_ref().unwrap();
-        let paper = lib.paper(&figure.paper_id);
-        let picture = match thumb {
-            Thumb::Ready(image) => {
-                let natural = image.size(0);
-                let (w, h) = fit((natural.width.0 as f32, natural.height.0 as f32), (width - 18., PICTURE_H - 16.));
-                img(image).w(px(w)).h(px(h)).into_any_element()
-            }
-            Thumb::Loading => div().into_any_element(),
-            Thumb::Broken => ui::icon("image-broken", 24., Theme::text_placeholder()).into_any_element(),
-        };
-        // The number the paper gives it; without one, where it is from stands in its place.
-        let source = if figure.uploaded() {
-            if figure.file_name.is_empty() { t("我上传的").to_string() } else { tf!("我上传的 · {}", "Uploaded · {}", figure.file_name) }
-        } else if figure.drawn() {
-            t("模型生成").to_string()
-        } else {
-            source_line(paper)
-        };
-        let (head, below) = if figure.label.is_empty() { (source.clone(), String::new()) } else { (figure.label.clone(), source) };
-        let said = if !figure.legend.is_empty() { figure.legend.clone() } else { figure.notes.clone() };
-        let tags: Vec<Div> = figure.tags.iter().take(4).map(|tag| ui::chip(tag.clone(), Theme::text_secondary(), Theme::bg_sunken()).h(text_px(20.)).text_size(text_px(11.))).collect();
-        div()
-            .id(SharedString::from(format!("figure-{}", figure.id)))
-            .flex()
-            .flex_col()
-            .flex_none()
-            .w(px(width))
-            .h(px(PICTURE_H) + text_px(CARD_H - PICTURE_H))
-            .rounded(px(10.))
-            .border_1()
-            .border_color(Theme::line())
-            .bg(Theme::bg_body())
-            .overflow_hidden()
-            .cursor_pointer()
-            .hover(|s| s.border_color(Theme::accent()))
+        let paper = self.lib.as_ref().and_then(|lib| lib.paper(&figure.paper_id));
+        figure_card(SharedString::from(format!("figure-{}", figure.id)), &figure, paper, thumb, width, None)
             .on_click(self.on(Cmd::OpenFigure(figure.id.clone()), cx))
             .on_mouse_down(MouseButton::Right, self.on_context(MenuKind::Figure(figure.id.clone()), cx))
-            .child(div().flex().flex_none().items_center().justify_center().h(px(PICTURE_H)).bg(gpui::white()).border_b_1().border_color(Theme::line()).child(picture))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_h_0()
-                    .gap(px(4.))
-                    .px(px(11.))
-                    .py(px(9.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.))
-                            .child(div().flex_1().min_w_0().truncate().font_weight(FontWeight::MEDIUM).child(head))
-                            .when(figure.page > 0, |d| d.child(div().flex_none().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(tf!("第 {} 页", "Page {}", figure.page)))),
-                    )
-                    .child(div().h(text_px(36.)).overflow_hidden().text_size(text_px(12.)).line_height(text_px(18.)).line_clamp(2).text_color(if said.is_empty() { Theme::text_placeholder() } else { Theme::text_secondary() }).child(if said.is_empty() { t("还没有图注").to_string() } else { said }))
-                    .when(!below.is_empty(), |d| d.child(div().truncate().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(below)))
-                    .child(div().flex().flex_none().gap(px(4.)).h(text_px(20.)).overflow_hidden().children(tags)),
-            )
             .into_any_element()
     }
 
