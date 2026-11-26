@@ -289,16 +289,60 @@ fn thumbnail(picture: &ChatImage, size: f32) -> Div {
 }
 
 /// How long an answer has been awaited: `8s`, `1m 05s`.
-/// The one line that says the assistant is at work, last in its conversation: the researcher's face, in words what it
-/// is doing where nothing above says so, and for how long. One line and one face however many calls are running above
-/// it (a face beside each call was a row of them moving at once), and the face stays where it is while what it does
-/// changes. Without the animation it is the turning mark the line had before.
+/// What the assistant of a conversation is doing, in words where the conversation does not say so itself, and for how
+/// long: what the face on the box shows (`face_on_box`). One answer for the whole conversation, however many calls are
+/// running in it.
+fn working(chat: &Chat) -> (Activity, Option<&'static str>, Option<String>) {
+    if chat.compacting { return (Activity::Compacting, Some(t("对话太长，正在把较早的部分压缩成摘要…")), None) }
+    // It asked and waits: the card in the conversation says for what.
+    if chat.pending.is_some() { return (Activity::WaitingUser, None, None) }
+    if !chat.busy { return (Activity::Idle, None, None) }
+    let time = Some(elapsed(chat));
+    // The calls still running at the end of the conversation; the first of them is what the face is seen doing.
+    let running = chat.messages.iter().rev().map_while(|item| match item { ChatItem::Tool { call, result } => Some((call, result)), _ => None }).filter(|(_, result)| result.is_none()).last();
+    match (chat.messages.last(), running) {
+        (_, Some((call, _))) => (Activity::from_tool_call(call), None, time),
+        // The last piece, still without text: the model is reading or thinking.
+        (Some(ChatItem::Answer(text)), _) if text.is_empty() => if chat.steps > 1 { (Activity::Reading, Some(t("正在整理查到的内容…")), time) } else { (Activity::Thinking, Some(t("正在阅读文献并思考…")), time) },
+        // Text has arrived and more is on its way (a tool call being written, the next piece).
+        _ => (Activity::Writing, None, time),
+    }
+}
+
+/// The researcher's face, standing on the box the person writes in: the strip over the box is where it lives. It is
+/// there before the first question and between two (idling: a blink, a look aside), and while the assistant works it
+/// says beside itself what it is doing and for how long. On the box and not at the end of the conversation, because
+/// the end of the conversation moves: with every run of calls that folds into a line and every piece of text, a face
+/// there went down the page and came back. The strip is always as tall, so nothing moves when work begins or ends.
+fn face_on_box(side: &str, chat: &Chat) -> Div {
+    let (activity, words, time) = working(chat);
+    // The strip is the face's height less the gap that follows it, and the face hangs from its lower edge by that gap:
+    // its feet are on the box's border. Past the box's round corner at the left.
+    div().relative().flex_none().h(px(22.)).child(
+        div()
+            .absolute()
+            .left(px(14.))
+            .right_0()
+            .bottom(px(-5.))
+            .h(px(27.))
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .text_color(Theme::text_tertiary())
+            .child(crate::mascot::inline_large(format!("working-{side}"), activity))
+            .children(words.map(|words| div().min_w_0().truncate().child(words)))
+            .children(time.map(|time| div().flex_none().text_size(text_px(12.)).child(time))),
+    )
+}
+
+/// A line of the conversation that says the assistant is at work, for the window without the animation: a turning
+/// mark, in words what it is doing, and for how long.
 fn working_line(side: &str, activity: Activity, words: Option<&'static str>, time: Option<String>) -> AnyElement {
     div()
         .flex()
         .items_center()
         .gap(px(8.))
-        .min_h(if theme::work_animation() { px(28.) } else { text_px(22.) })
+        .min_h(text_px(22.))
         .text_color(Theme::text_tertiary())
         .child(crate::mascot::inline_large(format!("working-{side}"), activity))
         .children(words)
@@ -1225,6 +1269,8 @@ impl Workspace {
     /// folded by run, the pieces of its answers with their sources.
     fn render_messages(&self, talk: Talk, chat: &Chat, review: Option<&wisp_core::review::Review>, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let side = talk.side();
+        // Without the animation the conversation says in its own lines that the assistant is at work; with it the face on the box does.
+        let quiet = !theme::work_animation();
         let mut items: Vec<AnyElement> = vec![];
         // A conversation not yet made a library is one conversation: it is not branched.
         let draft = talk == Talk::Library && self.in_draft();
@@ -1292,10 +1338,11 @@ impl Workspace {
                 }
                 ChatItem::Answer(text) => text,
             };
-            // The last piece, still without text: the model is reading or thinking.
+            // The last piece, still without text: the model is reading or thinking. The face on the box says so
+            // (`face_on_box`); without the animation a line here does.
             if content.is_empty() {
                 let (activity, words) = if chat.steps > 1 { (Activity::Reading, t("正在整理查到的内容…")) } else { (Activity::Thinking, t("正在阅读文献并思考…")) };
-                items.push(working_line(side, activity, Some(words), Some(elapsed(chat))));
+                if quiet { items.push(working_line(side, activity, Some(words), Some(elapsed(chat)))) }
                 i += 1;
                 continue;
             }
@@ -1486,20 +1533,12 @@ impl Workspace {
         // All that was said is summarised: the line stands under it.
         if chat.compacted.as_ref().is_some_and(|compacted| compacted.at >= chat.messages.len()) { items.push(self.render_compacted(talk, chat, cx)) }
         // The summary is being written: the answer waits for it.
-        if chat.compacting {
+        if quiet && chat.compacting {
             items.push(working_line(side, Activity::Compacting, Some(t("对话太长，正在把较早的部分压缩成摘要…")), None));
         }
-        if chat.busy && !chat.compacting && chat.pending.is_none() {
-            // The calls still running at the end of the conversation; the first of them is what the face is seen doing.
-            let running = chat.messages.iter().rev().map_while(|item| match item { ChatItem::Tool { call, result } => Some((call, result)), _ => None }).filter(|(_, result)| result.is_none()).last();
-            match (chat.messages.last(), running) {
-                // Text has arrived and more is on its way (a tool call being written, the next piece): the mark stays under it.
-                (Some(ChatItem::Answer(text)), _) if !text.is_empty() => items.push(working_line(side, Activity::Writing, None, Some(elapsed(chat)))),
-                // Calls are running: each says what it is on its own line (`render_tools`), and the one face under them for how long.
-                // Without the animation those lines keep their turning marks and their times, and nothing is added.
-                (_, Some((call, _))) if theme::work_animation() => items.push(working_line(side, Activity::from_tool_call(call), None, Some(elapsed(chat)))),
-                _ => {}
-            }
+        // Text has arrived and more is on its way (a tool call being written, the next piece): the mark keeps turning under it.
+        if quiet && chat.busy && !chat.compacting && chat.pending.is_none() && matches!(chat.messages.last(), Some(ChatItem::Answer(text)) if !text.is_empty()) {
+            items.push(working_line(side, Activity::Writing, None, Some(elapsed(chat))));
         }
         // A section about to be written anew is asked about where its text is (`render_proposal`): while that is on show the
         // conversation only says so, in a line, and does not ask the same thing a second time.
@@ -1519,8 +1558,6 @@ impl Workspace {
                 let shell = if consent == Consent::Once { ui::primary_button(id, label) } else { ui::secondary_button(id, label) };
                 shell.h(text_px(28.)).on_click(this.on(Cmd::AnswerTools(talk, consent), cx))
             };
-            // What the card says stands under the heading's words, past the mark that leads it: the face, or the icon without the animation.
-            let indent = px(if theme::work_animation() { 30. } else { 20. });
             items.push(
                 div()
                     .flex()
@@ -1531,24 +1568,24 @@ impl Workspace {
                     .border_1()
                     .border_color(Theme::line_strong())
                     .bg(Theme::bg_sunken())
-                    .child(div().flex().items_center().gap(px(6.)).font_weight(FontWeight::MEDIUM).child(crate::mascot::inline(format!("consent-mascot-{side}"), Activity::WaitingUser)).child(if pending.calls.iter().any(|call| call.confirm && call.outside.is_some()) { t("助手想执行下面的操作，等你同意") } else if pending.calls.iter().filter(|call| call.confirm).all(|call| wisp_core::tools::MANUSCRIPT.contains(&call.name.as_str())) { t("助手想改动稿件，等你同意") } else if draft { t("助手想收进或改动这次对话里的文献，等你同意") } else { t("助手想改动文献库，等你同意") }))
+                    .child(div().flex().items_center().gap(px(6.)).font_weight(FontWeight::MEDIUM).child(ui::icon("info", 14., Theme::accent())).child(if pending.calls.iter().any(|call| call.confirm && call.outside.is_some()) { t("助手想执行下面的操作，等你同意") } else if pending.calls.iter().filter(|call| call.confirm).all(|call| wisp_core::tools::MANUSCRIPT.contains(&call.name.as_str())) { t("助手想改动稿件，等你同意") } else if draft { t("助手想收进或改动这次对话里的文献，等你同意") } else { t("助手想改动文献库，等你同意") }))
                     .children(pending.calls.iter().enumerate().filter(|(_, call)| call.confirm).map(|(n, call)| {
                         let line = div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_secondary()).child(crate::i18n::tool_call(&call.line));
-                        if call.details.is_empty() { return div().pl(indent).child(line) }
+                        if call.details.is_empty() { return div().pl(px(20.)).child(line) }
                         // What it would change, paper by paper: all of it, in a box that scrolls when it is long.
                         let rows = call.details.iter().map(|detail| {
                             // A title may hold a colon of its own: the line is cut where the title's bracket closes.
                             let (title, change) = detail.split_once("》：").map(|(title, change)| (format!("{title}》"), change)).unwrap_or((detail.clone(), ""));
                             div().flex().flex_col().py(px(3.)).text_size(text_px(12.)).line_height(text_px(18.)).child(div().truncate().text_color(Theme::text_tertiary()).child(crate::i18n::phrase(&title))).child(div().text_color(Theme::text()).child(crate::i18n::phrase(change)))
                         });
-                        div().pl(indent).flex().flex_col().gap(px(4.)).child(line).child(div().id(SharedString::from(format!("consent-details-{side}-{n}"))).flex().flex_col().max_h(px(240.)).overflow_y_scroll().px(px(10.)).py(px(4.)).rounded(px(8.)).bg(Theme::bg_body()).border_1().border_color(Theme::line()).children(rows))
+                        div().pl(px(20.)).flex().flex_col().gap(px(4.)).child(line).child(div().id(SharedString::from(format!("consent-details-{side}-{n}"))).flex().flex_col().max_h(px(240.)).overflow_y_scroll().px(px(10.)).py(px(4.)).rounded(px(8.)).bg(Theme::bg_body()).border_1().border_color(Theme::line()).children(rows))
                     }))
                     .child(
                         div()
                             .flex()
                             .flex_wrap()
                             .gap(px(8.))
-                            .pl(indent)
+                            .pl(px(20.))
                             .child(button("once", t("允许"), Consent::Once, self, cx))
                             .child(button("always", t("这次对话里都允许"), Consent::Always, self, cx))
                             .child(button("deny", t("不允许"), Consent::Deny, self, cx)),
@@ -1781,7 +1818,7 @@ impl Workspace {
                 })
             })
             // The calls still running; those waiting for consent are named on the card that asks for it. A turning mark each
-            // and no face: the conversation has one, on the line under them (`working_line`), which also says for how long.
+            // and no face: the conversation has one, on its box (`face_on_box`), which also says for how long.
             .children(run.iter().enumerate().filter(|(_, (_, result))| result.is_none() && !waiting).map(|(n, (call, _))| {
                 div()
                     .flex()
@@ -1944,6 +1981,7 @@ impl Workspace {
             .px(px(16.))
             .pb(px(10.))
             .pt(px(6.))
+            .when(theme::work_animation(), |d| d.child(face_on_box(side, chat)))
             // What the `@` being typed can name, in the place of the commands: one list over the box at a time.
             .when_some(mentioning, |d, popup| d.child(popup))
             .when(mentioning_none && !commands.is_empty(), |d| {
