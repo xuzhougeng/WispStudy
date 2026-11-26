@@ -6,8 +6,14 @@
 //! custom fields are not among them: those have their own tools, which only
 //! propose. In the window the assistant runs the tool after the person has
 //! seen, paper by paper, what it would change (`preview`).
+//!
+//! The person's own tagging of several papers at once goes the same way
+//! (`Store::tag_papers`): the papers a search and the filters left, or the
+//! ones marked in the list, tagged as a whole or not at all, and kept with
+//! what each held before so that it can be taken back (`Store::untag`).
+//! A tag is written the way the library already spells it (`settle_tags`).
 
-use crate::model::{Paper, READINGS, label, one_of};
+use crate::model::{Paper, READINGS, clean_strings, label, one_of, settle_tags, tag_key};
 use crate::store::Store;
 use crate::time;
 use anyhow::{Result, anyhow, bail};
@@ -86,7 +92,9 @@ pub fn parse(args: &Value) -> Result<Vec<Change>, String> {
 /// said, and nothing changed, where the paper already is as asked.
 pub fn apply(paper: &mut Paper, change: &Change, date: &str) -> Vec<String> {
     let mut changed = vec![];
-    let held = |tags: &[String], tag: &str| tags.iter().position(|kept| kept.eq_ignore_ascii_case(tag));
+    // The tag as it is written, else the one that is it case and width aside (`tag_key`): a paper is not given one
+    // tag in two spellings, and a tag a model names in another case is still the one taken off.
+    let held = |tags: &[String], tag: &str| tags.iter().position(|kept| kept == tag).or_else(|| tags.iter().position(|kept| tag_key(kept) == tag_key(tag)));
     let added: Vec<&String> = change.add_tags.iter().filter(|tag| held(&paper.tags, tag).is_none()).collect();
     if !added.is_empty() {
         changed.push(format!("加标签{}", added.iter().map(|tag| format!("「{tag}」")).collect::<String>()));
@@ -118,11 +126,76 @@ pub fn apply(paper: &mut Paper, change: &Change, date: &str) -> Vec<String> {
 /// How much of a note the words about a change show.
 const NOTE_SHOWN: usize = 48;
 
+/// Tags put on several papers at once, or taken off them, by the person in the window: what was written, and
+/// what each paper it changed held before, which is what takes it back (`Store::untag`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Tagged {
+    /// The tags put on, spelt as the library spells them.
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+    /// The papers it changed: the id, the tags it held before, and its tags since.
+    pub papers: Vec<(String, Vec<String>, Vec<String>)>,
+    /// How many of the papers named already were as asked.
+    pub unchanged: usize,
+}
+
 impl Store {
+    /// Every tag of the library with the number of papers holding it, the most used first.
+    fn known_tags(&self) -> Result<Vec<(String, usize)>> {
+        let mut statement = self.db.prepare("SELECT tags_json FROM papers WHERE tags_json != '[]'")?;
+        let rows = statement.query_map([], |row| row.get::<_, String>(0))?;
+        let mut counts: std::collections::BTreeMap<String, usize> = Default::default();
+        for row in rows {
+            for tag in serde_json::from_str::<Vec<String>>(&row?).unwrap_or_default() { *counts.entry(tag).or_default() += 1 }
+        }
+        let mut known: Vec<(String, usize)> = counts.into_iter().collect();
+        known.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        Ok(known)
+    }
+
+    /// Put tags on several papers and take others off them, all of it or none. A paper that already is as
+    /// asked is counted and left alone, so asking twice changes nothing the second time.
+    pub fn tag_papers(&mut self, ids: &[String], add: &[String], remove: &[String]) -> Result<Tagged> {
+        let (ids, add, remove) = (clean_strings(ids), settle_tags(add, &self.known_tags()?), clean_strings(remove));
+        let mut before = vec![];
+        for id in &ids { before.push(self.get_paper(id).map_err(|_| anyhow!("没有找到这篇文献：{id}"))?.tags) }
+        // The tags to go were chosen by name among those the papers hold: a paper loses the ones it holds under that very
+        // name, not another spelling of them (`car-t` chosen leaves `CAR-T` where it is).
+        let changes: Vec<Change> = ids.iter().zip(&before).map(|(id, held)| Change { id: id.clone(), add_tags: add.clone(), remove_tags: remove.iter().filter(|tag| held.contains(tag)).cloned().collect(), ..Default::default() }).collect();
+        let papers: Vec<(String, Vec<String>, Vec<String>)> = self.organise(&changes)?.into_iter().zip(before).filter(|(done, _)| !done.changed.is_empty()).map(|(done, before)| (done.paper.id, before, done.paper.tags)).collect();
+        Ok(Tagged { unchanged: ids.len() - papers.len(), added: add, removed: remove, papers })
+    }
+
+    /// Take a tagging back, all of it or none, and say how many papers that changed. A paper still as the
+    /// tagging left it has the tags it held before, in their order; one whose tags were changed since loses
+    /// only what the tagging gave it and gets back what the tagging took.
+    pub fn untag(&mut self, tagged: &Tagged) -> Result<usize> {
+        let now = time::now_iso();
+        let tx = self.db.transaction()?;
+        let mut back = 0;
+        for (id, before, after) in &tagged.papers {
+            let Some(kept) = tx.query_row("SELECT tags_json FROM papers WHERE id = ?1", [id], |row| row.get::<_, String>(0)).optional()? else { continue };
+            let held: Vec<String> = serde_json::from_str(&kept).unwrap_or_default();
+            let tags = if held == *after {
+                before.clone()
+            } else {
+                let mut tags: Vec<String> = held.iter().filter(|tag| before.contains(tag) || !after.contains(tag)).cloned().collect();
+                for tag in before.iter().filter(|tag| !after.contains(tag)) { if !tags.contains(tag) { tags.push(tag.clone()) } }
+                tags
+            };
+            if tags == held { continue }
+            tx.execute("UPDATE papers SET tags_json = ?2, updated_at = ?3 WHERE id = ?1", params![id, serde_json::to_string(&tags)?, now])?;
+            back += 1;
+        }
+        tx.commit()?;
+        Ok(back)
+    }
+
     /// What the changes would make of their papers, without writing
     /// anything. A paper named twice gets its changes one after another.
     pub fn organise_plan(&self, changes: &[Change]) -> Result<Vec<Organised>> {
         let date = time::date_text(&time::now_iso());
+        let mut known = self.known_tags()?;
         let mut out: Vec<Organised> = vec![];
         for change in changes {
             let at = match out.iter().position(|done| done.paper.id == change.id) {
@@ -135,7 +208,11 @@ impl Store {
                     out.len() - 1
                 }
             };
-            let said = apply(&mut out[at].paper, change, &date);
+            // One spelling of a tag across the library: a tag it has under another case or width is written its way,
+            // and so is one an earlier change of this call brought.
+            let change = Change { add_tags: settle_tags(&change.add_tags, &known), ..change.clone() };
+            for tag in &change.add_tags { if !known.iter().any(|(kept, _)| kept == tag) { known.push((tag.clone(), 0)) } }
+            let said = apply(&mut out[at].paper, &change, &date);
             out[at].changed.extend(said);
         }
         Ok(out)
@@ -244,6 +321,62 @@ mod tests {
         // A paper in the trash is not organised.
         store.trash_paper(&b).unwrap();
         assert!(store.organise(&[Change { id: b, starred: Some(true), ..Default::default() }]).unwrap_err().to_string().contains("回收站"));
+    }
+
+    #[test]
+    fn a_tag_is_written_the_way_the_library_spells_it() {
+        let (mut store, a, b) = library();
+        // The other paper gets the tag as the first one has it, and a tag new to the library is spelt one way within the call.
+        let done = store.organise(&[Change { id: b.clone(), add_tags: vec!["#scrna".into(), "Solid Tumor".into()], ..Default::default() }, Change { id: a.clone(), add_tags: vec!["solid tumor".into()], ..Default::default() }]).unwrap();
+        assert_eq!(done[0].changed, ["加标签「scRNA」「Solid Tumor」"]);
+        assert_eq!(store.get_paper(&b).unwrap().tags, ["scRNA", "Solid Tumor"]);
+        assert_eq!(store.get_paper(&a).unwrap().tags, ["scRNA", "Solid Tumor"]);
+    }
+
+    #[test]
+    fn several_papers_are_tagged_at_once_and_it_is_taken_back() {
+        let (mut store, a, b) = library();
+        let c = store.add_paper(Paper { title: "Stem atlas".into(), tags: vec!["综述".into(), "根".into()], ..Default::default() }).unwrap().id;
+        let ids = vec![a.clone(), b.clone(), c.clone()];
+
+        // The one that has the tag is counted and left alone; the tag is spelt as the library has it.
+        let tagged = store.tag_papers(&ids, &["# 综述".into(), "SCRNA".into()], &[]).unwrap();
+        assert_eq!((tagged.added.clone(), tagged.papers.len(), tagged.unchanged), (vec!["综述".to_string(), "scRNA".to_string()], 3, 0));
+        assert_eq!(store.get_paper(&a).unwrap().tags, ["scRNA", "综述"]);
+        assert_eq!(store.get_paper(&c).unwrap().tags, ["综述", "根", "scRNA"]);
+        // Asked again, nothing is left to do.
+        let again = store.tag_papers(&ids, &["综述".into()], &[]).unwrap();
+        assert_eq!((again.papers.len(), again.unchanged), (0, 3));
+
+        // Taken back: each paper as it was, in the order its tags were in.
+        assert_eq!(store.untag(&tagged).unwrap(), 3);
+        assert_eq!(store.get_paper(&a).unwrap().tags, ["scRNA"]);
+        assert!(store.get_paper(&b).unwrap().tags.is_empty());
+        assert_eq!(store.get_paper(&c).unwrap().tags, ["综述", "根"]);
+        assert_eq!(store.untag(&tagged).unwrap(), 0);
+
+        // Tags taken off, and put back where they were.
+        let off = store.tag_papers(&ids, &[], &["综述".into()]).unwrap();
+        assert_eq!((off.papers.len(), off.unchanged), (1, 2));
+        assert_eq!(store.get_paper(&c).unwrap().tags, ["根"]);
+        store.untag(&off).unwrap();
+        assert_eq!(store.get_paper(&c).unwrap().tags, ["综述", "根"]);
+
+        // A paper changed since keeps the change: only what the tagging did is taken back.
+        let tagged = store.tag_papers(&ids, &["耗竭".into()], &["根".into()]).unwrap();
+        store.organise(&[Change { id: c.clone(), add_tags: vec!["精读".into()], ..Default::default() }]).unwrap();
+        assert_eq!(store.get_paper(&c).unwrap().tags, ["综述", "耗竭", "精读"]);
+        assert_eq!(store.untag(&tagged).unwrap(), 3);
+        assert_eq!(store.get_paper(&c).unwrap().tags, ["综述", "精读", "根"]);
+        assert_eq!(store.get_paper(&a).unwrap().tags, ["scRNA"]);
+
+        // A tag taken off by its name leaves another spelling of it on the papers that have that one.
+        let off = store.tag_papers(&ids, &[], &["SCRNA".into()]).unwrap();
+        assert_eq!((off.papers.len(), off.unchanged, store.get_paper(&a).unwrap().tags), (0, 3, vec!["scRNA".to_string()]));
+
+        // One paper that is not there, and none is tagged.
+        assert!(store.tag_papers(&[b.clone(), "nowhere".into()], &["耗竭".into()], &[]).unwrap_err().to_string().contains("没有找到"));
+        assert!(store.get_paper(&b).unwrap().tags.is_empty());
     }
 
     #[test]

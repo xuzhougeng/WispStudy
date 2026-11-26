@@ -915,6 +915,13 @@ impl Workspace {
                 .into_any_element()
         };
         let filtered = f.active() > 0 || !f.search.trim().is_empty();
+        // What a search and the filters left can be given a tag where it stands (#338): the filters are for now, the tag
+        // is what keeps these papers. The row's last word, at its right end, with the number of papers it would tag.
+        let tagging = (filtered && !lib.shown.is_empty() && !lib.finding.open).then(|| tn!("给这 {n} 篇加标签…", "Tag these {n}…", lib.shown.len(), "paper"));
+        let tag_shown = |label: &str, worded: bool, this: &Self, cx: &mut Context<Self>| {
+            let button = ui::ghost_button("f-tag-shown", Some("tag"), worded.then(|| label.to_string().into())).h(text_px(26.)).on_click(this.on(Cmd::TagShown, cx));
+            [div().flex_1().into_any_element(), if worded { button.into_any_element() } else { button.tooltip(ui::tip(label.to_string())).into_any_element() }]
+        };
         // A list too narrow for the buttons' words keeps their icons, and says the words on hover.
         let roomy = width >= f32::from(text_px(620.));
         lib.search.update(cx, |input, _| input.set_placeholder(if width >= f32::from(text_px(440.)) { "搜索题目、作者、DOI、标签、词条、笔记…" } else { "搜索…" }));
@@ -931,16 +938,17 @@ impl Workspace {
         let chip_width = |(_, name, value, _): &(ElementId, String, String, FilterKey)| wide(&said(name, value)) + 4. + 12. + 18. + 2.;
         let clear = |this: &Self, cx: &mut Context<Self>| ui::ghost_button("f-clear", Some("x"), Some(t("清空筛选").into())).h(text_px(26.)).on_click(this.on(Cmd::ClearFilters, cx)).into_any_element();
         let room = width - 34.;
-        let all = filters.iter().map(chip_width).sum::<f32>() + GAP * (filters.len() - 1) as f32 + if filtered { GAP + wide(t("清空筛选")) + 37. } else { 0. };
+        let all = filters.iter().map(chip_width).sum::<f32>() + GAP * (filters.len() - 1) as f32 + if filtered { GAP + wide(t("清空筛选")) + 37. } else { 0. } + tagging.as_ref().map_or(0., |label| GAP * 2. + wide(label) + 37.);
         let mut row: Vec<AnyElement> = vec![];
         let mut hidden = 0;
         if all <= room {
             for filter in &filters { row.push(chip(filter, self, cx)) }
             if filtered { row.push(clear(self, cx)) }
+            if let Some(label) = &tagging { row.extend(tag_shown(label, true, self, cx)) }
         } else {
             filters.sort_by_key(|(_, _, value, _)| value.is_empty());
             // Room is kept for the count of the rest, and for the x that clears.
-            let mut used = wide("+9") + 16. + if filtered { GAP + 28. } else { 0. };
+            let mut used = wide("+9") + 16. + if filtered { GAP + 28. } else { 0. } + if tagging.is_some() { GAP * 2. + 28. } else { 0. };
             for (i, filter) in filters.iter().enumerate() {
                 used += GAP + chip_width(filter);
                 if i > 0 && used > room { break }
@@ -952,6 +960,8 @@ impl Workspace {
                 row.push(div().flex().flex_none().items_center().h(text_px(26.)).px(px(8.)).rounded(px(13.)).text_size(text_px(12.)).bg(if set { Theme::accent_soft() } else { Theme::bg_sunken() }).text_color(if set { Theme::accent() } else { Theme::text_secondary() }).child(format!("+{hidden}")).into_any_element());
             }
             if filtered { row.push(ui::ghost_button("f-clear", Some("x"), None).h(text_px(26.)).tooltip(ui::tip(t("清空筛选"))).on_click(self.on(Cmd::ClearFilters, cx)).into_any_element()) }
+            // The row's buttons drop their words together.
+            if let Some(label) = &tagging { row.extend(tag_shown(label, false, self, cx)) }
         }
         self.filters_drawn = hidden > 0;
         // The card lies over the row, its first chips where the row's are, so a press meant for one of those lands on it.
@@ -1313,7 +1323,10 @@ impl Workspace {
                                 let line = if meta.is_empty() { t("作者、年份待补").to_string() } else { line };
                                 let weight = if p.reading == "unread" { FontWeight::MEDIUM } else { FontWeight::NORMAL };
                                 let preprint = p.publication_status == "preprint";
-                                let beside = p.tags.iter().take(2).map(|tag| 6. + wide(&format!("#{tag}"), small, FontWeight::NORMAL)).sum::<f32>() + if preprint { 6. + wide(t("预印本"), small, FontWeight::NORMAL) } else { 0. };
+                                // Two tags are written out; how many more there are is said after them, so a tag just given to a paper
+                                // that had two shows in its row as well (the tip names them all).
+                                let more = (p.tags.len() > 2).then(|| format!("+{}", p.tags.len() - 2));
+                                let beside = p.tags.iter().take(2).map(|tag| 6. + wide(&format!("#{tag}"), small, FontWeight::NORMAL)).sum::<f32>() + if preprint { 6. + wide(t("预印本"), small, FontWeight::NORMAL) } else { 0. } + more.as_ref().map_or(0., |more| 6. + wide(more, small, FontWeight::NORMAL));
                                 let cut = p.tags.len() > 2 || wide(title, base, weight) > title_room + 0.5 || wide(&line, small, FontWeight::NORMAL) + beside > title_room + 0.5;
                                 let tip = cut.then(|| {
                                     let (title, meta, tags) = (title.clone(), meta.clone(), p.tags.clone());
@@ -1336,7 +1349,8 @@ impl Workspace {
                                                 .text_color(Theme::text_tertiary())
                                                 .child(div().min_w_0().truncate().child(line))
                                                 .when(preprint, |d| d.child(div().flex_none().text_color(theme::status_colors("preprint").0).child(t("预印本"))))
-                                                .children(p.tags.iter().take(2).map(|t| div().flex_none().text_color(Theme::accent()).child(format!("#{t}")))),
+                                                .children(p.tags.iter().take(2).map(|t| div().flex_none().text_color(Theme::accent()).child(format!("#{t}"))))
+                                                .children(more.map(|more| div().flex_none().child(more))),
                                         ),
                                 )
                                 .into_any_element()

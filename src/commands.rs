@@ -272,6 +272,15 @@ pub enum Cmd {
     StarPapers(Vec<String>, bool),
     ReadPapers(Vec<String>, String),
     TagPapers(Vec<String>),
+    /// 给这 N 篇加标签: that dialog for every paper the search and the filters left in the list (`tagging.rs`).
+    TagShown,
+    /// A tag the library has, clicked under the dialog's box: it joins what is written there.
+    OfferTag(String),
+    /// 去掉标签: the tags the marked papers hold (the dialog), and one of them chosen to go or let stay.
+    UntagPapers(Vec<String>),
+    ChooseUntag(String),
+    /// The toast's 撤销 after tags were put on several papers or taken off them.
+    UndoTagging(wisp_core::organise::Tagged),
     FindPdfsOf(Vec<String>),
     AskTrashPapers(Vec<String>),
     /// 移到文献库: the dialog for one paper or several marked ones, a library chosen in it, and the move (`transfer.rs`).
@@ -1335,7 +1344,8 @@ impl Workspace {
                 if let Err(err) = libraries::save(&lib.info) { self.fail(format!("{err:#}"), cx) }
             }
             Cmd::Select(id) => self.select(Some(id), window, cx),
-            Cmd::AskPapers(_) | Cmd::StarPapers(..) | Cmd::ReadPapers(..) | Cmd::TagPapers(_) | Cmd::FindPdfsOf(_) | Cmd::AskTrashPapers(_) | Cmd::TrashPapers(_) => self.run_batch(cmd, window, cx),
+            Cmd::AskPapers(_) | Cmd::StarPapers(..) | Cmd::ReadPapers(..) | Cmd::FindPdfsOf(_) | Cmd::AskTrashPapers(_) | Cmd::TrashPapers(_) => self.run_batch(cmd, window, cx),
+            Cmd::TagPapers(_) | Cmd::TagShown | Cmd::OfferTag(_) | Cmd::UntagPapers(_) | Cmd::ChooseUntag(_) | Cmd::UndoTagging(_) => self.run_tagging(cmd, window, cx),
             Cmd::OpenPaper(id, tab) => {
                 self.select(Some(id), window, cx);
                 self.run(Cmd::SetTab(tab), window, cx);
