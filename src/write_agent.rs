@@ -176,6 +176,10 @@ impl Workspace {
         };
         if now == lib.writing.manuscripts { return }
         let before = std::mem::replace(&mut lib.writing.manuscripts, now);
+        // A manuscript begun on the home page is listed under its title, the one the assistant gave it too.
+        let titled = lib.writing.current().filter(|now| before.iter().find(|was| was.id == now.id).is_some_and(|was| was.title != now.title)).map(|now| now.title.clone());
+        if let Some(title) = titled { self.writing_named(&title, cx) }
+        let Some(lib) = self.lib.as_mut() else { return };
         let writing = &mut lib.writing;
         let Some(current) = writing.manuscripts.iter().find(|m| m.id == writing.manuscript) else {
             // The manuscript on show is no longer listed: nothing of this window's to bring along.

@@ -136,6 +136,8 @@ pub enum Modal {
     WriteFigures,
     /// 移到文献库: the papers, and the library chosen for them (`transfer.rs`).
     MoveTo { papers: Vec<String>, to: Option<String> },
+    /// 绑定到文献库: the conversation of the home page whose manuscripts are bound, and the library chosen (`written.rs`).
+    Bind { from: String, to: Option<String> },
     /// 归入已有文献: the papers whose files go under another, what narrows the papers offered, and the one chosen (`filing.rs`).
     FileInto { papers: Vec<String>, query: Entity<TextInput>, to: Option<String> },
 }
@@ -454,6 +456,13 @@ impl Workspace {
                     self.run(Cmd::MovePapers(papers, to), window, cx)
                 }
                 None => self.choose_only_move_target(cx),
+            },
+            Modal::Bind { from, to } => match to.clone() {
+                Some(to) => {
+                    let from = from.clone();
+                    self.run(Cmd::Written(crate::written::Do::Bind(from, to)), window, cx)
+                }
+                None => self.modal_error = t("选一个文献库。").into(),
             },
             Modal::FileInto { papers, to, .. } => match to.clone() {
                 Some(to) => {

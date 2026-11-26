@@ -39,6 +39,11 @@ pub struct LibraryInfo {
     /// it one (`promote`) only names it and clears this. Not written while false: a library's file stays as before.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub draft: bool,
+    /// Such a conversation that was begun as a manuscript (the home page's 稿件, `create_writing`): its window
+    /// opens on the manuscript beside the conversation, empty as it is, and it is named after the manuscript's
+    /// title. Not written while false.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub writing: bool,
     #[serde(skip)]
     pub dir: PathBuf,
     #[serde(skip)]
@@ -132,11 +137,23 @@ pub fn create_draft(root: &Path, about: &str) -> Result<LibraryInfo> {
     make(root, if name.is_empty() { "新对话" } else { &name }, "", "blue", true)
 }
 
+/// A manuscript begun on the home page, in no library (未绑定): a conversation like `create_draft`'s, marked
+/// `writing`, holding one manuscript that is a piece of text under no heading (`Store::create_piece`), in
+/// `language`. It is named after the manuscript, which has no title yet: `name` is what such a manuscript is
+/// called where the person reads it. The second value is the manuscript's id.
+pub fn create_writing(root: &Path, name: &str, language: &str) -> Result<(LibraryInfo, String)> {
+    let mut info = make(root, name, "", "blue", true)?;
+    info.writing = true;
+    save(&info)?;
+    let made = Store::open(&info.dir)?.create_piece("", language)?;
+    Ok((info, made.id))
+}
+
 /// 建成文献库: the conversation becomes a library on the shelf under this name, topic and colour. Nothing
 /// is copied or moved: its papers, conversations and manuscripts are the library's from now on.
 pub fn promote(info: &mut LibraryInfo, name: &str, topic: &str, color: &str) -> Result<()> {
     check(name, topic, &info.criteria, color)?;
-    let mut made = LibraryInfo { name: name.trim().into(), topic: topic.trim().into(), color: color.into(), draft: false, ..info.clone() };
+    let mut made = LibraryInfo { name: name.trim().into(), topic: topic.trim().into(), color: color.into(), draft: false, writing: false, ..info.clone() };
     made.dir = info.dir.clone();
     save(&made)?;
     *info = made;

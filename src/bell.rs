@@ -299,7 +299,7 @@ impl Workspace {
     /// The list under the bell: a row for each thing that ended, its library first, then when; what came of it under.
     pub(crate) fn render_bell_list(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let bell = &self.bell;
-        if !bell.open || self.lib.is_some() || self.settings_view.is_some() || self.tutorials.is_some() || self.collected.is_some() { return None }
+        if !bell.open || self.lib.is_some() || self.settings_view.is_some() || self.tutorials.is_some() || self.collected.is_some() || self.written.is_some() { return None }
         let room = LIST_WIDTH - 8. - 16.;
         let rows: Vec<AnyElement> = bell.done.iter().enumerate().map(|(n, done)| {
             let fresh = bell.fresh.contains(&done.id);

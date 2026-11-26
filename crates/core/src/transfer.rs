@@ -242,6 +242,200 @@ impl Store {
         from.trash_paper(id)?;
         Ok(taken)
     }
+
+    /// 绑定到文献库: take everything a conversation or a manuscript begun on the home page holds (`from`, a library
+    /// not on the shelf) into this library. Its papers come as `take_paper` brings them, one it already holds
+    /// joined, and a paper in its trash that a manuscript cites comes too, since the reference list names it. Its
+    /// manuscripts come with their sections and earlier versions, the file each began from, their comments and
+    /// the passages their citations rest on; its conversations, the manuscripts' among them. A citation keeps the
+    /// key it was written with where that key is free here or is the same paper's; where another paper has it,
+    /// the citation is written with the key the paper has here (`TakenAll::rekeyed`). A picture a manuscript
+    /// shows is kept in this library's figures, once by its bytes, and the line that shows it points there.
+    /// `from` keeps what it had, out of sight: the papers in its trash, the manuscripts put away. Nothing is
+    /// taken while one of the papers lies in this library's trash, or one of the manuscripts is here already.
+    pub fn take_all(&mut self, from: &mut Store) -> Result<TakenAll> {
+        if from.root() == self.root() { bail!("它已经在这个文献库里。") }
+        let manuscripts = from.manuscripts()?;
+        for manuscript in &manuscripts {
+            if self.db.query_row("SELECT 1 FROM manuscripts WHERE id = ?1", [&manuscript.id], |_| Ok(())).optional()?.is_some() { bail!("稿件「{}」已经在这个文献库里。", if manuscript.title.is_empty() { crate::manuscript::UNTITLED } else { &manuscript.title }) }
+        }
+        // What the manuscripts cite there, read while the papers are where the keys were given.
+        let (open, trash, kept, figures) = (from.list_papers()?, from.list_trash()?, from.cite_keys()?, from.list_figures()?);
+        let index = crate::cite::Index::new(&open, trash.iter().map(|entry| &entry.paper), &kept);
+        let mut cited: Vec<(String, String)> = vec![];
+        for body in manuscripts.iter().flat_map(|manuscript| &manuscript.sections).map(|section| section.body.as_str()) {
+            for one in crate::cite::find(body, &index).into_iter().filter(|one| !one.old) {
+                let (key, Some(paper)) = (one.written.trim_start_matches('@'), one.found.paper()) else { continue };
+                if !cited.iter().any(|(known, _)| known.eq_ignore_ascii_case(key)) { cited.push((key.to_string(), paper.to_string())) }
+            }
+        }
+        let wanted: Vec<&Paper> = open.iter().chain(trash.iter().map(|entry| &entry.paper).filter(|paper| cited.iter().any(|(_, id)| *id == paper.id))).collect();
+        for paper in &wanted {
+            if let Some(held) = existing_paper(&self.db, paper)? && self.in_trash(&held)? { bail!("「{}」在这个文献库的回收站里：先把它恢复，再绑定。", paper.title) }
+        }
+        let mut taken = TakenAll::default();
+        let mut ids: HashMap<String, String> = HashMap::new();
+        let brought = (|| -> Result<()> {
+            for paper in &wanted {
+                // One cited from the trash is a paper again while it is taken.
+                if from.in_trash(&paper.id)? { from.restore_paper(&paper.id)? }
+                let one = self.take_paper(from, &paper.id)?;
+                taken.papers += 1;
+                taken.joined += usize::from(one.joined);
+                for field in one.fields_left {
+                    if !taken.fields_left.contains(&field) { taken.fields_left.push(field) }
+                }
+                ids.insert(paper.id.clone(), one.paper);
+            }
+            // The keys: each citation's paper is the same paper here, by the key it was written with or the one it has here.
+            let mut renamed: HashMap<String, String> = HashMap::new();
+            for (key, paper) in &cited {
+                let Some(here) = ids.get(paper) else { continue };
+                let (ours, our_trash, our_kept) = (self.list_papers()?, self.list_trash()?, self.cite_keys()?);
+                let our_index = crate::cite::Index::new(&ours, our_trash.iter().map(|entry| &entry.paper), &our_kept);
+                let now = match our_index.holder(key) {
+                    Some(holder) if holder != here => our_index.key(here).unwrap_or(key).to_string(),
+                    _ => key.clone(),
+                };
+                self.keep_cite_key(here, &now)?;
+                if now != *key {
+                    renamed.insert(key.to_lowercase(), now.clone());
+                    taken.rekeyed.push((key.clone(), now));
+                }
+            }
+            // The pictures the manuscripts show: this library's own from here on.
+            let mut addresses: HashMap<String, String> = HashMap::new();
+            for address in manuscripts.iter().flat_map(crate::manuscript::pictures_used) {
+                if addresses.contains_key(&address) { continue }
+                let Ok(bytes) = std::fs::read(from.root().join(address.replace('/', std::path::MAIN_SEPARATOR_STR))) else { continue };
+                let held = match self.figure_holding(&bytes)? {
+                    Some(held) => held.local_path,
+                    None => {
+                        let mut figure = match figures.iter().find(|figure| figure.local_path == address) {
+                            Some(theirs) => crate::figure::Figure { id: String::new(), paper_id: ids.get(&theirs.paper_id).cloned().unwrap_or_default(), resource_id: String::new(), ..theirs.clone() },
+                            None => crate::figure::Figure { origin: crate::figure::UPLOADED.into(), ..Default::default() },
+                        };
+                        self.add_figure(&mut figure, &bytes)?;
+                        figure.local_path
+                    }
+                };
+                addresses.insert(address, held);
+            }
+            // A text as it reads here: its keys and the addresses of its pictures.
+            let rewrite = |written: &str| -> String {
+                let mut edits: Vec<(std::ops::Range<usize>, &str)> = vec![];
+                for one in crate::cite::find(written, &index).into_iter().filter(|one| !one.old) {
+                    if let Some(now) = renamed.get(&one.written.trim_start_matches('@').to_lowercase()) { edits.push((one.range.start + 1..one.range.end, now.as_str())) }
+                }
+                for picture in crate::manuscript::picture_lines(written) {
+                    if let Some(now) = addresses.get(&picture.address).filter(|now| **now != picture.address) { edits.push((picture.place, now.as_str())) }
+                }
+                edits.sort_by_key(|(range, _)| std::cmp::Reverse(range.start));
+                let mut out = written.to_string();
+                for (range, now) in edits { out.replace_range(range, now) }
+                out
+            };
+            let rewritten = |names: &[&str]| {
+                let names: Vec<String> = names.iter().map(|name| name.to_string()).collect();
+                move |name: &str, value: &mut Value| {
+                    if names.iter().any(|known| known == name) && let Value::Text(written) = value { *written = rewrite(written) }
+                }
+            };
+            // A paper joined to one held here has that one's id: what a conversation says of it follows.
+            let joined: Vec<(&String, &String)> = ids.iter().filter(|(old, new)| old != new).collect();
+            let said = |name: &str, value: &mut Value| {
+                if name == "body" && let Value::Text(body) = value {
+                    for (old, new) in &joined { *body = body.replace(old.as_str(), new) }
+                }
+            };
+            // The Word files the manuscripts began from, copied before anything is written.
+            let mut sources = vec![];
+            for manuscript in &manuscripts {
+                let (names, found) = rows(&from.db, "manuscript_sources", "manuscript_id", &manuscript.id)?;
+                for row in &found {
+                    let path = text(&names, row, "path");
+                    if path.is_empty() { continue }
+                    let (source, target) = (from.root().join(path.replace('/', std::path::MAIN_SEPARATOR_STR)), self.root().join(path.replace('/', std::path::MAIN_SEPARATOR_STR)));
+                    if let Some(folder) = target.parent() { std::fs::create_dir_all(folder)? }
+                    // A file that is gone leaves the manuscript one made here: its words are in the sections.
+                    if source.is_file() { std::fs::copy(&source, &target).map_err(|err| anyhow!("无法复制稿件的 Word 文件：{err}"))?; }
+                }
+                sources.push((names, found));
+            }
+            let tx = self.db.transaction()?;
+            let mut conversations: Vec<String> = vec![];
+            let mut talks = |tx: &Transaction, about: &str| -> Result<()> {
+                let (names, found) = rows(&from.db, "conversations", "paper_id", about)?;
+                conversations.extend(found.iter().map(|row| text(&names, row, "id")));
+                put(tx, "conversations", &names, found, said)?;
+                Ok(())
+            };
+            talks(&tx, "")?;
+            for (manuscript, (source_names, source_rows)) in manuscripts.iter().zip(sources) {
+                let (names, found) = rows(&from.db, "manuscripts", "id", &manuscript.id)?;
+                put(&tx, "manuscripts", &names, found, |_, _| {})?;
+                let (names, found) = rows(&from.db, "manuscript_sections", "manuscript_id", &manuscript.id)?;
+                put(&tx, "manuscript_sections", &names, found, rewritten(&["body"]))?;
+                for section in &manuscript.sections {
+                    // An earlier version's number is each library's own.
+                    let (mut names, mut found) = rows(&from.db, "section_snapshots", "section_id", &section.id)?;
+                    if let Some(at) = names.iter().position(|name| name == "id") {
+                        names.remove(at);
+                        for row in &mut found { row.remove(at); }
+                    }
+                    put(&tx, "section_snapshots", &names, found, rewritten(&["body"]))?;
+                }
+                put(&tx, "manuscript_sources", &source_names, source_rows, |_, _| {})?;
+                let (names, found) = rows(&from.db, "manuscript_comments", "manuscript_id", &manuscript.id)?;
+                put(&tx, "manuscript_comments", &names, found, rewritten(&["quote", "suggestion", "replaced"]))?;
+                // A passage of a paper that did not come has nothing to stand on here.
+                let (names, found) = rows(&from.db, "cite_passages", "manuscript_id", &manuscript.id)?;
+                let found: Vec<Vec<Value>> = found.into_iter().filter(|row| ids.contains_key(&text(&names, row, "paper_id"))).collect();
+                put(&tx, "cite_passages", &names, found, |name, value| {
+                    if name == "paper_id" && let Value::Text(old) = value && let Some(new) = ids.get(old.as_str()) { *value = Value::Text(new.clone()) }
+                })?;
+                talks(&tx, &manuscript.id)?;
+            }
+            for conversation in &conversations {
+                let (names, images) = rows(&from.db, "conversation_images", "conversation_id", conversation)?;
+                put(&tx, "conversation_images", &names, images, |_, _| {})?;
+                // A review lives with its conversation.
+                let (names, reviews) = rows(&from.db, "review_conversations", "conversation_id", conversation)?;
+                for review in reviews.iter().map(|row| text(&names, row, "review_id")) {
+                    let (names, found) = rows(&from.db, "review_projects", "id", &review)?;
+                    put(&tx, "review_projects", &names, found, said)?;
+                }
+                put(&tx, "review_conversations", &names, reviews, |_, _| {})?;
+            }
+            tx.commit()?;
+            taken.conversations = conversations.len();
+            Ok(())
+        })();
+        if let Err(err) = brought {
+            // What was not brought whole stays where it was: the papers taken so far are there again, and here too.
+            for old in ids.keys() { let _ = from.restore_paper(old); }
+            return Err(err);
+        }
+        for manuscript in &manuscripts { from.remove_manuscript(&manuscript.id)? }
+        taken.manuscripts = manuscripts.into_iter().map(|manuscript| manuscript.id).collect();
+        Ok(taken)
+    }
+}
+
+/// What came of taking in everything a conversation or a manuscript of the home page held (`Store::take_all`).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TakenAll {
+    /// The papers brought, and how many of them were joined to papers this library already held.
+    pub papers: usize,
+    pub joined: usize,
+    /// The manuscripts brought, by their ids, which they keep.
+    pub manuscripts: Vec<String>,
+    /// The conversations brought: its own, and those about its manuscripts.
+    pub conversations: usize,
+    /// The citation keys another paper has here, each with the key its citations are written with now.
+    pub rekeyed: Vec<(String, String)>,
+    /// Custom fields with values that this library has no field of the same name and kind for.
+    pub fields_left: Vec<String>,
 }
 
 #[cfg(test)]
@@ -352,6 +546,117 @@ mod tests {
         let again = to.take_paper(&mut from, &id).unwrap();
         assert_eq!((again.files, again.marks), (0, 0));
         assert_eq!(to.paper_files(&here.id).unwrap().len(), 1);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// A conversation of the home page that holds: a paper with a file, cited; one this library has too, cited; one in
+    /// its trash, cited; one that is not cited; a manuscript citing the three with a picture, an earlier version, a
+    /// comment and a passage; and two conversations, its own and the manuscript's.
+    fn writing(dir: &Path) -> (Store, crate::manuscript::Manuscript, [String; 4]) {
+        let mut store = Store::open(&dir.join("from")).unwrap();
+        let zhang = store.add_paper(Paper { title: "Root hairs under salt".into(), authors: "Zhang, Wei; Li, Na".into(), year: Some(2021), doi: "10.1234/salt".into(), ..Default::default() }).unwrap();
+        let pdf = dir.join("Zhang 2021.pdf");
+        std::fs::write(&pdf, b"%PDF-1.4 salt").unwrap();
+        store.import_file(&zhang.id, &pdf, "fulltext").unwrap();
+        let li = store.add_paper(Paper { title: "Ethylene and the root".into(), authors: "Li, Na".into(), year: Some(2019), doi: "10.1234/ethylene".into(), ..Default::default() }).unwrap();
+        let wang = store.add_paper(Paper { title: "Auxin transport".into(), authors: "Wang, Fang".into(), year: Some(2020), ..Default::default() }).unwrap();
+        let other = store.add_paper(Paper { title: "Never cited".into(), authors: "Okada, K".into(), year: Some(2018), ..Default::default() }).unwrap();
+        for (paper, key) in [(&zhang, "Zhang2021"), (&li, "Li2019"), (&wang, "Wang2020")] { store.keep_cite_key(&paper.id, key).unwrap() }
+        store.trash_paper(&wang.id).unwrap();
+        let mut drawn = crate::figure::Figure { legend: "A root tip".into(), ..Default::default() };
+        store.add_figure(&mut drawn, b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x10\x00\x00\x00\x10\x08\x02\x00\x00\x00").unwrap();
+        let made = store.create_piece("盐与根毛", "zh").unwrap();
+        let section = made.sections[0].id.clone();
+        store.save_section_body(&section, "早先的一版，引了 [@Zhang2021]。这一版写得足够长，值得留下来作为一个版本。").unwrap();
+        assert!(store.take_snapshot(&section, "pause").unwrap());
+        store.save_section_body(&section, &format!("根毛在盐胁迫下变短 [@Zhang2021; @li2019]，生长素也参与 [@Wang2020]，还有没收进来的 [@Nobody1999]。\n\n![根尖]({})", drawn.local_path)).unwrap();
+        store.add_comment(&made.id, &section, "变短 [@Zhang2021; @li2019]", "这里要不要再引一篇？", "我", crate::comment::PERSON).unwrap();
+        store.db.execute("INSERT INTO cite_passages(id, manuscript_id, section_id, paper_id, claim, passage, origin, created_at) VALUES ('Q-1', ?1, ?2, ?3, '根毛在盐胁迫下变短', 'Root hairs were shorter.', 'cited', 'now')", params![made.id, section, zhang.id]).unwrap();
+        store.db.execute("INSERT INTO conversations(id, paper_id, title, questions, body, created_at, updated_at) VALUES ('C-own', '', '找几篇文献', 1, ?1, 'now', 'now')", [format!("{{\"sources\":[\"{}\",\"{}\"]}}", zhang.id, li.id)]).unwrap();
+        store.db.execute("INSERT INTO conversations(id, paper_id, title, questions, created_at, updated_at) VALUES ('C-write', ?1, '写第一段', 1, 'now', 'now')", [&made.id]).unwrap();
+        store.db.execute("INSERT INTO conversation_images(conversation_id, id, media_type, data) VALUES ('C-write', 'I-1', 'image/png', x'00')", []).unwrap();
+        let made = store.manuscript(&made.id).unwrap().unwrap();
+        (store, made, [zhang.id, li.id, wang.id, other.id])
+    }
+
+    #[test]
+    fn everything_a_writing_holds_is_taken_into_a_library() {
+        let dir = temp_dir("all");
+        let (mut from, made, [zhang, li, wang, other]) = writing(&dir);
+        let mut to = Store::open(&dir.join("to")).unwrap();
+        // Here already: another Zhang of 2021, cited here by the key, and the same paper of Li's.
+        let earlier = to.add_paper(Paper { title: "Salt stress in rice".into(), authors: "Zhang, Min".into(), year: Some(2021), ..Default::default() }).unwrap();
+        to.keep_cite_key(&earlier.id, "Zhang2021").unwrap();
+        let held = to.add_paper(Paper { title: "Ethylene and the root".into(), authors: "Li, Na".into(), year: Some(2019), doi: "10.1234/ethylene".into(), ..Default::default() }).unwrap();
+        let taken = to.take_all(&mut from).unwrap();
+        assert_eq!((taken.papers, taken.joined, taken.manuscripts.clone(), taken.conversations), (4, 1, vec![made.id.clone()], 2));
+        assert_eq!(taken.rekeyed, [("Zhang2021".to_string(), "Zhang2021b".to_string())]);
+        // The papers: the cited one from the trash too, a paper again; Li's joined to the one held.
+        let papers = to.list_papers().unwrap();
+        assert_eq!(papers.len(), 5);
+        let id_of = |title: &str| papers.iter().find(|paper| paper.title == title).map(|paper| paper.id.clone()).unwrap();
+        let (zhang_here, wang_here) = (id_of("Root hairs under salt"), id_of("Auxin transport"));
+        assert_eq!((id_of("Ethylene and the root"), id_of("Never cited")), (held.id.clone(), other.clone()));
+        assert_eq!(to.paper_files(&zhang_here).unwrap().len(), 1);
+        // The manuscript, with its id: the key another paper has here is written anew, the others stay, and so does one no paper has.
+        let here = to.manuscript(&made.id).unwrap().unwrap();
+        assert_eq!((here.title.as_str(), here.language.as_str(), here.sections.len(), here.sections[0].bare, here.sections[0].id == made.sections[0].id), ("盐与根毛", "zh", 1, true, true));
+        let body = &here.sections[0].body;
+        assert!(body.starts_with("根毛在盐胁迫下变短 [@Zhang2021b; @li2019]，生长素也参与 [@Wang2020]，还有没收进来的 [@Nobody1999]。"), "{body}");
+        let kept = to.cite_keys().unwrap();
+        let index = crate::cite::Index::new(&papers, [], &kept);
+        let names: Vec<Option<String>> = crate::cite::find(body, &index).iter().map(|cited| cited.found.paper().map(String::from)).collect();
+        assert_eq!(names, [Some(zhang_here.clone()), Some(held.id.clone()), Some(wang_here.clone()), None]);
+        assert_eq!(index.key(&earlier.id), Some("Zhang2021"));
+        // Its picture is this library's, and the line shows it from here.
+        let pictures = crate::manuscript::pictures_used(&here);
+        let figures = to.list_figures().unwrap();
+        assert_eq!((pictures.len(), figures.len(), figures[0].legend.as_str()), (1, 1, "A root tip"));
+        assert_eq!(pictures[0], figures[0].local_path);
+        assert!(to.root().join(&pictures[0]).is_file());
+        // The earlier version, the comment and the passage read as the text does now.
+        let versions = to.snapshots(&here.sections[0].id).unwrap();
+        assert_eq!(versions.len(), 1);
+        assert!(versions[0].body.contains("[@Zhang2021b]"));
+        let comments = to.comments(&made.id).unwrap();
+        assert_eq!((comments.len(), comments[0].quote.as_str()), (1, "变短 [@Zhang2021b; @li2019]"));
+        let passages = to.passages(&made.id).unwrap();
+        assert_eq!((passages.len(), passages[0].paper_id.as_str(), passages[0].passage.as_str()), (1, zhang_here.as_str(), "Root hairs were shorter."));
+        // The conversations: its own is the library's, the manuscript's stays the manuscript's; a paper joined is named by the id it has here.
+        assert_eq!((to.list_conversations("").unwrap().len(), to.list_conversations(&made.id).unwrap().len()), (1, 1));
+        let said: String = to.db.query_row("SELECT body FROM conversations WHERE id = 'C-own'", [], |r| r.get(0)).unwrap();
+        assert!(said.contains(&held.id) && !said.contains(&li) && said.contains(&zhang), "{said}");
+        let images: i64 = to.db.query_row("SELECT count(*) FROM conversation_images WHERE conversation_id = 'C-write'", [], |r| r.get(0)).unwrap();
+        assert_eq!(images, 1);
+        // Where it came from keeps it all, out of sight.
+        assert!(from.manuscripts().unwrap().is_empty() && from.list_papers().unwrap().is_empty());
+        assert_eq!(from.list_trash().unwrap().len(), 4);
+        assert!(from.in_trash(&wang).unwrap());
+        // Nothing is taken twice.
+        assert!(to.take_all(&mut from).unwrap().manuscripts.is_empty());
+        assert_eq!(to.manuscripts().unwrap().len(), 1);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn nothing_is_taken_past_a_paper_in_the_trash_here() {
+        let dir = temp_dir("all-trashed");
+        let (mut from, made, [zhang, ..]) = writing(&dir);
+        let mut to = Store::open(&dir.join("to")).unwrap();
+        let here = to.add_paper(Paper { title: "Root hairs under salt".into(), doi: "10.1234/salt".into(), ..Default::default() }).unwrap();
+        to.trash_paper(&here.id).unwrap();
+        assert!(to.take_all(&mut from).unwrap_err().to_string().contains("回收站"));
+        // As it was, on both sides.
+        assert_eq!((from.manuscripts().unwrap().len(), from.list_papers().unwrap().len(), from.in_trash(&zhang).unwrap()), (1, 3, false));
+        assert!(to.manuscript(&made.id).unwrap().is_none() && to.list_papers().unwrap().is_empty() && to.list_conversations("").unwrap().is_empty());
+        // A manuscript with nothing but words: an article bound to a library it cites nothing of.
+        let mut plain = Store::open(&dir.join("plain")).unwrap();
+        let piece = plain.create_piece("", "zh").unwrap();
+        plain.save_section_body(&piece.sections[0].id, "写给公众号的一篇。").unwrap();
+        to.restore_paper(&here.id).unwrap();
+        let taken = to.take_all(&mut plain).unwrap();
+        assert_eq!((taken.papers, taken.manuscripts.len(), taken.conversations, taken.rekeyed.len()), (0, 1, 0, 0));
+        assert_eq!(to.manuscript(&piece.id).unwrap().unwrap().sections[0].body, "写给公众号的一篇。");
         std::fs::remove_dir_all(dir).ok();
     }
 

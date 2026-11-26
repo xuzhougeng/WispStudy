@@ -324,6 +324,8 @@ impl Workspace {
     }
 
     pub(crate) fn write_title_typed(&mut self, title: String, cx: &mut Context<Self>) {
+        // One begun on the home page is listed under its manuscript's title.
+        self.writing_named(&title, cx);
         let Some(lib) = self.lib.as_mut() else { return };
         let id = lib.writing.manuscript.clone();
         if let Err(err) = lib.store.rename_manuscript(&id, &title) { return self.fail(tf!("题目没有保存：{err:#}", "Title not saved: {err:#}"), cx) }

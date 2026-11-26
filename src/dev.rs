@@ -123,6 +123,8 @@ impl Workspace {
                 },
                 // 收藏 of every library: `collected` opens it as the star on the home page does, `collected:<kind>` shows 文献, 图片, 方法 or 导言 (`papers`, `figures`, `methods`, `intros`), `collected:library:<n>` the n-th library that holds something alone (`collected:library` all again), `collected:go:<n>` is a click on the n-th row on show, `collected:star:<n>` on the n-th paper's star, `collected:close` leaves it.
                 "collected" => self.collected_step(arg, cx),
+                // 写作 from the home page: `written` opens it as the pen does, `written:all` / `written:unbound` / `written:library:<n>` show a place, `written:go:<n>` goes to the n-th row, `written:new` is 新稿件, `written:bind:<n>` opens the dialog that binds the n-th row (in a conversation's window: that conversation), `written:to:<n>` picks the n-th library in it (`submit` binds).
+                "written" => self.written_step(arg, cx),
                 "starask" => {
                     self.star_ask = true;
                     cx.notify();
