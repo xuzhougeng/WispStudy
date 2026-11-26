@@ -36,6 +36,8 @@ pub enum MenuKind {
     AddProvider,
     /// How hard the n-th model of the provider on show thinks.
     ModelEffort(usize),
+    /// What kind of model the candidate in `new_model` is to be added as (设置 › AI › 模型).
+    NewModelKind,
     /// How large the PDF's pages are drawn.
     PdfZoom,
     /// Whether the PDF is shown twice, side by side or one over the other.
@@ -457,6 +459,16 @@ impl Workspace {
                 // What kind of model it is: the name tells when it is added, and here it can be said otherwise.
                 for (kind, name) in [("", t("对话模型")), (wisp_core::imagegen::KIND, t("生图模型")), (wisp_core::judge::KIND, t("判断模型"))] {
                     items.push(MenuItem { label: name.into(), checked: model.kind == kind, note: None, cmd: Cmd::SetModelKind(index, kind.to_string()) });
+                }
+            }
+            MenuKind::NewModelKind => {
+                let Some(view) = self.settings_view.as_ref() else { return };
+                let chosen = view.new_model_kind();
+                let guessed = crate::settings::model_kind_label(wisp_core::provider::guessed_kind(&view.new_model_text(cx)));
+                items.push(MenuItem { label: t("自动").into(), checked: chosen.is_none(), note: Some(guessed.into()), cmd: Cmd::SetNewModelKind(None) });
+                breaks.push(items.len());
+                for (kind, name) in [("", t("对话模型")), (wisp_core::imagegen::KIND, t("生图模型")), (wisp_core::judge::KIND, t("判断模型"))] {
+                    items.push(MenuItem { label: name.into(), checked: chosen == Some(kind), note: None, cmd: Cmd::SetNewModelKind(Some(kind.to_string())) });
                 }
             }
             MenuKind::TaskModel(task) => {
