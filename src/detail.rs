@@ -48,6 +48,8 @@ struct PdfBar {
     count: usize,
     /// 页面总览 is on show over the pages.
     overview: bool,
+    /// The find bar is open over the pages.
+    finding: bool,
     percent: f32,
     zoom: Zoom,
     /// The fit the reader reads at, which a zoom by hand goes back to.
@@ -760,9 +762,9 @@ impl Workspace {
                 if !paned { pdf.fit_facing(cx) }
             });
         }
-        let (page, count, percent, zoom, cutting, split, pen, marks_open, overview) = {
+        let (page, count, percent, zoom, cutting, split, pen, marks_open, overview, finding) = {
             let view = pdf.read(cx);
-            (view.current_page(), view.page_count(), view.percent(), view.zoom(), view.cutting(), pair.as_ref().map_or(view.split(), |(_, split, _)| *split), view.tool(), view.annotations_open(), view.overview_open())
+            (view.current_page(), view.page_count(), view.percent(), view.zoom(), view.cutting(), pair.as_ref().map_or(view.split(), |(_, split, _)| *split), view.tool(), view.annotations_open(), view.overview_open(), view.finding())
         };
         let viewer = match pair {
             None => pdf.into_any_element(),
@@ -811,7 +813,7 @@ impl Workspace {
         // The tools stand in the toolbar, or float at the page's right edge: a habit, kept for every paper.
         let floating = self.settings.pdf_tools_floating;
         let pdf_map = self.lib.as_ref().and_then(|lib| lib.pdf.as_ref()).is_some_and(|pdf| pdf.read(cx).map_shown());
-        let bar = PdfBar { width, file_id: file_id.clone(), paper_id, file_title, others, page, count, overview, percent, zoom, fit: lib.zoom, cutting, split, pen, facing, map: pdf_map, floating, free, can_pin, keep: lib.keep, beside, aloud, paned, hidden: hidden.to_vec() };
+        let bar = PdfBar { width, file_id: file_id.clone(), paper_id, file_title, others, page, count, overview, finding, percent, zoom, fit: lib.zoom, cutting, split, pen, facing, map: pdf_map, floating, free, can_pin, keep: lib.keep, beside, aloud, paned, hidden: hidden.to_vec() };
         // One line whatever the width: what it has no room for gives way level by level, the last of them under ⋯.
         let mut level = 0;
         let parts = loop {
@@ -860,6 +862,10 @@ impl Workspace {
         if has {
             let pages = tf!("{} / {} 页", "{} / {} pages", bar.page, bar.count);
             let width = wide(&pages);
+            // The three ways to a place in the file stand together: by its words, by the look of its page, by its number.
+            // The find bar's button is lit while the bar is open and puts it away again; its tooltip names the key.
+            let find_tip = if bar.finding { t("收起查找").to_string() } else { tf!("在 PDF 里查找 {}", "Find in PDF {}", crate::shortcuts::pretty(&crate::shortcuts::key_of("search", &self.settings.shortcuts))).trim_end().to_string() };
+            put((ui::ghost_button(if bar.finding { "pdf-find-close-bar" } else { "pdf-find" }, None, None).h(text_px(24.)).min_w(px(24.)).child(ui::icon("search", 14., if bar.finding { Theme::accent() } else { Theme::text_secondary() })).tooltip(ui::tip(find_tip)).on_click(self.on(Cmd::PdfFind(!bar.finding), cx)), 24.));
             // All the pages small, to go to one by the look of it: beside the count, which goes to one by its number.
             put((ui::ghost_button("pdf-overview", None, None).h(text_px(24.)).min_w(px(24.)).child(ui::icon("layout-grid", 14., if bar.overview { Theme::accent() } else { Theme::text_secondary() })).tooltip(ui::tip(t("页面总览"))).on_click(self.on(Cmd::PdfOverview, cx)), 24.));
             // Where it is read, and the way to a page by its number.

@@ -1829,6 +1829,8 @@ impl PdfView {
     /// For a citation not found, `words` is the first of `search_words` and the rest are tried after it when it finds nothing.
     pub fn open_finder(&mut self, words: Option<String>, missed: bool, window: &mut Window, cx: &mut Context<Self>) {
         let words = words.or_else(|| self.selected().map(|(_, text)| text).filter(|text| text.chars().count() <= 80 && !text.contains('\n')));
+        // The places found are shown on the pages: 页面总览 gives way to them.
+        self.overview = false;
         if self.finder.is_none() {
             let input = cx.new(|cx| TextInput::new("在 PDF 里查找", cx));
             let heard = cx.subscribe(&input, |this, _, event: &InputEvent, cx| match event {
@@ -1860,6 +1862,18 @@ impl PdfView {
     fn close_finder(&mut self, window: &mut Window) {
         self.finder = None;
         window.focus(&self.focus);
+    }
+
+    /// Whether the find bar is on show.
+    pub fn finding(&self) -> bool {
+        self.finder.is_some()
+    }
+
+    /// The find bar from outside the viewer (the search key while the paper has the window, the button of the bar over
+    /// the pages): opened with the keyboard in it, or put away.
+    pub fn show_finder(&mut self, on: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if on { self.open_finder(None, false, window, cx) } else if self.finder.is_some() { self.close_finder(window) }
+        cx.notify();
     }
 
     /// Ask the worker for the words now in the bar.

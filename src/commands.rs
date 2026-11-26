@@ -327,6 +327,8 @@ pub enum Cmd {
     AskPdfPage,
     /// 页面总览 of the PDF on show, on or off: all its pages small, to go to one.
     PdfOverview,
+    /// The find bar of the PDF on show: opened with the keyboard in it, or put away.
+    PdfFind(bool),
     /// 下一页 beside the pages of the PDF on show, on or off: a column more, a page on (两页并排).
     PdfNext,
     /// Show the PDF on show twice, each half scrolled on its own, or once again.
@@ -1615,6 +1617,9 @@ impl Workspace {
             Cmd::PdfOverview => {
                 if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.toggle_overview(cx)) }
             }
+            Cmd::PdfFind(on) => {
+                if let Some(pdf) = self.lib.as_ref().filter(|lib| lib.selected.is_some() && lib.pdf_on_show()).and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.show_finder(on, window, cx)) }
+            }
             Cmd::AskPdfPage => {
                 let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) else { return };
                 let (page, count) = { let view = pdf.read(cx); (view.current_page(), view.page_count()) };
@@ -2466,9 +2471,14 @@ impl Workspace {
             "ask" if !in_settings && self.lib.is_none() => Cmd::Draft(crate::draft::Do::Begin),
             // The rest act on the open library, when it is the one in view.
             _ if in_settings || self.lib.is_none() => return,
+            // The words are looked for in what is read (#328). A paper that has the window (reading mode, the one asked
+            // about) or stands beside a page that is not the list of papers is that: its PDF is searched wherever the
+            // keyboard is, not only once a page was clicked. Beside the full list the key stays the list's, and beside
+            // a manuscript the manuscript's; a PDF with the keyboard looks in itself in any layout (pdf.rs).
+            "search" if self.lib.as_ref().is_some_and(|l| l.selected.is_some() && l.pdf.is_some() && l.pdf_on_show() && (l.reading || !matches!(l.page, Page::Papers | Page::Write))) || (pdf_shown && self.asking(window)) => Cmd::PdfFind(true),
             // A conversation not yet made a library has no list to search or add to, no sidebar and no manuscript to find for.
             "search" | "add" | "import-pdf" | "ask" | "sidebar" | "write-find" if self.in_draft() => return,
-            // On the writing page the words are looked for in the manuscript, not among the papers (a PDF with the keyboard looks in itself, pdf.rs).
+            // On the writing page the words are looked for in the manuscript, not among the papers.
             "search" if self.lib.as_ref().is_some_and(|l| l.page == Page::Write && !l.reading) => return self.seek_open(window, cx),
             "search" => {
                 if let Some(lib) = self.lib.as_mut() {
