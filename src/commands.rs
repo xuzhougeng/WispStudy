@@ -118,6 +118,8 @@ pub enum Cmd {
     Tutorial(crate::tutorial::Do),
     /// 收藏 of every library: the star beside the book, and the page it opens (`collected.rs`).
     Collected(crate::collected::Do),
+    /// 写作 from the home page: the pen beside the star, the manuscripts it lists, and binding one to a library (`written.rs`).
+    Written(crate::written::Do),
     /// The line that offers a contact email where a search starts (`Workspace::contact_hint`), closed for good.
     DismissContactHint,
     NoteOpen(Option<Talk>, bool),
@@ -747,7 +749,10 @@ impl Workspace {
             }
             Cmd::GoHome => {
                 self.write_snapshot("leave");
+                // A manuscript begun on the home page and left with nothing in it is not kept.
+                let blank = self.retire_blank_writing();
                 self.close_library(cx);
+                if let Some(blank) = blank && let Err(err) = libraries::remove(&self.root, &blank) { self.fail(format!("{err:#}"), cx) }
                 // One level up: from a conversation, or the assistant's page, to the home page.
                 (self.home.open, self.home.listing) = (false, false);
                 self.settings_view = None;
@@ -756,6 +761,8 @@ impl Workspace {
                 self.libraries = libraries::list(&self.root);
                 // Back on 收藏 of every library, when the library was gone to from it: what it holds may have changed there.
                 self.collected_read(cx);
+                // And on 写作's list of every manuscript: what was written there is said by its row.
+                self.written_read(cx);
                 window.set_window_title("Wisp Study");
                 window.focus(&self.focus);
             }
@@ -831,6 +838,7 @@ impl Workspace {
             Cmd::Bell(what) => self.bell_do(what, window, cx),
             Cmd::Tutorial(what) => self.tutorial_do(what, window, cx),
             Cmd::Collected(what) => self.collected_do(what, window, cx),
+            Cmd::Written(what) => self.written_do(what, window, cx),
             Cmd::DismissContactHint => {
                 self.settings.contact_hint_dismissed = true;
                 self.save_settings(cx);
@@ -2396,6 +2404,9 @@ impl Workspace {
         } else if self.collected.is_some() && self.lib.is_none() {
             // 收藏 of every library: its search first, then the page.
             self.collected_up(window, cx);
+        } else if self.written.is_some() && self.lib.is_none() {
+            // 写作's list of every manuscript: its search first, then the page.
+            self.written_up(window, cx);
         } else if self.lib.as_ref().is_some_and(|l| l.page == Page::Write && l.writing.seek.open) {
             // The search over the manuscript, from its own field or the manuscript: before a paper beside it is closed.
             self.run(Cmd::Seek(crate::write_seek::Do::Close), window, cx);
@@ -2479,6 +2490,7 @@ impl Workspace {
             "ask" if !in_settings && self.lib.is_none() => Cmd::Draft(crate::draft::Do::Begin),
             // 收藏 of every library has a search of its own.
             "search" if !in_settings && self.lib.is_none() && self.collected.is_some() && self.tutorials.is_none() && !self.home.open => return self.collected_search(window, cx),
+            "search" if !in_settings && self.lib.is_none() && self.written.is_some() && self.tutorials.is_none() && !self.home.open => return self.written_search(window, cx),
             // The rest act on the open library, when it is the one in view.
             _ if in_settings || self.lib.is_none() => return,
             // The words are looked for in what is read (#328). A paper that has the window (reading mode, the one asked

@@ -1368,6 +1368,19 @@ impl Store {
         Ok(self.manuscript(&id)?.unwrap_or_default())
     }
 
+    /// A new manuscript that is one piece of text under no heading (`Section::bare`): an article, a note, a post.
+    /// What the home page's 稿件 starts, where nothing says the text is a paper with IMRaD parts; headings are
+    /// made as it is written (`split_section`), or by an outline.
+    pub fn create_piece(&mut self, title: &str, language: &str) -> Result<Manuscript> {
+        if !is_language(language) { bail!("不认识这种语言：{language}") }
+        let (id, now) = (new_id("M"), now_iso());
+        let tx = self.db.transaction()?;
+        tx.execute("INSERT INTO manuscripts(id, title, language, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)", params![id, title.trim(), language, now])?;
+        tx.execute("INSERT INTO manuscript_sections(id, manuscript_id, position, name, kind, body, updated_at, bare) VALUES (?1, ?2, 0, ?3, 'other', '', ?4, 1)", params![new_id("S"), id, if language == "zh" { "正文" } else { "Text" }, now])?;
+        tx.commit()?;
+        self.manuscript(&id)?.ok_or_else(|| anyhow::anyhow!("新稿件保存后未找到"))
+    }
+
     pub fn rename_manuscript(&mut self, id: &str, title: &str) -> Result<()> {
         self.db.execute("UPDATE manuscripts SET title = ?2, updated_at = ?3 WHERE id = ?1", params![id, title.trim(), now_iso()])?;
         Ok(())

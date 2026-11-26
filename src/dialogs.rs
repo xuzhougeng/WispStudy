@@ -72,6 +72,7 @@ impl Workspace {
             Modal::Extract(_) => self.render_extract_dialog(cx)?,
             Modal::Headings(_) => self.render_headings_dialog(cx)?,
             Modal::MoveTo { .. } => self.render_move_dialog(cx)?,
+            Modal::Bind { .. } => self.render_bind_dialog(cx)?,
             Modal::CiteStyle { .. } => self.render_cite_style_dialog(window, cx)?,
             Modal::FileInto { .. } => self.render_file_into_dialog(cx)?,
             Modal::Zotero { open } => ui::dialog(560.)

@@ -874,6 +874,8 @@ impl Workspace {
                     .when(draft && !self.home.listing, |d| d.child(ui::ghost_button(SharedString::from(format!("chat-new-{side}")), Some("plus"), Some(t("新对话").into())).on_click(self.on(Cmd::Draft(crate::draft::Do::New), cx))))
                     // A manuscript closed beside the conversation is a click away.
                     .when(draft && !self.home.listing && self.draft_manuscript() && lib.writing.away, |d| d.child(ui::ghost_button("draft-manuscript-show", Some("file-text"), Some(t("稿件").into())).tooltip(ui::tip(t("把稿件放回对话右边"))).on_click(self.on(Cmd::Draft(crate::draft::Do::Manuscript(true)), cx))))
+                    // What it holds can go into a library there already (绑定到文献库, `written.rs`), or become a new one.
+                    .when(draft && self.libraries.iter().any(|info| !info.draft), |d| d.child(ui::ghost_button("draft-bind", Some("link-2"), None).tooltip(ui::tip(t("绑定到已有的文献库"))).on_click(self.on(Cmd::Written(crate::written::Do::AskBind(lib.info.id.clone())), cx))))
                     .when(draft, |d| d.child(ui::secondary_button("draft-promote", t("建成文献库")).h(text_px(28.)).px(px(10.)).ml(px(4.)).text_size(text_px(12.)).on_click(self.on(Cmd::Draft(crate::draft::Do::Promote(lib.info.id.clone())), cx)))),
             )
             // Under the header, everything the panel of papers floats over: it pushes nothing down.

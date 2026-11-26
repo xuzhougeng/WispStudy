@@ -348,6 +348,24 @@ pub fn manuscript_review_note(manuscripts: &[(&crate::manuscript::Manuscript, Op
     Some(out)
 }
 
+/// What each question says of the manuscript of a conversation that was begun as one (the home page's 稿件, in no
+/// library yet: `LibraryInfo::writing`), shown at the right of the conversation: what it is, that it is written
+/// through the tools, that it need not be a paper, and that a paper of a library on the shelf is cited only once
+/// the manuscript is bound to that library.
+pub fn manuscript_writing_note(manuscript: &crate::manuscript::Manuscript) -> String {
+    let mut out = format!("【写作】用户在首页开始写一篇稿件，还没有绑定文献库，显示在对话右边：《{}》（ID {}），正文用{}写。\n各节（节 ID · 名称 · 现有字数）：\n", manuscript.shown_title(), manuscript.id, language_name(&manuscript.language));
+    for (n, section) in manuscript.sections.iter().enumerate() {
+        let length = section.body.chars().filter(|c| !c.is_whitespace()).count();
+        out.push_str(&format!("{}. {} · {}{} · {}\n", n + 1, section.id, section.name, if section.bare { "（没有标题，稿件的正文就写在这里）" } else { "" }, if length == 0 { "未写".to_string() } else { format!("{length} 字") }));
+    }
+    out.push_str("做法：\n\
+- 用户让你写、续写或修改时，稿件只通过工具改动：edit_section 逐处修改一节，write_section 写出一节的全文（只用于空的一节，或用户明确要整节重写的一节），set_outline 调整各节和题目；每次改动用户会在窗口里确认。稿件还没有题目时，写完用 set_outline 给它起一个，题目不要写进正文。动笔前先用 read_manuscript 读它现在的文字，用户可能刚亲手改过；edit_section 的 old 要从中逐字摘出。要写进稿件的正文不要贴在对话里：对话里用几句话说明做了什么，让用户去右边看稿。\n\
+- 它不一定是论文：可以是一篇文章、一篇公众号推送、一份随笔或讲稿。按用户说的体裁和读者来写；用户没有要求时，不要套论文的结构，也不要硬配引用。正文是 Markdown。\n\
+- 需要文献依据时，按上面的办法检索，把要用的文献收进这次对话，再用 [P1] 这样的标签引用；没有收进来的文献不要引用，更不要编造。书架上已有文献库里的文献在这里只能读，不能引用进稿件：要引用它们，请用户点对话上方的链环，把稿件绑定到那个文献库（绑定后在那个文献库的「写作」里接着写，库里的文献都可以引用）。\n\
+- 用户只是提问、要意见或让你查东西时，在对话里回答，不要动稿件；明确要审稿意见时才用 comment_manuscript 留批注。");
+    out
+}
+
 /// Assemble what the model reads. `papers` is the scope's list in display
 /// order; `fulltext` holds the extracted pages by paper id. `known` is what
 /// the labels of an earlier part of the conversation name (one reopened
@@ -2334,6 +2352,12 @@ mod tests {
         let manuscript = store.manuscripts().unwrap().remove(0);
         let note = manuscript_review_note(&[(&manuscript, Some("/data/L1/manuscripts/M1.docx".into()))]).unwrap();
         assert!(note.contains("《Review me》") && note.contains(&manuscript.sections[1].id) && note.contains("comment_manuscript") && note.contains("/data/L1/manuscripts/M1.docx") && note.contains("不要用 edit_section"));
+        // One begun as a manuscript is written, not reviewed: the tools that write it, that it need not be a paper,
+        // and that a library's papers are cited once it is bound to that library.
+        let piece = store.create_piece("", "zh").unwrap();
+        let note = manuscript_writing_note(&piece);
+        assert!(note.contains("还没有绑定文献库") && note.contains(&piece.id) && note.contains(&format!("1. {} · 正文（没有标题", piece.sections[0].id)) && note.contains("未写") && note.contains("正文用中文写"), "{note}");
+        assert!(note.contains("write_section") && note.contains("edit_section") && note.contains("set_outline") && note.contains("不要硬配引用") && note.contains("绑定到那个文献库") && !note.contains("不要用 edit_section"));
     }
 
     #[test]

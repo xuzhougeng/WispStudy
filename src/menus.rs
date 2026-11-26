@@ -303,6 +303,7 @@ impl Workspace {
             MenuKind::Draft(id) => {
                 items.push(item(t("重命名…"), Cmd::Draft(crate::draft::Do::Rename(id.clone()))));
                 items.push(item(t("建成文献库…"), Cmd::Draft(crate::draft::Do::Promote(id.clone()))));
+                if self.libraries.iter().any(|info| !info.draft) { items.push(item(t("绑定到文献库…"), Cmd::Written(crate::written::Do::AskBind(id.clone())))) }
                 breaks.push(items.len());
                 items.push(item(t("删除…"), Cmd::AskRemoveLibrary(id)));
             }

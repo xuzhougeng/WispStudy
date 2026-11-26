@@ -30,15 +30,18 @@ const STACK_UNDER: f32 = 640.;
 
 /// The quiet starts under the box: an icon, the words on the line, and what they put in the box. The second and
 /// the fourth pick a Word file first: a manuscript is what they are about.
-const STARTS: [(&str, &str, &str, bool); 5] = [
+const STARTS: [(&str, &str, &str, bool); 6] = [
     ("search", "调研一个想法", "帮我调研一下这个想法：", false),
     ("file-text", "审一份稿件", "帮我审一下这份稿件：逻辑、论据和表述，意见作为批注留在稿件上。", true),
     ("library", "找几篇文献", "帮我找几篇文献：", false),
     ("list", "从 Word 建文献库", "把这份 Word 文件参考文献表里的文献都收进来，建成一个文献库。", true),
     ("library", "问我的文献库", "在我的文献库里查一查：", false),
+    ("pen-line", "写一篇稿件", "", false),
 ];
 /// The start that asks the libraries on the shelf (跨库提问): not offered while there is none.
 const ACROSS: usize = 4;
+/// The start that begins a manuscript in no library (`Do::Write`): it opens that manuscript, and puts no words in the box.
+const WRITE: usize = 5;
 /// The start whose Word file is read for the works it cites (`import_docx_references`), not taken in as a manuscript to review.
 const COLLECT: usize = 3;
 
@@ -138,6 +141,9 @@ pub enum Do {
     Later,
     /// The sparkle by that dialog's name and topic: the model proposes both from the conversation.
     Propose,
+    /// A manuscript begun without a library (未绑定, `written.rs`): the start 写一篇稿件, the palette. What the box
+    /// holds goes along, into the box of the manuscript's conversation.
+    Write,
     /// The manuscript beside the conversation: shown (稿件 in the conversation's header), or closed (its ×) so the conversation has the page.
     Manuscript(bool),
 }
@@ -162,6 +168,12 @@ impl Workspace {
             }
             Do::History => self.home.listing = !self.home.listing,
             Do::Send => self.draft_send(window, cx),
+            Do::Write => {
+                let asked = self.home.input.read(cx).text().to_string();
+                self.home.input.update(cx, |input, cx| input.set_text("", cx));
+                self.write_unbound(asked, window, cx);
+            }
+            Do::Start(WRITE) => return self.run_draft(Do::Write, window, cx),
             Do::Start(n) => {
                 let Some((_, _, words, pick)) = STARTS.get(n) else { return };
                 self.home.collect = n == COLLECT;
@@ -207,9 +219,10 @@ impl Workspace {
         self.libraries.iter().filter(|info| info.draft)
     }
 
-    /// Whether the open conversation not yet made a library holds a manuscript with text: one to stand beside it.
+    /// Whether the open conversation not yet made a library holds a manuscript to stand beside it: one with text,
+    /// or, where the conversation was begun as a manuscript (`LibraryInfo::writing`), the manuscript empty as it is.
     pub(crate) fn draft_manuscript(&self) -> bool {
-        self.lib.as_ref().is_some_and(|lib| lib.info.draft && lib.writing.current().is_some_and(|m| m.sections.iter().any(|s| !s.body.trim().is_empty())))
+        self.lib.as_ref().is_some_and(|lib| lib.info.draft && lib.writing.current().is_some_and(|m| lib.info.writing || m.sections.iter().any(|s| !s.body.trim().is_empty())))
     }
 
     /// Whether the open library is a conversation not yet made one.
@@ -503,7 +516,7 @@ impl Workspace {
                     .when(!here, |d| d.hover(|s| s.bg(Theme::hover())))
                     .on_click(self.on(Cmd::Draft(Do::Open(info.id.clone())), cx))
                     .on_mouse_down(MouseButton::Right, self.on_context(crate::app::MenuKind::Draft(info.id.clone()), cx))
-                    .child(ui::icon("message-square", 14., Theme::text_tertiary()))
+                    .child(ui::icon(if info.writing { "pen-line" } else { "message-square" }, 14., Theme::text_tertiary()))
                     .child(div().flex_1().min_w_0().truncate().child(ui::one_line(&info.name)))
                     // Left while it was answering, it goes on: said here until the answer is in.
                     .children(self.off_screen_mark(&info.id))
@@ -528,7 +541,9 @@ impl Workspace {
         // A manuscript closed with its × leaves the conversation the page; 稿件 in the conversation's header brings it back.
         let reviewing = self.draft_manuscript() && self.lib.as_ref().is_some_and(|lib| !lib.writing.away);
         if !reviewing { return self.render_chat(Talk::Library, window, cx) }
-        let comments_width = if width >= ROOM_FOR_COMMENTS { COMMENTS_W } else { 0. };
+        // A manuscript handed in to be reviewed has its comments beside it from the start; one being written, once there is a comment to read.
+        let commented = self.lib.as_ref().is_some_and(|lib| !lib.info.writing || !lib.writing.comments.list.is_empty());
+        let comments_width = if commented && width >= ROOM_FOR_COMMENTS { COMMENTS_W } else { 0. };
         let rest = width - comments_width;
         let stacked = rest < STACK_UNDER;
         let manuscript_width = if stacked { rest } else { self.agent_manuscript_width(rest) };
@@ -589,6 +604,9 @@ impl Workspace {
         let waiting = self.lib.as_ref().is_some_and(|lib| self.home.waiting.as_ref().is_some_and(|(id, _)| *id == lib.info.id));
         if waiting {
             return div().flex().flex_1().items_center().justify_center().gap(px(8.)).text_color(Theme::text_secondary()).child(ui::spinner("draft-taking", 14., Theme::accent())).child(t("正在读入文件，读完就把问题交给助手…")).into_any_element();
+        }
+        if self.lib.as_ref().is_some_and(|lib| lib.info.writing) {
+            return ui::empty_state("pen-line", t("边写边查"), t("在右边直接写，或者告诉助手要写什么：它会到 PubMed、Europe PMC 等文献数据库里找文献，起草和修改稿件。要引用已有文献库里的文献，把稿件绑定到那个文献库（上方的链环）；想把这里收进的文献留成一个新的文献库，点「建成文献库」。")).into_any_element();
         }
         ui::empty_state("sparkle", t("说说你的想法"), t("还没有文献库也可以：助手会到 PubMed、Europe PMC 等文献数据库里找文献。拖进一份 Word 稿件，它会把审稿意见作为批注留在稿件上。聊出眉目后，点上方的「建成文献库」。")).into_any_element()
     }

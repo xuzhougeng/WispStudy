@@ -300,6 +300,8 @@ impl Workspace {
         // What `@` names here besides papers: the same as the box offered.
         let offers = self.offers(crate::mention::Place::Chat(talk));
         let reviewing = self.lib.as_ref().filter(|_| draft).and_then(|lib| {
+            // Begun as a manuscript, it is one being written, not one handed in to be reviewed.
+            if lib.info.writing && let Some(manuscript) = lib.writing.current() { return Some(ai::manuscript_writing_note(manuscript)) }
             let handed: Vec<(&Manuscript, Option<String>)> = lib.writing.manuscripts.iter().filter(|m| m.sections.iter().any(|s| !s.body.trim().is_empty())).map(|m| (m, lib.store.manuscript_source(&m.id).ok().flatten().filter(|source| source.kind == "docx").map(|source| lib.store.source_file(&source).display().to_string()))).collect();
             ai::manuscript_review_note(&handed)
         });

@@ -26,6 +26,9 @@ impl Render for Workspace {
         } else if self.collected.is_some() {
             // 收藏 of every library (`collected.rs`): under whatever was opened from it.
             self.render_collected(window, cx)
+        } else if self.written.is_some() {
+            // 写作's list of every manuscript (`written.rs`): under whatever was opened from it.
+            self.render_written(window, cx)
         } else {
             self.render_home(cx)
         };
@@ -475,7 +478,9 @@ impl Workspace {
                                     // 教程: the tutorials of the project page, read here (`tutorial.rs`). Beside the bell, apart from the switch after it.
                                     .child(ui::ghost_button("home-tutorials", Some("book-open"), None).tooltip(ui::tip(t("教程"))).on_click(self.on(Cmd::Tutorial(crate::tutorial::Do::Open), cx)))
                                     // 收藏 of every library together (`collected.rs`): the star after the book, the last of the three that open something to read.
-                                    .child(ui::ghost_button("home-collected", Some("star"), None).mr(px(8.)).tooltip(ui::tip(t("所有文献库的收藏"))).on_click(self.on(Cmd::Collected(crate::collected::Do::Open), cx)))
+                                    .child(ui::ghost_button("home-collected", Some("star"), None).tooltip(ui::tip(t("所有文献库的收藏"))).on_click(self.on(Cmd::Collected(crate::collected::Do::Open), cx)))
+                                    // 写作 (`written.rs`): every manuscript, in a library or in none, and where a new one begins without a library. The last of those that open something.
+                                    .child(ui::ghost_button("home-written", Some("pen-line"), None).mr(px(8.)).tooltip(ui::tip(t("写作"))).on_click(self.on(Cmd::Written(crate::written::Do::Open), cx)))
                                     // How the libraries are laid out, once there is one: the two ways side by side, the one in force lit.
                                     .when(!empty, |d| {
                                         let mut way = |id: &'static str, icon: &'static str, rows: bool, name: &'static str| div().id(id).flex().flex_none().items_center().justify_center().size(text_px(28.)).rounded(px(6.)).cursor_pointer().when(listed == rows, |d| d.bg(Theme::pressed())).hover(|s| s.bg(Theme::hover())).child(ui::icon(icon, 15., if listed == rows { Theme::text() } else { Theme::text_tertiary() })).tooltip(ui::tip(t(name))).on_click(self.on(Cmd::HomeList(rows), cx));

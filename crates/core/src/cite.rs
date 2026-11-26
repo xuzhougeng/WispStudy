@@ -337,6 +337,12 @@ impl<'a> Index<'a> {
         self.papers.get(paper_id).map(|(paper, _)| *paper)
     }
 
+    /// The paper a key is taken by, letters compared without their case: one of the library, or one a kept key
+    /// still names though it is gone. None for a key that is free.
+    pub fn holder(&self, key: &str) -> Option<&str> {
+        self.by_key.get(&key.to_lowercase()).map(String::as_str)
+    }
+
     fn resolve(&self, key: &str) -> Found {
         match self.by_key.get(&key.to_lowercase()) {
             None => Found::Unknown,
