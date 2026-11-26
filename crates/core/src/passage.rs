@@ -164,10 +164,14 @@ pub fn citations(text: &str, cited: &[Cited]) -> Vec<Citation> {
 /// citations: for each sentence it quoted (`cite::convert_ai_citations`),
 /// the paper, what the sentence citing it says, and the quotation as the
 /// paper's sentence. `text` is the converted answer, `cited` its citations.
+/// A sentence is found by the brackets it was quoted in (`Quoted::at`) and
+/// its paper, which of several papers there is the last
+/// (`[@A; @B, p. 7]`: the sentence was written after B).
 /// Whether the paper says so is the caller's to check.
 pub fn quoted(text: &str, cited: &[Cited], quoted: &[crate::cite::Quoted]) -> Vec<(String, String, Candidate)> {
     let citations = citations(text, cited);
-    quoted.iter().filter_map(|one| citations.iter().find(|citation| citation.at.start == one.at + 1 && citation.paper == one.paper_id).map(|citation| (one.paper_id.clone(), citation.claim.clone(), Candidate { text: one.quote.clone(), part: String::new(), page: one.page.unwrap_or(0) }))).collect()
+    let within = |one: &crate::cite::Quoted, citation: &Citation| citation.paper == one.paper_id && citation.at.start > one.at && text.get(one.at..citation.at.start).is_some_and(|between| between.starts_with('[') && !between.contains(']'));
+    quoted.iter().filter_map(|one| citations.iter().rev().find(|citation| within(one, citation)).map(|citation| (one.paper_id.clone(), citation.claim.clone(), Candidate { text: one.quote.clone(), part: String::new(), page: one.page.unwrap_or(0) }))).collect()
 }
 
 /// The passage a citation rests on.
@@ -416,6 +420,10 @@ mod tests {
         let sources = [crate::ai::Source { label: "P1".into(), paper_id: "a".into(), title: String::new(), ..Default::default() }, crate::ai::Source { label: "P2".into(), paper_id: "b".into(), title: String::new(), ..Default::default() }];
         let answer = cite::convert_ai_citations("Roots sense compaction [P1 p.4 \"Roots sense soil compaction.\"]. Ethylene builds up [P2].", &sources, &index);
         assert_eq!(quoted(&answer.text, &cite::find(&answer.text, &index), &answer.quoted), [("a".to_string(), "Roots sense compaction.".to_string(), Candidate { text: "Roots sense soil compaction.".into(), part: String::new(), page: 4 })]);
+        // Quoted after several papers, the sentence is the last one's: found by the brackets and the paper, not by the first key.
+        let answer = cite::convert_ai_citations("Roots sense it [P2]. Ethylene builds up [P1; P2 p.7 \"Ethylene accumulates in compacted soil.\"].", &sources, &index);
+        assert_eq!(answer.text, "Roots sense it [@Lee2020]. Ethylene builds up [@Zhang2021; @Lee2020, p. 7].");
+        assert_eq!(quoted(&answer.text, &cite::find(&answer.text, &index), &answer.quoted), [("b".to_string(), "Ethylene builds up.".to_string(), Candidate { text: "Ethylene accumulates in compacted soil.".into(), part: String::new(), page: 7 })]);
     }
 
     #[test]

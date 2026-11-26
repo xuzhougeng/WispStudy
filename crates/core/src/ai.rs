@@ -625,6 +625,11 @@ pub fn citation_spans(answer: &str) -> Vec<(std::ops::Range<usize>, Vec<Citation
 /// that runs to the closing bracket is one. What names a paper there is the
 /// reader's to say: a label (`citation_spans`), or a manuscript's key
 /// written with the sentence a label has (`cite::convert_ai_citations`).
+///
+/// A bracket that was opened and not closed is no pair, and takes nothing
+/// with it: in `[P2 "One."。 words [P1 "Two."]` the pair is the second
+/// citation's, and the first bracket, its sentence and the words after it
+/// are the text they were written as.
 pub fn bracketed(answer: &str) -> Vec<(std::ops::Range<usize>, &str, &str)> {
     let mut found = vec![];
     let mut rest = answer;
@@ -633,7 +638,7 @@ pub fn bracketed(answer: &str) -> Vec<(std::ops::Range<usize>, &str, &str)> {
         rest = &rest[open + 1..];
         // `[P3 p.5 "a sentence"]`: the quotation may hold brackets of its own, so the
         // label ends at the `]` right after the closing quotation mark.
-        let quoted = rest.find(['"', '“', '「']).filter(|at| !rest[..*at].contains(']')).and_then(|at| {
+        let quoted = rest.find(['"', '“', '「']).filter(|at| !rest[..*at].contains(['[', ']'])).and_then(|at| {
             let mark = rest[at..].chars().next()?;
             let closing = match mark {
                 '“' => '”',
@@ -641,15 +646,24 @@ pub fn bracketed(answer: &str) -> Vec<(std::ops::Range<usize>, &str, &str)> {
                 _ => '"',
             };
             let start = at + mark.len_utf8();
-            let end = start + rest[start..].find(closing)?;
-            let tail = &rest[end + closing.len_utf8()..];
-            let close = tail.find(']').filter(|close| tail[..*close].trim().is_empty())?;
-            Some((&rest[..at], rest[start..end].trim(), end + closing.len_utf8() + close))
+            // The sentence ends at the first closing mark the bracket closes after. A mark before that one is
+            // the sentence's own (`"the "hypoxic" response"`), unless a bracket opens after it: then that mark
+            // closed the sentence of a citation whose bracket was left open, and what follows is the text.
+            let mut from = start;
+            loop {
+                let end = from + rest[from..].find(closing)?;
+                if from > start && rest[from..end].contains('[') { return None }
+                let tail = &rest[end + closing.len_utf8()..];
+                if let Some(close) = tail.find(']').filter(|close| tail[..*close].trim().is_empty()) { return Some((&rest[..at], rest[start..end].trim(), end + closing.len_utf8() + close)) }
+                from = end + closing.len_utf8();
+            }
         });
         let (head, quote, close) = match quoted {
             Some(parts) => parts,
             None => {
                 let Some(close) = rest.find(']') else { break };
+                // Another bracket opens before this one closes: the pair is that one's, read next.
+                if rest[..close].contains('[') { continue }
                 (&rest[..close], "", close)
             }
         };
@@ -2257,6 +2271,13 @@ mod tests {
         let spans = citation_spans(answer);
         assert_eq!(spans.iter().map(|(range, _)| &answer[range.clone()]).collect::<Vec<_>>(), ["[P3]", "[P1 p.2 \"Libraries [12] were prepared.\"]", "[P2, p.7]"]);
         assert_eq!(spans[1].1, [Citation { label: "P1".into(), file: None, page: Some(2), quote: "Libraries [12] were prepared.".into() }]);
+        // A bracket left open cites nothing and takes nothing with it: the citation after it is read as it is written.
+        let open = "驱动的是 HIF-2α [P2 \"One sentence; with a stop.\"。这一认识转化成了治疗 [P1 \"Another sentence.\"]，区间 [0, 1) 之后的 [P3, p.4] 也一样。";
+        assert_eq!(citation_spans(open).iter().map(|(range, cited)| (&open[range.clone()], cited[0].label.as_str(), cited[0].quote.as_str())).collect::<Vec<_>>(), [("[P1 \"Another sentence.\"]", "P1", "Another sentence."), ("[P3, p.4]", "P3", "")]);
+        // A sentence may hold quotation marks of the kind it is quoted in, until a bracket opens after one of them.
+        let own = "见 [P1 p.2 \"The response [3] was \"hypoxic\".\"] 和 [P2 “所谓“缺氧”反应。”]。";
+        assert_eq!(citation_spans(own).iter().map(|(_, cited)| cited[0].quote.as_str()).collect::<Vec<_>>(), ["The response [3] was \"hypoxic\".", "所谓“缺氧”反应。"]);
+        assert_eq!(bracketed("[a \"b\" c \"d\"] [e \"f\" g [h \"i\"]").iter().map(|(range, head, quote)| (range.clone(), *head, *quote)).collect::<Vec<_>>(), [(0..13, "a ", "b\" c \"d"), (23..30, "h ", "i")]);
     }
 
 

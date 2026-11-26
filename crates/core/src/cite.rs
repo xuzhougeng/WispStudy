@@ -47,6 +47,21 @@ pub struct AiCitationConversion {
     /// The sentences quoted after a key that names no paper of the library (`[@Nobody1999 "…"]`), each with
     /// the key as written (`@Nobody1999`): out of the text as the others are, with no paper to look them up in.
     pub dropped: Vec<(String, String)>,
+    /// The citations of the conversation's that stayed in the text as they were written, in its order.
+    pub left: Vec<Left>,
+}
+
+/// A citation as a conversation writes one, by a label or with its sentence, that stayed as it was written:
+/// the text has it, sentence and all.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Left {
+    /// As it stands in the text: its brackets and what they hold, or, of a bracket that was not closed,
+    /// from the bracket to the end of the sentence it quotes (`[P2 "A sentence."`, `[@Key "A sentence."`).
+    pub written: String,
+    /// The labels in it that are not one paper of the conversation's which the library has. None when every
+    /// label is: then it is how the citation is written that was not read (a bracket left open, words that
+    /// are neither a label nor a page nor the sentence).
+    pub unknown: Vec<String>,
 }
 
 /// A sentence a chat citation quoted: `[P3 p.5 "…"]`, or `[@Key p.5 "…"]`.
@@ -60,12 +75,21 @@ pub struct Quoted {
 }
 
 /// Convert only complete, unambiguous chat citation groups. Unrecognised
-/// text and groups with an unavailable source remain exactly as written.
-/// The sentence a citation quotes (`[P3 p.5 "…"]`) is left out of the text,
-/// the page kept: a manuscript cites, and the quotation was the
-/// conversation's way of showing where. It is handed back beside the text
-/// (`quoted`), for the caller to keep as the passage the citation rests on.
+/// text and groups with an unavailable source remain exactly as written,
+/// and are handed back in `left`. The sentence a citation quotes
+/// (`[P3 p.5 "…"]`) is left out of the text, the page kept (`p.0` is no
+/// page): a manuscript cites, and the quotation was the conversation's way
+/// of showing where. It is handed back beside the text (`quoted`), for the
+/// caller to keep as the passage the citation rests on. With several papers
+/// in the brackets (`[P1; P2 p.7 "…"]`) the sentence is the last one's,
+/// the paper it was written after, as an answer's is (`ai::citation_spans`).
 /// Conversion is not verification of the claim or page.
+///
+/// Nothing but such a sentence leaves the text. A sentence is what
+/// `ai::bracketed` reads as one: it runs to the closing bracket. A model
+/// that left the bracket of one citation open (`[P2 "One."。 words
+/// [P1 "Two."]`) has written the first as text: it stays, with its sentence
+/// and the words after it, and the second is the citation it is.
 ///
 /// A model that has the manuscript's form in mind writes the key where the
 /// label goes and the sentence after it all the same: `[@Kaelin2008 "…"]`,
@@ -81,20 +105,39 @@ pub struct Quoted {
 /// manuscript's own `[@Key]` and `[see @Key, p. 5]` quote nothing.
 pub fn convert_ai_citations(answer: &str, sources: &[crate::ai::Source], index: &Index<'_>) -> AiCitationConversion {
     let mut text = String::new();
-    let mut keys = Vec::new();
+    let mut keys: Vec<(String, String)> = Vec::new();
     let mut quoted = Vec::new();
     let mut dropped = Vec::new();
-    let mut end = 0;
+    let mut left = Vec::new();
+    // The paper a label names, with its key: one paper of the conversation's, which the library has.
+    let named = |label: &str| -> Option<(String, String)> {
+        let mut matches = sources.iter().filter(|source| source.label == label);
+        let source = matches.next()?;
+        if matches.next().is_some() { return None }
+        Some((source.paper_id.clone(), index.key(&source.paper_id)?.to_string()))
+    };
+    // Of the labels of a citation that stays as written, those that name no such paper.
+    let unknown = |labels: Vec<&str>| -> Vec<String> {
+        let mut unknown: Vec<String> = vec![];
+        for label in labels {
+            if named(label).is_none() && !unknown.iter().any(|one| one == label) { unknown.push(label.to_string()) }
+        }
+        unknown
+    };
+    let open = |stretch: &str| -> Vec<Left> { unclosed(stretch).into_iter().map(|(written, labels)| Left { written: written.to_string(), unknown: unknown(labels.iter().map(String::as_str).collect()) }).collect() };
+    // Where the text taken so far ends, and where the last pair of brackets did.
+    let (mut end, mut after) = (0, 0);
     let labelled = crate::ai::citation_spans(answer);
     for (range, head, quote) in crate::ai::bracketed(answer) {
-        let label = labelled.iter().any(|(span, _)| *span == range);
-        if !label {
+        left.extend(open(&answer[after..range.start]));
+        after = range.end;
+        let Some((_, labels)) = labelled.iter().find(|(span, _)| *span == range) else {
             // `[@Key p.5 "…"]`: a key and the sentence a label would have.
             let Some((written, cited)) = (!quote.is_empty()).then(|| keyed_group(head)).flatten() else { continue };
             text.push_str(&answer[end..range.start]);
             end = range.end;
-            // Several papers and one sentence: whose it is is not said, as with `[P1; P2 "…"]`.
-            if let [(key, page)] = cited.as_slice() {
+            // Of several papers the sentence is the last one's, as with labels.
+            if let Some((key, page)) = cited.last() {
                 // A paper's id stands for its key in what a tool is given (`compose::keyed`).
                 match index.key(key).map(|_| key.to_string()).or_else(|| index.resolve(key).paper().map(str::to_string)) {
                     Some(id) => {
@@ -106,32 +149,75 @@ pub fn convert_ai_citations(answer: &str, sources: &[crate::ai::Source], index: 
             }
             text.push_str(&format!("[{written}]"));
             continue;
-        }
+        };
         text.push_str(&answer[end..range.start]);
-        let original = &answer[range.clone()];
-        if let Some(cited) = parse_chat_group(&without_quotation(original)) {
-            let resolved: Option<Vec<_>> = cited.iter().map(|(label, page)| {
-                let mut matches = sources.iter().filter(|source| &source.label == label);
-                let source = matches.next()?;
-                if matches.next().is_some() { return None }
-                Some((source.paper_id.clone(), index.key(&source.paper_id)?.to_string(), *page))
-            }).collect();
-            if let Some(resolved) = resolved {
-                let pieces: Vec<String> = resolved.iter().map(|(_, key, page)| match page {
-                    Some(page) => format!("@{key}, p. {page}"),
-                    None => format!("@{key}"),
-                }).collect();
-                if let ([(id, _, page)], Some(quote)) = (resolved.as_slice(), quotation(original)) { quoted.push(Quoted { at: text.len(), paper_id: id.clone(), page: *page, quote }) }
-                text.push_str(&format!("[{}]", pieces.join("; ")));
-                for (id, key, _) in resolved {
-                    if !keys.iter().any(|pair| pair == &(id.clone(), key.clone())) { keys.push((id, key)) }
-                }
-            } else { text.push_str(original) }
-        } else { text.push_str(original) }
         end = range.end;
+        // What stands before the sentence is labels and pages and nothing else, and every label names its paper.
+        let resolved: Option<Vec<(String, String, Option<usize>)>> = parse_chat_group(head).and_then(|cited| cited.into_iter().map(|(label, page)| named(&label).map(|(id, key)| (id, key, page))).collect());
+        let Some(resolved) = resolved else {
+            text.push_str(&answer[range.clone()]);
+            left.push(Left { written: answer[range].to_string(), unknown: unknown(labels.iter().map(|one| one.label.as_str()).collect()) });
+            continue;
+        };
+        if let (false, Some((id, _, page))) = (quote.is_empty(), resolved.last()) { quoted.push(Quoted { at: text.len(), paper_id: id.clone(), page: *page, quote: quote.to_string() }) }
+        let pieces: Vec<String> = resolved.iter().map(|(_, key, page)| match page {
+            Some(page) => format!("@{key}, p. {page}"),
+            None => format!("@{key}"),
+        }).collect();
+        text.push_str(&format!("[{}]", pieces.join("; ")));
+        for (id, key, _) in resolved {
+            if !keys.iter().any(|pair| pair == &(id.clone(), key.clone())) { keys.push((id, key)) }
+        }
     }
+    left.extend(open(&answer[after..]));
     text.push_str(&answer[end..]);
-    AiCitationConversion { text, keys, quoted, dropped }
+    AiCitationConversion { text, keys, quoted, dropped, left }
+}
+
+/// The citations that a stretch of text between two pairs of brackets
+/// begins and does not end: a bracket with a label after it (`[P2`,
+/// `[@P2`), or with a key and its sentence (`[@Key p.5 "…"`), and no
+/// bracket that closes it where one belongs. Each as it is written, as far
+/// as it reads as a citation, with its labels: to the end of the sentence
+/// it quotes when labels and pages, or a key, are followed by one on the
+/// same line, else the bracket and its first label alone. A key without a
+/// sentence is the manuscript's own way of citing, and not looked at.
+fn unclosed(text: &str) -> Vec<(&str, Vec<String>)> {
+    let mut found = vec![];
+    let mut from = 0;
+    while let Some(open) = text[from..].find('[').map(|at| from + at) {
+        from = open + 1;
+        let rest = &text[from..];
+        let quoting = rest.find(['"', '“', '「', '[', ']', '\n']).and_then(|at| {
+            let cited = match parse_chat_group(&rest[..at]) {
+                Some(cited) => cited,
+                None => keyed_group(&rest[..at]).map(|_| vec![])?,
+            };
+            let closing = match rest[at..].chars().next()? {
+                '"' => '"',
+                '“' => '”',
+                '「' => '」',
+                _ => return None,
+            };
+            let start = at + closing.len_utf8();
+            let end = start + rest[start..].find([closing, '\n'])?;
+            rest[end..].starts_with(closing).then(|| (end + closing.len_utf8(), cited.into_iter().map(|(label, _)| label).collect::<Vec<_>>()))
+        });
+        let (len, labels) = match quoting {
+            Some(read) => read,
+            None => {
+                let bare = rest.strip_prefix('@').unwrap_or(rest);
+                let digits = bare.strip_prefix('P').map_or(0, |after| after.bytes().take_while(u8::is_ascii_digit).count());
+                if digits == 0 { continue }
+                // `[P2: …`, `[P2a`: not a label.
+                if bare[1 + digits..].chars().next().is_some_and(|next| !next.is_whitespace() && ![']', ',', '，', ';', '、'].contains(&next)) { continue }
+                (rest.len() - bare.len() + 1 + digits, vec![bare[..1 + digits].to_string()])
+            }
+        };
+        from += len;
+        found.push((&text[open..from], labels));
+    }
+    found
 }
 
 /// What stands before the sentence in `[@Key p.5 "…"]`, as a manuscript
@@ -174,34 +260,20 @@ fn page_alone(locator: &str) -> Option<Option<usize>> {
     Some(digits.parse::<usize>().ok().filter(|page| *page > 0))
 }
 
-/// The sentence a citation group quotes, without its quotation marks: one that runs to the closing bracket.
-fn quotation(group: &str) -> Option<String> {
-    let at = group.find(['"', '“', '「'])?;
-    let inner = group.strip_suffix(']')?.trim_end();
-    let open = group[at..].chars().next()?.len_utf8();
-    let close = inner.chars().last().filter(|c| ['"', '”', '」'].contains(c))?.len_utf8();
-    let quote = inner.get(at + open..inner.len() - close)?.trim();
-    (!quote.is_empty()).then(|| quote.to_string())
-}
-
-/// A citation group without the sentence it quotes: `[P3 p.5 "…"]` as `[P3 p.5]`.
-/// Only a quotation that runs to the closing bracket is one (`ai::citation_spans`).
-fn without_quotation(group: &str) -> String {
-    let Some(at) = group.find(['"', '“', '「']) else { return group.to_string() };
-    let closed = group.strip_suffix(']').is_some_and(|inner| inner.trim_end().ends_with(['"', '”', '」']) && inner.trim_end().len() > at + 1);
-    if closed { format!("{}]", group[..at].trim_end()) } else { group.to_string() }
-}
-
-/// The deliberately narrow grammar has no free text or quotations, so
-/// converting a group cannot silently drop a qualifier or source detail.
-fn parse_chat_group(group: &str) -> Option<Vec<(String, Option<usize>)>> {
-    let inner = group.strip_prefix('[')?.strip_suffix(']')?;
+/// What a citation group names before the sentence it quotes, or in all it
+/// holds when it quotes none: labels, each with its page or without. The
+/// deliberately narrow grammar has no free text, and no quotation but the
+/// sentence the brackets end with (`ai::bracketed`), so converting a group
+/// cannot silently drop a qualifier or source detail. `p.0` is no page, as
+/// after a key (`page_alone`).
+fn parse_chat_group(inner: &str) -> Option<Vec<(String, Option<usize>)>> {
     if inner.contains(['[', ']', '\n', '"', '“', '”', '「', '」']) { return None }
     let mut citations: Vec<(String, Option<usize>)> = Vec::new();
-    let parse_page = |word: &str| -> Option<usize> {
+    let parse_page = |word: &str| -> Option<Option<usize>> {
         let digits = word.strip_prefix("p.").or_else(|| word.strip_prefix('p'))?;
         if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) { return None }
-        digits.parse::<usize>().ok().filter(|page| *page > 0)
+        let page = digits.parse::<usize>().ok()?;
+        Some((page > 0).then_some(page))
     };
     for part in inner.split([',', '，', ';', '、']) {
         let mut words = part.split_whitespace();
@@ -209,7 +281,7 @@ fn parse_chat_group(group: &str) -> Option<Vec<(String, Option<usize>)>> {
         // `[@P3 p.5]` is `[P3 p.5]` (`ai::citation_spans`).
         let first = first.strip_prefix('@').unwrap_or(first);
         if first.starts_with('P') && first.len() > 1 && first[1..].bytes().all(|b| b.is_ascii_digit()) {
-            let page = match words.next() { Some(word) => Some(parse_page(word)?), None => None };
+            let page = match words.next() { Some(word) => parse_page(word)?, None => None };
             if words.next().is_some() { return None }
             citations.push((first.to_string(), page));
         } else {
@@ -217,7 +289,7 @@ fn parse_chat_group(group: &str) -> Option<Vec<(String, Option<usize>)>> {
             if words.next().is_some() { return None }
             let last = citations.last_mut()?;
             if last.1.is_some() { return None }
-            last.1 = Some(page);
+            last.1 = page;
         }
     }
     (!citations.is_empty()).then_some(citations)
@@ -1136,13 +1208,16 @@ mod tests {
         ];
         let original = "测试 [P1 p.5] and [P1, p.6; P2 p.7] [P1, P9] [P1 \"quote\"] [P2 p.3 “a sentence. With a stop”] [P1 p.5 extra] [P1 p.0].";
         let converted = convert_ai_citations(original, &sources, &index);
-        assert_eq!(converted.text, "测试 [@Zhang2024, p. 5] and [@Zhang2024, p. 6; @Zhang2024b, p. 7] [P1, P9] [@Zhang2024] [@Zhang2024b, p. 3] [P1 p.5 extra] [P1 p.0].");
+        // `p.0` is no page, as after a key.
+        assert_eq!(converted.text, "测试 [@Zhang2024, p. 5] and [@Zhang2024, p. 6; @Zhang2024b, p. 7] [P1, P9] [@Zhang2024] [@Zhang2024b, p. 3] [P1 p.5 extra] [@Zhang2024].");
         assert_eq!(converted.keys, vec![("P1".into(), "Zhang2024".into()), ("P2".into(), "Zhang2024b".into())]);
         // What was quoted is handed back with where its citation now stands.
         assert_eq!(converted.quoted.iter().map(|q| (&converted.text[q.at..q.at + 2], q.paper_id.as_str(), q.page, q.quote.as_str())).collect::<Vec<_>>(), [("[@", "P1", None, "quote"), ("[@", "P2", Some(3), "a sentence. With a stop")]);
-        assert_eq!(&converted.text[converted.quoted[1].at..], "[@Zhang2024b, p. 3] [P1 p.5 extra] [P1 p.0].");
+        assert_eq!(&converted.text[converted.quoted[1].at..], "[@Zhang2024b, p. 3] [P1 p.5 extra] [@Zhang2024].");
         let references = find(&converted.text, &index);
-        assert_eq!(references.iter().filter(|citation| citation.found.paper().is_some()).count(), 5);
+        assert_eq!(references.iter().filter(|citation| citation.found.paper().is_some()).count(), 6);
+        // What stayed as written is handed back: with the label that names no paper, or with none when it is the writing that was not read.
+        assert_eq!(converted.left, [Left { written: "[P1, P9]".into(), unknown: vec!["P9".into()] }, Left { written: "[P1 p.5 extra]".into(), unknown: vec![] }]);
 
         // A label written with the manuscript's `@` before it is the same label, and its quotation is not left in the text.
         let hybrid = convert_ai_citations("One [@P1 p.5 \"a sentence\"] and two [@P1; @P2 p.7].", &sources, &index);
@@ -1159,6 +1234,87 @@ mod tests {
         let result = convert_ai_citations("[P1 p.5]", &removed, &index);
         assert_eq!(result.text, "[P1 p.5]");
         assert!(result.keys.is_empty());
+        assert_eq!(result.left, [Left { written: "[P1 p.5]".into(), unknown: vec!["P1".into()] }]);
+    }
+
+    #[test]
+    fn a_bracket_left_open_takes_nothing_with_it() {
+        let papers = library();
+        let index = Index::new(&papers, [], &BTreeMap::new());
+        let sources = vec![
+            crate::ai::Source { label: "P1".into(), paper_id: "P1".into(), title: "One".into(), ..Default::default() },
+            crate::ai::Source { label: "P2".into(), paper_id: "P2".into(), title: "Two".into(), ..Default::default() },
+        ];
+        let convert = |text: &str| convert_ai_citations(text, &sources, &index);
+        // What a model sent (Kimi K3, 助手写): the first citation's bracket never closes. Read as one citation it took the
+        // words between the two, and the second citation, out of the manuscript as its sentence.
+        let (first, second) = ("HIF-1α and HIF-2α have distinct and sometimes opposing roles in tumour growth; HIF-2α drives clear cell renal carcinoma.", "The HIF-2α inhibitor belzutifan produced durable responses in renal cell carcinoma associated with VHL disease.");
+        let (before, between, after) = ("具体看肾透明细胞癌，HIF-2α 的地位尤其突出。HIF-1α 与 HIF-2α 虽然是同源的两个亚基，但在肿瘤生长中的作用并不相同，有时甚至相互拮抗，其中驱动肾透明细胞癌的主要是 HIF-2α ", "。这一机制认识也直接转化成了治疗手段：HIF-2α 抑制剂 belzutifan 在 VHL 病相关的肾细胞癌中取得了持久的疗效 ", "，证明靶向 HIF-2α 是治疗这类肿瘤的一条可行途径。");
+        let sent = format!("{before}[P2 \"{first}\"{between}[P1 \"{second}\"]{after}");
+        let converted = convert(&sent);
+        // The open bracket is the text it was written as, with its sentence; the citation after it is a citation.
+        assert_eq!(converted.text, format!("{before}[P2 \"{first}\"{between}[@Zhang2024]{after}"));
+        assert_eq!(converted.quoted.iter().map(|q| (&converted.text[q.at..q.at + 11], q.paper_id.as_str(), q.page, q.quote.as_str())).collect::<Vec<_>>(), [("[@Zhang2024", "P1", None, second)]);
+        assert_eq!(converted.keys, vec![("P1".into(), "Zhang2024".into())]);
+        // It is handed back as far as it reads as a citation, and its label is not said to be unknown.
+        assert_eq!(converted.left, [Left { written: format!("[P2 \"{first}\""), unknown: vec![] }]);
+
+        // Closed, each converts as it did.
+        let closed = convert(&format!("{before}[P2 \"{first}\"]{between}[P1 \"{second}\"]{after} 另见 [P1]、[P2 p.5] 和 [P2 p.5 “With a page.”]。"));
+        assert_eq!(closed.text, format!("{before}[@Zhang2024b]{between}[@Zhang2024]{after} 另见 [@Zhang2024]、[@Zhang2024b, p. 5] 和 [@Zhang2024b, p. 5]。"));
+        assert_eq!(closed.quoted.iter().map(|q| (q.paper_id.as_str(), q.page, q.quote.as_str())).collect::<Vec<_>>(), [("P2", None, first), ("P1", None, second), ("P2", Some(5), "With a page.")]);
+        assert!(closed.left.is_empty());
+
+        // Other ways of not ending a citation: nothing after the label, words after the sentence, a sentence that does not
+        // end, a label of no paper. All stay; only a sentence that runs to its closing bracket leaves the text.
+        let open = "一 [P1 p.5 “Open.” 二 [P9 \"Nobody's.\" 三 [P1 \"Words after.\" and so on] 四 [P2 \"It never ends 五 [@P2, p.3 「With an at.」\n六 [@Zhang2024 p.5 \"After a key.\"。七 [@Zhang2024, p. 5 八 [P1";
+        let left = convert(open);
+        assert_eq!((left.text.as_str(), left.quoted.len(), left.keys.len()), (open, 0, 0));
+        assert_eq!(left.left.iter().map(|one| (one.written.as_str(), one.unknown.join(" "))).collect::<Vec<_>>(), [
+            ("[P1 p.5 “Open.”", String::new()),
+            ("[P9 \"Nobody's.\"", "P9".to_string()),
+            ("[P1 \"Words after.\" and so on]", String::new()),
+            ("[P2", String::new()),
+            ("[@P2, p.3 「With an at.」", String::new()),
+            // After a key too, when it has a sentence: without one the bracket is the manuscript's own.
+            ("[@Zhang2024 p.5 \"After a key.\"", String::new()),
+            ("[P1", String::new()),
+        ]);
+        // A bracket that only looks like a label's is nobody's citation, and one the sentence holds is the sentence's.
+        let other = convert("[P2: a note [P2a [P1 \"The [P2 allele] is lost.\"]");
+        assert_eq!((other.text.as_str(), other.quoted[0].quote.as_str(), other.left.len()), ("[P2: a note [P2a [@Zhang2024]", "The [P2 allele] is lost.", 0));
+
+        // A sentence with quotation marks of its own, of the kind it is quoted in, is still one sentence.
+        let own = convert("[P1 p.5 \"He called it a \"sibling rivalry\" of the two.\"] [P2 “所谓“缺氧”反应。”]");
+        assert_eq!(own.text, "[@Zhang2024, p. 5] [@Zhang2024b]");
+        assert_eq!(own.quoted.iter().map(|q| q.quote.as_str()).collect::<Vec<_>>(), ["He called it a \"sibling rivalry\" of the two.", "所谓“缺氧”反应。"]);
+    }
+
+    #[test]
+    fn page_nought_and_a_sentence_after_several_papers() {
+        let papers = library();
+        let index = Index::new(&papers, [], &BTreeMap::new());
+        let sources = vec![
+            crate::ai::Source { label: "P1".into(), paper_id: "P1".into(), title: "One".into(), ..Default::default() },
+            crate::ai::Source { label: "P2".into(), paper_id: "P2".into(), title: "Two".into(), ..Default::default() },
+        ];
+        let quoted = |converted: &AiCitationConversion| converted.quoted.iter().map(|q| (converted.text[q.at..].chars().next(), q.paper_id.clone(), q.page, q.quote.clone())).collect::<Vec<_>>();
+        // `p.0` is what a model writes for "no page": the citation has none, and its sentence is kept as any other.
+        let nought = convert_ai_citations("一 [P1 p.0 \"From the abstract.\"]，二 [P2 p.0]，三 [P1, p.0; P2 p.3]。", &sources, &index);
+        assert_eq!(nought.text, "一 [@Zhang2024]，二 [@Zhang2024b]，三 [@Zhang2024; @Zhang2024b, p. 3]。");
+        assert_eq!(quoted(&nought), [(Some('['), "P1".to_string(), None, "From the abstract.".to_string())]);
+        assert!(nought.left.is_empty());
+        // Several papers and one sentence: it is the last one's, the paper it was written after, with that paper's page.
+        let several = convert_ai_citations("一 [P1; P2 p.7 \"The second paper's.\"]，二 [P2 p.3、P1 “The first paper's.”]。", &sources, &index);
+        assert_eq!(several.text, "一 [@Zhang2024; @Zhang2024b, p. 7]，二 [@Zhang2024b, p. 3; @Zhang2024]。");
+        assert_eq!(quoted(&several), [(Some('['), "P2".to_string(), Some(7), "The second paper's.".to_string()), (Some('['), "P1".to_string(), None, "The first paper's.".to_string())]);
+        // Each is found by its brackets and its paper where the passages are kept.
+        let brought = crate::passage::quoted(&several.text, &find(&several.text, &index), &several.quoted);
+        assert_eq!(brought.iter().map(|(paper, _, candidate)| (paper.as_str(), candidate.text.as_str(), candidate.page)).collect::<Vec<_>>(), [("P2", "The second paper's.", 7), ("P1", "The first paper's.", 0)]);
+        // One label of the group names no paper: the group stays as written, sentence and all.
+        let stray = convert_ai_citations("[P1; P9 \"Whose?\"]", &sources, &index);
+        assert_eq!((stray.text.as_str(), stray.quoted.len()), ("[P1; P9 \"Whose?\"]", 0));
+        assert_eq!(stray.left, [Left { written: "[P1; P9 \"Whose?\"]".into(), unknown: vec!["P9".into()] }]);
     }
 
     #[test]
@@ -1185,9 +1341,11 @@ mod tests {
         assert_eq!(unknown.dropped, [("@Nobody1999".to_string(), "Nobody said this.".to_string())]);
         assert_eq!(find(&unknown.text, &index)[0].found, Found::Unknown);
 
-        // Several papers and one sentence: the citation stays and the sentence goes, as with labels.
-        let several = convert("[@Zhang2024; @Smith2019 p.2 \"Whose is it?\"]");
-        assert_eq!((several.text.as_str(), several.quoted.len(), several.dropped.len()), ("[@Zhang2024; @Smith2019, p. 2]", 0, 0));
+        // Several papers and one sentence: it is the last one's, as with labels, or handed back when that key is no paper's.
+        let several = convert("[@Zhang2024; @Smith2019 p.2 \"The last one's.\"] [@Zhang2024; @Nobody1999 \"Nobody's.\"]");
+        assert_eq!(several.text, "[@Zhang2024; @Smith2019, p. 2] [@Zhang2024; @Nobody1999]");
+        assert_eq!(several.quoted.iter().map(|q| (&several.text[q.at..q.at + 2], q.paper_id.as_str(), q.page, q.quote.as_str())).collect::<Vec<_>>(), [("[@", "P5", Some(2), "The last one's.")]);
+        assert_eq!((several.dropped.as_slice(), several.keys.as_slice()), ([("@Nobody1999".to_string(), "Nobody's.".to_string())].as_slice(), [("P5".to_string(), "Smith2019".to_string())].as_slice()));
         // Words after the key that are not a page stay as they were written; the sentence still leaves.
         let worded = convert("[@Zhang2024, Fig. 2 \"In the figure.\"] [@Smith2019 pp. 3–4 \"Over two pages.\"]");
         assert_eq!(worded.text, "[@Zhang2024, Fig. 2] [@Smith2019 pp. 3–4]");
