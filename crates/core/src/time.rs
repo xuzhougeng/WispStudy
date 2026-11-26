@@ -32,6 +32,11 @@ pub fn date_text(value: &str) -> String {
     }
 }
 
+/// `2026.11.11` in local time from milliseconds since the epoch; empty when out of range.
+pub fn millis_date(millis: i64) -> String {
+    DateTime::from_timestamp_millis(millis).map(|d| d.with_timezone(&Local).format("%Y.%m.%d").to_string()).unwrap_or_default()
+}
+
 /// `11-11 09:30` in local time.
 pub fn short_time(value: &str) -> String {
     parse(value).map(|d| d.with_timezone(&Local).format("%m-%d %H:%M").to_string()).unwrap_or_default()

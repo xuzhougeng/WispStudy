@@ -162,8 +162,12 @@ pub struct SettingsView {
     storage: Option<(PathBuf, storage::Space)>,
     /// 存储空间 is measuring the data folder.
     measuring: bool,
-    /// The library whose parts 存储空间 shows, by id.
+    /// Generation counter for 存储空间 measurements so a newer run supersedes an older one.
+    storage_run: usize,
+    /// The library whose parts 存储空间 shows, by id (or `removed:<folder>` for a removed library).
     storage_open: Option<String>,
+    /// The folder inside `removed/` currently being permanently deleted.
+    purging: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -611,7 +615,7 @@ impl Workspace {
                 subscriptions.push(heard);
                 let kept = |keys: &std::collections::BTreeMap<String, String>| keys.get("deepseek").is_some_and(|key| !key.trim().is_empty());
                 let deepseek_fields = [kept(&self.settings.web_search.keys), kept(&self.settings.ocr.keys)];
-                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, contact_email, ncbi_key, reach: None, reach_asked: 0, typed: 0, search_keys, ocr_keys, deepseek_fields, author, styles, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, skill: None, recording: None, shortcut_error: None, balance: None, trials: vec![], trial_runs: 0, storage: None, measuring: false, storage_open: None, _subscriptions: subscriptions });
+                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, contact_email, ncbi_key, reach: None, reach_asked: 0, typed: 0, search_keys, ocr_keys, deepseek_fields, author, styles, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, skill: None, recording: None, shortcut_error: None, balance: None, trials: vec![], trial_runs: 0, storage: None, measuring: false, storage_run: 0, storage_open: None, purging: None, _subscriptions: subscriptions });
                 self.read_balance_shown(cx);
             }
         }
@@ -637,7 +641,8 @@ impl Workspace {
     /// Measure the data folder on a background thread; what was measured before stays on show meanwhile.
     pub fn measure_storage(&mut self, cx: &mut Context<Self>) {
         let Some(view) = self.settings_view.as_mut() else { return };
-        if view.measuring { return }
+        view.storage_run += 1;
+        let run = view.storage_run;
         view.measuring = true;
         let root = self.root.clone();
         let measured = cx.background_executor().spawn({
@@ -649,6 +654,7 @@ impl Workspace {
             this.update(cx, |this, cx| {
                 let current = this.root.clone();
                 let Some(view) = this.settings_view.as_mut() else { return };
+                if view.storage_run != run { return }
                 view.measuring = false;
                 // The data folder was changed meanwhile: this measure is of another folder.
                 if current == root { view.storage = Some((root, space)) }
@@ -665,6 +671,92 @@ impl Workspace {
         let Some(view) = self.settings_view.as_mut() else { return };
         view.storage_open = if view.storage_open.as_deref() == Some(id.as_str()) { None } else { Some(id) };
         cx.notify();
+    }
+
+    /// Put a removed library from `removed/` back onto the home page (or 最近对话 for a draft).
+    pub fn restore_removed_library(&mut self, folder: String, cx: &mut Context<Self>) {
+        if self.settings_view.as_ref().is_some_and(|view| view.purging.as_deref() == Some(folder.as_str())) { return }
+        match libraries::restore(&self.root, &folder) {
+            Ok(info) => {
+                self.libraries = libraries::list(&self.root);
+                if let Some(view) = self.settings_view.as_mut() {
+                    let key = format!("removed:{folder}");
+                    if view.storage_open.as_deref() == Some(key.as_str()) { view.storage_open = None }
+                }
+                self.measure_storage(cx);
+                if info.draft {
+                    self.say(tf!("已恢复对话「{}」，它回到了「最近对话」。", "Restored conversation “{}”; it is back in Recent conversations.", info.name), cx);
+                } else {
+                    self.say(tf!("已恢复文献库「{}」，它回到了首页。", "Restored library “{}”; it is back on the home page.", info.name), cx);
+                }
+            }
+            Err(err) => self.fail(format!("{err:#}"), cx),
+        }
+    }
+
+    /// Ask before permanently deleting a removed library's folder from disk.
+    pub fn ask_purge_removed_library(&mut self, folder: String, cx: &mut Context<Self>) {
+        let Some((name, draft, paper_count, bytes)) = self.settings_view.as_ref()
+            .filter(|view| view.purging.is_none())
+            .and_then(|view| view.storage.as_ref())
+            .filter(|(root, _)| *root == self.root)
+            .and_then(|(_, space)| space.removed_libraries.iter().find(|lib| lib.folder == folder))
+            .map(|lib| (lib.name.clone(), lib.draft, lib.paper_count, storage::human(lib.total()))) else { return };
+        self.modal_error.clear();
+        let papers = tn!("{n} 篇文献", "{n}", paper_count, "paper");
+        let (title, message) = if draft {
+            let message = if paper_count > 0 {
+                tf!("「{}」（{}，占 {}）的文件夹连同对话、文献和稿件会从磁盘上完全删除，无法恢复。", "The folder of “{}” ({}, {}) — with its conversation, papers and manuscripts — will be deleted from disk completely and cannot be recovered.", name, papers, bytes)
+            } else {
+                tf!("「{}」（占 {}）的文件夹连同对话和稿件会从磁盘上完全删除，无法恢复。", "The folder of “{}” ({}) — with its conversation and manuscripts — will be deleted from disk completely and cannot be recovered.", name, bytes)
+            };
+            (tf!("彻底删除对话「{}」？", "Delete conversation “{}” permanently?", name), message)
+        } else {
+            (
+                tf!("彻底删除文献库「{}」？", "Delete library “{}” permanently?", name),
+                tf!("「{}」（{}，占 {}）的文件夹连同数据库、PDF、笔记、图片库和稿件会从磁盘上完全删除，无法恢复。", "The folder of “{}” ({}, {}) — with its database, PDFs, notes, figures and manuscripts — will be deleted from disk completely and cannot be recovered.", name, papers, bytes),
+            )
+        };
+        self.modal = Some(Modal::Confirm { title, message, action: t("彻底删除").into(), cmd: Cmd::PurgeRemovedLibrary(folder) });
+        cx.notify();
+    }
+
+    /// Permanently delete a removed library's folder on a background thread.
+    pub fn purge_removed_library(&mut self, folder: String, cx: &mut Context<Self>) {
+        self.modal = None;
+        if self.settings_view.as_ref().is_some_and(|view| view.purging.is_some()) { return }
+        if let Some(view) = self.settings_view.as_mut() { view.purging = Some(folder.clone()) }
+        cx.notify();
+        let root = self.root.clone();
+        let deleted = cx.background_executor().spawn({
+            let root = root.clone();
+            let folder = folder.clone();
+            async move { libraries::purge_removed(&root, &folder) }
+        });
+        cx.spawn(async move |this, cx| {
+            let deleted = deleted.await;
+            this.update(cx, |this, cx| {
+                if let Some(view) = this.settings_view.as_mut() {
+                    if view.purging.as_deref() == Some(folder.as_str()) { view.purging = None }
+                    let key = format!("removed:{folder}");
+                    if view.storage_open.as_deref() == Some(key.as_str()) { view.storage_open = None }
+                }
+                match deleted {
+                    Ok(info) => {
+                        if info.draft {
+                            this.say(tf!("已彻底删除对话「{}」。", "Deleted conversation “{}” permanently.", info.name), cx);
+                        } else {
+                            this.say(tf!("已彻底删除文献库「{}」。", "Deleted library “{}” permanently.", info.name), cx);
+                        }
+                        if this.root == root { this.measure_storage(cx) }
+                    }
+                    Err(err) => this.fail(format!("{err:#}"), cx),
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
     }
 
     // ---- 通用
@@ -2432,9 +2524,69 @@ impl Workspace {
             for lib in &drafts { for (sum, bytes) in parts.iter_mut().zip(lib.parts) { *sum += bytes } }
             rows.push(library_row("drafts".into(), Theme::text_tertiary(), t("最近对话").to_string(), tn!("{n} 个首页对话，还没有存为文献库", "{n} from the home page, not made libraries yet", drafts.len(), "conversation"), parts, None, self, cx));
         }
+        let removed_rows: Vec<AnyElement> = space.removed_libraries.iter().map(|lib| {
+            let key = format!("removed:{}", lib.folder);
+            let bytes = lib.total();
+            let expanded = open.as_deref() == Some(key.as_str());
+            let busy = view.purging.as_deref() == Some(lib.folder.as_str());
+            let color = if lib.draft { Theme::text_tertiary() } else { theme::accent_of(&lib.color).strong().opacity(0.6) };
+            let mut bits: Vec<String> = Vec::new();
+            if lib.draft { bits.push(t("首页对话").to_string()) }
+            if !lib.draft || lib.paper_count > 0 { bits.push(papers(lib.paper_count)) }
+            if let Some(ms) = lib.removed_at {
+                let date = wisp_core::time::millis_date(ms);
+                if !date.is_empty() { bits.push(tf!("移除于 {date}", "Removed {date}")) }
+            }
+            let detail = bits.join(" · ");
+            let actions = if busy {
+                div().flex().flex_none().items_center().gap(px(6.)).text_size(text_px(12.)).text_color(Theme::text_tertiary())
+                    .child(ui::spinner(SharedString::from(format!("storage-purging-{}", lib.folder)), 13., Theme::text_tertiary()))
+                    .child(t("正在删除…"))
+                    .into_any_element()
+            } else {
+                div().flex().flex_none().items_center().gap(px(6.))
+                    .child(button(SharedString::from(format!("storage-restore-{}", lib.folder)), t("恢复")).on_click(self.on_alone(Cmd::RestoreRemovedLibrary(lib.folder.clone()), cx)))
+                    .child(ui::ghost_button(SharedString::from(format!("storage-purge-{}", lib.folder)), Some("bin"), Some(t("彻底删除").into())).text_color(Theme::danger()).on_click(self.on_alone(Cmd::AskPurgeRemovedLibrary(lib.folder.clone()), cx)))
+                    .into_any_element()
+            };
+            let head = div()
+                .id(SharedString::from(format!("storage-{key}")))
+                .flex()
+                .items_center()
+                .gap(px(12.))
+                .w_full()
+                .min_h(px(48.))
+                .px(px(16.))
+                .py(px(8.))
+                .cursor_pointer()
+                .hover(|s| s.bg(Theme::hover()))
+                .on_click(self.on(Cmd::StorageLibrary(key.clone()), cx))
+                .child(ui::icon(if expanded { "chevron-down" } else { "chevron-right" }, 14., Theme::text_tertiary()))
+                .child(div().flex_none().size(px(10.)).rounded_full().bg(color))
+                .child(div().flex().flex_col().flex_1().min_w_0().gap(px(2.))
+                    .child(div().truncate().child(ui::one_line(&lib.name)))
+                    .child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).truncate().child(detail)))
+                .child(size(bytes))
+                .child(actions);
+            let body = expanded.then(|| {
+                let lines = storage::Part::ALL.iter().zip(lib.parts).filter(|(_, bytes)| *bytes > 0).map(|(part, bytes)| {
+                    div().flex().items_center().gap(px(12.)).w_full()
+                        .child(div().flex_1().min_w_0().text_color(Theme::text_secondary()).child(t(part.label())))
+                        .child(div().flex_none().w(px(96.)).h(px(4.)).rounded_full().bg(Theme::groove()).overflow_hidden().child(div().h_full().w(relative(if bytes == 0 { 0. } else { parts_share(bytes, &lib.parts) })).bg(color)))
+                        .child(div().flex_none().w(px(40.)))
+                        .child(size(bytes))
+                });
+                div().flex().flex_col().w_full().gap(px(8.)).pl(px(64.)).pr(px(16.)).pb(px(12.))
+                    .children(lines)
+                    .child(div().flex().pt(px(4.)).child(button(SharedString::from(format!("storage-reveal-{key}")), reveal_label).on_click(self.on(Cmd::RevealDir(lib.dir.clone()), cx))))
+            });
+            div().flex().flex_col().w_full().child(head).children(body).into_any_element()
+        }).collect();
+        let removed_other = space.removed_other();
         let mut aside: Vec<AnyElement> = Vec::new();
-        if space.removed > 0 {
-            aside.push(row(t("已移除的文献库"), Some(t("移除的文献库连同文件移到数据目录下的 removed 文件夹，不会被删除。").into()), div().flex().items_center().gap(px(12.)).child(size(space.removed)).child(button("storage-reveal-removed", reveal_label).on_click(self.on(Cmd::RevealDir(self.root.join("removed")), cx)))).into_any_element());
+        if removed_other > 0 {
+            let label = if space.removed_libraries.is_empty() { t("removed 文件夹") } else { t("removed 文件夹中的其他内容") };
+            aside.push(row(label, Some(t("removed 文件夹里不属于任何文献库的文件。").into()), div().flex().items_center().gap(px(12.)).child(size(removed_other)).child(button("storage-reveal-removed", reveal_label).on_click(self.on(Cmd::RevealDir(self.root.join("removed")), cx)))).into_any_element());
         }
         if space.other > 0 {
             aside.push(row(t("其他"), Some(t("数据目录里不属于任何文献库的文件，例如引文样式。").into()), size(space.other)).into_any_element());
@@ -2446,8 +2598,9 @@ impl Workspace {
             .gap(px(24.))
             .child(group(None, vec![summary.into_any_element()]))
             .when(!rows.is_empty(), |d| d.child(group(Some(crate::i18n::tc("storage.libraries", "文献库")), rows)))
+            .when(!removed_rows.is_empty(), |d| d.child(group(Some(t("已移除的文献库")), removed_rows)))
             .when(!aside.is_empty(), |d| d.child(group(Some(t("文献库之外")), aside)))
-            .child(note(t("点开一个文献库，看文献文件、数据库、图片库和稿件各占多少；回收站里的文献仍算在文献文件里。移除文献库或附件时，文件移到 removed 文件夹而不删除，只有清空回收站会删掉文献的文件；要腾出空间，可以在文件夹里清理 removed 中不再需要的内容。")))
+            .child(note(t("点开一个文献库，看文献文件、数据库、图片库和稿件各占多少；回收站里的文献仍算在文献文件里。已移除的文献库可以在这里恢复或彻底删除；移除的附件仍留在各自文献库的 removed 文件夹里，只有清空回收站或彻底删除文献库会从磁盘删掉文件。")))
             .into_any_element()
     }
 

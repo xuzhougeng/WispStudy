@@ -195,14 +195,92 @@ pub fn save(info: &LibraryInfo) -> Result<()> {
     Ok(())
 }
 
+/// A library (or home-page conversation) waiting in `removed/` under the data folder.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RemovedLibrary {
+    pub info: LibraryInfo,
+    /// Its folder name under `removed/` (e.g. `L-abc-1700000000000`).
+    pub folder: String,
+    /// When it was removed (milliseconds since the Unix epoch), read from the folder name when present.
+    pub removed_at: Option<i64>,
+}
+
 /// Take a library off the home page. Its folder moves to `removed/` under
-/// the data folder, papers and files intact, and can be moved back by hand.
+/// the data folder, papers and files intact, so it can be restored or deleted from 存储空间.
 pub fn remove(root: &Path, info: &LibraryInfo) -> Result<PathBuf> {
     let removed = root.join("removed");
     std::fs::create_dir_all(&removed)?;
     let target = removed.join(format!("{}-{}", info.id, crate::time::now_millis()));
     std::fs::rename(&info.dir, &target).with_context(|| format!("无法移动 {}（是否有文件正被其他程序使用？）", info.dir.display()))?;
     Ok(target)
+}
+
+/// Every removed library under `root/removed/`, most recently removed first.
+/// Entries without a readable `library.json` or symlinks are left alone.
+pub fn list_removed(root: &Path) -> Vec<RemovedLibrary> {
+    let mut found = vec![];
+    let Ok(entries) = std::fs::read_dir(root.join("removed")) else { return found };
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        let Ok(meta) = std::fs::symlink_metadata(&dir) else { continue };
+        if meta.file_type().is_symlink() || !meta.is_dir() { continue }
+        let Ok(text) = std::fs::read_to_string(dir.join(INFO_FILE)) else { continue };
+        let Ok(mut info) = serde_json::from_str::<LibraryInfo>(&text) else { continue };
+        if info.id.is_empty() || info.name.is_empty() { continue }
+        info.paper_count = Store::count_papers(&dir.join(DB_FILE));
+        info.dir = dir;
+        let folder = entry.file_name().to_string_lossy().to_string();
+        let removed_at = folder.strip_prefix(&format!("{}-", info.id)).and_then(|tail| tail.parse::<i64>().ok()).filter(|&ms| ms > 0);
+        found.push(RemovedLibrary { info, folder, removed_at });
+    }
+    found.sort_by(|a, b| b.removed_at.cmp(&a.removed_at).then_with(|| a.info.name.cmp(&b.info.name)));
+    found
+}
+
+/// Resolve a single folder name under `root/removed/` and read its `library.json`,
+/// refusing symlinks, path traversal and folders that are not libraries.
+fn removed_entry(root: &Path, folder: &str) -> Result<(PathBuf, LibraryInfo)> {
+    let mut components = Path::new(folder).components();
+    if !matches!((components.next(), components.next()), (Some(std::path::Component::Normal(_)), None)) {
+        bail!("无效的文件夹名称：{folder}");
+    }
+    let dir = root.join("removed").join(folder);
+    let meta = std::fs::symlink_metadata(&dir).with_context(|| format!("找不到已移除的文献库 {}", dir.display()))?;
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        bail!("不是有效的文献库文件夹：{}", dir.display());
+    }
+    let text = std::fs::read_to_string(dir.join(INFO_FILE)).with_context(|| format!("无法读取 {}", dir.join(INFO_FILE).display()))?;
+    let mut info: LibraryInfo = serde_json::from_str(&text).with_context(|| format!("无法解析 {}", dir.join(INFO_FILE).display()))?;
+    if info.id.is_empty() || info.name.is_empty() {
+        bail!("文献库信息不完整：{}", dir.display());
+    }
+    info.dir = dir.clone();
+    Ok((dir, info))
+}
+
+/// Put a removed library back under `root`. If another library already holds its id or folder name,
+/// a fresh id is assigned so nothing is overwritten.
+pub fn restore(root: &Path, folder: &str) -> Result<LibraryInfo> {
+    let (source, mut info) = removed_entry(root, folder)?;
+    let clash = root.join(&info.id).exists() || list(root).iter().any(|existing| existing.id == info.id);
+    if clash {
+        info.id = new_id("L");
+    }
+    let target = root.join(&info.id);
+    std::fs::rename(&source, &target).with_context(|| format!("无法恢复 {}（是否有文件正被其他程序使用？）", source.display()))?;
+    info.dir = target;
+    if clash { save(&info)? }
+    info.paper_count = Store::count_papers(&info.dir.join(DB_FILE));
+    let _ = std::fs::remove_dir(root.join("removed"));
+    Ok(info)
+}
+
+/// Delete a removed library's folder from `root/removed/` permanently.
+pub fn purge_removed(root: &Path, folder: &str) -> Result<LibraryInfo> {
+    let (target, info) = removed_entry(root, folder)?;
+    std::fs::remove_dir_all(&target).with_context(|| format!("无法彻底删除 {}（是否有文件正被其他程序使用？）", target.display()))?;
+    let _ = std::fs::remove_dir(root.join("removed"));
+    Ok(info)
 }
 
 #[cfg(test)]
@@ -294,5 +372,58 @@ mod tests {
         assert_eq!(parse_proposal("好的：```json\n{\"name\": \"《根毛发育》\", \"topic\": \"乙烯与生长素\\n如何调控根毛。\"}\n```").unwrap(), ("根毛发育".to_string(), "乙烯与生长素 如何调控根毛。".to_string()));
         assert!(parse_proposal("{\"name\": \"\", \"topic\": \"x\"}").is_err());
         assert!(parse_proposal("根毛发育").is_err());
+    }
+
+    #[test]
+    fn removed_libraries_can_be_listed_restored_and_purged() {
+        let root = std::env::temp_dir().join(format!("wisp-removed-{}", new_id("T")));
+        let first = create(&root, "第一库", "主题一", "green").unwrap();
+        let second = create(&root, "第二库", "", "blue").unwrap();
+        Store::open(&first.dir).unwrap().add_paper(Paper { title: "Alpha".into(), ..Default::default() }).unwrap();
+
+        // Removing puts the folder in removed/ and list_removed picks it up with its paper count and timestamp.
+        let moved_first = remove(&root, &first).unwrap();
+        let folder_first = moved_first.file_name().unwrap().to_string_lossy().to_string();
+        let moved_second = remove(&root, &second).unwrap();
+        let folder_second = moved_second.file_name().unwrap().to_string_lossy().to_string();
+        // A non-library directory in removed/ is ignored and cannot be restored or purged.
+        std::fs::create_dir_all(root.join("removed").join("not-a-library")).unwrap();
+
+        let removed = list_removed(&root);
+        assert_eq!(removed.len(), 2);
+        let entry = removed.iter().find(|r| r.folder == folder_first).unwrap();
+        assert_eq!((entry.info.id.as_str(), entry.info.name.as_str(), entry.info.paper_count), (first.id.as_str(), "第一库", 1));
+        assert!(entry.removed_at.is_some());
+
+        // Path traversal and non-library folders are refused.
+        assert!(restore(&root, "../escape").is_err());
+        assert!(restore(&root, "not-a-library").is_err());
+        assert!(purge_removed(&root, "../escape").is_err());
+        assert!(purge_removed(&root, "not-a-library").is_err());
+
+        // Restore moves the library back under root with its original id and papers intact.
+        let restored = restore(&root, &folder_first).unwrap();
+        assert_eq!((restored.id.as_str(), restored.name.as_str(), restored.paper_count), (first.id.as_str(), "第一库", 1));
+        assert_eq!(restored.dir, root.join(&first.id));
+        assert_eq!(list(&root).len(), 1);
+        assert_eq!(list_removed(&root).len(), 1);
+
+        // If a folder with the same id already exists under root, restore assigns a fresh id without overwriting.
+        let clash_dir = root.join(&second.id);
+        std::fs::create_dir_all(&clash_dir).unwrap();
+        let restored_second = restore(&root, &folder_second).unwrap();
+        assert_ne!(restored_second.id, second.id);
+        assert_eq!(restored_second.name, "第二库");
+        assert!(clash_dir.exists() && restored_second.dir.exists());
+
+        // Remove again and purge permanently.
+        let moved_again = remove(&root, &restored_second).unwrap();
+        let folder_again = moved_again.file_name().unwrap().to_string_lossy().to_string();
+        let purged = purge_removed(&root, &folder_again).unwrap();
+        assert_eq!(purged.name, "第二库");
+        assert!(!moved_again.exists());
+        assert!(list_removed(&root).is_empty());
+
+        std::fs::remove_dir_all(root).ok();
     }
 }

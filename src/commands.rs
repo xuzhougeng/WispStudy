@@ -140,6 +140,12 @@ pub enum Cmd {
     MeasureStorage,
     /// Show or fold one library's parts on 存储空间, by id (`drafts` for the conversations not made libraries).
     StorageLibrary(String),
+    /// Put a removed library from `removed/` back under the data folder (存储空间).
+    RestoreRemovedLibrary(String),
+    /// Ask before permanently deleting a removed library from `removed/` (存储空间).
+    AskPurgeRemovedLibrary(String),
+    /// Permanently delete a removed library from `removed/` (存储空间).
+    PurgeRemovedLibrary(String),
     ToggleAutoUpdate,
     ToggleAutoDownload,
     ToggleRestoreSession,
@@ -795,7 +801,7 @@ impl Workspace {
                 if info.draft {
                     self.modal = Some(Modal::Confirm {
                         title: tf!("删除对话「{}」？", "Delete conversation “{}”?", info.name),
-                        message: tf!("对话会从「最近对话」里消失。它的文件夹（对话、{} 篇收进的文献和交来的稿件）会移到数据目录下的 removed 文件夹，不会被删除，需要时可以手动移回。", "The conversation will disappear from Recent conversations. Its folder (the conversation, {} papers kept and any manuscript) moves to removed in the data directory. You can move it back manually.", info.paper_count),
+                        message: tf!("对话会从「最近对话」里消失。它的文件夹（对话、{} 篇收进的文献和交来的稿件）会移到数据目录下的 removed 文件夹，不会被删除，可以在「设置 › 存储空间」里恢复或彻底删除。", "The conversation will disappear from Recent conversations. Its folder (the conversation, {} papers kept and any manuscript) moves to removed in the data directory. You can restore or delete it permanently under Settings › Storage.", info.paper_count),
                         action: t("删除").into(),
                         cmd: Cmd::RemoveLibrary(id),
                     });
@@ -803,7 +809,7 @@ impl Workspace {
                 }
                 self.modal = Some(Modal::Confirm {
                     title: tf!("移除文献库「{}」？", "Remove library “{}”?", info.name),
-                    message: tf!("文献库会从首页消失。它的文件夹（{} 篇文献、PDF 和笔记）会移到数据目录下的 removed 文件夹，不会被删除，需要时可以手动移回。", "The library will disappear from home. Its folder ({} papers, PDFs and notes) moves to removed in the data directory. You can move it back manually.", info.paper_count),
+                    message: tf!("文献库会从首页消失。它的文件夹（{} 篇文献、PDF 和笔记）会移到数据目录下的 removed 文件夹，不会被删除，可以在「设置 › 存储空间」里恢复或彻底删除。", "The library will disappear from home. Its folder ({} papers, PDFs and notes) moves to removed in the data directory. You can restore or delete it permanently under Settings › Storage.", info.paper_count),
                     action: t("移除").into(),
                     cmd: Cmd::RemoveLibrary(id),
                 });
@@ -858,6 +864,9 @@ impl Workspace {
             Cmd::RevealDir(dir) => cx.open_with_system(&dir),
             Cmd::MeasureStorage => self.measure_storage(cx),
             Cmd::StorageLibrary(id) => self.toggle_storage_library(id, cx),
+            Cmd::RestoreRemovedLibrary(folder) => self.restore_removed_library(folder, cx),
+            Cmd::AskPurgeRemovedLibrary(folder) => self.ask_purge_removed_library(folder, cx),
+            Cmd::PurgeRemovedLibrary(folder) => self.purge_removed_library(folder, cx),
             Cmd::ToggleAutoUpdate => {
                 self.settings.auto_update = !self.settings.auto_update;
                 self.save_settings(cx);
