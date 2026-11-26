@@ -44,9 +44,12 @@ pub struct AiCitationConversion {
     pub keys: Vec<(String, String)>,
     /// The sentences the answer quoted for a citation of one paper: what that citation rests on (`passage::quoted`).
     pub quoted: Vec<Quoted>,
+    /// The sentences quoted after a key that names no paper of the library (`[@Nobody1999 "…"]`), each with
+    /// the key as written (`@Nobody1999`): out of the text as the others are, with no paper to look them up in.
+    pub dropped: Vec<(String, String)>,
 }
 
-/// A sentence a chat citation quoted: `[P3 p.5 "…"]`.
+/// A sentence a chat citation quoted: `[P3 p.5 "…"]`, or `[@Key p.5 "…"]`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Quoted {
     /// Where the citation stands in the converted text: its opening bracket.
@@ -63,13 +66,47 @@ pub struct Quoted {
 /// conversation's way of showing where. It is handed back beside the text
 /// (`quoted`), for the caller to keep as the passage the citation rests on.
 /// Conversion is not verification of the claim or page.
+///
+/// A model that has the manuscript's form in mind writes the key where the
+/// label goes and the sentence after it all the same: `[@Kaelin2008 "…"]`,
+/// `[@Keith2012 p.0 "…"]`. That is read as the label with its sentence is:
+/// the citation stays as a manuscript writes it (`[@Kaelin2008]`,
+/// `[@Keith2012, p. 5]`; `p.0` is no page), and the sentence is handed back
+/// in `quoted`. Left as it was written it would be a paper's sentence in
+/// the middle of the manuscript, with nothing kept of where it is from. The
+/// sentence leaves the text whatever the key names: after a key no paper
+/// has there is nowhere to look it up, so it is handed back in `dropped`,
+/// and the citation stays for `find` to report as unknown. Only brackets
+/// that begin with a key and end with the quotation are read so: a
+/// manuscript's own `[@Key]` and `[see @Key, p. 5]` quote nothing.
 pub fn convert_ai_citations(answer: &str, sources: &[crate::ai::Source], index: &Index<'_>) -> AiCitationConversion {
     let mut text = String::new();
     let mut keys = Vec::new();
     let mut quoted = Vec::new();
+    let mut dropped = Vec::new();
     let mut end = 0;
-    for (range, _) in crate::ai::citation_spans(answer) {
-        if range.start < end { continue }
+    let labelled = crate::ai::citation_spans(answer);
+    for (range, head, quote) in crate::ai::bracketed(answer) {
+        let label = labelled.iter().any(|(span, _)| *span == range);
+        if !label {
+            // `[@Key p.5 "…"]`: a key and the sentence a label would have.
+            let Some((written, cited)) = (!quote.is_empty()).then(|| keyed_group(head)).flatten() else { continue };
+            text.push_str(&answer[end..range.start]);
+            end = range.end;
+            // Several papers and one sentence: whose it is is not said, as with `[P1; P2 "…"]`.
+            if let [(key, page)] = cited.as_slice() {
+                // A paper's id stands for its key in what a tool is given (`compose::keyed`).
+                match index.key(key).map(|_| key.to_string()).or_else(|| index.resolve(key).paper().map(str::to_string)) {
+                    Some(id) => {
+                        if let Some(key) = index.key(&id) && !keys.iter().any(|pair| pair == &(id.clone(), key.to_string())) { keys.push((id.clone(), key.to_string())) }
+                        quoted.push(Quoted { at: text.len(), paper_id: id, page: *page, quote: quote.to_string() });
+                    }
+                    None => dropped.push((format!("@{key}"), quote.to_string())),
+                }
+            }
+            text.push_str(&format!("[{written}]"));
+            continue;
+        }
         text.push_str(&answer[end..range.start]);
         let original = &answer[range.clone()];
         if let Some(cited) = parse_chat_group(&without_quotation(original)) {
@@ -94,7 +131,47 @@ pub fn convert_ai_citations(answer: &str, sources: &[crate::ai::Source], index: 
         end = range.end;
     }
     text.push_str(&answer[end..]);
-    AiCitationConversion { text, keys, quoted }
+    AiCitationConversion { text, keys, quoted, dropped }
+}
+
+/// What stands before the sentence in `[@Key p.5 "…"]`, as a manuscript
+/// writes it, and the keys with the page each names. A page and nothing
+/// else after a key is written `, p. 5`, and `p.0` is no page; with
+/// anything else there (`[@Key, Fig. 2 "…"]`) the words stay as they were
+/// written, since nothing but the sentence is to leave the text. None when
+/// the brackets do not begin with a key: `[see @Key, p. 5 "…"]` is a
+/// person's own way of citing.
+fn keyed_group(head: &str) -> Option<(String, Vec<(&str, Option<usize>)>)> {
+    let head = head.trim();
+    let starts = key_starts(head);
+    if starts.first().map(|(at, _)| *at) != Some(0) { return None }
+    let parts: Vec<(&str, &str)> = starts.iter().enumerate().map(|(n, (at, key))| (*key, &head[at + 1 + key.len()..starts.get(n + 1).map_or(head.len(), |(next, _)| *next)])).collect();
+    let pages: Option<Vec<Option<usize>>> = parts.iter().map(|(_, locator)| page_alone(locator)).collect();
+    Some(match pages {
+        Some(pages) => {
+            let written: Vec<String> = parts.iter().zip(&pages).map(|((key, _), page)| match page {
+                Some(page) => format!("@{key}, p. {page}"),
+                None => format!("@{key}"),
+            }).collect();
+            (written.join("; "), parts.iter().zip(pages).map(|((key, _), page)| (*key, page)).collect())
+        }
+        None => (head.to_string(), parts.iter().map(|(key, locator)| (*key, page_of(locator))).collect()),
+    })
+}
+
+/// What follows a key when it is a page and nothing else (`p.5`, `, p. 5`,
+/// `p5`) or nothing at all: the page, none for `p.0`.
+fn page_alone(locator: &str) -> Option<Option<usize>> {
+    let words: Vec<String> = locator.split(|c: char| c.is_whitespace() || [',', '，', ';', '；'].contains(&c)).filter(|word| !word.is_empty()).map(str::to_lowercase).collect();
+    let words: Vec<&str> = words.iter().map(String::as_str).collect();
+    let digits = match words[..] {
+        [] => return Some(None),
+        ["p." | "p", digits] => digits,
+        [word] => word.strip_prefix("p.").or_else(|| word.strip_prefix('p'))?,
+        _ => return None,
+    };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) { return None }
+    Some(digits.parse::<usize>().ok().filter(|page| *page > 0))
 }
 
 /// The sentence a citation group quotes, without its quotation marks: one that runs to the closing bracket.
@@ -289,23 +366,28 @@ fn keyed(text: &str, index: &Index) -> Vec<Cited> {
             continue;
         }
         let group = open..close + 1;
-        let inner = &text[open + 1..close];
-        let mut keys = vec![];
-        let mut previous: Option<char> = None;
-        for (at, c) in inner.char_indices() {
-            if c == '@' && previous.is_none_or(|p| p.is_whitespace() || p == ';' || p == '-') {
-                let key = key_at(&inner[at + 1..]);
-                if !key.is_empty() { keys.push((open + 1 + at, key)) }
-            }
-            previous = Some(c);
-        }
-        for (at, key) in keys {
-            let range = at..at + 1 + key.len();
+        for (at, key) in key_starts(&text[open + 1..close]) {
+            let range = open + 1 + at..open + 2 + at + key.len();
             out.push(Cited { written: text[range.clone()].to_string(), range, group: group.clone(), old: false, found: index.resolve(key) });
         }
         from = close + 1;
     }
     out
+}
+
+/// Where the keys stand in what a pair of brackets holds, each `@` with the
+/// key after it: at the beginning, or after a space, a `;` or a `-`.
+fn key_starts(inner: &str) -> Vec<(usize, &str)> {
+    let mut keys = vec![];
+    let mut previous: Option<char> = None;
+    for (at, c) in inner.char_indices() {
+        if c == '@' && previous.is_none_or(|p| p.is_whitespace() || p == ';' || p == '-') {
+            let key = key_at(&inner[at + 1..]);
+            if !key.is_empty() { keys.push((at, key)) }
+        }
+        previous = Some(c);
+    }
+    keys
 }
 
 /// A key as Pandoc reads it: letters, digits and `_`, with punctuation only between them.
@@ -1077,6 +1159,49 @@ mod tests {
         let result = convert_ai_citations("[P1 p.5]", &removed, &index);
         assert_eq!(result.text, "[P1 p.5]");
         assert!(result.keys.is_empty());
+    }
+
+    #[test]
+    fn a_key_written_with_the_sentence_a_label_has() {
+        let papers = library();
+        let index = Index::new(&papers, [], &BTreeMap::new());
+        let convert = |text: &str| convert_ai_citations(text, &[], &index);
+        // As a model wrote them, with and without a page; `p.0` is no page, and a bracket inside the sentence does not end it.
+        let converted = convert("一 [@Zhang2024 \"First [sic] sentence.\"]，二 [@Smith2019 p.0 \"Second.\"]，三 [@Zhang2024b p.5 “Third.”]，四 [@DeNovo2020, p. 7 「Fourth.」]，五 [@zhang2024 p12 \"Fifth.\" ]。");
+        assert_eq!(converted.text, "一 [@Zhang2024]，二 [@Smith2019]，三 [@Zhang2024b, p. 5]，四 [@DeNovo2020, p. 7]，五 [@zhang2024, p. 12]。");
+        assert_eq!(
+            converted.quoted.iter().map(|q| (&converted.text[q.at..q.at + 2], q.paper_id.as_str(), q.page, q.quote.as_str())).collect::<Vec<_>>(),
+            [("[@", "P1", None, "First [sic] sentence."), ("[@", "P5", None, "Second."), ("[@", "P2", Some(5), "Third."), ("[@", "P3", Some(7), "Fourth."), ("[@", "P1", Some(12), "Fifth.")]
+        );
+        assert_eq!(converted.keys, vec![("P1".into(), "Zhang2024".into()), ("P5".into(), "Smith2019".into()), ("P2".into(), "Zhang2024b".into()), ("P3".into(), "DeNovo2020".into())]);
+        assert!(converted.dropped.is_empty());
+        // Every one of them is a citation the manuscript reads, and none says a sentence any more.
+        let found = find(&converted.text, &index);
+        assert!(found.len() == 5 && found.iter().all(|one| one.found.paper().is_some() && said(&converted.text, one).quote.is_none()));
+
+        // A key no paper has: the sentence does not stay in the text, and is handed back with the key it was written after.
+        let unknown = convert("x [@Nobody1999 p.3 \"Nobody said this.\"] y");
+        assert_eq!((unknown.text.as_str(), unknown.quoted.len(), unknown.keys.len()), ("x [@Nobody1999, p. 3] y", 0, 0));
+        assert_eq!(unknown.dropped, [("@Nobody1999".to_string(), "Nobody said this.".to_string())]);
+        assert_eq!(find(&unknown.text, &index)[0].found, Found::Unknown);
+
+        // Several papers and one sentence: the citation stays and the sentence goes, as with labels.
+        let several = convert("[@Zhang2024; @Smith2019 p.2 \"Whose is it?\"]");
+        assert_eq!((several.text.as_str(), several.quoted.len(), several.dropped.len()), ("[@Zhang2024; @Smith2019, p. 2]", 0, 0));
+        // Words after the key that are not a page stay as they were written; the sentence still leaves.
+        let worded = convert("[@Zhang2024, Fig. 2 \"In the figure.\"] [@Smith2019 pp. 3–4 \"Over two pages.\"]");
+        assert_eq!(worded.text, "[@Zhang2024, Fig. 2] [@Smith2019 pp. 3–4]");
+        assert_eq!(worded.quoted.iter().map(|q| (q.paper_id.as_str(), q.page, q.quote.as_str())).collect::<Vec<_>>(), [("P1", None, "In the figure."), ("P5", Some(3), "Over two pages.")]);
+        // A paper's id where the key goes, as a tool takes it.
+        let other = [paper("paper-1700000000000-0a1b2c3d", "Jürgen Müller", None, "Auxin", "2024-04-01")];
+        let by_id = convert_ai_citations("[@paper-1700000000000-0a1b2c3d \"By its id.\"]", &[], &Index::new(&other, [], &BTreeMap::new()));
+        assert_eq!((by_id.text.as_str(), by_id.quoted[0].paper_id.as_str(), by_id.keys[0].1.as_str()), ("[@paper-1700000000000-0a1b2c3d]", "paper-1700000000000-0a1b2c3d", "Muller-nd"));
+
+        // What a manuscript's own citations look like is not touched: no sentence, a sentence that is not the
+        // end of the brackets, or words before the key.
+        let own = "[@Zhang2024] [@Zhang2024, p. 5] [see @Zhang2024, p. 5] [@Zhang2024 \"a title\", p. 5] [see @Zhang2024 \"quoted\"] [-@Zhang2024 \"quoted\"] [\"quoted\" @Zhang2024] [@ \"no key\"] [note \"quoted\"]";
+        let kept = convert(own);
+        assert_eq!((kept.text.as_str(), kept.quoted.len(), kept.dropped.len(), kept.keys.len()), (own, 0, 0, 0));
     }
 
     #[test]

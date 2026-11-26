@@ -579,6 +579,42 @@ pub fn citations(answer: &str) -> Vec<Citation> {
 /// the bytes it takes (brackets included) and what it cites.
 pub fn citation_spans(answer: &str) -> Vec<(std::ops::Range<usize>, Vec<Citation>)> {
     let mut spans = vec![];
+    for (range, head, quote) in bracketed(answer) {
+        // "[P3]", "[P3 p.5]", "[P3, p.5]", "[P1, P2]"
+        let mut found: Vec<Citation> = vec![];
+        for part in head.split([',', '，', ';', '、']) {
+            let part = part.trim();
+            let mut words = part.split_whitespace();
+            let Some(first) = words.next() else { continue };
+            // "[@P3 p.5]": a label written after the manuscript's `[@Key]`, as a smaller model does when it writes a manuscript.
+            let first = first.strip_prefix('@').unwrap_or(first);
+            let page = |word: &str| word.trim_start_matches("p.").trim_start_matches('p').parse::<usize>().ok();
+            if first.starts_with('P') && first.len() > 1 && first[1..].bytes().all(|b| b.is_ascii_digit()) {
+                // "[P3 S2 p.4]": page 4 of the paper's second attachment.
+                let mut next = words.next();
+                let file = next.and_then(|word| word.strip_prefix('S')).and_then(|n| n.parse::<usize>().ok()).filter(|n| *n > 0);
+                if file.is_some() { next = words.next() }
+                found.push(Citation { label: first.to_string(), file, page: next.and_then(page), quote: String::new() });
+            } else if first.starts_with("p.") && words.next().is_none() && let (Some(page), Some(last)) = (page(first), found.last_mut()) {
+                // "[P3, p.5]": the page belongs to the label before the comma.
+                if last.page.is_none() { last.page = Some(page) }
+            }
+        }
+        // The quotation belongs to the last paper named in its brackets.
+        if let Some(last) = found.last_mut() { last.quote = quote.to_string() }
+        if !found.is_empty() { spans.push((range, found)) }
+    }
+    spans
+}
+
+/// The pairs of brackets of an answer, one after another: the bytes each
+/// takes (brackets included), what it holds before the sentence it quotes
+/// (all of it when it quotes none), and that sentence. Only a quotation
+/// that runs to the closing bracket is one. What names a paper there is the
+/// reader's to say: a label (`citation_spans`), or a manuscript's key
+/// written with the sentence a label has (`cite::convert_ai_citations`).
+pub fn bracketed(answer: &str) -> Vec<(std::ops::Range<usize>, &str, &str)> {
+    let mut found = vec![];
     let mut rest = answer;
     while let Some(open) = rest.find('[') {
         let start = answer.len() - rest.len() + open;
@@ -605,32 +641,10 @@ pub fn citation_spans(answer: &str) -> Vec<(std::ops::Range<usize>, Vec<Citation
                 (&rest[..close], "", close)
             }
         };
-        // "[P3]", "[P3 p.5]", "[P3, p.5]", "[P1, P2]"
-        let mut found: Vec<Citation> = vec![];
-        for part in head.split([',', '，', ';', '、']) {
-            let part = part.trim();
-            let mut words = part.split_whitespace();
-            let Some(first) = words.next() else { continue };
-            // "[@P3 p.5]": a label written after the manuscript's `[@Key]`, as a smaller model does when it writes a manuscript.
-            let first = first.strip_prefix('@').unwrap_or(first);
-            let page = |word: &str| word.trim_start_matches("p.").trim_start_matches('p').parse::<usize>().ok();
-            if first.starts_with('P') && first.len() > 1 && first[1..].bytes().all(|b| b.is_ascii_digit()) {
-                // "[P3 S2 p.4]": page 4 of the paper's second attachment.
-                let mut next = words.next();
-                let file = next.and_then(|word| word.strip_prefix('S')).and_then(|n| n.parse::<usize>().ok()).filter(|n| *n > 0);
-                if file.is_some() { next = words.next() }
-                found.push(Citation { label: first.to_string(), file, page: next.and_then(page), quote: String::new() });
-            } else if first.starts_with("p.") && words.next().is_none() && let (Some(page), Some(last)) = (page(first), found.last_mut()) {
-                // "[P3, p.5]": the page belongs to the label before the comma.
-                if last.page.is_none() { last.page = Some(page) }
-            }
-        }
-        // The quotation belongs to the last paper named in its brackets.
-        if let Some(last) = found.last_mut() { last.quote = quote.to_string() }
         rest = &rest[close + 1..];
-        if !found.is_empty() { spans.push((start..answer.len() - rest.len(), found)) }
+        found.push((start..answer.len() - rest.len(), head, quote));
     }
-    spans
+    found
 }
 
 /// A passage of a paper as a question hands it to the model: written the
