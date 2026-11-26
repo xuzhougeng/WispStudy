@@ -113,6 +113,8 @@ const MAX_CHAT_STEPS: usize = 24;
 /// The tools that write a new file outside the library, a Word file cited anew and slides: where the file goes is asked in a save dialog (`place_outputs`).
 const PLACED: [&str; 2] = ["restyle_docx", SLIDES];
 const SLIDES: &str = "make_slides";
+/// What a call hears of a tool the conversation was given that is no longer there to call (`ai::Table`).
+const GONE: &str = "这个工具现在用不了：它所在的连接器已经关闭或断开，或者技能都已关闭。请照实告诉用户，这次对话里不要再调用它。";
 /// The tool that leaves the assistant's remarks on a manuscript as comments: they are read again after it ran (`comments_arrived`).
 const COMMENT: &str = "comment_manuscript";
 /// The tool that puts a card of buttons under the answer: the window keeps its arguments (`Chat::offer`).
@@ -434,6 +436,8 @@ impl Workspace {
             // And which libraries are on the shelf, which it can read and not change (`tools::ACROSS`).
             if draft { ctx.instructions = format!("{}{}", ai::draft_instructions(&ctx), ai::shelf_note(&shelf)) }
             chat.ctx = Some(ctx);
+            // What the model is given is new from its first word: the tools are those on offer now, and none of before.
+            chat.table.clear();
             // The panel over the conversation lists what was handed over from here on: all of it, not what its search had narrowed the list to.
             if talk == Talk::Library && lib.scope_hits.take().is_some() {
                 lib.scope_words.clear();
@@ -663,17 +667,24 @@ impl Workspace {
         let profile = self.settings.profile_for_or_default(Task::Chat);
         // Beside the library's tools: the connectors' and the one that reads a skill.
         let outside: Vec<_> = self.outside_tools().into_iter().map(|(tool, _)| tool).collect();
+        // Web search is offered only while an engine can be asked: switched off or without a key, the model would only hear why not.
+        let searches = wisp_core::websearch::ready(&self.settings, "").is_ok();
+        // Pages are read for the assistant by an engine that takes the file; a model's look at pictures of them is the window's own run.
+        let reads = wisp_core::ocr::ready(&self.settings, "").is_ok_and(|ready| ready.engine.key != wisp_core::ocr::MODEL);
         let Some(lib) = self.lib.as_mut() else { return false };
+        // A conversation of the home page also reads the libraries on the shelf (`tools::ACROSS`); one inside a library keeps to it.
+        let draft = lib.info.draft && talk == Talk::Library;
         let chat = chat_of!(lib, talk);
         if chat.ctx.is_none() { return false }
-        // A conversation of the home page also reads the libraries on the shelf (`tools::ACROSS`); one inside a library keeps to it.
-        let mut catalog = if lib.info.draft && talk == Talk::Library { tools::draft_catalog() } else { tools::library_catalog() };
-        // Web search is offered only while an engine can be asked: switched off or without a key, the model would only hear why not.
-        if wisp_core::websearch::ready(&self.settings, "").is_err() { catalog.retain(|tool| tool.name != "web_search") }
-        // Pages are read for the assistant by an engine that takes the file; a model's look at pictures of them is the window's own run.
-        if !wisp_core::ocr::ready(&self.settings, "").is_ok_and(|ready| ready.engine.key != wisp_core::ocr::MODEL) { catalog.retain(|tool| tool.name != "ocr_pdf") }
-        let build = |chat: &Chat| ai::chat_request_with(&profile, chat.ctx.as_ref()?, &chat.wire, &catalog, &outside).ok();
-        let mut request = match chat.ctx.as_ref().map(|ctx| ai::chat_request_with(&profile, ctx, &chat.wire, &catalog, &outside)) {
+        // What is on offer is looked at when a question is asked, not at every step of its answer: a connector that comes up or
+        // drops out in the middle of one would have the service read the whole request anew (`ai::Table`).
+        if chat.steps == 0 || chat.table.is_empty() {
+            let mut catalog = if draft { tools::draft_catalog() } else { tools::library_catalog() };
+            catalog.retain(|tool| (searches || tool.name != "web_search") && (reads || tool.name != "ocr_pdf"));
+            chat.table.offer(&catalog, &outside);
+        }
+        let build = |chat: &Chat| ai::chat_request_with(&profile, chat.ctx.as_ref()?, &chat.wire, &[], chat.table.tools()).ok();
+        let mut request = match chat.ctx.as_ref().map(|ctx| ai::chat_request_with(&profile, ctx, &chat.wire, &[], chat.table.tools())) {
             Some(Ok(request)) => request,
             Some(Err(err)) => {
                 chat.error = err;
@@ -863,6 +874,9 @@ impl Workspace {
                 ai::resolve_labels(&mut args, chat.sources());
                 args
             });
+            // A tool the conversation was given and that is no longer there to call (`ai::Table` keeps it as it was sent): a connector
+            // switched off or not connected, the last skill switched off. The call fails with why, not with there being no such tool.
+            let args = if tool.is_none() && chat.table.has(&call.name) { Err(GONE.to_string()) } else { args };
             // A call that reads another library says which, by its name: the line is what the person sees of it.
             if let Some(named) = args.as_ref().ok().and_then(|args| args["library"].as_str()).map(str::trim).filter(|named| !named.is_empty() && *named != own.0 && *named != own.1) {
                 let name = shelf.iter().find(|(id, name)| id == named || name.eq_ignore_ascii_case(named)).map_or(named, |(_, name)| name.as_str());

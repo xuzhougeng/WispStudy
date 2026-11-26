@@ -105,6 +105,9 @@ pub struct Chat {
     pub steps: usize,
     /// What the model was given, built with the first question.
     pub ctx: Option<ai::Context>,
+    /// The tools its requests carry, settled when a question is asked and the same for every step of its answer
+    /// (`ai::Table`: it only grows, until the context is built anew).
+    pub(crate) table: ai::Table,
     pub busy: bool,
     pub error: String,
     /// Why the last answer ended early, if it did; while one is awaited, what it is waiting for.
@@ -270,6 +273,7 @@ impl Chat {
             protocol: None,
             steps: 0,
             ctx: None,
+            table: ai::Table::default(),
             busy: false,
             error: String::new(),
             note: String::new(),
