@@ -18,15 +18,6 @@ use wisp_core::store::Suggestion;
 /// The rows drawn at most: a longer queue is worked off from the top.
 const SHOWN: usize = 200;
 
-/// A sheet of paper; while the assistant reads, a line passes over it.
-fn reading_sheet(running: bool) -> Div {
-    let lines = [1., 1., 1., 0.6].map(|width| div().h(px(2.)).w(relative(width)).rounded_full().bg(Theme::line_strong()));
-    let sheet = div().relative().flex().flex_col().flex_none().justify_center().gap(px(6.)).w(px(42.)).h(px(54.)).px(px(8.)).rounded(px(4.)).border_1().border_color(Theme::line_strong()).bg(Theme::bg_body()).children(lines);
-    if !running { return sheet }
-    let scan = div().absolute().left(px(-4.)).right(px(-4.)).h(px(2.)).rounded_full().bg(Theme::accent());
-    sheet.child(scan.with_animation("screen-scan", Animation::new(Duration::from_millis(2400)).repeat().with_easing(pulsating_between(0., 1.)), |line, at| line.top(px(5. + 42. * at))))
-}
-
 /// How far a run is, as a bar that fills up to each new answer instead of jumping there.
 pub(crate) fn progress_bar(done: usize, total: usize) -> Div {
     let at = |n: usize| if total == 0 { 0. } else { (n as f32 / total as f32).min(1.) };
@@ -247,7 +238,7 @@ impl Workspace {
             .border_1()
             .border_color(Theme::line())
             .bg(Theme::bg_sunken())
-            .child(reading_sheet(running))
+            .child(crate::mascot::desk("screen-run-desk", crate::mascot::Activity::from_run(running, screen.done, screen.total, crate::mascot::Activity::Reading), Some((screen.done, screen.total))))
             .child(
                 div()
                     .flex()

@@ -2278,5 +2278,7 @@
   "写作：所有稿件": "Writing: all manuscripts",
   "写一篇稿件": "Write a manuscript",
   "边写边查": "Write and look things up as you go",
-  "在右边直接写，或者告诉助手要写什么：它会到 PubMed、Europe PMC 等文献数据库里找文献，起草和修改稿件。要引用已有文献库里的文献，把稿件绑定到那个文献库（上方的链环）；想把这里收进的文献留成一个新的文献库，点「建成文献库」。": "Write on the right, or tell the assistant what to write: it finds papers in PubMed, Europe PMC and other databases, drafts and revises the manuscript. To cite papers of a library you already have, bind the manuscript to that library (the link above); to keep the papers gathered here as a new library, click Make it a library."
+  "在右边直接写，或者告诉助手要写什么：它会到 PubMed、Europe PMC 等文献数据库里找文献，起草和修改稿件。要引用已有文献库里的文献，把稿件绑定到那个文献库（上方的链环）；想把这里收进的文献留成一个新的文献库，点「建成文献库」。": "Write on the right, or tell the assistant what to write: it finds papers in PubMed, Europe PMC and other databases, drafts and revises the manuscript. To cite papers of a library you already have, bind the manuscript to that library (the link above); to keep the papers gathered here as a new library, click Make it a library.",
+  "工作动画": "Work animation",
+  "等待助手阅读、检索或生成时，显示像素研究员动画。": "Show the pixel researcher animation while the assistant reads, searches or writes."
 }

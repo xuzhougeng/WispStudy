@@ -65,32 +65,35 @@ pub fn progress_bar(total: usize, segments: &[ProgressSegment]) -> Div {
         }))
 }
 
-pub fn progress_entry(id: &'static str, label: &'static str, done: usize, total: usize, running: bool, segments: &[ProgressSegment]) -> Stateful<Div> {
+pub fn progress_entry(id: &'static str, label: &'static str, done: usize, total: usize, running: bool, activity: crate::mascot::Activity, segments: &[ProgressSegment]) -> Stateful<Div> {
     div().id(id).flex().flex_none().flex_col().gap(px(7.)).px(px(8.)).py(px(10.)).rounded(px(6.))
         .cursor_pointer().hover(|s| s.bg(Theme::hover()))
         .child(div().flex().items_center().gap(px(6.)).text_size(text_px(12.)).line_height(text_px(17.))
-            .when(running, |d| d.child(spinner((id, 0_usize), 12., theme::accent_of("blue").strong())))
+            .when(running, |d| d.child(crate::mascot::inline(format!("{id}-mascot"), activity, 16.)))
             .child(div().flex_1().min_w_0().truncate().text_color(Theme::text_secondary()).child(label))
             .child(div().flex_none().text_color(Theme::text_tertiary()).child(if running && total == 0 { t("准备中").into() } else { format!("{done}/{total}") }))
             .child(icon("chevron-right", 12., Theme::text_tertiary())))
         .child(progress_bar(total, segments))
 }
 
-pub fn progress_overview(done: usize, total: usize, state: &'static str, running: bool, segments: &[ProgressSegment]) -> Div {
+pub fn progress_overview(done: usize, total: usize, state: &'static str, running: bool, activity: crate::mascot::Activity, segments: &[ProgressSegment]) -> Div {
     let color = if running { theme::accent_of("blue").strong() } else { Theme::text_secondary() };
-    div().flex().flex_none().flex_col().gap(px(12.)).px(px(20.)).py(px(14.))
+    let body = div().flex().flex_col().flex_1().min_w_0().gap(px(12.))
         .child(div().flex().items_center().gap(px(8.))
             .child(div().text_size(text_px(20.)).font_weight(FontWeight::SEMIBOLD).child(if running && total == 0 { t("正在准备…").into() } else { format!("{done} / {total}") }))
             .when(total > 0, |d| d.child(div().text_color(Theme::text_tertiary()).child(t("项已处理"))))
             .child(div().flex_1())
-            .when(running, |d| d.child(spinner("progress-modal-working", 13., color)))
             .child(div().text_color(color).child(state)))
         .child(progress_bar(total, segments).h(px(9.)))
         .child(div().flex().flex_wrap().gap(px(14.)).children(segments.iter().map(|(count, label, color)| {
             div().flex().items_center().gap(px(5.)).text_size(text_px(12.))
                 .child(div().flex_none().size(px(7.)).rounded_full().bg(*color))
                 .child(div().text_color(Theme::text_secondary()).child(format!("{label} {count}")))
-        })))
+        })));
+    div().flex().flex_none().flex_col().gap(px(12.)).px(px(20.)).py(px(14.))
+        .child(div().flex().items_start().gap(px(14.))
+            .child(crate::mascot::desk(format!("progress-modal-desk-{activity:?}"), activity, Some((done, total))))
+            .child(body))
 }
 
 pub fn icon(name: &str, size: f32, color: Hsla) -> Svg {

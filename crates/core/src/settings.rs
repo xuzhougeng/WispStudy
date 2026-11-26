@@ -104,6 +104,8 @@ pub struct Settings {
     pub appearance: String,
     /// Stronger text and separators in both light and dark themes.
     pub high_contrast: bool,
+    /// Show the pixel researcher animation while the assistant works.
+    pub work_animation: bool,
     /// The interface language; independent of manuscript and translation languages.
     pub language: Language,
     /// "compact" or "comfortable" changes the paper rows; empty is standard.
@@ -199,7 +201,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let providers = provider::DEFAULT_PRESETS.iter().filter_map(|key| provider::preset(key)).map(Provider::from_preset).collect();
-        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), play_speed: 1., commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), proxy_off: false, contact_email: String::new(), ncbi_api_key: String::new(), contact_hint_dismissed: false, web_search: Default::default(), ocr: Default::default(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, pdf_split_free: false, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, write_facing_language: String::new(), library_order: vec![], days_used: 0, last_used_day: String::new(), star_answered: false, home_list: false, tour_step: 0, tour_done: false };
+        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), play_speed: 1., commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, work_animation: true, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), proxy_off: false, contact_email: String::new(), ncbi_api_key: String::new(), contact_hint_dismissed: false, web_search: Default::default(), ocr: Default::default(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, pdf_split_free: false, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, write_facing_language: String::new(), library_order: vec![], days_used: 0, last_used_day: String::new(), star_answered: false, home_list: false, tour_step: 0, tour_done: false };
         settings.tidy();
         settings
     }
@@ -530,6 +532,7 @@ impl Settings {
     pub fn reset_appearance(&mut self) {
         self.appearance.clear();
         self.high_contrast = false;
+        self.work_animation = true;
         self.density.clear();
         self.font_family.clear();
         self.cjk_font_family.clear();
@@ -1186,6 +1189,23 @@ mod tests {
         assert!(text.contains(r#""daysUsed": 7"#) && text.contains(r#""lastUsedDay": "2026-11-22""#) && text.contains(r#""starAnswered": true"#), "{text}");
         let again = Settings::load(&path).unwrap();
         assert_eq!((again.days_used, again.last_used_day.as_str(), again.star_answered), (7, "2026-11-22", true));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn work_animation_defaults_round_trips_and_resets() {
+        let dir = std::env::temp_dir().join(format!("wisp-anim-{}", crate::model::new_id("T")));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, r#"{"dataDir": ""}"#).unwrap();
+        let mut settings = Settings::load(&path).unwrap();
+        assert!(settings.work_animation);
+        settings.work_animation = false;
+        settings.save(&path).unwrap();
+        let reloaded = Settings::load(&path).unwrap();
+        assert!(!reloaded.work_animation);
+        settings.reset_appearance();
+        assert!(settings.work_animation);
         std::fs::remove_dir_all(&dir).ok();
     }
 }
