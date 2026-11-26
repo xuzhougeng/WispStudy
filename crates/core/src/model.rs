@@ -265,6 +265,33 @@ pub fn split_list(value: &str) -> Vec<String> {
     clean_strings(value.split([',', '，', ';', '；', '\n']))
 }
 
+/// A tag's name as it is kept. The `#` a tag is referred to with is not part of its name, and its blanks
+/// are single spaces: `# CAR-T　耗竭 ` is `CAR-T 耗竭`. A space inside a name stays a space (`T cell exhaustion`).
+pub fn clean_tag(value: &str) -> String {
+    value.trim().trim_start_matches(['#', '＃']).split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// What two spellings of one tag share: the case of its letters and the width of its letters, digits and
+/// signs aside (`ＣＡＲ－Ｔ` and `car-t`). Tags are compared by it and never kept as it.
+pub fn tag_key(value: &str) -> String {
+    clean_tag(value).chars().map(|c| if ('\u{FF01}'..='\u{FF5E}').contains(&c) { char::from_u32(c as u32 - 0xFEE0).unwrap_or(c) } else { c }).flat_map(char::to_lowercase).collect()
+}
+
+/// The tags a person or a model wrote, as they are to be kept: each cleaned (`clean_tag`), and spelt the
+/// way the library spells it where it already has the tag in another case or width, so that one subject does
+/// not become two tags. `known` is the library's tags, the most used first; a spelling it has is left alone.
+pub fn settle_tags<S: AsRef<str>>(written: &[S], known: &[(String, usize)]) -> Vec<String> {
+    let mut settled: Vec<String> = vec![];
+    for tag in written {
+        let tag = clean_tag(tag.as_ref());
+        if tag.is_empty() { continue }
+        let key = tag_key(&tag);
+        let tag = if known.iter().any(|(kept, _)| *kept == tag) { tag } else { known.iter().find(|(kept, _)| tag_key(kept) == key).map_or(tag, |(kept, _)| kept.clone()) };
+        if !settled.iter().any(|kept| tag_key(kept) == key) { settled.push(tag) }
+    }
+    settled
+}
+
 /// A page range as it is kept: `357-362`, whatever dash the source wrote and
 /// with the last page in full (`357-62` is PubMed's short form). An article
 /// number (`e1234`) is kept as it is.
@@ -441,6 +468,27 @@ pub fn family_first(authors: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tag_is_kept_under_one_spelling() {
+        // The sign it is referred to with and stray blanks are not its name; a space inside it is.
+        assert_eq!(clean_tag(" #CAR-T "), "CAR-T");
+        assert_eq!(clean_tag("＃ CAR-T　与  T细胞耗竭"), "CAR-T 与 T细胞耗竭");
+        assert_eq!(clean_tag("T cell exhaustion"), "T cell exhaustion");
+        assert_eq!(clean_tag("C#"), "C#");
+        assert_eq!(clean_tag(" # "), "");
+        // Case and width aside, two spellings are one tag.
+        assert_eq!(tag_key("ＣＡＲ－Ｔ"), tag_key("#car-t"));
+        assert_ne!(tag_key("CAR-T"), tag_key("CAR T"));
+
+        let known = vec![("CAR-T".to_string(), 12), ("car-t".to_string(), 2), ("耗竭".to_string(), 5)];
+        // The library's spelling is taken, the most used one where it has two; one it has is left alone.
+        assert_eq!(settle_tags(&["#car-T", "耗竭 ", "新方向"], &known), ["CAR-T", "耗竭", "新方向"]);
+        assert_eq!(settle_tags(&["car-t"], &known), ["car-t"]);
+        // Written twice, or nothing at all.
+        assert_eq!(settle_tags(&["持久性", "#持久性", "", "#"], &known), ["持久性"]);
+        assert_eq!(settle_tags(&["Solid Tumor", "solid tumor"], &[]), ["Solid Tumor"]);
+    }
 
     #[test]
     fn family_names_however_a_name_is_written() {

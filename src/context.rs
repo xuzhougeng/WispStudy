@@ -168,13 +168,6 @@ impl Workspace {
             Cmd::ReadPapers(ids, value) => {
                 each(self, &ids, cx, &|paper| paper.reading = value.clone());
             }
-            Cmd::TagPapers(ids) => {
-                self.modal_subscriptions.clear();
-                self.modal_error.clear();
-                let name = self.modal_input("例如 综述、方法", "", false, window, cx);
-                name.read(cx).focus(window);
-                self.modal = Some(crate::app::Modal::TagPapers { ids, name });
-            }
             Cmd::FindPdfsOf(ids) => {
                 for id in ids { self.fetch_start(Some(id), cx) }
             }
@@ -265,6 +258,7 @@ impl Workspace {
                     items.push(MenuItem { label: tf!("标为{label}", "Mark as {label}").into(), checked: papers.iter().all(|p| p.reading == value), note: None, cmd: Cmd::ReadPapers(ids.clone(), value.into()) });
                 }
                 items.push(item(t("添加标签…"), Cmd::TagPapers(ids.clone())));
+                if papers.iter().any(|p| !p.tags.is_empty()) { items.push(item(t("去掉标签…"), Cmd::UntagPapers(ids.clone()))) }
                 if self.can_file(ids) { items.push(item(t("归入已有文献…"), Cmd::AskFileInto(ids.clone()))) }
                 // Those without a PDF that have a number to be looked up by.
                 let lacking: Vec<String> = papers.iter().filter(|p| lib.pdf_file(&p.id).is_none() && wisp_core::openaccess::lookable(p)).map(|p| p.id.clone()).collect();

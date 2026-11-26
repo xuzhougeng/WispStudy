@@ -313,10 +313,18 @@ impl Workspace {
 
             Modal::Tag { tag, name } => {
                 let count = self.lib.as_ref().map_or(0, |lib| lib.papers.iter().filter(|p| p.tags.contains(tag)).count());
+                // The name being typed is another tag's: said while it is typed, with the tag it joins and how many papers that one is on.
+                let into = self.tag_merged(tag, &wisp_core::model::clean_tag(name.read(cx).text()));
                 ui::dialog(420.)
                     .child(ui::dialog_title(t("重命名标签")))
-                    .child(body().child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_tertiary()).child(tf!("「{tag}」在 {count} 篇文献上，都会改成新的名字。改成一个已有的标签，两个就合成一个。", "“{tag}” is used on {count} papers. All will be renamed. Choosing an existing tag merges them."))).child(ui::field(name, window, cx)).child(error))
-                    .child(footer(t("改名"), false, self, cx))
+                    .child(
+                        body()
+                            .child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_tertiary()).child(tf!("「{tag}」在 {count} 篇文献上，都会改成新的名字。改成一个已有的标签，两个就合成一个。", "“{tag}” is used on {count} papers. All will be renamed. Choosing an existing tag merges them.")))
+                            .child(ui::field(name, window, cx))
+                            .when_some(into.as_ref(), |d, (kept, held)| d.child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::accent()).child(tn!("已有标签「{kept}」（{n} 篇）：「{tag}」会并入它。", "“{kept}” is a tag already ({n}): “{tag}” will be merged into it.", *held, "paper"))))
+                            .child(error),
+                    )
+                    .child(footer(if into.is_some() { t("合并") } else { t("改名") }, false, self, cx))
             }
 
             // One short number, and how far the file goes.
@@ -364,10 +372,30 @@ impl Workspace {
                     )
             }
 
-            Modal::TagPapers { ids, name } => ui::dialog(420.)
-                .child(ui::dialog_title(tn!("为 {n} 篇文献添加标签", "Add tags to {n}", ids.len(), "paper")))
-                .child(body().child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_tertiary()).child(t("多个标签用逗号或分号隔开。已有的标签不动，只添加还没有的。"))).child(ui::field(name, window, cx)).child(error))
-                .child(footer(t("添加"), false, self, cx)),
+            Modal::TagPapers { ids, name } => {
+                // The tags the library has, to take with a click: one spelling of a subject is kept by not typing it twice.
+                let offers = self.tag_offers(name, cx);
+                ui::dialog(460.)
+                    .child(ui::dialog_title(tn!("为 {n} 篇文献添加标签", "Add tags to {n}", ids.len(), "paper")))
+                    .child(
+                        body()
+                            .child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_tertiary()).child(t("多个标签用逗号或分号隔开。已有的标签不动，只添加还没有的。")))
+                            .child(ui::field(name, window, cx))
+                            .when(!offers.is_empty(), |d| d.child(div().flex().flex_wrap().gap(px(6.)).children(offers)))
+                            .child(error),
+                    )
+                    .child(footer(t("添加"), false, self, cx))
+            }
+
+            Modal::UntagPapers { ids, chosen } => ui::dialog(460.)
+                .child(ui::dialog_title(tn!("从 {n} 篇文献上去掉标签", "Remove tags from {n}", ids.len(), "paper")))
+                .child(
+                    body()
+                        .child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_tertiary()).child(t("点一下要去掉的标签，再点一下留着。数字是这几篇里有几篇带着它；文献本身不动。")))
+                        .child(div().flex().flex_wrap().gap(px(6.)).children(self.untag_choices(ids, chosen, cx)))
+                        .child(error),
+                )
+                .child(footer(t("去掉"), false, self, cx)),
 
             Modal::Note { paper_id, text } => {
                 let title = self.lib.as_ref().and_then(|lib| lib.paper(paper_id)).map(|paper| paper.title.clone()).unwrap_or_default();

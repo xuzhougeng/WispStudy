@@ -74,6 +74,7 @@ mod tour;
 mod tutorial;
 mod collected;
 mod written;
+mod tagging;
 mod transfer;
 mod translate;
 mod ui;

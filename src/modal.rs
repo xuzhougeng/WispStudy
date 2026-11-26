@@ -100,8 +100,10 @@ pub enum Modal {
     Range { key: FilterKey, low: Entity<TextInput>, high: Entity<TextInput> },
     /// 跳到第几页: the page of the PDF on show to go to, of `count`.
     PdfPage { page: Entity<TextInput>, count: usize },
-    /// Tags for several papers at once.
+    /// Tags for several papers at once: the ones marked in the list, or all that a search and the filters left (`tagging.rs`).
     TagPapers { ids: Vec<String>, name: Entity<TextInput> },
+    /// Tags taken off several papers at once: the ones chosen among those they hold.
+    UntagPapers { ids: Vec<String>, chosen: Vec<String> },
     /// 清空回收站: the papers in the trash deleted from disk, once the phrase is typed.
     EmptyTrash { phrase: Entity<TextInput> },
     /// What came of each PDF of the last import (`Library::import`).
@@ -557,12 +559,18 @@ impl Workspace {
                 }
             }
             Modal::Tag { tag, name } => {
-                let (tag, name) = (tag.clone(), text(name, cx));
+                let (tag, name) = (tag.clone(), wisp_core::model::clean_tag(&text(name, cx)));
                 if name.is_empty() {
                     self.modal_error = t("标签不能没有名字。要去掉它，在标签上点右键选「去掉这个标签」。").into();
                     return;
                 }
-                if name == tag || self.retag(&tag, Some(&name), cx) { self.run(Cmd::CloseModal, window, cx) }
+                // The name of another tag, case and width aside, is that tag: the two become one, spelt its way.
+                let into = self.tag_merged(&tag, &name).map(|(kept, _)| kept);
+                let name = into.clone().unwrap_or(name);
+                if name == tag || self.retag(&tag, Some(&name), cx) {
+                    self.run(Cmd::CloseModal, window, cx);
+                    if into.is_some() { self.say(tf!("「{tag}」已并入「{name}」。", "“{tag}” is merged into “{name}”."), cx) }
+                }
             }
             Modal::PdfPage { page, count } => {
                 let (typed, count) = (text(page, cx), *count);
@@ -588,23 +596,20 @@ impl Workspace {
                 if crate::dialogs::phrase_typed(&text(phrase, cx)) { self.run(Cmd::EmptyTrash, window, cx) }
             }
             Modal::TagPapers { ids, name } => {
-                let (ids, tags) = (ids.clone(), wisp_core::model::split_list(&text(name, cx)));
+                let (ids, tags): (_, Vec<String>) = (ids.clone(), wisp_core::model::split_list(&text(name, cx)).iter().map(|tag| wisp_core::model::clean_tag(tag)).filter(|tag| !tag.is_empty()).collect());
                 if tags.is_empty() {
                     self.modal_error = t("写上要添加的标签，多个用逗号或分号隔开。").into();
                     return;
                 }
-                let done = self.change(cx, |lib| {
-                    for id in &ids {
-                        let mut paper = lib.store.get_paper(id)?;
-                        for tag in &tags { if !paper.tags.contains(tag) { paper.tags.push(tag.clone()) } }
-                        lib.store.save_paper(&mut paper)?;
-                    }
-                    Ok(())
-                });
-                if done {
-                    self.run(Cmd::CloseModal, window, cx);
-                    self.say(tf!("已为 {} 篇文献添加标签。", "Added tags to {} papers.", ids.len()), cx);
+                self.tag_papers(ids, tags, vec![], window, cx);
+            }
+            Modal::UntagPapers { ids, chosen } => {
+                let (ids, chosen) = (ids.clone(), chosen.clone());
+                if chosen.is_empty() {
+                    self.modal_error = t("点一下要去掉的标签。").into();
+                    return;
                 }
+                self.tag_papers(ids, vec![], chosen, window, cx);
             }
             Modal::Note { paper_id, text: input } => {
                 let (paper_id, note) = (paper_id.clone(), text(input, cx));
@@ -665,6 +670,9 @@ impl Workspace {
             Modal::Paper(form) => {
                 let Some(lib) = self.lib.as_mut() else { return };
                 let mut paper = form.id.as_ref().and_then(|id| lib.paper(id)).cloned().unwrap_or_default();
+                // The library's tags without the ones only this paper holds: here is where such a tag can be spelt anew.
+                let own: &[String] = if paper.screening == "irrelevant" { &[] } else { &paper.tags };
+                let known: Vec<(String, usize)> = lib.tags.iter().filter(|(tag, count)| *count > own.contains(tag) as usize).cloned().collect();
                 let year = text(&form.year, cx);
                 paper.year = match year.parse::<i32>() {
                     Ok(year) => Some(year),
@@ -683,7 +691,7 @@ impl Workspace {
                 paper.doi = text(&form.doi, cx);
                 paper.pmid = text(&form.pmid, cx);
                 paper.url = text(&form.url, cx);
-                paper.tags = split_list(&text(&form.tags, cx));
+                paper.tags = wisp_core::model::settle_tags(&split_list(&text(&form.tags, cx)), &known);
                 paper.abstract_text = text(&form.abstract_text, cx);
                 paper.fields.clear();
                 for (id, input) in &form.fields {

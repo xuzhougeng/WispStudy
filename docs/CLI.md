@@ -111,7 +111,7 @@ wisp search_fulltext --help             # 一个工具的参数
 | `sync_searches` | 运行到期的检索式（所有开启了自动更新的文献库，或指定的一个）。「自动更新」关着的文献库不会运行，用 `-l` 指定它也一样，结果里 `runs` 为空；`--force` 不看间隔，也不看这个开关，运行所有已启用的检索式（会改动文献库） |
 | `suggest_screening` | 为一篇文献提出收录建议（结论、理由、逐字引文、把握）；不改变收录判断，由用户在筛选页确认 |
 | `suggest_field` | 为一篇文献的一个自定义词条提出取值（附逐字引文）；不改动词条，由用户在提取页确认。单选词条只接受它的选项 |
-| `organise_papers` | 整理已有的文献：`changes` 是一个 JSON 数组，每项给出文献 `id` 和要改的方面（`addTags`、`removeTags`、`starred`、`reading`、`note`）；全部写入或全部不写。不能改收录判断和自定义词条 |
+| `organise_papers` | 整理已有的文献：`changes` 是一个 JSON 数组，每项给出文献 `id` 和要改的方面（`addTags`、`removeTags`、`starred`、`reading`、`note`）；全部写入或全部不写。标签按文献库已有的写法写入：开头的 `#` 不算名字，和已有标签只差大小写或全角半角的写成已有的那一个。不能改收录判断和自定义词条 |
 | `list_cite_styles` | 列出导出 Word 时可用的引用样式（CSL）：常用的内置样式（先是顺序编码的，再是著者-出版年的，带界面上显示的短名 `short`）、自己添加的和 Zotero 里装的、全部内置样式 |
 | `read_cite_style` | 读取一个引用样式的 CSL 定义（`--style csl:nature`）；只读 |
 | `try_cite_style` | 用文献库里的文献试排一个样式（`--style` 已有样式，或 `--csl` 一份 CSL 定义），不保存：正文引用和参考文献条目各是什么样子 |
