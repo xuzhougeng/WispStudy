@@ -79,12 +79,39 @@ impl LibrarySpace {
     }
 }
 
+/// A removed library (or home-page conversation) in `removed/` and what it takes on disk.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RemovedLibrarySpace {
+    /// Its folder name inside `removed/`, used as a stable identifier.
+    pub folder: String,
+    pub id: String,
+    pub name: String,
+    /// Its colour key (`libraries::COLORS`).
+    pub color: String,
+    /// A conversation from the home page not made a library yet.
+    pub draft: bool,
+    pub dir: PathBuf,
+    pub paper_count: usize,
+    /// When it was removed (milliseconds since the Unix epoch), if encoded in its folder name.
+    pub removed_at: Option<i64>,
+    /// The bytes of each part, in the order of `Part::ALL`.
+    pub parts: [u64; 6],
+}
+
+impl RemovedLibrarySpace {
+    pub fn total(&self) -> u64 {
+        self.parts.iter().sum()
+    }
+}
+
 /// The whole data folder.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Space {
     /// Every library, conversations not yet made libraries among them, the largest first.
     pub libraries: Vec<LibrarySpace>,
-    /// `removed/` under the data folder: the libraries taken off the home page.
+    /// Removed libraries and home-page conversations in `removed/`, the largest first.
+    pub removed_libraries: Vec<RemovedLibrarySpace>,
+    /// `removed/` under the data folder in total: the removed libraries plus anything else left there.
     pub removed: u64,
     /// Everything else under the data folder (citation styles, files left there).
     pub other: u64,
@@ -93,6 +120,12 @@ pub struct Space {
 impl Space {
     pub fn total(&self) -> u64 {
         self.libraries.iter().map(LibrarySpace::total).sum::<u64>() + self.removed + self.other
+    }
+
+    /// Bytes inside `removed/` that do not belong to a recognized removed library.
+    pub fn removed_other(&self) -> u64 {
+        let known: u64 = self.removed_libraries.iter().map(RemovedLibrarySpace::total).sum();
+        self.removed.saturating_sub(known)
     }
 }
 
@@ -104,25 +137,61 @@ pub fn measure(root: &Path) -> Space {
         space.libraries.push(measure_library(info));
     }
     space.libraries.sort_by(|a, b| b.total().cmp(&a.total()).then_with(|| a.name.cmp(&b.name)));
+    let removed_found = libraries::list_removed(root);
+    for item in &removed_found {
+        let parts = measure_parts(&item.info.dir);
+        space.removed_libraries.push(RemovedLibrarySpace {
+            folder: item.folder.clone(),
+            id: item.info.id.clone(),
+            name: item.info.name.clone(),
+            color: item.info.color.clone(),
+            draft: item.info.draft,
+            dir: item.info.dir.clone(),
+            paper_count: item.info.paper_count,
+            removed_at: item.removed_at,
+            parts,
+        });
+    }
+    space.removed_libraries.sort_by(|a, b| b.total().cmp(&a.total()).then_with(|| b.removed_at.cmp(&a.removed_at)).then_with(|| a.name.cmp(&b.name)));
     let Ok(entries) = std::fs::read_dir(root) else { return space };
     for entry in entries.flatten() {
         let path = entry.path();
         if found.iter().any(|info| info.dir == path) { continue }
-        let size = size_of(&path);
-        if entry.file_name() == "removed" { space.removed += size } else { space.other += size }
+        if entry.file_name() == "removed" {
+            let is_dir = std::fs::symlink_metadata(&path).is_ok_and(|meta| !meta.file_type().is_symlink() && meta.is_dir());
+            if is_dir && let Ok(removed_entries) = std::fs::read_dir(&path) {
+                for sub in removed_entries.flatten() {
+                    let sub_path = sub.path();
+                    if let Some(lib) = space.removed_libraries.iter().find(|lib| lib.dir == sub_path) {
+                        space.removed += lib.total();
+                    } else {
+                        space.removed += size_of(&sub_path);
+                    }
+                }
+            } else {
+                space.removed += size_of(&path);
+            }
+        } else {
+            space.other += size_of(&path);
+        }
     }
     space
 }
 
-fn measure_library(info: &LibraryInfo) -> LibrarySpace {
+fn measure_parts(dir: &Path) -> [u64; 6] {
     let mut parts = [0u64; 6];
-    if let Ok(entries) = std::fs::read_dir(&info.dir) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let part = Part::of(&entry.file_name().to_string_lossy());
             let index = Part::ALL.iter().position(|p| *p == part).unwrap_or(Part::ALL.len() - 1);
             parts[index] += size_of(&entry.path());
         }
     }
+    parts
+}
+
+fn measure_library(info: &LibraryInfo) -> LibrarySpace {
+    let parts = measure_parts(&info.dir);
     LibrarySpace { id: info.id.clone(), name: info.name.clone(), color: info.color.clone(), draft: info.draft, dir: info.dir.clone(), paper_count: info.paper_count, parts }
 }
 
@@ -192,6 +261,29 @@ mod tests {
         let space = measure(Path::new("/no/such/wisp/folder"));
         assert_eq!(space.total(), 0);
         assert!(space.libraries.is_empty());
+    }
+
+    #[test]
+    fn removed_libraries_are_measured_beside_loose_removed_files() {
+        let root = std::env::temp_dir().join(format!("wisp-space-rem-{}", new_id("T")));
+        let active = libraries::create(&root, "在用", "", "blue").unwrap();
+        let gone = libraries::create(&root, "已移走", "", "amber").unwrap();
+        write(&gone.dir.join("papers").join("P-1").join("a.pdf"), 6000);
+        let moved = libraries::remove(&root, &gone).unwrap();
+        let folder = moved.file_name().unwrap().to_string_lossy().to_string();
+        write(&root.join("removed").join("stray.bin"), 500);
+
+        let space = measure(&root);
+        assert_eq!(space.libraries.len(), 1);
+        assert_eq!(space.libraries[0].id, active.id);
+        assert_eq!(space.removed_libraries.len(), 1);
+        let rem = &space.removed_libraries[0];
+        assert_eq!((rem.folder.as_str(), rem.name.as_str(), rem.color.as_str()), (folder.as_str(), "已移走", "amber"));
+        assert_eq!(rem.parts[0], 6000);
+        assert_eq!(space.removed, rem.total() + 500);
+        assert_eq!(space.removed_other(), 500);
+        assert_eq!(space.total(), space.libraries[0].total() + space.removed);
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]
