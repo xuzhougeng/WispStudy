@@ -264,10 +264,10 @@ pub enum Cmd {
     TagPapers(Vec<String>),
     FindPdfsOf(Vec<String>),
     AskTrashPapers(Vec<String>),
-    /// 移到文献库: the dialog for a paper, a library chosen in it, and the move (`transfer.rs`).
-    AskMovePaper(String),
+    /// 移到文献库: the dialog for one paper or several marked ones, a library chosen in it, and the move (`transfer.rs`).
+    AskMovePapers(Vec<String>),
     ChooseMoveTarget(String),
-    MovePaper(String, String),
+    MovePapers(Vec<String>, String),
     /// 归入已有文献: the dialog for the papers whose files are to go under another, the paper chosen in it, the
     /// filing, and the way back while its toast is up (`filing.rs`).
     AskFileInto(Vec<String>),
@@ -756,12 +756,12 @@ impl Workspace {
                 window.focus(&self.focus);
             }
             Cmd::Draft(what) => self.run_draft(what, window, cx),
-            Cmd::AskMovePaper(paper) => self.ask_move_paper(paper, cx),
+            Cmd::AskMovePapers(papers) => self.ask_move_papers(papers, cx),
             Cmd::ChooseMoveTarget(id) => {
                 if let Some(Modal::MoveTo { to, .. }) = self.modal.as_mut() { *to = Some(id) }
                 self.modal_error.clear();
             }
-            Cmd::MovePaper(paper, to) => self.move_paper(paper, to, window, cx),
+            Cmd::MovePapers(papers, to) => self.move_papers(papers, to, window, cx),
             Cmd::AskFileInto(papers) => self.ask_file_into(papers, window, cx),
             Cmd::ChooseFileTarget(id) => {
                 if let Some(Modal::FileInto { to, .. }) = self.modal.as_mut() { *to = Some(id) }
