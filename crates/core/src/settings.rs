@@ -955,7 +955,7 @@ mod tests {
         s.providers.push(Provider { name: "mine".into(), base_url: "https://api.deepseek.com/v1".into(), api_key: "k".into(), ..Default::default() });
         s.providers[0].api_key.clear();
         s.providers[0].preset = "deepseek".into();
-        if s.providers[0].key().is_empty() { assert_eq!(s.speech_provider().map(|p| p.title()), Some("mine".into())) }
+        assert_eq!(s.speech_provider().map(|p| p.title()), Some("mine".into()));
         s.providers.retain(|p| p.preset != "deepseek" && !crate::speech::is_service(&p.base_url));
         assert!(s.speech_provider().is_none());
     }
