@@ -413,7 +413,7 @@ impl Workspace {
             .child(div().px(px(10.)).py(px(8.)).rounded(px(8.)).bg(Theme::bg_sunken()).text_size(text_px(12.)).line_height(text_px(19.)).text_color(Theme::text_secondary()).child(before))
             .child(label(match card.assist { Assist::Translate => t("译文"), Assist::Own(_) => t("结果"), _ => t("改后") }))
             .child(if card.result.trim().is_empty() && card.busy {
-                div().flex().items_center().gap(px(6.)).text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(crate::mascot::inline("write-assist-wait", crate::mascot::Activity::Writing, 18.)).child(if card.note.is_empty() { t("正在写…") } else { "" })
+                div().flex().items_center().gap(px(6.)).text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(crate::mascot::inline("write-assist-wait", crate::mascot::Activity::Writing)).child(if card.note.is_empty() { t("正在写…") } else { "" })
             } else {
                 div().text_size(text_px(13.)).line_height(text_px(21.)).text_color(Theme::text()).child(after)
             })

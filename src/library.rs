@@ -577,13 +577,13 @@ impl Workspace {
     /// Each background job stays compact; its dialog owns the live details.
     fn render_import(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let run = self.lib.as_ref()?.import.as_ref()?;
-        Some(ui::progress_entry("import-progress", run.title(), run.rows.len(), run.total, run.running(), crate::mascot::Activity::Importing, &ui::import_segments(run))
+        Some(ui::progress_entry("import-progress", run.title(), run.rows.len(), run.total, run.running(), &ui::import_segments(run))
             .on_click(self.on(Cmd::ShowImport, cx)).into_any_element())
     }
 
     fn render_fetching(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let run = self.lib.as_ref()?.fetching.as_ref()?;
-        Some(ui::progress_entry("fetch-progress", if run.running() { t("查找全文") } else { run.status() }, run.rows.len(), run.total, run.running(), crate::mascot::Activity::Searching, &ui::fetch_segments(run))
+        Some(ui::progress_entry("fetch-progress", if run.running() { t("查找全文") } else { run.status() }, run.rows.len(), run.total, run.running(), &ui::fetch_segments(run))
             .on_click(self.on(Cmd::ShowFetch, cx)).into_any_element())
     }
 
@@ -781,7 +781,7 @@ impl Workspace {
             )
             .children(self.render_import(cx))
             .when_some(lib.zotero.as_ref(), |d, run| d.child(
-                ui::progress_entry("zotero-progress", if run.running { t("导入 Zotero") } else if !run.error.is_empty() { t("Zotero 导入失败") } else { t("Zotero 导入完成") }, run.rows.len(), run.total, run.running, crate::mascot::Activity::Importing, &ui::zotero_segments(run))
+                ui::progress_entry("zotero-progress", if run.running { t("导入 Zotero") } else if !run.error.is_empty() { t("Zotero 导入失败") } else { t("Zotero 导入完成") }, run.rows.len(), run.total, run.running, &ui::zotero_segments(run))
                     .on_click(self.on(Cmd::ShowZotero, cx))
             ))
             .children(self.render_fetching(cx))
