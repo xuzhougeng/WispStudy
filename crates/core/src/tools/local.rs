@@ -314,6 +314,10 @@ impl ManuscriptFile {
     /// The manuscript of the writing page that already is this file: a Word file by its bytes, any other by its
     /// name while not a word of it was changed.
     fn already(&self, store: &Store) -> Result<Option<crate::manuscript::Manuscript>> {
+        // What a text says, line by line. Its pictures are shown from the figure library since: the addresses are not
+        // compared. Nor is which lines stand right under each other: a build before `manuscript::kept_together`
+        // read a table's rows, a list's items and the lines of code as paragraphs apart.
+        let said = |text: &str| crate::manuscript::paragraphs(&crate::manuscript::without_addresses(text)).map(str::to_string).collect::<Vec<_>>();
         for manuscript in store.manuscripts()? {
             let Some(source) = store.manuscript_source(&manuscript.id)? else { continue };
             let same = match &self.bytes {
@@ -321,8 +325,7 @@ impl ManuscriptFile {
                     let kept = store.source_file(&source);
                     source.kind == self.kind && std::fs::metadata(&kept).is_ok_and(|kept| kept.len() == bytes.len() as u64) && std::fs::read(&kept).is_ok_and(|kept| kept == *bytes)
                 }
-                // Its pictures are shown from the figure library since: the addresses are not compared.
-                None => source.kind == self.kind && source.name == self.name && manuscript.sections.len() == self.draft.sections.len() && manuscript.sections.iter().zip(&self.draft.sections).all(|(kept, read)| crate::manuscript::without_addresses(&kept.body) == crate::manuscript::without_addresses(&read.paragraphs.join("\n\n"))),
+                None => source.kind == self.kind && source.name == self.name && manuscript.sections.len() == self.draft.sections.len() && manuscript.sections.iter().zip(&self.draft.sections).all(|(kept, read)| said(&kept.body) == said(&read.paragraphs.join("\n\n"))),
             };
             if same { return Ok(Some(manuscript)) }
         }

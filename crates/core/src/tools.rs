@@ -3742,6 +3742,16 @@ pub(crate) mod tests {
         let taken = call(&root, "import_manuscript", &json!({"path": notes})).unwrap();
         assert_eq!((taken["manuscript"]["title"].as_str(), taken["manuscript"]["sections"].as_array().map(Vec::len)), (Some("根的综述"), Some(2)));
         assert_eq!(call(&root, "import_manuscript", &json!({"path": notes})).unwrap()["already"], true);
+        // A table's rows come one under the other; a manuscript an earlier build took in with them apart is this file all the same.
+        let table = root.join("table.md");
+        std::fs::write(&table, "# Models\n\n## Results\n\n| Model | Year |\n| --- | --- |\n| LSTM | 1997 |\n").unwrap();
+        let taken = call(&root, "import_manuscript", &json!({"path": table})).unwrap();
+        let mut store = Store::open(&dir).unwrap();
+        let section = store.manuscript(taken["manuscript"]["id"].as_str().unwrap()).unwrap().unwrap().sections.remove(0);
+        assert_eq!(section.body, "| Model | Year |\n| --- | --- |\n| LSTM | 1997 |");
+        store.save_section_body(&section.id, "| Model | Year |\n\n| --- | --- |\n\n| LSTM | 1997 |").unwrap();
+        drop(store);
+        assert_eq!(call(&root, "import_manuscript", &json!({"path": table})).unwrap()["already"], true);
         let plain = crate::docx::tests::file(&format!("{}{}{}{}{}", p("根尖干细胞的研究进展"), p("一、引言"), p("根向下生长，吸收水分，这是一段足够长的正文，用来和标题区分开。"), p("二、结果"), p("干细胞留在原处，这也是一段足够长的正文，用来和标题区分开。")), "");
         let unstyled = root.join("无样式.docx");
         std::fs::write(&unstyled, &plain).unwrap();

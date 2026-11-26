@@ -714,6 +714,8 @@ struct Line {
     kept: String,
     level: Option<u8>,
     title: bool,
+    /// Lines of a Markdown file kept one under the other (`kept_together`): never the file's title.
+    block: bool,
 }
 
 /// A title is short and is not a sentence.
@@ -733,7 +735,7 @@ fn manuscript_language(text: &str) -> String {
 /// The paragraph that is the file's title: the one styled as one, else a short first line that is not a sentence.
 fn title_of(lines: &[Line]) -> Option<usize> {
     let styled = lines.iter().position(|line| line.title);
-    if styled.is_none() && lines.len() > 1 && lines[0].level.is_none() && structure::width(&lines[0].text) <= TITLE_WIDTH && !lines[0].text.ends_with(['。', '.', '；', ';', '：', ':', '，', ',']) { return Some(0) }
+    if styled.is_none() && lines.len() > 1 && lines[0].level.is_none() && !lines[0].block && structure::width(&lines[0].text) <= TITLE_WIDTH && !lines[0].text.ends_with(['。', '.', '；', ';', '：', ':', '，', ',']) { return Some(0) }
     styled
 }
 
@@ -795,7 +797,7 @@ pub fn from_word(read: &docx::Read, file_name: &str) -> Draft {
 /// back, a section's name is that paragraph as it was.
 pub fn from_word_with(read: &docx::Read, file_name: &str, chosen: Option<&[usize]>) -> Draft {
     // What a paragraph says is its words: Markdown's characters in it stay characters (`escape_markdown`).
-    let mut lines: Vec<Line> = read.paragraphs.iter().map(|para| Line { text: para.text.clone(), kept: escape_markdown(&para.text), level: para.level, title: para.title }).collect();
+    let mut lines: Vec<Line> = read.paragraphs.iter().map(|para| Line { text: para.text.clone(), kept: escape_markdown(&para.text), level: para.level, title: para.title, block: false }).collect();
     let mut guesses = vec![];
     if lines.iter().all(|line| line.level.is_none()) {
         let title = title_of(&lines);
@@ -816,9 +818,28 @@ pub fn from_word_with(read: &docx::Read, file_name: &str, chosen: Option<&[usize
     draft
 }
 
+/// The lines of a Markdown file from line `at` on that stay one under the other in a section's text, as one
+/// paragraph of the draft, and how many they are; none for a line that is a paragraph by itself. They are what
+/// `section_markdown` writes together, told by the same reading (`markdown::lines`, `table_rows`): the lines of
+/// fenced code as written, the blank ones among them too; the rows of a table; the items of a list that stand
+/// next to each other, each as far in as it is nested (what all of them are indented by is not kept).
+fn kept_together(lines: &[markdown::Line], written: &[&str], at: usize) -> Option<(String, usize)> {
+    let run = |is: fn(&markdown::Line) -> bool| lines[at..].iter().take_while(|line| is(line)).count();
+    let code = run(|line| line.code);
+    // A fence left open runs to the end of the file: the blank lines there are not the code's.
+    if code > 0 { return Some((written[at..at + code].join("\n").trim_end().to_string(), code)) }
+    let rows = table_rows(lines, written, at);
+    if rows > 0 { return Some((written[at..at + rows].iter().map(|row| row.trim()).collect::<Vec<_>>().join("\n"), rows)) }
+    let items = &written[at..at + run(|line| line.item.is_some())];
+    let least = items.iter().map(|item| item.len() - item.trim_start_matches([' ', '\t']).len()).min()?;
+    Some((items.iter().map(|item| item[least..].trim_end()).collect::<Vec<_>>().join("\n"), items.len()))
+}
+
 /// The manuscript a Markdown (or plain text) file makes. Lines of one
-/// paragraph become one line, as the manuscript has them; a list item, a
-/// table row or a line of code keeps its own.
+/// paragraph become one line, as the manuscript has them; a picture, a
+/// quotation's line and a rule keep their own, and the rows of a table,
+/// the items of a list and the lines of fenced code stay one under the
+/// other (`kept_together`), so the section reads as the file did.
 pub fn from_markdown(text: &str, file_name: &str) -> Draft {
     let text = text.replace("\r\n", "\n");
     let mut rest = text.trim_start_matches('\u{feff}');
@@ -828,28 +849,31 @@ pub fn from_markdown(text: &str, file_name: &str) -> Draft {
         named = after[..end].lines().find_map(|line| line.strip_prefix("title:")).map(|title| title.trim().trim_matches(['"', '\'']).to_string()).filter(|title| !title.is_empty());
         rest = after[end + 4..].split_once('\n').map_or("", |(_, rest)| rest);
     }
+    // The file as the editor reads a section: what is code, an item or a table is told there, not by a rule of this reader's own.
+    let read = markdown::lines(rest);
+    let written: Vec<&str> = read.iter().map(|line| &rest[line.range.clone()]).collect();
     let mut lines: Vec<Line> = vec![];
-    let (mut joining, mut code) = (false, false);
-    for line in rest.lines() {
-        let line = line.trim_end();
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            code = !code;
-            joining = false;
-            lines.push(Line { text: line.to_string(), kept: line.to_string(), level: None, title: false });
+    let mut joining = false;
+    // The lines still to pass over: those of a block already taken whole.
+    let mut taken = 0;
+    for (at, line) in written.iter().enumerate() {
+        if taken > 0 {
+            taken -= 1;
             continue;
         }
-        if code {
-            if !line.is_empty() { lines.push(Line { text: line.to_string(), kept: line.to_string(), level: None, title: false }) }
+        if let Some((block, took)) = kept_together(&read, &written, at) {
+            lines.push(Line { text: block.clone(), kept: block, level: None, title: false, block: true });
+            (joining, taken) = (false, took - 1);
             continue;
         }
+        let trimmed = line.trim();
         if trimmed.is_empty() {
             joining = false;
             continue;
         }
         let marks = trimmed.chars().take_while(|c| *c == '#').count();
         if (1..=6).contains(&marks) && trimmed[marks..].starts_with(' ') {
-            lines.push(Line { text: trimmed[marks..].trim().trim_end_matches('#').trim().to_string(), kept: trimmed.to_string(), level: Some(marks as u8), title: false });
+            lines.push(Line { text: trimmed[marks..].trim().trim_end_matches('#').trim().to_string(), kept: trimmed.to_string(), level: Some(marks as u8), title: false, block: false });
             joining = false;
             continue;
         }
@@ -858,8 +882,7 @@ pub fn from_markdown(text: &str, file_name: &str) -> Draft {
             Some(at) if trimmed.starts_with("![") && trimmed.ends_with('}') && markdown::picture_line(&trimmed[..=at]).is_some() => &trimmed[..=at],
             _ => trimmed,
         };
-        let digits = trimmed.chars().take_while(char::is_ascii_digit).count();
-        let own = markdown::picture_line(trimmed).is_some() || trimmed.starts_with(['|', '>']) || ["- ", "* ", "+ "].iter().any(|mark| trimmed.starts_with(mark)) || (digits > 0 && (trimmed[digits..].starts_with(". ") || trimmed[digits..].starts_with(") ")));
+        let own = markdown::picture_line(trimmed).is_some() || trimmed.starts_with(['|', '>']) || read[at].rule;
         match lines.last_mut().filter(|_| joining && !own) {
             Some(last) => {
                 // Chinese is written without spaces between the lines of a paragraph.
@@ -868,7 +891,7 @@ pub fn from_markdown(text: &str, file_name: &str) -> Draft {
                 last.text.push_str(trimmed);
                 last.kept = last.text.clone();
             }
-            None => lines.push(Line { text: trimmed.to_string(), kept: trimmed.to_string(), level: None, title: false }),
+            None => lines.push(Line { text: trimmed.to_string(), kept: trimmed.to_string(), level: None, title: false, block: false }),
         }
         joining = !own;
     }
@@ -880,7 +903,7 @@ pub fn from_markdown(text: &str, file_name: &str) -> Draft {
     }
     // With a title from the header, no line is taken for one.
     let guard = named.is_some();
-    if guard { lines.insert(0, Line { text: named.unwrap_or_default(), kept: String::new(), level: None, title: true }) }
+    if guard { lines.insert(0, Line { text: named.unwrap_or_default(), kept: String::new(), level: None, title: true, block: false }) }
     let (mut draft, _) = outline(lines, file_name, true);
     draft.titled = false;
     draft
@@ -1900,13 +1923,57 @@ mod tests {
         let draft = from_markdown(text, "notes/draft.md");
         assert_eq!((draft.title.as_str(), draft.language.as_str()), ("Roots and shoots", "en"));
         let shown: Vec<(&str, &str, bool, Vec<&str>)> = draft.sections.iter().map(|s| (s.name.as_str(), s.kind.as_str(), s.bare, s.paragraphs.iter().map(String::as_str).collect())).collect();
-        assert_eq!(shown, [("Front matter", "other", true, vec!["A line before any heading."]), ("Introduction", "introduction", false, vec!["Roots grow down. 根向下生长。", "- one", "- two", "### Hairs", "Short."]), ("方法", "methods", false, vec!["```", "code  line", "```"])]);
+        assert_eq!(shown, [("Front matter", "other", true, vec!["A line before any heading."]), ("Introduction", "introduction", false, vec!["Roots grow down. 根向下生长。", "- one\n- two", "### Hairs", "Short."]), ("方法", "methods", false, vec!["```\ncode  line\n```"])]);
         // One `#` heading before the rest is the title; without any heading the file's name is, and the text is one section.
         let draft = from_markdown("# 根的综述\n\n## 引言\n\n根向下生长，吸收水分。\n", "x.md");
         assert_eq!((draft.title.as_str(), draft.language.as_str(), draft.sections.len(), draft.sections[0].name.as_str(), draft.sections[0].kind.as_str()), ("根的综述", "zh", 1, "引言", "introduction"));
         let draft = from_markdown("只有一段话，没有标题，写得长一点才不会被当成题目。\n\n第二段。", "随手记.txt");
         assert_eq!((draft.title.as_str(), draft.sections.len(), draft.sections[0].name.as_str(), draft.sections[0].bare), ("随手记", 1, "正文", true));
         assert_eq!(from_markdown("", "empty.md").sections.len(), 1);
+    }
+
+    #[test]
+    fn a_markdown_file_keeps_its_tables_lists_and_code_together() {
+        let text = "# Models\n\n## Results\n\nThe models\nare these:\n| Model | Year |\n| --- | --- |\n| LSTM | 1997 |\nAfter the table.\n\nModel | Year\n:-- | --:\nGRU | 2014\n\n  - one\n  - two\n      1. deeper\n  - three\nnot an item\n\n- apart\n\n````python\ndef f():\n    return 1\n\n```\n# no heading\n| a | b |\n|---|---|\n````\n***\nlast\nwords\n";
+        let draft = from_markdown(text, "models.md");
+        assert_eq!((draft.title.as_str(), draft.sections.len(), draft.sections[0].name.as_str()), ("Models", 1, "Results"));
+        // The rows of a table, with or without the pipes at its edges, the items of a list as far in as each is
+        // nested, and the lines of code, the blank one and what only looks like a heading or a table among them:
+        // each one under the other, as the file has them. A rule is a line of its own, and nothing joins it.
+        assert_eq!(draft.sections[0].paragraphs, ["The models are these:", "| Model | Year |\n| --- | --- |\n| LSTM | 1997 |", "After the table.", "Model | Year\n:-- | --:\nGRU | 2014", "- one\n- two\n    1. deeper\n- three", "not an item", "- apart", "````python\ndef f():\n    return 1\n\n```\n# no heading\n| a | b |\n|---|---|\n````", "***", "last words"]);
+        // Kept as a manuscript, the section's text has a table where the file had one: before, each row was a paragraph of pipes.
+        let mut store = store();
+        let made = store.import_manuscript(&draft, "markdown", "models.md", None).unwrap();
+        let blocks = markdown::parse(&made.sections[0].body);
+        assert!(matches!(&blocks[1], markdown::Block::Table { rows, .. } if rows.len() == 2 && rows[1][0].text == "LSTM"), "{blocks:?}");
+        assert!(matches!(&blocks[3], markdown::Block::Table { rows, .. } if rows.len() == 2 && rows[1][1].text == "2014"), "{blocks:?}");
+        // A file that opens with a table, a list or code has no title in it; a fence left open takes the rest, without the blank lines at its end.
+        let draft = from_markdown("| a | b |\n|---|---|\n\nShort words", "table.md");
+        assert_eq!((draft.title.as_str(), &draft.sections[0].paragraphs[..]), ("table", &["| a | b |\n|---|---|".to_string(), "Short words".into()][..]));
+        assert_eq!(from_markdown("Some words here.\n\n```\ncode\n\n## Not a section\n\n\n", "open.md").sections[0].paragraphs, ["Some words here.", "```\ncode\n\n## Not a section"]);
+    }
+
+    #[test]
+    fn an_exported_manuscript_read_again_has_the_same_sections() {
+        let section = |name: &str, body: &str| Section { name: name.into(), kind: "other".into(), body: body.into(), ..Default::default() };
+        let bodies = [
+            "Compared:\n\n| Model | Year |\n|---|:-:|\n| LSTM | 1997 |\n| GRU | **2014** |\n\nThat is all.",
+            "- one\n- two\n  - nested\n    1. deeper\n\nBetween the lists.\n\n1. first\n2. second\n\n• a dot\n• another",
+            "```python\ndef f():\n    return 1\n\n\nprint(f())\n```\n\n~~~\n| a | b |\n|---|---|\n- no item\n~~~\n\nAfter the code.",
+        ];
+        let manuscript = Manuscript { title: "Round trip".into(), language: "en".into(), sections: vec![section("Tables", bodies[0]), section("Lists", bodies[1]), section("Code", bodies[2])], ..Default::default() };
+        let written = markdown(&manuscript);
+        let draft = from_markdown(&written, "round.md");
+        assert_eq!((draft.title.as_str(), draft.sections.iter().map(|s| s.name.as_str()).collect::<Vec<_>>()), ("Round trip", vec!["Tables", "Lists", "Code"]));
+        assert_eq!(draft.sections.iter().map(|s| s.paragraphs.join("\n\n")).collect::<Vec<_>>(), bodies);
+        // Kept, the sections' texts are those, and written again the file is the same to the byte.
+        let mut store = store();
+        let made = store.import_manuscript(&draft, "markdown", "round.md", None).unwrap();
+        assert_eq!(made.sections.iter().map(|s| s.body.as_str()).collect::<Vec<_>>(), bodies);
+        assert_eq!(markdown(&made), written);
+        // Lines written right under each other in the editor are paragraphs apart in the file and come back so, the table still whole.
+        let manuscript = Manuscript { title: "T".into(), sections: vec![section("Results", "Compared:\n| a | b |\n|---|---|\n| 1 | 2 |\nThe end.")], ..Default::default() };
+        assert_eq!(from_markdown(&markdown(&manuscript), "t.md").sections[0].paragraphs, ["Compared:", "| a | b |\n|---|---|\n| 1 | 2 |", "The end."]);
     }
 
     /// A Word file as this app writes one, with a comment put on it.
