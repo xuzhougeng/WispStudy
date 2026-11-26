@@ -233,18 +233,18 @@
           <figcaption><b>Figure 14.</b> “No text extracted: pages have no text layer”, with two buttons below: “Read again” and “Recognise page text”.</figcaption>
         </figure>
 
-        <p>“Recognise page text” is text recognition (OCR): it reads the words off the pages. Which engine does it is chosen under Settings › Network › “Text recognition (OCR)”:</p>
+        <p>“Recognise page text” is text recognition (OCR): it reads the words off the pages. Which engine does it is chosen on the “Text recognition (OCR)” card in “Settings › AI › Tasks” (before v0.20.0 it was under “Settings › Network”): the switch at the right of its title says whether pages are recognised at all, and under it is one row per engine.</p>
 
         <figure class="shot">
-          <img src="../../img/en/t/migrate-15-ocr-settings.jpg" width="1372" height="867" loading="lazy" alt="Settings › Network, lower half, “Text recognition (OCR)”: Engine with the choices Auto, DeepSeek OCR, Vision model and Off. Auto is chosen, and green text beside it says Using DeepSeek OCR. Below is the DeepSeek OCR API key box, which uses the DeepSeek service's key when left blank. A paragraph at the bottom says that DeepSeek OCR uploads the whole file to DeepSeek, at most 1000 pages and 100 MB a file, billed by the page, and that the vision model is the one the AI page gives the Structure full text task.">
-          <figcaption><b>Figure 15.</b> “Engine”: “Auto”, “DeepSeek OCR”, “Vision model” and “Off”. With “Auto”, the label beside it says which one is actually used.</figcaption>
+          <img src="../../img/en/t/migrate-15-ocr-tasks.jpg" width="1372" height="870" loading="lazy" alt="The Tasks page of Settings › AI, lower half: a “Text recognition (OCR)” card with its switch on at the right of the title, and under it two rows: DeepSeek OCR, marked In use, saying the whole file is uploaded to DeepSeek, billed by the page, up to 1000 pages and 100 MB a file, with “Uses the key of DeepSeek under Models” at the right; Vision model, with “Use this one” beside it, saying the model of “Structure full text” above reads the pages as pictures, one at a time, with deepseek-flash at the right.">
+          <figcaption><b>Figure 15.</b> “Text recognition (OCR)” in “Settings › AI › Tasks”: one row per engine; the one in use is marked “In use”, and the other has “Use this one”.</figcaption>
         </figure>
 
         <ul>
-          <li><strong>DeepSeek OCR</strong> uploads the whole file to DeepSeek, at most 1000 pages and 100 MB a file, billed by the page. With the key left blank it uses the key of the DeepSeek service on the AI page, or <code>DEEPSEEK_API_KEY</code>.</li>
-          <li><strong>Vision model</strong> is the model the AI page gives the “Structure full text” task. It draws the pages as pictures and reads them one at a time.</li>
+          <li><strong>DeepSeek OCR</strong> uploads the whole file to DeepSeek, at most 1000 pages and 100 MB a file, billed by the page. Its key is the one of the DeepSeek service in “Settings › AI › Models”, or <code>DEEPSEEK_API_KEY</code>.</li>
+          <li><strong>Vision model</strong> is the model of the “Structure full text” task higher up the same page. It draws the pages as pictures and reads them one at a time, so it has to be a model that sees pictures.</li>
         </ul>
-        <p>This example has a DeepSeek key, so “Auto” says “Using DeepSeek OCR”. Back at the paper, click “Recognise page text”. The file's row shows a spinner and “Recognising page text…”, and about half a minute later the 35 pages were done:</p>
+        <p>This example has a DeepSeek key, so the DeepSeek OCR row is marked “In use”. Back at the paper, click “Recognise page text”. The file's row shows a spinner and “Recognising page text…”, and about half a minute later the 35 pages were done:</p>
 
         <figure class="shot">
           <img src="../../img/en/t/migrate-16-ocr-done.jpg" width="1372" height="867" loading="lazy" alt="The same paper's details, its status now PDF saved. Under “Main text PDF” the row of Qin_2026_scan.pdf reads Body · 8.2 MB · 27 of 35 pages contain text for chat (read by DeepSeek OCR). In the list the row's title is still Qin_2026_scan, with authors and year missing.">
@@ -326,7 +326,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> Most screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface; Figures 2 and 3 still show the Chinese interface and the earlier run (Figure 2 comes from a small database made for the demo). Figures 4, 5 and 12–16 come from another run with v0.18.0, also with the English interface, on a library of 40 papers: the Zotero database was made for the demo (its items are real papers), the scan was made by drawing a preprint page by page into pictures, and text recognition used DeepSeek OCR (straight to DeepSeek, not through a model provider). Figures 17–20 come from a run on November 24, 2026 with v0.19.0, with the English interface, on the same library of 40 papers (renamed “Plant single-cell transcriptomics” for the English run); no model was used. The numbers in the text come from those runs and will differ with your own papers, but the steps are the same. The text uses the labels of the English interface (Settings › General › Interface language).</p>
+      <p><b>About this tutorial.</b> Most screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface; Figures 2 and 3 still show the Chinese interface and the earlier run (Figure 2 comes from a small database made for the demo). Figures 4, 5 and 12–16 come from another run with v0.18.0, also with the English interface, on a library of 40 papers: the Zotero database was made for the demo (its items are real papers), the scan was made by drawing a preprint page by page into pictures, and text recognition used DeepSeek OCR (straight to DeepSeek, not through a model provider). Figures 17–20 come from a run on November 24, 2026 with v0.19.0, with the English interface, on the same library of 40 papers (renamed “Plant single-cell transcriptomics” for the English run); no model was used. The numbers in the text come from those runs and will differ with your own papers, but the steps are the same. The text uses the labels of the English interface (Settings › General › Interface language). Figure 15 shows “Settings › AI › Tasks” of v0.20.0, where text recognition has been since that version.</p>
       <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation. Check key numbers and conclusions against the original text.</p>
     </div>
   </div>
