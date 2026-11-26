@@ -884,9 +884,13 @@ impl Workspace {
         self.show_toast(message.into(), true, None, cx);
     }
 
-    /// What was done, with a button that takes it back: it stays up long enough to be read and reached.
+    /// What was done, with a button beside it (to go where it went, or to take it back): it stays up long enough to be read and reached.
+    pub fn say_with(&mut self, message: impl Into<SharedString>, label: impl Into<SharedString>, cmd: Cmd, cx: &mut Context<Self>) {
+        self.show_toast(message.into(), false, Some((label.into(), cmd)), cx);
+    }
+
     pub fn say_undoable(&mut self, message: impl Into<SharedString>, undo: Cmd, cx: &mut Context<Self>) {
-        self.show_toast(message.into(), false, Some((t("撤销").into(), undo)), cx);
+        self.say_with(message, t("撤销"), undo, cx);
     }
 
     fn show_toast(&mut self, message: SharedString, error: bool, action: Option<(SharedString, Cmd)>, cx: &mut Context<Self>) {

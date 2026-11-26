@@ -1,15 +1,23 @@
-//! 移到文献库: a paper of the library (or conversation) on show moved into another library, chosen in a dialog
-//! (`Modal::MoveTo`, from the paper's right-click menu). The engine's `Store::take_paper` does the moving; here
-//! the window opens the library it went to on the paper, read as it was. A conversation left with no paper and
-//! no question goes the way a removed conversation goes (its folder to `removed/`).
+//! 移到文献库: one paper or several marked ones of the library (or conversation) on show moved into another library,
+//! chosen in a dialog (`Modal::MoveTo`, from the right-click menu). The engine's `Store::take_papers` does the moving;
+//! for one paper the window opens the library it went to on that paper, read as it was, while moving several from a
+//! library stays in the list with a button on the toast to open the target. A conversation left with no paper and no
+//! question goes the way a removed conversation goes (its folder to `removed/`).
 
 use crate::app::{Cmd, Modal, Talk, Workspace};
+use crate::context::Nav;
 use crate::i18n::t;
 use crate::theme::{self, Theme, text_px};
 use crate::ui;
 use gpui::{prelude::FluentBuilder, *};
 use wisp_core::libraries::{self, LibraryInfo};
 use wisp_core::store::Store;
+
+fn brief(title: &str) -> String {
+    let line = ui::one_line(title);
+    if line.chars().count() <= 36 { return line }
+    format!("{}…", line.chars().take(34).collect::<String>().trim_end())
+}
 
 impl Workspace {
     /// The libraries a paper of the open library can go to: every other one, not the conversations.
@@ -18,46 +26,124 @@ impl Workspace {
         libraries::shelf(&self.libraries, &self.settings.library_order).into_iter().filter(|info| info.id != here).cloned().collect()
     }
 
-    pub(crate) fn ask_move_paper(&mut self, paper: String, cx: &mut Context<Self>) {
+    pub(crate) fn ask_move_papers(&mut self, papers: Vec<String>, cx: &mut Context<Self>) {
+        if papers.is_empty() { return }
         if self.move_targets().is_empty() { return self.fail(t("还没有别的文献库可以移过去。"), cx) }
         self.modal_error.clear();
-        self.modal = Some(Modal::MoveTo { paper, to: None });
+        self.modal = Some(Modal::MoveTo { papers, to: None });
         cx.notify();
     }
 
-    pub(crate) fn move_paper(&mut self, paper: String, to: String, window: &mut Window, cx: &mut Context<Self>) {
+    /// Enter with no library chosen: the only one offered is chosen (a second Enter moves), else the dialog says what it waits for.
+    pub(crate) fn choose_only_move_target(&mut self, cx: &mut Context<Self>) {
+        let mut offered = self.move_targets();
+        match (offered.pop(), offered.is_empty(), self.modal.as_mut()) {
+            (Some(only), true, Some(Modal::MoveTo { to, .. })) => *to = Some(only.id),
+            _ => self.modal_error = t("选一个文献库。").into(),
+        }
+        cx.notify();
+    }
+
+    /// Arrow keys and Enter in `Modal::MoveTo` walk the libraries offered.
+    pub(crate) fn move_nav(&mut self, nav: Nav, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        let targets = self.move_targets();
+        let Some(Modal::MoveTo { to, .. }) = self.modal.as_mut() else { return false };
+        if targets.is_empty() { return true }
+        let at = to.as_deref().and_then(|id| targets.iter().position(|info| info.id == id));
+        let last = targets.len() - 1;
+        match nav {
+            Nav::Down => *to = Some(targets[at.map_or(0, |at| (at + 1).min(last))].id.clone()),
+            Nav::Up => *to = Some(targets[at.map_or(last, |at| at.saturating_sub(1))].id.clone()),
+            Nav::First => *to = Some(targets[0].id.clone()),
+            Nav::Last => *to = Some(targets[last].id.clone()),
+            Nav::Open => {
+                self.run(Cmd::SubmitModal, window, cx);
+                return true;
+            }
+            _ => return true,
+        }
+        self.modal_error.clear();
+        cx.notify();
+        true
+    }
+
+    pub(crate) fn move_papers(&mut self, papers: Vec<String>, to: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(target) = self.libraries.iter().find(|info| info.id == to).cloned() else { return };
         let Some(lib) = self.lib.as_mut() else { return };
         if lib.answering() { return self.modal_error = t("这次回答结束后再移。").into() }
-        // Where its PDF was read to is written first, so that it goes along.
+        // Where their PDFs were read to is written first, so that it goes along.
         lib.keep_places(cx);
-        let (reading, tab) = (lib.reading && lib.selected.as_deref() == Some(paper.as_str()), lib.tab);
-        let taken = Store::open(&target.dir).and_then(|mut store| store.take_paper(&mut lib.store, &paper));
+        let single = (papers.len() == 1).then(|| papers[0].as_str());
+        let (reading, tab) = (single.is_some_and(|paper| lib.reading && lib.selected.as_deref() == Some(paper)), lib.tab);
+        let taken = Store::open(&target.dir).and_then(|mut store| store.take_papers(&mut lib.store, &papers));
         let taken = match taken {
-            Ok(taken) => taken,
-            Err(err) => return self.modal_error = format!("{err:#}"),
+            Ok(taken) if !taken.is_empty() => taken,
+            Ok(_) => return,
+            Err(err) => return self.modal_error = crate::i18n::phrase(&format!("{err:#}")),
         };
         self.modal = None;
+        let mut fields_left: Vec<String> = vec![];
+        for field in taken.iter().flat_map(|t| &t.fields_left) {
+            if !fields_left.contains(field) { fields_left.push(field.clone()) }
+        }
         let from = lib.info.clone();
-        // A conversation that held only this paper, where nothing was asked, has nothing left to go back to.
+        // A conversation that held only these papers, where nothing was asked, has nothing left to go back to.
         let empty = from.draft && lib.store.list_papers().is_ok_and(|papers| papers.is_empty()) && lib.chat(Talk::Library).messages.is_empty() && lib.store.list_conversations("").is_ok_and(|kept| kept.iter().all(|c| c.questions == 0));
-        self.close_library(cx);
-        if empty && let Err(err) = libraries::remove(&self.root, &from) { self.fail(format!("{err:#}"), cx) }
-        self.libraries = libraries::list(&self.root);
-        self.open_library(&to, window, cx);
-        if self.lib.as_ref().is_none_or(|lib| lib.info.id != to || lib.paper(&taken.paper).is_none()) { return }
-        self.select(Some(taken.paper.clone()), window, cx);
-        self.run(Cmd::SetTab(tab), window, cx);
-        if let Some(lib) = self.lib.as_mut() { lib.reading = reading }
-        let mut said = if taken.joined { tf!("「{}」里已有这篇：文件和标注并到了那一条上。", "“{}” already had this paper: its files and annotations were added to it.", target.name) } else { tf!("已移到「{}」。", "Moved to “{}”.", target.name) };
-        if !empty { said += &tf!("原来的那条在「{}」的回收站里。", " The original is in the trash of “{}”.", from.name) }
-        if !taken.fields_left.is_empty() { said += &tf!("这里没有词条「{}」，它的内容没有带过来。", " This library has no field “{}”; its values were not brought.", taken.fields_left.join("」「")) }
-        self.say(said, cx);
+        if taken.len() == 1 || empty {
+            self.close_library(cx);
+            if empty && let Err(err) = libraries::remove(&self.root, &from) { self.fail(format!("{err:#}"), cx) }
+            self.libraries = libraries::list(&self.root);
+            self.open_library(&to, window, cx);
+            if let [only] = taken.as_slice() {
+                if self.lib.as_ref().is_none_or(|lib| lib.info.id != to || lib.paper(&only.paper).is_none()) { return }
+                self.select(Some(only.paper.clone()), window, cx);
+                self.run(Cmd::SetTab(tab), window, cx);
+                if let Some(lib) = self.lib.as_mut() { lib.reading = reading }
+                let mut said = if only.joined { tf!("「{}」里已有这篇：文件和标注并到了那一条上。", "“{}” already had this paper: its files and annotations were added to it.", target.name) } else { tf!("已移到「{}」。", "Moved to “{}”.", target.name) };
+                if !empty { said += &tf!("原来的那条在「{}」的回收站里。", " The original is in the trash of “{}”.", from.name) }
+                if !fields_left.is_empty() { said += &tf!("这里没有词条「{}」，它的内容没有带过来。", " This library has no field “{}”; its values were not brought.", fields_left.join("」「")) }
+                return self.say(said, cx);
+            }
+        } else {
+            if let Some(parked) = self.parked.iter_mut().find(|lib| lib.info.id == to) { let _ = parked.reload(); }
+            self.change(cx, |_| Ok(()));
+            self.libraries = libraries::list(&self.root);
+            window.focus(&self.focus);
+        }
+        let count = taken.len();
+        let joined = taken.iter().filter(|t| t.joined).count();
+        let mut said = if joined == 0 {
+            tn!("已把 {n} 篇文献移到「{}」。", "Moved {n} to “{}”.", count, "paper", target.name)
+        } else if joined == count {
+            tf!("「{}」里已有这 {} 篇：文件和标注并到了原有的条目上。", "“{}” already had these {} papers: their files and annotations were added to them.", target.name, count)
+        } else {
+            tf!("已把 {} 篇文献移到「{}」，其中 {} 篇并到了已有的条目上。", "Moved {} papers to “{}” ({} merged with existing entries).", count, target.name, joined)
+        };
+        if !empty {
+            said += &if self.lib.as_ref().is_some_and(|lib| lib.info.id == from.id) {
+                tf!("原来的条目在本库的回收站里。", " The originals are in this library's trash.")
+            } else {
+                tf!("原来的条目在「{}」的回收站里。", " The originals are in the trash of “{}”.", from.name)
+            };
+        }
+        if !fields_left.is_empty() {
+            said += &tf!("「{}」没有词条「{}」，内容没有带过来。", " “{}” has no field “{}”; its values were not brought.", target.name, fields_left.join("」「"));
+        }
+        if self.lib.as_ref().is_some_and(|lib| lib.info.id == from.id) {
+            self.say_with(said, t("打开"), Cmd::OpenLibrary(to), cx);
+        } else {
+            self.say(said, cx);
+        }
     }
 
     pub(crate) fn render_move_dialog(&self, cx: &mut Context<Self>) -> Option<Div> {
-        let Some(Modal::MoveTo { paper, to }) = &self.modal else { return None };
-        let title = self.lib.as_ref().and_then(|lib| lib.paper(paper)).map(|p| p.title.clone()).unwrap_or_default();
+        let Some(Modal::MoveTo { papers, to }) = &self.modal else { return None };
+        let titles: Vec<&str> = papers.iter().filter_map(|id| self.lib.as_ref()?.paper(id)).map(|p| p.title.as_str()).collect();
+        let what = match titles.as_slice() {
+            [one] => one.to_string(),
+            [first, ..] => tn!("「{}」等 {n} 篇文献", "“{}” ({n} in all)", titles.len(), "paper", brief(first)),
+            [] => String::new(),
+        };
         let draft = self.lib.as_ref().is_some_and(|lib| lib.info.draft);
         let rows = self.move_targets().into_iter().enumerate().map(|(i, info)| {
             let chosen = to.as_deref() == Some(info.id.as_str());
@@ -79,13 +165,18 @@ impl Workspace {
                 .child(div().flex_none().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tn!("{n} 篇", "{n}", info.paper_count, "paper")))
                 .on_click(self.on(Cmd::ChooseMoveTarget(info.id.clone()), cx))
         });
-        let note = if draft { t("PDF、标注、读到的位置和关于它的对话都一起过去；这段对话里不再有它。") } else { t("PDF、标注、读到的位置和关于它的对话都一起过去，收录状态回到待判断；原来的那条留在本库的回收站里。") };
+        let note = match (papers.len() > 1, draft) {
+            (false, true) => t("PDF、标注、读到的位置和关于它的对话都一起过去；这段对话里不再有它。"),
+            (false, false) => t("PDF、标注、读到的位置和关于它的对话都一起过去，收录状态回到待判断；原来的那条留在本库的回收站里。"),
+            (true, true) => t("PDF、标注、读到的位置和各自的对话都一起过去；这段对话里不再有它们。"),
+            (true, false) => t("PDF、标注、读到的位置和各自的对话都一起过去，收录状态回到待判断；原来的条目留在本库的回收站里。"),
+        };
         Some(
             ui::dialog(460.)
                 .child(ui::dialog_title(t("移到文献库")))
                 .child(
                     div().id("modal-body").flex().flex_col().flex_1().min_h_0().overflow_y_scroll().gap(px(10.)).px(px(20.)).py(px(8.))
-                        .child(div().font_weight(FontWeight::MEDIUM).line_height(text_px(21.)).child(title))
+                        .child(div().font_weight(FontWeight::MEDIUM).line_height(text_px(21.)).child(what))
                         .child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_tertiary()).child(note))
                         .child(div().flex().flex_col().gap(px(2.)).children(rows))
                         .child(ui::error_line(&self.modal_error)),

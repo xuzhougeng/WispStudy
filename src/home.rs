@@ -259,8 +259,11 @@ impl Workspace {
                         .shadow(theme::shadow_panel())
                         .child(ui::icon(mark, 14., color))
                         .child(div().min_w_0().child(toast.message.clone()))
-                        // What was just done, taken back from where it is said.
-                        .when_some(toast.action.clone(), |d, (label, cmd)| d.child(div().id("toast-action").flex_none().ml(px(4.)).px(px(8.)).py(px(2.)).rounded(px(6.)).cursor_pointer().text_color(Theme::accent()).font_weight(FontWeight::MEDIUM).hover(|s| s.bg(Theme::hover())).child(label).on_click(self.on(cmd, cx)))),
+                        // What was just done, taken back or followed from where it is said.
+                        .when_some(toast.action.clone(), |d, (label, cmd)| d.child(div().id("toast-action").flex_none().ml(px(4.)).px(px(8.)).py(px(2.)).rounded(px(6.)).cursor_pointer().text_color(Theme::accent()).font_weight(FontWeight::MEDIUM).hover(|s| s.bg(Theme::hover())).child(label).on_click(cx.listener(move |this, _, window, cx| {
+                            this.toast = None;
+                            this.run(cmd.clone(), window, cx);
+                        })))),
                 )
                 .into_any_element(),
         )

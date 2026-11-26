@@ -70,20 +70,48 @@ fn put_by_file(from: &Connection, tx: &Transaction, old: &str, new: &str) -> Res
 }
 
 impl Store {
+    /// The paper here that is `paper` (by DOI, PMID or title, or holding one of `files` by bytes); errs when it is in the trash.
+    fn held_here(&self, paper: &Paper, file_names: &[String], files: &[Vec<Value>]) -> Result<Option<String>> {
+        let mut held = existing_paper(&self.db, paper)?;
+        for file in files {
+            if held.is_some() { break }
+            let sha = text(file_names, file, "sha256");
+            if sha.is_empty() { continue }
+            held = self.db.query_row("SELECT paper_id FROM resources WHERE sha256 = ?1 ORDER BY added_at, id LIMIT 1", [sha], |r| r.get(0)).optional()?;
+        }
+        if let Some(held) = &held && self.in_trash(held)? { bail!("「{}」在这个文献库的回收站里：先把它恢复，再移过来。", paper.title) }
+        Ok(held)
+    }
+
+    /// Take the papers `ids` of `from` into this library, in order. Checked beforehand so a paper in this library's
+    /// trash or a missing file stops the whole lot before any paper moves.
+    pub fn take_papers(&mut self, from: &mut Store, ids: &[String]) -> Result<Vec<Taken>> {
+        if from.root() == self.root() { bail!("这篇文献已经在这个文献库里。") }
+        let mut ordered = vec![];
+        for id in ids {
+            if !ordered.contains(id) { ordered.push(id.clone()) }
+        }
+        for id in &ordered {
+            let paper = from.get_paper(id)?;
+            let (file_names, files) = rows(&from.db, "resources", "paper_id", id)?;
+            let held = self.held_here(&paper, &file_names, &files)?;
+            for file in &files {
+                let sha = text(&file_names, file, "sha256");
+                if let (Some(held), false) = (&held, sha.is_empty()) && self.db.query_row("SELECT 1 FROM resources WHERE paper_id = ?1 AND sha256 = ?2", params![held, sha], |_| Ok(())).optional()?.is_some() { continue }
+                let source = from.root().join(text(&file_names, file, "local_path").replace('/', std::path::MAIN_SEPARATOR_STR));
+                std::fs::metadata(&source).map_err(|err| anyhow!("无法复制文件「{}」：{err}", text(&file_names, file, "title")))?;
+            }
+        }
+        ordered.iter().map(|id| self.take_paper(from, id)).collect()
+    }
+
     /// Take the paper `id` of `from` into this library (see the module). `from` keeps it in its trash.
     pub fn take_paper(&mut self, from: &mut Store, id: &str) -> Result<Taken> {
         if from.root() == self.root() { bail!("这篇文献已经在这个文献库里。") }
         let paper = from.get_paper(id)?;
         let (file_names, files) = rows(&from.db, "resources", "paper_id", id)?;
         // The paper here: the same record, or one holding one of the same files.
-        let mut held = existing_paper(&self.db, &paper)?;
-        for file in &files {
-            if held.is_some() { break }
-            let sha = text(&file_names, file, "sha256");
-            if sha.is_empty() { continue }
-            held = self.db.query_row("SELECT paper_id FROM resources WHERE sha256 = ?1 ORDER BY added_at, id LIMIT 1", [sha], |r| r.get(0)).optional()?;
-        }
-        if let Some(held) = &held && self.in_trash(held)? { bail!("「{}」在这个文献库的回收站里：先把它恢复，再移过来。", paper.title) }
+        let held = self.held_here(&paper, &file_names, &files)?;
         let mut target = match &held {
             Some(held) => {
                 let here = self.get_paper(held)?;
@@ -336,6 +364,28 @@ mod tests {
         to.trash_paper(&here.id).unwrap();
         assert!(to.take_paper(&mut from, &id).unwrap_err().to_string().contains("回收站"));
         assert!(!from.in_trash(&id).unwrap());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn several_papers_move_together_or_none_when_one_is_trashed_here() {
+        let dir = temp_dir("batch");
+        let (mut from, first) = source(&dir);
+        let second = from.add_paper(Paper { title: "Auxin transport in roots".into(), doi: "10.1234/auxin".into(), tags: vec!["生长素".into()], ..Default::default() }).unwrap();
+        let mut to = Store::open(&dir.join("to")).unwrap();
+        let trashed = to.add_paper(Paper { title: "Auxin transport in roots".into(), doi: "10.1234/auxin".into(), ..Default::default() }).unwrap();
+        to.trash_paper(&trashed.id).unwrap();
+        // The second is in the target's trash: the first does not move either.
+        assert!(to.take_papers(&mut from, &[first.clone(), second.id.clone()]).unwrap_err().to_string().contains("回收站"));
+        assert!(!from.in_trash(&first).unwrap() && !from.in_trash(&second.id).unwrap());
+        assert!(to.list_papers().unwrap().is_empty());
+
+        to.restore_paper(&trashed.id).unwrap();
+        let taken = to.take_papers(&mut from, &[first.clone(), second.id.clone(), first.clone()]).unwrap();
+        assert_eq!(taken.len(), 2);
+        assert_eq!((taken[0].joined, taken[1].joined), (false, true));
+        assert_eq!(to.list_papers().unwrap().len(), 2);
+        assert!(from.in_trash(&first).unwrap() && from.in_trash(&second.id).unwrap());
         std::fs::remove_dir_all(dir).ok();
     }
 }

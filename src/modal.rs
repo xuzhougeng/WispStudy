@@ -134,8 +134,8 @@ pub enum Modal {
     Headings(Box<crate::comments::HeadingsForm>),
     /// 写作's 资料库: the figures to bring in and to put into the manuscript. Its state is `Library::write_figures`.
     WriteFigures,
-    /// 移到文献库: the paper, and the library chosen for it (`transfer.rs`).
-    MoveTo { paper: String, to: Option<String> },
+    /// 移到文献库: the papers, and the library chosen for them (`transfer.rs`).
+    MoveTo { papers: Vec<String>, to: Option<String> },
     /// 归入已有文献: the papers whose files go under another, what narrows the papers offered, and the one chosen (`filing.rs`).
     FileInto { papers: Vec<String>, query: Entity<TextInput>, to: Option<String> },
 }
@@ -448,12 +448,12 @@ impl Workspace {
                 self.run(cmd, window, cx);
             }
             Modal::ImportReport => self.run(Cmd::CloseModal, window, cx),
-            Modal::MoveTo { paper, to } => match to.clone() {
+            Modal::MoveTo { papers, to } => match to.clone() {
                 Some(to) => {
-                    let paper = paper.clone();
-                    self.run(Cmd::MovePaper(paper, to), window, cx)
+                    let papers = papers.clone();
+                    self.run(Cmd::MovePapers(papers, to), window, cx)
                 }
-                None => self.modal_error = t("选一个文献库。").into(),
+                None => self.choose_only_move_target(cx),
             },
             Modal::FileInto { papers, to, .. } => match to.clone() {
                 Some(to) => {
