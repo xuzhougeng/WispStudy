@@ -957,6 +957,49 @@ pub fn chat_request_with(profile: &Profile, ctx: &Context, wire: &[Value], tools
     }
 }
 
+/// The tools a conversation's requests carry, as they were sent. A service reads the table near the head of
+/// every request and keeps what it read: with a tool taken out of the middle it reads everything after that anew
+/// (some 16,000 tokens on DeepSeek and on Kimi, measured with the `cache_probe` example), with one added at the
+/// end only the conversation. So a conversation's table only grows. What it was given stays as it was sent when
+/// it is no longer on offer (a call of it then fails and says why); what comes on offer later is added after it,
+/// and only when a question is asked (`offer`), never between the steps of an answer.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Table {
+    tools: Vec<crate::connector::Tool>,
+}
+
+impl Table {
+    /// What is on offer when a question is asked: the library's tools, then those from outside it. One the table
+    /// does not have goes to its end; one it has is given as it is now, in its place (the skills `use_skill` lists).
+    pub fn offer(&mut self, library: &[ToolDef], outside: &[crate::connector::Tool]) {
+        let library = library.iter().map(|tool| crate::connector::Tool { name: tool.name.into(), tool: tool.name.into(), description: tool.description.into(), input_schema: tool.input_schema.clone(), read_only: !tool.writes });
+        for tool in library.chain(outside.iter().cloned()) {
+            match self.tools.iter_mut().find(|known| known.name == tool.name) {
+                Some(known) => *known = tool,
+                None => self.tools.push(tool),
+            }
+        }
+    }
+
+    /// The table as a request carries it (`chat_request_with`).
+    pub fn tools(&self) -> &[crate::connector::Tool] {
+        &self.tools
+    }
+
+    pub fn has(&self, name: &str) -> bool {
+        self.tools.iter().any(|tool| tool.name == name)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.tools.is_empty()
+    }
+
+    /// The context is built anew, and with it what the model is given: the next question starts the table again.
+    pub fn clear(&mut self) {
+        self.tools.clear();
+    }
+}
+
 // ---- the streamed turn
 
 /// A tool the model asked for.
@@ -2347,6 +2390,46 @@ mod tests {
         // The same quotation twice is one; an unclosed one is no quotation, and what follows is still read.
         assert_eq!(citations("[P1 p.2 \"a b c\"] [P1 p.2 \"a b c\"] [P5 p.1 \"open] [P6]"), [cite("P1", Some(2), "a b c"), cite("P5", Some(1), ""), cite("P6", None, "")]);
         assert_eq!(citations("说了 \"引号\" 的话 [P2]"), [cite("P2", None, "")]);
+    }
+
+    #[test]
+    fn a_table_only_grows() {
+        let ctx = Context { instructions: "I".into(), documents: "D".into(), ..Default::default() };
+        let (wire, profile) = ([user_message("hi")], Profile { api_key: "k".into(), ..Default::default() });
+        let outside = |name: &str, says: &str| crate::connector::Tool { name: name.into(), tool: name.into(), description: says.into(), input_schema: json!({"type": "object"}), read_only: true };
+        let names = |table: &Table| table.tools().iter().map(|tool| tool.name.clone()).collect::<Vec<_>>();
+        let sent = |table: &Table| chat_request_with(&profile, &ctx, &wire, &[], table.tools()).unwrap().body["tools"].clone();
+        let all = crate::tools::library_catalog();
+        let without: Vec<ToolDef> = crate::tools::library_catalog().into_iter().filter(|tool| tool.name != "web_search").collect();
+
+        // A table of the library's tools and those from outside is what a request of both carried before there was a table.
+        let mut table = Table::default();
+        table.offer(&all, &[outside("notes__find", "找笔记")]);
+        assert_eq!(sent(&table), chat_request_with(&profile, &ctx, &wire, &all, &[outside("notes__find", "找笔记")]).unwrap().body["tools"]);
+        // The same on offer again: not a byte of it changes.
+        let before = sent(&table);
+        table.offer(&all, &[outside("notes__find", "找笔记")]);
+        assert_eq!(sent(&table), before);
+
+        // What is no longer on offer stays where it was, as it was sent.
+        table.offer(&without, &[]);
+        assert_eq!(sent(&table), before);
+        assert!(table.has("web_search") && table.has("notes__find"));
+
+        // What comes on offer later goes to the end, whatever its place in the catalog: nothing sent before it moves.
+        let mut late = Table::default();
+        late.offer(&without, &[outside("notes__find", "找笔记")]);
+        let head = names(&late);
+        late.offer(&all, &[outside("notes__find", "找笔记"), outside("use_skill", "技能：甲")]);
+        assert_eq!(names(&late)[..head.len()], head[..]);
+        assert_eq!(names(&late)[head.len()..], ["web_search", "use_skill"]);
+        // One whose words changed is given as it is now, in its place.
+        late.offer(&all, &[outside("use_skill", "技能：甲、乙")]);
+        assert_eq!((names(&late).len(), late.tools().last().map(|tool| tool.description.as_str())), (head.len() + 2, Some("技能：甲、乙")));
+
+        // A context built anew starts the table again.
+        late.clear();
+        assert!(late.is_empty() && !late.has("web_search"));
     }
 
     #[test]
