@@ -371,7 +371,7 @@ pub(super) fn import_manuscript(store: &mut Store, args: &Value) -> Result<Value
         "guessedHeadings": file.guessed(),
         "retiredBlank": retired.len(),
         "notes": notes,
-        "next": "稿件已在写作页，原文件没有改动。告诉用户题目、分了几节和 notes 里的情况；figures.added 和 figures.known 是收进图片库（或原来就在）并显示在稿件里的图，figures.left 里的图没有带进来，照 reason 告诉用户（可以转成 PNG 后在写作页的资料库里上传）。正文里的引用还是文件里写的文字，没有变成文献库的引用。之后它是写作页的稿件：读它用 read_manuscript，留审阅意见用 comment_manuscript，改它用 edit_section。",
+        "next": "稿件已在写作页，原文件没有改动。告诉用户题目、分了几节和 notes 里的情况；figures.added 和 figures.known 是收进图片库（或原来就在）并显示在稿件里的图，figures.left 里的图没有带进来，照 reason 告诉用户（可以转成 PNG 后在写作页的资料库里上传）。正文里的引用还是文件里写的文字，没有变成文献库的引用。之后它是写作页的稿件：读它用 read_manuscript，留审阅意见用 comment_manuscript，改它用 edit_section（整节重写用 write_section）。",
     }))
 }
 

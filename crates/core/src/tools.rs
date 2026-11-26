@@ -42,17 +42,18 @@ pub struct ToolDef {
 }
 
 /// The tools that change the library.
-const WRITING: [&str; 29] = ["compress_pdf", "ocr_pdf", "create_library", "import_library", "export_library", "import_pdf", "import_references", "import_zotero", "save_search", "remove_search", "run_search", "undo_import", "suggest_screening", "suggest_field", "sync_searches", "find_pdf", "import_url", "organise_papers", "edit_section", "set_outline", "comment_manuscript", "export_note", "save_note_to_notion", "resolve_note_save", "save_cite_style", "restyle_docx", "import_docx_references", "import_manuscript", "make_slides"];
+const WRITING: [&str; 30] = ["compress_pdf", "ocr_pdf", "create_library", "import_library", "export_library", "import_pdf", "import_references", "import_zotero", "save_search", "remove_search", "run_search", "undo_import", "suggest_screening", "suggest_field", "sync_searches", "find_pdf", "import_url", "organise_papers", "edit_section", "write_section", "set_outline", "comment_manuscript", "export_note", "save_note_to_notion", "resolve_note_save", "save_cite_style", "restyle_docx", "import_docx_references", "import_manuscript", "make_slides"];
 /// Of those, the ones the window's assistant runs only with the person's
 /// consent. Saving a search, suggesting a screening decision or proposing
 /// a field's value changes nothing a person has not yet to act on, so they
-/// run as asked. The two that write a manuscript (`MANUSCRIPT`) are asked
+/// run as asked. The three that write a manuscript (`MANUSCRIPT`) are asked
 /// about everywhere but in the conversation that writes that manuscript,
-/// where the person has handed the pen over. `comment_manuscript` is not among them: a comment changes no
+/// where the person has handed the pen over; there only a section that would
+/// lose most of its words is asked about (`compose::Replacing::drops`). `comment_manuscript` is not among them: a comment changes no
 /// word of the manuscript, it waits for the person like a screening suggestion.
-const CONFIRMING: [&str; 22] = ["compress_pdf", "ocr_pdf", "import_library", "export_library", "import_pdf", "import_references", "import_zotero", "run_search", "undo_import", "remove_search", "find_pdf", "import_url", "organise_papers", "edit_section", "set_outline", "export_note", "save_note_to_notion", "resolve_note_save", "restyle_docx", "import_docx_references", "import_manuscript", "make_slides"];
+const CONFIRMING: [&str; 23] = ["compress_pdf", "ocr_pdf", "import_library", "export_library", "import_pdf", "import_references", "import_zotero", "run_search", "undo_import", "remove_search", "find_pdf", "import_url", "organise_papers", "edit_section", "write_section", "set_outline", "export_note", "save_note_to_notion", "resolve_note_save", "restyle_docx", "import_docx_references", "import_manuscript", "make_slides"];
 /// The tools that write a manuscript (`compose`).
-pub const MANUSCRIPT: [&str; 2] = ["edit_section", "set_outline"];
+pub const MANUSCRIPT: [&str; 3] = ["edit_section", "write_section", "set_outline"];
 
 /// A tool that works inside one library: it also takes `library`.
 fn scoped(name: &'static str, title: &'static str, description: &'static str, mut properties: Value, required: &[&str]) -> ToolDef {
@@ -567,7 +568,7 @@ pub fn catalog() -> Vec<ToolDef> {
         scoped(
             "read_manuscript",
             "读取稿件",
-            "读取用户在写作页写的稿件正文，可以只读其中一节。只读；要改稿件用 edit_section。稿件里的引用写作 [@Key]，Key 对应文献库里的一篇文献；每节的 passages 是已记下的引用出处：稿件里的哪句话（sentence）依据文献的哪句原文（passage，page 为 0 时出自摘要）。",
+            "读取用户在写作页写的稿件正文，可以只读其中一节。只读；要改稿件用 edit_section，写出一节的全文用 write_section。稿件里的引用写作 [@Key]，Key 对应文献库里的一篇文献；每节的 passages 是已记下的引用出处：稿件里的哪句话（sentence）依据文献的哪句原文（passage，page 为 0 时出自摘要）。",
             json!({
                 "manuscript": {"type": "string", "description": "稿件的 ID 或题目；只有一份稿件时可以省略。"},
                 "section": {"type": "string", "description": "只读这一节：节的 ID 或名称。省略时返回所有写了内容的节。"},
@@ -599,11 +600,11 @@ pub fn catalog() -> Vec<ToolDef> {
         ),
         scoped(
             "edit_section",
-            "写稿件",
-            "写或修改写作页稿件的一节。只在用户要求你动笔（写、改、补、删稿件里的文字）时使用。两种用法取其一：edits 逐处修改，每项的 old 是从这一节现在的文字里逐字摘出的原文（先用 read_manuscript 读），new 是改成的文字，old 留空表示加在这一节末尾，new 留空表示删去；text 是这一节的全部新正文，用于空的一节或整节重写。正文是 Markdown，用稿件的语言写，节的名称不要写进正文。引用写作 [@Key]（Key 见 read_manuscript 里已有的引用），不知道 Key 时写 [@文献ID]，写入时会换成这篇文献的引用键；不要引用文献库里没有的文献。改动前这一节的文字会留作一个历史版本，用户可以随时换回去。返回改了几处；missed 是没有在这一节里找到原文、因而没有改的地方。",
+            "改稿件",
+            "逐处修改写作页稿件的一节。只在用户要求你动笔（改、补、删稿件里的文字）时使用。edits 的每项：old 是从这一节现在的文字里逐字摘出的原文（先用 read_manuscript 读），new 是改成的文字；old 留空表示加在这一节末尾，new 留空表示删去。edits 没有提到的文字一字不动。要写出空的一节，或用户明确要整节重写，用 write_section。正文是 Markdown，用稿件的语言写，节的名称不要写进正文。引用写作 [@Key]（Key 见 read_manuscript 里已有的引用），不知道 Key 时写 [@文献ID]，写入时会换成这篇文献的引用键；不要引用文献库里没有的文献。改动前这一节的文字会留作一个历史版本，用户可以随时换回去。返回改了几处；missed 是没有在这一节里找到原文、因而没有改的地方。",
             json!({
                 "manuscript": {"type": "string", "description": "稿件的 ID 或题目；只有一份稿件时可以省略。"},
-                "section": {"type": "string", "description": "要写的一节：节的 ID 或名称。"},
+                "section": {"type": "string", "description": "要改的一节：节的 ID 或名称。"},
                 "edits": {
                     "type": "array",
                     "description": "逐处修改，按在这一节里的先后排列，互不重叠。",
@@ -616,9 +617,19 @@ pub fn catalog() -> Vec<ToolDef> {
                         "required": ["old", "new"],
                     },
                 },
-                "text": {"type": "string", "description": "这一节的全部新正文（与 edits 二选一）。"},
             }),
-            &["section"],
+            &["section", "edits"],
+        ),
+        scoped(
+            "write_section",
+            "写稿件",
+            "写出写作页稿件一节的全文：这一节现有的文字会整节换成 text。只用于空的一节，或用户明确要整节重写的一节；只改其中几处时用 edit_section。text 是这一节完整的新正文，不是其中一段。正文是 Markdown，用稿件的语言写，节的名称不要写进正文。引用写作 [@Key]（Key 见 read_manuscript 里已有的引用），不知道 Key 时写 [@文献ID]，写入时会换成这篇文献的引用键；不要引用文献库里没有的文献。改动前这一节的文字会留作一个历史版本，用户可以随时换回去。这一节原来有文字时，返回的 replaced 是替换前后的字数。",
+            json!({
+                "manuscript": {"type": "string", "description": "稿件的 ID 或题目；只有一份稿件时可以省略。"},
+                "section": {"type": "string", "description": "要写的一节：节的 ID 或名称。"},
+                "text": {"type": "string", "description": "这一节完整的新正文。"},
+            }),
+            &["section", "text"],
         ),
         scoped(
             "set_outline",
@@ -698,17 +709,45 @@ pub fn across(root: &Path, own: &LibraryInfo, name: &str, args: &Value) -> Resul
     Ok(Some(info))
 }
 
-/// The tool `name` and whether `args` fit its schema's names.
-fn checked(name: &str, args: &Value) -> Result<ToolDef, String> {
+/// The arguments of a call as the tool's schema reads them: a name the tool does not have and one it needs are
+/// said, and a value a model wrote another way than its parameter is read is taken as what it plainly means (`fit`).
+/// Models differ in how they fill a call in; what a tool does must not depend on it.
+pub fn fitted(name: &str, args: &Value) -> Result<Value, String> {
     let Some(tool) = catalog().into_iter().find(|t| t.name == name) else { return Err(format!("没有这个工具：{name}")) };
     let Some(given) = args.as_object() else { return Err("参数应为一个 JSON 对象。".into()) };
-    if let Some(unknown) = given.keys().find(|key| tool.input_schema["properties"].get(key.as_str()).is_none()) {
-        return Err(format!("{name} 没有参数 {unknown}。"));
+    let empty = Map::new();
+    let properties = tool.input_schema["properties"].as_object().unwrap_or(&empty);
+    let mut out = Map::new();
+    for (key, value) in given {
+        let Some(wanted) = properties.get(key) else {
+            // Which library is where a tool works, not what it does: it is not offered to a caller that guessed a name.
+            let mut names: Vec<&str> = properties.keys().map(String::as_str).filter(|key| *key != "library").collect();
+            names.sort_unstable();
+            return Err(format!("{name} 没有参数 {key}。可用：{}", names.join("、")));
+        };
+        out.insert(key.clone(), fit(value, wanted));
     }
-    if let Some(missing) = tool.input_schema["required"].as_array().into_iter().flatten().filter_map(Value::as_str).find(|key| args[*key].is_null()) {
+    if let Some(missing) = tool.input_schema["required"].as_array().into_iter().flatten().filter_map(Value::as_str).find(|key| out.get(*key).is_none_or(Value::is_null)) {
         return Err(format!("{name} 需要参数 {missing}。"));
     }
-    Ok(tool)
+    Ok(Value::Object(out))
+}
+
+/// A value as the parameter `wanted` describes reads it, where a model wrote it another way and what it meant is
+/// plain: a list, an object, a number or a yes written as a string is what the string says (and so each item of a
+/// list), and an empty string where anything but words is read is nothing given. Any other value stays as it is:
+/// what a tool makes of a value of another kind is the tool's to say.
+fn fit(value: &Value, wanted: &Value) -> Value {
+    let parsed = |text: &str, is: fn(&Value) -> bool| serde_json::from_str::<Value>(text.trim()).ok().filter(is);
+    match (wanted["type"].as_str().unwrap_or(""), value) {
+        ("array", Value::Array(items)) => Value::Array(items.iter().map(|item| fit(item, &wanted["items"])).collect()),
+        ("array" | "object" | "boolean" | "integer" | "number", Value::String(text)) if text.trim().is_empty() => Value::Null,
+        ("array", Value::String(text)) => parsed(text, Value::is_array).map_or_else(|| value.clone(), |list| fit(&list, wanted)),
+        ("object", Value::String(text)) => parsed(text, Value::is_object).unwrap_or_else(|| value.clone()),
+        ("integer" | "number", Value::String(text)) => parsed(text, Value::is_number).unwrap_or_else(|| value.clone()),
+        ("boolean", Value::String(text)) => parsed(text, Value::is_boolean).unwrap_or_else(|| value.clone()),
+        _ => value.clone(),
+    }
 }
 
 /// What a tool result may add to a model's context; a longer one is cut and says so.
@@ -732,7 +771,7 @@ pub fn describe_call(name: &str, args: &Value) -> String {
         match (key.as_str(), value) {
             ("page", Value::Number(n)) => numbers.push((key, format!("第 {n} 页起"))),
             // The words written are for the manuscript, not for the line that says a section is being written.
-            ("text", Value::String(text)) if name == "edit_section" => numbers.push((key, format!("全文 {} 字", text.trim().chars().count()))),
+            ("text", Value::String(text)) if MANUSCRIPT.contains(&name) => numbers.push((key, format!("全文 {}", crate::manuscript::length_said(text)))),
             (_, Value::String(text)) if !text.trim().is_empty() => words.push((key, text.split_whitespace().collect::<Vec<_>>().join(" "))),
             (_, Value::Number(n)) => numbers.push((key, format!("{key} {n}"))),
             ("changes", Value::Array(items)) => numbers.push((key, format!("{} 篇", items.len()))),
@@ -769,11 +808,14 @@ pub fn describe_result(result: &Result<Value, String>) -> String {
                 let name = value["section"]["name"].as_str().unwrap_or("");
                 // Sentences that repeat the papers they cite were handed back to the model (`compose::copied`): the person is told so too.
                 let copied = value["copied"].as_array().map_or(0, Vec::len);
-                match (edited, missed) {
-                    (0, 0) => format!("「{name}」不用改"),
+                // A section written anew over one that had words (`compose::write`): what became of its length is said.
+                let replaced = value["replaced"]["before"].as_u64().zip(value["replaced"]["after"].as_u64());
+                match (edited, missed, replaced) {
+                    (0, 0, _) => format!("「{name}」不用改"),
                     _ if copied > 0 => format!("已写入「{name}」，{copied} 句和所引文献的原文大段相同"),
-                    (_, 0) => format!("已写入「{name}」"),
-                    (0, _) => format!("「{name}」的 {missed} 处没有对上原文，没有改"),
+                    (_, 0, Some((before, after))) => format!("已把「{name}」整节换成新写的：{before} {unit} → {after} {unit}", unit = value["replaced"]["unit"].as_str().unwrap_or("字")),
+                    (_, 0, None) => format!("已写入「{name}」"),
+                    (0, _, _) => format!("「{name}」的 {missed} 处没有对上原文，没有改"),
                     _ => format!("已写入「{name}」，另有 {missed} 处没有对上原文"),
                 }
             } else if let (Some(file), Some(sections)) = (value["file"].as_str(), value["manuscript"]["sections"].as_array()) {
@@ -820,7 +862,7 @@ pub fn call(root: &Path, name: &str, args: &Value, fetch: Fetch, download: Downl
 }
 
 pub fn call_with(root: &Path, name: &str, args: &Value, fetch: Fetch, download: Download, reach: Reach) -> Result<Value, String> {
-    checked(name, args)?;
+    let args = &fitted(name, args)?;
     if name == "create_library" { return local::create_library(root, args).map_err(|e| format!("{e:#}")) }
     if name == "import_library" { return local::import_library(root, args).map_err(|e| format!("{e:#}")) }
     if name == "list_zotero_libraries" { return local::zotero_libraries(args).map_err(|e| format!("{e:#}")) }
@@ -841,7 +883,7 @@ pub fn call_in(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, 
 }
 
 pub fn call_in_with(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fetch: Fetch, download: Download, reach: Reach) -> Result<Value, String> {
-    checked(name, args)?;
+    let args = &fitted(name, args)?;
     if name == "save_note_to_notion" {
         return reach.publish.ok_or("此运行环境没有提供 Notion MCP；请使用桌面应用或 wisp 命令。")?(store, info, args);
     }
@@ -1031,6 +1073,7 @@ fn dispatch(store: &mut Store, info: &LibraryInfo, name: &str, args: &Value, fet
         "read_manuscript" => read_manuscript(store, args),
         "comment_manuscript" => comment_manuscript(store, args),
         "edit_section" => crate::compose::edit(store, args),
+        "write_section" => crate::compose::write(store, args),
         "set_outline" => crate::compose::outline(store, args),
         "library_status" => library_status(store, info),
         "offer_action" => crate::offer::offered(args),
@@ -2096,7 +2139,7 @@ pub fn preview_call(store: &Store, name: &str, args: &Value) -> Result<Vec<Strin
             Ok(vec![destination, format!("标题：{}", doc.title), format!("正文 {} 字，{} 张图片；原始笔记不变。", doc.markdown.chars().count(), doc.used_attachments().count()), doc.markdown.chars().take(2000).collect()])
         }
         "resolve_note_save" => Ok(vec![format!("仅在已手动核对 Notion 后确认：{}。", if args["saved"] == true { "笔记已成功写入" } else { "完全没有写入（不是部分写入）" }), format!("记录：{}；页面：{}", args["id"].as_str().unwrap_or(""), args["page"].as_str().unwrap_or(""))]),
-        "edit_section" | "set_outline" => crate::compose::preview(store, name, args).map_err(|e| format!("{e:#}")),
+        "edit_section" | "write_section" | "set_outline" => crate::compose::preview(store, name, args).map_err(|e| format!("{e:#}")),
         "import_manuscript" => local::preview_manuscript(store, args).map_err(|e| format!("{e:#}")),
         _ => Ok(vec![]),
     }
@@ -3266,11 +3309,17 @@ pub(crate) mod tests {
         assert_eq!(call(&root, "read_manuscript", &json!({"manuscript": "根的综述", "section": name})).unwrap()["sections"][0]["body"], "");
         assert!(call(&root, "read_manuscript", &json!({"section": "没有这一节"})).unwrap_err().contains("没有名为"));
         // An agent writes a section and sets the outline; how each reads in a conversation.
-        let wrote = call(&root, "edit_section", &json!({"section": name, "text": format!("根尖的干细胞 [@{atlas}]。")})).unwrap();
+        let wrote = call(&root, "write_section", &json!({"section": name, "text": format!("根尖的干细胞 [@{atlas}]。")})).unwrap();
         assert_eq!(describe_result(&Ok(wrote)), format!("已写入「{name}」"));
+        // The whole text over a section that has words: the line says what became of its length, and the tool for changes does not take it.
+        let held = crate::manuscript::text_length(call(&root, "read_manuscript", &json!({"section": name})).unwrap()["sections"][0]["body"].as_str().unwrap()).0;
+        let again = call(&root, "write_section", &json!({"section": name, "text": "短了"})).unwrap();
+        assert_eq!((describe_result(&Ok(again.clone())), again["replacedHint"].is_string()), (format!("已把「{name}」整节换成新写的：{held} 字 → 2 字"), true));
+        assert!(call(&root, "edit_section", &json!({"section": name, "text": "短了"})).unwrap_err().contains("没有参数 text"));
+        call(&root, "edit_section", &json!({"section": name, "edits": [{"old": "短了", "new": format!("根尖的干细胞 [@{atlas}]。")}]})).unwrap();
         assert!(call(&root, "read_manuscript", &json!({"section": name})).unwrap()["sections"][0]["body"].as_str().unwrap().starts_with("根尖的干细胞 [@"));
-        assert_eq!(describe_call("edit_section", &json!({"section": "导言", "text": "一二三"})), "写稿件：导言 · 全文 3 字");
-        assert_eq!(describe_call("edit_section", &json!({"section": "导言", "edits": [{"old": "a", "new": "b"}]})), "写稿件：导言 · 1 处");
+        assert_eq!(describe_call("write_section", &json!({"section": "导言", "text": "一二三"})), "写稿件：导言 · 全文 3 字");
+        assert_eq!(describe_call("edit_section", &json!({"section": "导言", "edits": [{"old": "a", "new": "b"}]})), "改稿件：导言 · 1 处");
         let outlined = call(&root, "set_outline", &json!({"sections": [{"name": name}, {"name": "展望"}]})).unwrap();
         assert_eq!((describe_result(&Ok(outlined.clone())), outlined["sections"].as_array().map(Vec::len)), ("大纲现有 3 节".to_string(), Some(3)));
         assert_eq!(outlined["kept"].as_array().map(Vec::len), Some(1));
@@ -3360,6 +3409,25 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn arguments_are_read_as_the_schema_means_them() {
+        // A list a model wrote as a string is the list, and so is each of its items; a number and a yes likewise.
+        let fit = fitted("edit_section", &json!({"section": "导言", "edits": "[{\"old\": \"a\", \"new\": \"b\"}, \"{\\\"old\\\": \\\"c\\\", \\\"new\\\": \\\"d\\\"}\"]"})).unwrap();
+        assert_eq!((fit["edits"][0]["new"].as_str(), fit["edits"][1]["old"].as_str()), (Some("b"), Some("c")));
+        assert_eq!(fitted("list_papers", &json!({"limit": "5", "library": null})).unwrap(), json!({"limit": 5, "library": null}));
+        assert_eq!(fitted("find_sentences", &json!({"section": "introduction", "context": " true"})).unwrap(), json!({"section": "introduction", "context": true}));
+        // An empty string where a list is read is nothing given, and a tool that needs the list says so.
+        assert_eq!(fitted("list_papers", &json!({"tags": "", "limit": " "})).unwrap(), json!({"tags": null, "limit": null}));
+        assert_eq!(fitted("edit_section", &json!({"section": "导言", "edits": " "})).unwrap_err(), "edit_section 需要参数 edits。");
+        // Words are never read as anything else, and what is not plainly the kind wanted is left for the tool to speak of.
+        assert_eq!(fitted("write_section", &json!({"section": "[1]", "text": "5"})).unwrap(), json!({"section": "[1]", "text": "5"}));
+        assert_eq!(fitted("edit_section", &json!({"section": "导言", "edits": "[把第二句改短]"})).unwrap()["edits"], "[把第二句改短]");
+        assert_eq!(fitted("list_papers", &json!({"limit": "ten", "notTags": [1]})).unwrap(), json!({"limit": "ten", "notTags": [1]}));
+        // A section's whole text has a tool of its own: the one for changes does not take it, and says what it takes.
+        assert_eq!(fitted("edit_section", &json!({"section": "导言", "text": "错误：应使用 edits 参数"})).unwrap_err(), "edit_section 没有参数 text。可用：edits、manuscript、section");
+        assert!(fitted("no_such_tool", &json!({})).unwrap_err().contains("没有这个工具") && fitted("list_papers", &json!([1])).unwrap_err().contains("JSON 对象"));
+    }
+
+    #[test]
     fn every_tool_is_callable() {
         let (root, _) = sample();
         for tool in catalog() {
@@ -3369,7 +3437,7 @@ pub(crate) mod tests {
             // Only a tool that changes the library has anything to ask the person about.
             assert!(tool.writes || !tool.confirm, "{}", tool.name);
         }
-        assert_eq!(library_catalog().iter().filter(|tool| tool.confirm).map(|tool| tool.name).collect::<Vec<_>>().len(), 21);
+        assert_eq!(library_catalog().iter().filter(|tool| tool.confirm).map(|tool| tool.name).collect::<Vec<_>>().len(), 22);
         // The tools that write a manuscript are asked about outside the conversation that writes it.
         assert!(MANUSCRIPT.iter().all(|name| catalog().iter().any(|tool| tool.name == *name && tool.writes && tool.confirm)));
         std::fs::remove_dir_all(root).ok();

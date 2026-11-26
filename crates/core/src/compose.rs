@@ -1,8 +1,9 @@
 //! 助手写: the writing page's other mode, where the assistant leads. The
 //! person talks with it in the middle of the window and it writes the
 //! manuscript at the right. It looks through the library with the tools
-//! every conversation has and changes the manuscript with two of its own:
-//! `edit_section` (`edit`) writes or changes one section, `set_outline`
+//! every conversation has and changes the manuscript with three of its own:
+//! `edit_section` (`edit`) changes one section where its words stand,
+//! `write_section` (`write`) writes the whole of one, `set_outline`
 //! (`outline`) says which sections the manuscript has. What a section held
 //! is kept as a snapshot before the assistant's first change to it, so a
 //! version can always be gone back to. `note` is what each question of
@@ -23,6 +24,9 @@ use crate::structure::{self, SECTIONS};
 use anyhow::{Result, anyhow, bail};
 use serde_json::{Value, json};
 use std::ops::Range;
+
+/// The two tools that write words into a section: what they write cites as the conversation does (`call_with`).
+pub const WORDS: [&str; 2] = ["edit_section", "write_section"];
 
 /// The most sections `set_outline` takes at once: a list longer than this is a mistake, not an outline.
 const MOST_SECTIONS: usize = 60;
@@ -65,54 +69,24 @@ pub fn keyed(text: &str, index: &Index) -> String {
     out
 }
 
-/// The tool `edit_section`: write or change one section of a manuscript.
-/// `edits` are changes each made where its words stand (`revise::place`; no
-/// words to find is the end of the section), `text` is the section's whole
-/// new text. The citations of the new words name papers by key or by id;
-/// the keys are kept with their papers. What the section held is kept as a
-/// snapshot first.
-pub fn edit(store: &mut Store, args: &Value) -> Result<Value> {
+/// The section the two tools that write one name: `manuscript` by id or title, `section` by id or name.
+fn section_named(store: &Store, args: &Value) -> Result<(Manuscript, Section)> {
     let manuscript = find_manuscript(store, word(args, "manuscript"))?;
     let wanted = word(args, "section");
     if wanted.is_empty() { bail!("用 section 指定要写的一节（节的 ID 或名称）。现有：{}", names(&manuscript.sections)) }
-    let Some(section) = manuscript.sections.iter().find(|s| s.id == wanted).or_else(|| manuscript.sections.iter().find(|s| s.name == wanted)) else {
+    let Some(section) = manuscript.sections.iter().find(|s| s.id == wanted).or_else(|| manuscript.sections.iter().find(|s| s.name == wanted)).cloned() else {
         bail!("这份稿件没有「{wanted}」这一节。现有：{}。要新加一节，用 set_outline。", names(&manuscript.sections))
     };
-    let (papers, trash, kept) = (store.list_papers()?, store.list_trash()?, store.cite_keys()?);
-    let index = Index::new(&papers, trash.iter().map(|entry| &entry.paper), &kept);
-    let mut body = section.body.clone();
-    let (mut changed, mut missed) = (0, vec![]);
-    match (args["text"].as_str(), args["edits"].as_array()) {
-        (Some(text), None) => {
-            let text = keyed(text.trim(), &index);
-            if text.is_empty() && !section.body.trim().is_empty() { bail!("text 是空的：不会把写了内容的一节清空。要删去一段，用 edits 并把 new 留空。") }
-            if text != body.trim() {
-                body = text;
-                changed = 1;
-            }
-        }
-        (None, Some(edits)) if !edits.is_empty() => {
-            let mut near = None;
-            for one in edits {
-                let (old, new) = (one["old"].as_str().unwrap_or(""), keyed(one["new"].as_str().unwrap_or(""), &index));
-                match revise::place(&body, &Edit { old: old.to_string(), new }, near) {
-                    Placed::At(range, new) => {
-                        near = Some(range.start + new.len());
-                        body.replace_range(range, &new);
-                        changed += 1;
-                    }
-                    Placed::Same => {}
-                    Placed::Missing => missed.push(old.to_string()),
-                }
-            }
-        }
-        _ => bail!("给出 edits（逐处修改，每项是 old 和 new）或 text（这一节的全部新正文）其中之一。"),
-    }
-    let cited = cite::find(&body, &index);
+    Ok((manuscript, section))
+}
+
+/// A section's text after a tool wrote it: when it `changed`, what the section held is kept as a snapshot
+/// first, and a key written into a manuscript stays with its paper from then on. What the tool hands back.
+fn keep(store: &mut Store, manuscript: &Manuscript, section: &Section, body: &str, changed: usize, index: &Index) -> Result<Value> {
+    let cited = cite::find(body, index);
     if changed > 0 {
         store.take_snapshot(&section.id, "assistant")?;
-        store.save_section_body(&section.id, &body)?;
-        // A key written into a manuscript stays with its paper from then on.
+        store.save_section_body(&section.id, body)?;
         for one in &cited {
             if let (Found::Paper(paper), false) = (&one.found, one.old) && let Some(key) = index.key(paper) { store.keep_cite_key(paper, key)? }
         }
@@ -124,12 +98,107 @@ pub fn edit(store: &mut Store, args: &Value) -> Result<Value> {
         "edited": changed,
         "characters": body.chars().count(),
     });
+    if !unknown.is_empty() { out["unknownCitations"] = json!(unknown) }
+    Ok(out)
+}
+
+/// The tool `edit_section`: changes to one section of a manuscript, each made where its words stand
+/// (`revise::place`; no words to find is the end of the section). What no change names stays as it is.
+/// The citations of the new words name papers by key or by id; the keys are kept with their papers.
+/// The whole of a section is written by `write`, a tool of its own: while this one took either, a model
+/// that meant a change began the whole text instead and put a few words where a section had been.
+pub fn edit(store: &mut Store, args: &Value) -> Result<Value> {
+    let (manuscript, section) = section_named(store, args)?;
+    let Some(edits) = args["edits"].as_array().filter(|edits| !edits.is_empty()) else { bail!("用 edits 给出要改的地方，每项是 old 和 new。要写出一节的全文，用 write_section。") };
+    let (papers, trash, kept) = (store.list_papers()?, store.list_trash()?, store.cite_keys()?);
+    let index = Index::new(&papers, trash.iter().map(|entry| &entry.paper), &kept);
+    let mut body = section.body.clone();
+    let (mut changed, mut missed, mut near) = (0, vec![], None);
+    for one in edits {
+        let (old, new) = (one["old"].as_str().unwrap_or(""), keyed(one["new"].as_str().unwrap_or(""), &index));
+        match revise::place(&body, &Edit { old: old.to_string(), new }, near) {
+            Placed::At(range, new) => {
+                near = Some(range.start + new.len());
+                body.replace_range(range, &new);
+                changed += 1;
+            }
+            Placed::Same => {}
+            Placed::Missing => missed.push(old.to_string()),
+        }
+    }
+    let mut out = keep(store, &manuscript, &section, &body, changed, &index)?;
     if !missed.is_empty() {
         out["missed"] = json!(missed);
         out["hint"] = json!("missed 里的原文没有在这一节里找到，这几处没有改。原文要从这一节现在的文字里逐字摘出：先用 read_manuscript 读这一节，再改。");
     }
-    if !unknown.is_empty() { out["unknownCitations"] = json!(unknown) }
     Ok(out)
+}
+
+/// The tool `write_section`: the whole text of one section, in place of what it holds: for a section with
+/// nothing in it, or one the person wants written anew. A section that has words is never emptied this way,
+/// and what a replacement did to its length is handed back (`replaced`), with a word to the model when
+/// most of the section went (`Replacing::drops`).
+pub fn write(store: &mut Store, args: &Value) -> Result<Value> {
+    let (manuscript, section) = section_named(store, args)?;
+    let Some(text) = args["text"].as_str() else { bail!("用 text 给出这一节完整的新正文。只改其中几处，用 edit_section。") };
+    let (papers, trash, kept) = (store.list_papers()?, store.list_trash()?, store.cite_keys()?);
+    let index = Index::new(&papers, trash.iter().map(|entry| &entry.paper), &kept);
+    let text = keyed(text.trim(), &index);
+    let held = section.body.trim();
+    if text.is_empty() && !held.is_empty() { bail!("text 是空的：不会把写了内容的一节清空。要删去一段，用 edit_section 并把 new 留空。") }
+    if text == held { return keep(store, &manuscript, &section, &section.body, 0, &index) }
+    let mut out = keep(store, &manuscript, &section, &text, 1, &index)?;
+    if let Some(replacing) = Replacing::of(held, &text) {
+        let unit = replacing.unit();
+        out["replaced"] = json!({"before": replacing.before, "after": replacing.after, "unit": unit});
+        if replacing.drops {
+            out["replacedHint"] = json!(format!("这一节原有 {} {unit}，现在整节是你给的 {} {unit}：原来的文字大半不在了。如果本意只是改其中几处，这是用错了工具：告诉用户原来的文字留作了历史版本，可以在写作页稿件上方的「版本」里恢复，恢复后用 edit_section 逐处修改。", replacing.before, replacing.after));
+        }
+    }
+    Ok(out)
+}
+
+/// The share of a section's words a text written in its place has to have, for the section not to have lost most of them.
+const STAYS: f32 = 0.5;
+
+/// What writing a section anew does to one that has words.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Replacing {
+    /// How long it is and would be, as the outline counts it (`manuscript::text_length`).
+    pub before: usize,
+    pub after: usize,
+    /// What the two count: letters (字) when either text has Chinese in it, else words (词).
+    pub letters: bool,
+    /// Most of what the section says would go: less than `STAYS` of its words are left. Counted as `words` counts
+    /// them, a word of English as two characters of Chinese, so a section put into another language is not one cut short.
+    pub drops: bool,
+}
+
+impl Replacing {
+    /// `None` for a section with nothing in it: there a text is written, nothing is replaced.
+    pub fn of(before: &str, after: &str) -> Option<Replacing> {
+        if before.trim().is_empty() { return None }
+        let amount = |text: &str| words(text).iter().map(|(_, counts)| counts).sum::<f32>();
+        let ((was, letters), (is, more)) = (manuscript::text_length(before), manuscript::text_length(after));
+        Some(Replacing { before: was, after: is, letters: letters || more, drops: amount(after) < amount(before) * STAYS })
+    }
+
+    /// What its numbers are called.
+    pub fn unit(&self) -> &'static str {
+        if self.letters { "字" } else { "词" }
+    }
+}
+
+/// What a call of `write_section` would do to the section it names, when that section has words. The
+/// citations of the text are counted as the manuscript will have them (`label_citations`), not as the
+/// conversation wrote them: a label carries the sentence it quotes, which the manuscript does not keep.
+pub fn replacing(store: &Store, args: &Value, sources: &[Source]) -> Option<Replacing> {
+    let (_, section) = section_named(store, args).ok()?;
+    let (papers, trash, kept) = (store.list_papers().ok()?, store.list_trash().ok()?, store.cite_keys().ok()?);
+    let index = Index::new(&papers, trash.iter().map(|entry| &entry.paper), &kept);
+    let mut args = args.clone();
+    label_citations(&mut args, sources, &index);
+    Replacing::of(&section.body, &keyed(args["text"].as_str()?.trim(), &index))
 }
 
 /// One line of the outline `set_outline` asks for.
@@ -200,21 +269,25 @@ pub fn outline(store: &mut Store, args: &Value) -> Result<Value> {
     Ok(out)
 }
 
-/// What a call of one of the two tools would do, in a line or two: for the card that asks the person first,
-/// where the conversation is not the manuscript's own.
+/// What a call of one of the three tools would do, in a line or two: for the card that asks the person first,
+/// where the conversation is not the manuscript's own, or a section of it would lose most of its words.
 pub fn preview(store: &Store, name: &str, args: &Value) -> Result<Vec<String>> {
+    preview_for(store, name, args, &[])
+}
+
+/// `preview` for a conversation, whose citations are labels (`sources`): a text is counted as the manuscript will have it.
+pub fn preview_for(store: &Store, name: &str, args: &Value, sources: &[Source]) -> Result<Vec<String>> {
     let manuscript = find_manuscript(store, word(args, "manuscript"))?;
     let title = manuscript.shown_title();
+    let section = word(args, "section");
+    let section = manuscript.sections.iter().find(|s| s.id == section || s.name == section).map_or(section, |s| s.name.as_str());
     Ok(match name {
-        "edit_section" => {
-            let section = word(args, "section");
-            let name = manuscript.sections.iter().find(|s| s.id == section || s.name == section).map_or(section, |s| s.name.as_str());
-            match (args["text"].as_str(), args["edits"].as_array()) {
-                (Some(text), _) => vec![format!("《{title}》的「{name}」：整节写成新的 {} 字", text.trim().chars().count())],
-                (None, Some(edits)) => vec![format!("《{title}》的「{name}」：改 {} 处", edits.len())],
-                _ => vec![],
-            }
-        }
+        "edit_section" => args["edits"].as_array().map(|edits| format!("《{title}》的「{section}」：改 {} 处", edits.len())).into_iter().collect(),
+        "write_section" => match (replacing(store, args, sources), args["text"].as_str()) {
+            (Some(replacing), _) => vec![format!("《{title}》的「{section}」：整节 {} {unit}换成新写的 {} {unit}", replacing.before, replacing.after, unit = replacing.unit())],
+            (None, Some(text)) => vec![format!("《{title}》的「{section}」：整节写成新的 {}", manuscript::length_said(text))],
+            _ => vec![],
+        },
         _ => {
             let sections: Vec<&str> = args["sections"].as_array().into_iter().flatten().map(|one| word(one, "name")).filter(|name| !name.is_empty()).collect();
             let mut lines = vec![];
@@ -259,12 +332,12 @@ pub fn note(asked: &Asked) -> String {
     let written_in = if structure::LANGUAGES.iter().any(|(code, _)| *code == manuscript.language) { format!("language 用 \"{}\"（这种语言一句也没有时去掉 language 再看：别的语言的句子只用来看一段怎么组织，措辞不能照搬）；", manuscript.language) } else { String::new() };
     out.push_str(&format!(
         "做法：\n\
-- 稿件只通过工具改动：edit_section 写或改一节（edits 逐处修改；text 写一节的全文，只用于空的一节，或用户明确要整节重写），set_outline 调整各节、题目和正文语言（用户要的语言和上面写的不一样时，先用它改过来）。节里已有文字时用 edits：用户写的句子，要求之外的一字不动。要写进稿件的正文不要贴在对话里；对话里用几句话说明做了什么、依据哪些文献、参照了哪几篇的写法、还缺什么，让用户去右边看稿。\n\
-- 动笔前先读：要改的一节用 read_manuscript 读它现在的文字，用户可能刚亲手改过，以稿件现在的文字为准；edits 的 old 要从中逐字摘出。\n\
+- 稿件只通过工具改动：edit_section 逐处修改一节，write_section 写出一节的全文（只用于空的一节，或用户明确要整节重写的一节），set_outline 调整各节、题目和正文语言（用户要的语言和上面写的不一样时，先用它改过来）。节里已有文字时用 edit_section：用户写的句子，要求之外的一字不动。要写进稿件的正文不要贴在对话里；对话里用几句话说明做了什么、依据哪些文献、参照了哪几篇的写法、还缺什么，让用户去右边看稿。\n\
+- 动笔前先读：要改的一节用 read_manuscript 读它现在的文字，用户可能刚亲手改过，以稿件现在的文字为准；edit_section 的 old 要从中逐字摘出。\n\
 - 论断要有出处：先用 find_sentences、find_citations、search_fulltext 等在文献库里找到文献和原句，再写。写进稿件的引用和回答里一样，尽量带上它所依据的原句：[P3 p.5 \"逐字摘出的原句\"]，出自摘要的原句不写页码：[P3 \"逐字摘出的原句\"]，实在没有可摘的原句才写 [P3]。写入时会换成稿件的引用格式，引的那句原文会记为这处引用的出处，用户点一下就能核对。文献库里找不到依据的论断不要配引用，更不要编造文献；在对话里指出来。\n\
 - {}\n\
 - 正文用{language}写，是 Markdown；节的名称不要作为标题写进正文。\n\
-- 只做用户要求的范围。删去或合并写了内容的节、大段删改之前，先在对话里说明并征得同意。",
+- 只做用户要求的范围。删去或合并写了内容的节、大段删改之前，先在对话里说明并征得同意；整节重写会让一节少掉一大半文字时，窗口还会再问用户一次。",
         by_example(&written_in)
     ));
     out
@@ -278,7 +351,7 @@ pub fn note(asked: &Asked) -> String {
 fn by_example(written_in: &str) -> String {
     format!(
         "写法要有参照：写一节或成段的新文字之前，先用 find_sentences 看文献库里的论文在同一部分是怎么写的。section 用这一节的类型（大纲里写着；类型是「其他」的一节，按它实际的内容选最接近的部分）；{written_in}先不带 query 看各篇怎么开头，再用 queries 给出要写的内容的英文关键词找相近的句子，context 设为 true 可以看到前后句。照这些句子的写法来写：一段里先说什么后说什么、句子之间怎么衔接、这个领域惯用的说法、句子的长短和详略。一段围绕一个判断，把回答同一问题的几篇文献放在一起说，不要一篇一句地罗列；换一个题目也成立的句子不写。这一部分在文献库里没有句子可参照时（sentencesInSection 为 0）照常写，并在对话里说一声。\n\
-- 用自己的话写：候选句和引用标签里的原句是参照和出处，不是正文。写进稿件的每句话都要自己写，和任何一句原文连续相同的词不超过五六个；候选句里的论断和数据，只有引用它出自的文献时才用。确实要用原话时，加引号写成直接引语。edit_section 的结果里有 copied 时，那几句和所引文献的原文大段相同：用 edits 改成自己的话；用户要的就是原话时，问他是加引号还是改写。"
+- 用自己的话写：候选句和引用标签里的原句是参照和出处，不是正文。写进稿件的每句话都要自己写，和任何一句原文连续相同的词不超过五六个；候选句里的论断和数据，只有引用它出自的文献时才用。确实要用原话时，加引号写成直接引语。写稿件的结果里有 copied 时，那几句和所引文献的原文大段相同：用 edit_section 改成自己的话；用户要的就是原话时，问他是加引号还是改写。"
     )
 }
 
@@ -290,7 +363,7 @@ pub struct Piece {
     pub quoted: Vec<Quoted>,
 }
 
-/// Before `edit_section` runs for a conversation: the citations of the
+/// Before `edit_section` or `write_section` runs for a conversation: the citations of the
 /// words to be written (`text`, and every `new` of `edits`) are turned from
 /// the conversation's (`[P3 p.5 "…"]`) into the manuscript's (`[@Key, p. 5]`)
 /// in `args`. The pieces written, each with what it quoted, for `keep_quoted`.
@@ -311,7 +384,7 @@ pub fn label_citations(args: &mut Value, sources: &[Source], index: &Index) -> V
 }
 
 /// A tool called for a conversation: as `tools::call_in`, and for
-/// `edit_section` the citations of the words to be written are the
+/// `edit_section` and `write_section` the citations of the words to be written are the
 /// conversation's (`label_citations`), and the sentences they quote are
 /// kept as the passages those citations rest on (`keep_quoted`). The
 /// result says how many were kept and which quotations their papers do not hold.
@@ -320,8 +393,9 @@ pub fn call(store: &mut Store, info: &crate::libraries::LibraryInfo, name: &str,
 }
 
 pub fn call_with(store: &mut Store, info: &crate::libraries::LibraryInfo, name: &str, args: &Value, sources: &[Source], fetch: crate::sources::Fetch, download: crate::sources::Download, reach: crate::tools::Reach) -> Result<Value, String> {
-    if name != "edit_section" { return crate::tools::call_in_with(store, info, name, args, fetch, download, reach) }
-    let mut args = args.clone();
+    if !WORDS.contains(&name) { return crate::tools::call_in_with(store, info, name, args, fetch, download, reach) }
+    // As the schema reads them first: a list a model wrote as a string is a list before its citations are looked at.
+    let mut args = crate::tools::fitted(name, args)?;
     let pieces = {
         let read = |store: &Store| -> Result<_> { Ok((store.list_papers()?, store.list_trash()?, store.cite_keys()?)) };
         let (papers, trash, kept) = read(store).map_err(|e| format!("{e:#}"))?;
@@ -333,7 +407,7 @@ pub fn call_with(store: &mut Store, info: &crate::libraries::LibraryInfo, name: 
     stray.dedup();
     if !stray.is_empty() {
         value["unknownLabels"] = json!(stray);
-        value["labelsHint"] = json!("unknownLabels 里的标签在这次对话里不对应任何文献，已原样留在稿件里。用 edits 把它们改成正确的文献标签，或去掉这几处引用。");
+        value["labelsHint"] = json!("unknownLabels 里的标签在这次对话里不对应任何文献，已原样留在稿件里。用 edit_section 把它们改成正确的文献标签，或去掉这几处引用。");
     }
     let (Some(manuscript), Some(section)) = (value["manuscript"].as_str().map(str::to_string), value["section"]["id"].as_str().map(str::to_string)) else { return Ok(value) };
     let body = store.manuscript(&manuscript).ok().flatten().and_then(|m| m.section(&section).map(|s| s.body.clone())).unwrap_or_default();
@@ -341,7 +415,7 @@ pub fn call_with(store: &mut Store, info: &crate::libraries::LibraryInfo, name: 
     // A sentence that repeats the paper it cites is the paper's, not the manuscript's: the model is told, to say it in its own words.
     if let Ok(copied) = copied(store, &body, &pieces) && !copied.is_empty() {
         value["copied"] = json!(copied.iter().map(|(sentence, shared)| json!({"sentence": sentence, "shared": shared})).collect::<Vec<_>>());
-        value["copiedHint"] = json!("copied 里的句子（sentence）有一长串词（shared）和它所引文献的原文一字不差，这是照抄。用 edits 把这几句改成自己的话：意思和引用不变，说法换掉；确实要用原话时，加引号写成直接引语。相同的只是一串专有名词（物种、方法的名称）时不用改。");
+        value["copiedHint"] = json!("copied 里的句子（sentence）有一长串词（shared）和它所引文献的原文一字不差，这是照抄。用 edit_section 把这几句改成自己的话：意思和引用不变，说法换掉；确实要用原话时，加引号写成直接引语。相同的只是一串专有名词（物种、方法的名称）时不用改。");
     }
     if let Ok((kept, unfound)) = keep_quoted(store, &manuscript, &section, &body, &pieces) {
         if kept > 0 { value["passagesKept"] = json!(kept) }
@@ -573,8 +647,8 @@ mod tests {
         let (mut store, made, paper) = library();
         let section = made.sections[1].clone();
         // The whole text of an empty section, citing a paper by its id.
-        let done = edit(&mut store, &json!({"section": section.name, "text": format!("根尖有干细胞微环境 [@{}]。\n\n第二段。", paper.id)})).unwrap();
-        assert_eq!((done["edited"].as_u64(), done["section"]["id"].as_str()), (Some(1), Some(section.id.as_str())));
+        let done = write(&mut store, &json!({"section": section.name, "text": format!("根尖有干细胞微环境 [@{}]。\n\n第二段。", paper.id)})).unwrap();
+        assert_eq!((done["edited"].as_u64(), done["section"]["id"].as_str(), done["replaced"].is_null()), (Some(1), Some(section.id.as_str()), true));
         let body = store.manuscript(&made.id).unwrap().unwrap().section(&section.id).unwrap().body.clone();
         assert_eq!(body, "根尖有干细胞微环境 [@Zhang2021]。\n\n第二段。");
         // The key stays with its paper; nothing was there to keep as a version.
@@ -592,10 +666,51 @@ mod tests {
         let done = edit(&mut store, &json!({"section": section.id, "edits": [{"old": "第二段写长了。", "new": "第二段写长了。"}]})).unwrap();
         assert_eq!((done["edited"].as_u64(), store.snapshots(&section.id).unwrap().len()), (Some(0), 1));
         // What is refused, and why.
-        assert!(edit(&mut store, &json!({"section": "没有", "text": "x"})).unwrap_err().to_string().contains("没有「没有」这一节"));
-        assert!(edit(&mut store, &json!({"section": section.id})).unwrap_err().to_string().contains("其中之一"));
-        assert!(edit(&mut store, &json!({"section": section.id, "text": "  "})).unwrap_err().to_string().contains("清空"));
-        assert!(edit(&mut store, &json!({"text": "x"})).unwrap_err().to_string().contains("section"));
+        assert!(write(&mut store, &json!({"section": "没有", "text": "x"})).unwrap_err().to_string().contains("没有「没有」这一节"));
+        assert!(edit(&mut store, &json!({"section": section.id})).unwrap_err().to_string().contains("write_section"));
+        assert!(write(&mut store, &json!({"section": section.id})).unwrap_err().to_string().contains("edit_section"));
+        assert!(write(&mut store, &json!({"section": section.id, "text": "  "})).unwrap_err().to_string().contains("清空"));
+        assert!(write(&mut store, &json!({"text": "x"})).unwrap_err().to_string().contains("section"));
+    }
+
+    #[test]
+    fn a_section_written_anew_says_what_became_of_it() {
+        let (mut store, made, paper) = library();
+        let (section, empty) = (made.sections[1].clone(), made.sections[0].clone());
+        let held = "根尖的静止中心由 WOX5 维持 [@Zhang2021]。\n\n干细胞微环境的信号来自静止中心，这些信号让周围的干细胞保持不分化的状态。\n\n静止中心受损以后，邻近的干细胞会分裂来补上它。";
+        let length = |text: &str| manuscript::text_length(text).0 as u64;
+        store.save_section_body(&section.id, held).unwrap();
+        let body = |store: &Store| store.manuscript(&made.id).unwrap().unwrap().section(&section.id).unwrap().body.clone();
+        // A change is no place for a section's whole text: a few words meant for a change leave the section as it is.
+        assert!(edit(&mut store, &json!({"section": section.id, "text": "错误：应使用 edits 参数"})).is_err());
+        assert_eq!(body(&store), held);
+        // What a call would do, for the card that asks: a section with nothing in it is written, one with words is replaced.
+        assert_eq!(preview(&store, "write_section", &json!({"section": empty.id, "text": "一二三"})).unwrap(), vec![format!("《根的综述》的「{}」：整节写成新的 3 字", empty.name)]);
+        assert_eq!(preview(&store, "write_section", &json!({"section": section.id, "text": "一二三"})).unwrap(), vec![format!("《根的综述》的「{}」：整节 {} 字换成新写的 3 字", section.name, length(held))]);
+        // A conversation's label carries the sentence it quotes; the manuscript keeps the citation alone, and that is what is counted.
+        let sources = vec![Source { label: "P1".into(), paper_id: paper.id.clone(), title: paper.title.clone(), ..Default::default() }];
+        let quoting = json!({"section": section.id, "text": "静止中心 [P1 \"WOX5 maintains the quiescent centre of the root.\"]。"});
+        assert_eq!(replacing(&store, &quoting, &sources), Some(Replacing { before: length(held) as usize, after: 5, letters: true, drops: true }));
+        assert_eq!(replacing(&store, &json!({"section": empty.id, "text": "一二三"}), &sources), None);
+        // Written anew at about its length: what became of it is said, and there is nothing to put right.
+        let anew = "WOX5 维持着根尖的静止中心 [@Zhang2021]。\n\n静止中心发出的信号构成了干细胞微环境，周围的干细胞因此不分化。\n\n它受损时，邻近的干细胞分裂并取代它。";
+        let done = write(&mut store, &json!({"section": section.id, "text": anew})).unwrap();
+        assert_eq!((done["replaced"]["before"].as_u64(), done["replaced"]["after"].as_u64(), done["replacedHint"].is_null()), (Some(length(held)), Some(length(anew)), true));
+        // The same text again is no change, and no version.
+        let done = write(&mut store, &json!({"section": section.id, "text": format!("  {anew}\n")})).unwrap();
+        assert_eq!((done["edited"].as_u64(), done["replaced"].is_null(), store.snapshots(&section.id).unwrap().len()), (Some(0), true, 1));
+        // A few words where a section stood are written as asked, the model is told what that did, and the section is a version to go back to.
+        let done = write(&mut store, &json!({"section": section.id, "text": "错误：应使用 edits 参数"})).unwrap();
+        assert!(done["replacedHint"].as_str().unwrap().contains("历史版本") && done["replaced"] == json!({"before": length(anew), "after": 8, "unit": "字"}));
+        assert!(store.snapshots(&section.id).unwrap().iter().any(|version| version.body == anew));
+        // Most of a section going is fewer than half of its words left; a section put into another language has lost none.
+        assert_eq!(Replacing::of(" \n", "x"), None);
+        assert!(Replacing::of(held, "根尖的静止中心由 WOX5 维持 [@Zhang2021]。").unwrap().drops);
+        assert!(!Replacing::of(held, "根尖的静止中心由 WOX5 维持 [@Zhang2021]。\n\n干细胞微环境的信号来自静止中心，这些信号让周围的干细胞保持不分化的状态。").unwrap().drops);
+        let (chinese, english) = ("根尖的静止中心由 WOX5 维持，它发出的信号让周围的干细胞不分化。", "WOX5 maintains the quiescent centre of the root tip, and its signals keep the surrounding stem cells undifferentiated.");
+        assert!(!Replacing::of(chinese, english).unwrap().drops && !Replacing::of(english, chinese).unwrap().drops);
+        // Words are what an English text is counted in, and letters as soon as one of the two has Chinese.
+        assert_eq!((Replacing::of(english, "Too short.").map(|r| (r.before, r.after, r.unit(), r.drops)), Replacing::of(english, chinese).map(|r| r.unit())), (Some((18, 2, "词", true)), Some("字")));
     }
 
     #[test]

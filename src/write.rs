@@ -36,19 +36,9 @@ const PLACEHOLDER_AGENT: &str = "这一节还是空的。在左边告诉助手�
 /// How long a text is, as a writer counts it: a Chinese, Japanese or Korean
 /// letter is one, and so is every word of a language that spaces them.
 /// The second is whether letters were counted, which is what to call the number.
+/// The engine counts it (`manuscript::text_length`), so the card that asks before a section is written anew says the outline's number.
 pub(crate) fn text_length(text: &str) -> (usize, bool) {
-    // A picture's line is its caption: the address of its file is not something written.
-    if text.contains("![") {
-        let said: Vec<&str> = text.lines().map(|line| wisp_core::markdown::picture_line(line).map_or(line, |(caption, _)| &line[caption])).collect();
-        return count_length(&said.join("\n"));
-    }
-    count_length(text)
-}
-
-fn count_length(text: &str) -> (usize, bool) {
-    let letters = text.chars().filter(|c| wisp_core::structure::is_cjk(*c)).count();
-    let words = text.split(|c: char| c.is_whitespace() || wisp_core::structure::is_cjk(c)).filter(|word| word.chars().any(char::is_alphanumeric)).count();
-    (letters + words, letters > 0)
+    wisp_core::manuscript::text_length(text)
 }
 
 /// That length in words: 「1200 字」 for a text with Chinese in it, 「300 词」 for one without.

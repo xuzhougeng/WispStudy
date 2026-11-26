@@ -1990,6 +1990,8 @@
   "稿件列表": "List manuscripts",
   "读取稿件": "Read manuscript",
   "写稿件": "Write manuscript",
+  "改稿件": "Edit manuscript",
+  "助手想改动稿件，等你同意": "The assistant wants to change the manuscript and waits for your consent",
   "定大纲": "Set outline",
   "请用户决定": "Ask for your decision",
   "列出文献库": "List libraries",

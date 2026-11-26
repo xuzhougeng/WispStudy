@@ -1062,7 +1062,11 @@ impl Workspace {
                 // `command:0` opens the first of the person's own commands on 设置 › 命令.
                 "command" => Some(Cmd::SelectCommand(arg.parse().unwrap_or(0))),
                 // `consent` / `consent:always` / `consent:deny` answers the card that asks about the assistant's tools.
-                "consent" => Some(Cmd::AnswerTools(Talk::Library, match arg { "always" => Consent::Always, "deny" => Consent::Deny, _ => Consent::Once })),
+                // It is the conversation that waits for a yes which is answered: the one that writes a manuscript before a paper's and the library's.
+                "consent" => {
+                    let waits = self.lib.as_ref().and_then(|lib| [Talk::Write, Talk::Paper, Talk::Library].into_iter().find(|talk| lib.chat(*talk).pending.is_some())).unwrap_or(Talk::Library);
+                    Some(Cmd::AnswerTools(waits, match arg { "always" => Consent::Always, "deny" => Consent::Deny, _ => Consent::Once }))
+                }
                 // `connector:0` opens the first connector on 设置 › 自定义 (after `settings:customize`).
                 "connector" => Some(Cmd::Custom(crate::custom::Do::SelectConnector(arg.parse().unwrap_or(0)))),
                 // `skill:0` opens the first skill's page on 设置 › 自定义 (after `settings:skills`); `skill:file;<path>` shows a file of it,

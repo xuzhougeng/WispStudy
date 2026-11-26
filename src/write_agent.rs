@@ -1,7 +1,7 @@
 //! 助手写: 写作's other mode (`wisp_core::compose`). The outline stays at
 //! the left; in the middle the person talks with the assistant, and at the
 //! right stands the manuscript, which the assistant writes with its tools
-//! (`edit_section`, `set_outline`) while the person reads, corrects by hand
+//! (`edit_section`, `write_section`, `set_outline`) while the person reads, corrects by hand
 //! and goes back to an earlier version when a change was for the worse.
 //! The conversation is `Library::write_chat`, the third of a library's
 //! conversations (`Talk::Write`), kept in the history under the manuscript

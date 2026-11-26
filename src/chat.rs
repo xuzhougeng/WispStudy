@@ -1499,7 +1499,7 @@ impl Workspace {
                     .border_1()
                     .border_color(Theme::line_strong())
                     .bg(Theme::bg_sunken())
-                    .child(div().flex().items_center().gap(px(6.)).font_weight(FontWeight::MEDIUM).child(ui::icon("info", 14., Theme::accent())).child(if pending.calls.iter().any(|call| call.confirm && call.outside.is_some()) { t("助手想执行下面的操作，等你同意") } else if draft { t("助手想收进或改动这次对话里的文献，等你同意") } else { t("助手想改动文献库，等你同意") }))
+                    .child(div().flex().items_center().gap(px(6.)).font_weight(FontWeight::MEDIUM).child(ui::icon("info", 14., Theme::accent())).child(if pending.calls.iter().any(|call| call.confirm && call.outside.is_some()) { t("助手想执行下面的操作，等你同意") } else if pending.calls.iter().filter(|call| call.confirm).all(|call| wisp_core::tools::MANUSCRIPT.contains(&call.name.as_str())) { t("助手想改动稿件，等你同意") } else if draft { t("助手想收进或改动这次对话里的文献，等你同意") } else { t("助手想改动文献库，等你同意") }))
                     .children(pending.calls.iter().enumerate().filter(|(_, call)| call.confirm).map(|(n, call)| {
                         let line = div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_secondary()).child(crate::i18n::tool_call(&call.line));
                         if call.details.is_empty() { return div().pl(px(20.)).child(line) }
