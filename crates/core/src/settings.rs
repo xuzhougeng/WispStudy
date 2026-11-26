@@ -664,8 +664,14 @@ impl Settings {
     /// (`imagegen::looks_like`) or judges (`judge::looks_like`) makes it that
     /// kind of model; `set_model_kind` says otherwise.
     pub fn add_model(&mut self, provider: usize, model: &str) -> Option<String> {
+        self.add_model_with_kind(provider, model, None)
+    }
+
+    /// One more model of a provider, given an explicit `kind` (`""`, `imagegen::KIND`, `judge::KIND`) or `None` to
+    /// guess from its name (`provider::guessed_kind`).
+    pub fn add_model_with_kind(&mut self, provider: usize, model: &str, kind: Option<&str>) -> Option<String> {
         let id = self.free_id();
-        let kind = if crate::judge::looks_like(model) { crate::judge::KIND } else if crate::imagegen::looks_like(model) { crate::imagegen::KIND } else { "" };
+        let kind = kind.unwrap_or_else(|| provider::guessed_kind(model));
         self.providers.get_mut(provider)?.models.push(Model { id: id.clone(), model: model.trim().to_string(), kind: kind.into(), ..Default::default() });
         Some(id)
     }
@@ -1073,8 +1079,12 @@ mod tests {
         assert_eq!(s.profile_for(Task::Screen).map(|p| (p.model.clone(), p.judges())), Some(("jev-latest".into(), true)));
         assert_eq!(s.speaking_profile_for(Task::Screen).model, "deepseek-flash");
         assert_eq!(s.speaking_profile_for(Task::Translate).model, "deepseek-flash");
-        // A name that says so makes a judging model; made a model of words, it lets go of screening only if it must.
+        // A name that says so makes a judging model; an explicit kind overrides what the name looks like.
         assert!(s.add_model(0, "jev-1.13.0").and_then(|id| s.model(&id).map(|(_, m)| m.judges())).unwrap());
+        let ep_draw = s.add_model_with_kind(0, "ep-20260101-custom", Some(crate::imagegen::KIND)).unwrap();
+        assert!(s.model(&ep_draw).unwrap().1.draws());
+        let ep_chat = s.add_model_with_kind(0, "gpt-image-like-chat", Some("")).unwrap();
+        assert!(s.model(&ep_chat).unwrap().1.speaks());
         s.set_model_kind(typesafe, 0, "");
         assert_eq!((s.tasks.screen.as_str(), s.profile_for(Task::Screen).map(|p| p.judges())), (jev.as_str(), Some(false)));
         s.set_model_kind(typesafe, 0, crate::imagegen::KIND);

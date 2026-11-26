@@ -179,14 +179,18 @@ pub enum Cmd {
     SelectProvider(usize),
     /// Ask again what the account of the provider on show holds.
     ReadBalance,
-    /// 设置 › AI › 模型's 连接测试: one short question to each model of the provider on show.
-    TestModels,
+    /// 设置 › AI › 模型: ask the n-th model of the provider on show one short question (`wisp_net::test_model`).
+    TestModel(usize),
+    /// 设置 › AI › 模型: ask the candidate model typed in `new_model` one short question before adding it.
+    TestNewModel,
     /// One more provider, from a `provider::Preset` key; empty is a service set up by hand.
     AddProvider(String),
     AskRemoveProvider(usize),
     RemoveProvider(usize),
-    /// One more model of the provider on show, from what its field holds.
+    /// One more model of the provider on show, from what its field holds (once tested, or directly when it draws).
     AddModel,
+    /// Choose the kind of the candidate model to add (`None` guesses from its name).
+    SetNewModelKind(Option<String>),
     RemoveModel(usize),
     /// How hard the n-th model of the provider on show thinks, a key of `ai::EFFORTS`.
     SetEffort(usize, String),
@@ -970,7 +974,8 @@ impl Workspace {
             Cmd::AiTab(tab) => self.open_ai_tab(tab, window, cx),
             Cmd::SelectProvider(index) => self.select_provider(index, cx),
             Cmd::ReadBalance => self.read_balance_shown(cx),
-            Cmd::TestModels => self.test_models(cx),
+            Cmd::TestModel(index) => self.test_model(index, cx),
+            Cmd::TestNewModel => self.test_new_model(cx),
             Cmd::AddProvider(preset) => self.add_provider(&preset, cx),
             Cmd::AskRemoveProvider(index) => {
                 let Some(provider) = self.settings.providers.get(index) else { return };
@@ -984,6 +989,7 @@ impl Workspace {
                 self.remove_provider(index, cx);
             }
             Cmd::AddModel => self.add_model(cx),
+            Cmd::SetNewModelKind(kind) => self.set_new_model_kind(kind, cx),
             Cmd::RemoveModel(index) => self.remove_model(index, cx),
             Cmd::SetEffort(index, value) => self.set_effort(index, value, cx),
             Cmd::SetModelContext(index, tokens) => self.set_model_context(index, tokens, cx),

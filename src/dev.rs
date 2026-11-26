@@ -854,8 +854,14 @@ impl Workspace {
                 "translate" => Some(Cmd::ToggleTranslation),
                 // `profile:1` shows the second provider on 设置 › AI › 模型.
                 "profile" => Some(Cmd::SelectProvider(arg.parse().unwrap_or(0))),
-                // `testmodels` is 连接测试 on that page: one short question to each of the provider's models.
-                "testmodels" => Some(Cmd::TestModels),
+                // `testmodel:0` tests the first model of the provider on show; `testmodel:new` tests the candidate in `new_model`.
+                "testmodel" => Some(if arg == "new" { Cmd::TestNewModel } else { Cmd::TestModel(arg.parse().unwrap_or(0)) }),
+                // `newmodel:<name>` types into the add-a-model box on 设置 › AI › 模型; `addmodel` adds it once ready.
+                "newmodel" => {
+                    self.set_new_model_text(arg, cx);
+                    None
+                }
+                "addmodel" => Some(Cmd::AddModel),
                 // `palette` opens the command palette; `palette:<text>` with that typed into it.
                 "palette" => {
                     if self.palette.is_none() { self.toggle_palette(window, cx) }
