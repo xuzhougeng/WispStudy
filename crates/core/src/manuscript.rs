@@ -116,6 +116,30 @@ pub struct Manuscript {
     pub sections: Vec<Section>,
 }
 
+/// How long a text is, as a writer counts it: a Chinese, Japanese or Korean letter is one, and so is every word
+/// of a language that spaces them. The second is whether letters were counted, which is what to call the number
+/// (字, else 词). A picture's line is its caption: the address of its file is not something written. It is the
+/// one count of a manuscript's text: the outline's, the card's that asks before a section is written anew, and
+/// a conversation's line about what was written.
+pub fn text_length(text: &str) -> (usize, bool) {
+    let count = |text: &str| {
+        let letters = text.chars().filter(|c| crate::structure::is_cjk(*c)).count();
+        let words = text.split(|c: char| c.is_whitespace() || crate::structure::is_cjk(c)).filter(|word| word.chars().any(char::is_alphanumeric)).count();
+        (letters + words, letters > 0)
+    };
+    if !text.contains("![") { return count(text) }
+    let said: Vec<&str> = text.lines().map(|line| crate::markdown::picture_line(line).map_or(line, |(caption, _)| &line[caption])).collect();
+    count(&said.join("\n"))
+}
+
+/// That length said: 「1200 字」 for a text with Chinese in it, 「300 词」 for one without.
+pub fn length_said(text: &str) -> String {
+    match text_length(text) {
+        (n, true) => format!("{n} 字"),
+        (n, false) => format!("{n} 词"),
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Section {

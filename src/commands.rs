@@ -1911,6 +1911,8 @@ impl Workspace {
             }
             Cmd::AnswerTools(paper, consent) => {
                 let Some(pending) = self.lib.as_mut().and_then(|lib| {
+                    // Answered: what the conversation that writes had put in a section's place for the answer goes.
+                    if paper == Talk::Write { lib.writing.agent.proposal = None }
                     let chat = lib.chat_mut(paper);
                     if consent == Consent::Always { chat.allow_changes = true }
                     chat.pending.take()

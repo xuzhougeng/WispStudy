@@ -28,7 +28,10 @@
 //! 「试试卡片」 ends in a card of 去筛选, 查找开放全文 and a reply. In the
 //! conversation that writes a manuscript (助手写) it calls `edit_section`
 //! and puts a paragraph citing the first paper at the end of the section on
-//! show; asked there to 「试试大纲」, it calls `set_outline` with three sections.
+//! show; asked there to 「试试大纲」, it calls `set_outline` with three sections,
+//! and asked to 「试试整节」 it calls `write_section` with one sentence for the
+//! whole of the section on show (a section with words would lose most of them:
+//! what the window asks about even there).
 //! Asked to review a section of the manuscript (批注), it proposes a change
 //! to the first sentence, remarks on the start of the second paragraph, and
 //! makes one remark on words the manuscript does not have, which is dropped.
@@ -431,18 +434,19 @@ fn answer(mut stream: TcpStream, delay: u64) {
             // The conversation that writes a manuscript (助手写): a new outline when asked to try one, else a paragraph at the end of the section on show.
             let said = &request[note..];
             // What was asked this time stands before the note, after the last question's start.
-            let outline = request[request.rfind("\"role\":\"user\"").unwrap_or(0)..note].contains("试试大纲");
+            let asked = &request[request.rfind("\"role\":\"user\"").unwrap_or(0)..note];
+            let (outline, whole) = (asked.contains("试试大纲"), asked.contains("试试整节"));
             let args = if outline {
                 r#"{"title": "假模型拟的题目", "sections": [{"name": "研究背景", "kind": "introduction"}, {"name": "主要进展"}, {"name": "展望", "kind": "discussion"}]}"#.to_string()
             } else {
                 // `2. S-… · Introduction · 导言 · 未写 ← 右边正显示这一节`: the id on the line that says so, else the first of the outline.
                 let line = said.find("右边正显示").map_or(said, |at| &said[..at]);
                 let id: String = if said.contains("右边正显示") { line.rfind("S-") } else { line.find("S-") }.map(|at| line[at..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-').collect()).unwrap_or_default();
-                format!(r#"{{"section": "{id}", "edits": [{{"old": "", "new": "（假模型）这是助手写进稿件的一段，引了文献库里的第一篇 [P1]。"}}]}}"#)
+                if whole { format!(r#"{{"section": "{id}", "text": "（假模型）整节只剩这一句。"}}"#) } else { format!(r#"{{"section": "{id}", "edits": [{{"old": "", "new": "（假模型）这是助手写进稿件的一段，引了文献库里的第一篇 [P1]。"}}]}}"#) }
             };
             events.push_str(&event(r#"{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}"#));
             events.push_str(&event(r#"{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"我来动笔。"}}"#));
-            events.push_str(&event(&format!(r#"{{"type":"content_block_start","index":1,"content_block":{{"type":"tool_use","id":"toolu_5","name":"{}","input":{{}}}}}}"#, if outline { "set_outline" } else { "edit_section" })));
+            events.push_str(&event(&format!(r#"{{"type":"content_block_start","index":1,"content_block":{{"type":"tool_use","id":"toolu_5","name":"{}","input":{{}}}}}}"#, if outline { "set_outline" } else if whole { "write_section" } else { "edit_section" })));
             events.push_str(&event(&format!(r#"{{"type":"content_block_delta","index":1,"delta":{{"type":"input_json_delta","partial_json":{}}}}}"#, quoted(&args))));
             events.push_str(&event(r#"{"type":"message_delta","delta":{"stop_reason":"tool_use"}}"#));
         } else if let Some(path) = request.rfind("建成一个文献库").filter(|at| request.rfind("\"role\":\"user\"").is_some_and(|user| user < *at)).and_then(|_| {

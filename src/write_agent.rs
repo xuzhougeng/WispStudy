@@ -1,7 +1,7 @@
 //! 助手写: 写作's other mode (`wisp_core::compose`). The outline stays at
 //! the left; in the middle the person talks with the assistant, and at the
 //! right stands the manuscript, which the assistant writes with its tools
-//! (`edit_section`, `set_outline`) while the person reads, corrects by hand
+//! (`edit_section`, `write_section`, `set_outline`) while the person reads, corrects by hand
 //! and goes back to an earlier version when a change was for the worse.
 //! The conversation is `Library::write_chat`, the third of a library's
 //! conversations (`Talk::Write`), kept in the history under the manuscript
@@ -39,6 +39,9 @@ pub struct Agent {
     /// That question, as the changes are said to answer it.
     pub asked: String,
     pub versions: Versions,
+    /// A section the assistant wants to write anew and that would lose most of its words, while its conversation waits
+    /// for a yes: shown in the section's place, what it would hold and what it holds (`render_proposal`).
+    pub proposal: Option<compose::Proposed>,
 }
 
 /// The earlier versions of the section on show, to be looked at in its place.
@@ -398,6 +401,74 @@ impl Workspace {
                 .child(div().flex_none().px(px(4.)).text_size(text_px(12.)).text_color(if versions.at.is_some() { Theme::accent() } else { Theme::text_secondary() }).child(tf!("版本 {at}/{count}", "Version {at}/{count}")))
                 .child(arrow("agent-version-later", "chevron-right", at < count, true, self, cx)),
         )
+    }
+
+    /// A section the assistant wants to write anew, in the manuscript's place while its conversation waits for a yes:
+    /// what the section would hold, then what it holds now and would lose, and the answers the conversation's card has.
+    /// The question is put where the text is: two numbers in a card do not say what goes.
+    pub(crate) fn render_proposal(&self, proposal: &compose::Proposed, cx: &mut Context<Self>) -> AnyElement {
+        use crate::chat_state::Consent;
+        let count = |n: usize| crate::write::count_label(n, proposal.replacing.letters);
+        let (before, after) = (count(proposal.replacing.before), count(proposal.replacing.after));
+        let answer = |id: &'static str, label: &'static str, consent: Consent, this: &Self, cx: &mut Context<Self>| {
+            let shell = if consent == Consent::Once { ui::primary_button(id, label) } else { ui::secondary_button(id, label) };
+            shell.h(text_px(24.)).text_size(text_px(12.)).on_click(this.on(Cmd::AnswerTools(Talk::Write, consent), cx))
+        };
+        // One of the two texts under what it is: the one to come at the accent's edge, the one to go at the danger's, a little back.
+        let part = |id: &'static str, label: String, text: &str, going: bool| {
+            let edge = if going { Theme::danger() } else { Theme::accent() };
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .child(div().text_size(text_px(12.)).font_weight(FontWeight::MEDIUM).text_color(edge).child(label))
+                .child(div().pl(px(12.)).border_l_2().border_color(edge.opacity(0.55)).text_size(text_px(15.)).text_color(if going { Theme::text_secondary() } else { Theme::text() }).child(crate::markdown::render(id, &manuscript::section_markdown(text, 2), None, None)))
+        };
+        div()
+            .id("agent-proposal")
+            .flex()
+            .flex_col()
+            .flex_1()
+            .min_h_0()
+            .rounded(px(10.))
+            .border_1()
+            .border_color(Theme::accent().opacity(0.45))
+            .bg(Theme::bg_body())
+            .overflow_hidden()
+            .child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(6.))
+                    .px(px(14.))
+                    .py(px(8.))
+                    .border_b_1()
+                    .border_color(Theme::line())
+                    .bg(Theme::accent_soft())
+                    .child(ui::icon("info", 13., Theme::accent()))
+                    .child(div().flex_1().min_w(px(160.)).text_size(text_px(12.)).text_color(Theme::text()).child(tf!("助手想整节重写：{before} → {after}", "The assistant wants to rewrite this whole section: {before} → {after}")))
+                    .child(answer("agent-proposal-deny", t("不允许"), Consent::Deny, self, cx))
+                    .child(answer("agent-proposal-always", t("这次对话里都允许"), Consent::Always, self, cx))
+                    .child(answer("agent-proposal-once", t("允许"), Consent::Once, self, cx)),
+            )
+            .child(
+                div().id("agent-proposal-text").flex_1().min_h_0().overflow_y_scroll().child(
+                    div()
+                        .w_full()
+                        .max_w(crate::theme::manuscript_width())
+                        .mx_auto()
+                        .flex()
+                        .flex_col()
+                        .gap(px(18.))
+                        .px(px(18.))
+                        .py(px(14.))
+                        .child(part("agent-proposal-after", tf!("换成的文字 · {after}", "The new text · {after}"), &proposal.after, false))
+                        .child(part("agent-proposal-before", tf!("现在的文字 · {before} · 会被整节换掉", "The text now · {before} · all of it would be replaced"), &proposal.before, true)),
+                ),
+            )
+            .into_any_element()
     }
 
     /// An earlier version of the section, in the manuscript's place: what it said, when it was kept, and the two ways on.

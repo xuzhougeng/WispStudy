@@ -710,7 +710,7 @@ pub fn note(named: &[Thing]) -> String {
         }
     }
     out.push_str("点名只说明问的是哪一个，不是让你改动它们，也不表示用户同意了任何改动。");
-    if named.iter().any(|thing| matches!(thing, Thing::Section { .. })) { out.push_str("点到稿件的一节，是说问题说的是这一节，不是要你改它：用户没有要求改，就不要用 edit_section 改它。") }
+    if named.iter().any(|thing| matches!(thing, Thing::Section { .. })) { out.push_str("点到稿件的一节，是说问题说的是这一节，不是要你改它：用户没有要求改，就不要用 edit_section、write_section 改它。") }
     out
 }
 
@@ -991,7 +991,7 @@ mod tests {
         assert!(!note.contains("[P11]"));
         assert!(note.contains("稿件「根的综述」（ID M1）的「引言」一节（ID S1，属于导言）：共 7 字，现在的正文：\n<<<\n根尖的干细胞。\n>>>"), "{note}");
         assert!(note.contains("用 read_manuscript 读（manuscript 填 M1，section 填 S2）"), "{note}");
-        assert!(note.contains("不要用 edit_section 改它"));
+        assert!(note.contains("不要用 edit_section、write_section 改它"));
     }
 
     #[test]

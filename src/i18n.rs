@@ -52,6 +52,7 @@ const PHRASES: &[(&str, &str)] = &[
     // What a tool was called with (`tools::describe_call`).
     ("第 {n} 页起", "from page {0}"),
     ("全文 {n} 字", "{0} {0|character|characters} in all"),
+    ("全文 {n} 词", "{0} {0|word|words} in all"),
     ("{n} 篇", "{0} {0|paper|papers}"),
     ("{n} 处", "{0} {0|edit|edits}"),
     ("{n} 条", "{0} {0|comment|comments}"),
@@ -66,6 +67,8 @@ const PHRASES: &[(&str, &str)] = &[
     ("「{}」的 {n} 处没有对上原文，没有改", "{1} {1|edit|edits} to “{0}” did not match its text; nothing changed"),
     ("已写入「{}」，另有 {n} 处没有对上原文", "Wrote “{0}”; {1} more {1|edit|edits} did not match its text"),
     ("已写入「{}」，{n} 句和所引文献的原文大段相同", "Wrote “{0}”; {1} {1|sentence repeats|sentences repeat} the paper cited"),
+    ("已把「{}」整节换成新写的：{n} 字 → {n} 字", "Replaced the whole of “{0}”: {1} → {2} {2|character|characters}"),
+    ("已把「{}」整节换成新写的：{n} 词 → {n} 词", "Replaced the whole of “{0}”: {1} → {2} {2|word|words}"),
     ("已写入「{}」", "Wrote “{0}”"),
     ("「{}」不用改", "“{0}” needs no change"),
     ("「{}」已经是稿件《{}》", "“{0}” is already the manuscript “{1}”"),
@@ -80,7 +83,10 @@ const PHRASES: &[(&str, &str)] = &[
     ("{n} 句", "{0} {0|sentence|sentences}"),
     // What a call would change, for the card that asks (`tools::preview_call`).
     ("{}（最多取最新的 {n} 条）", "{0} (the latest {1} at most)"),
+    ("《{}》的「{}」：整节 {n} 字换成新写的 {n} 字", "“{1}” of “{0}”: the whole section, {2} {2|character|characters}, replaced by {3} newly written"),
+    ("《{}》的「{}」：整节 {n} 词换成新写的 {n} 词", "“{1}” of “{0}”: the whole section, {2} {2|word|words}, replaced by {3} newly written"),
     ("《{}》的「{}」：整节写成新的 {n} 字", "“{1}” of “{0}”: the whole section written anew, {2} {2|character|characters}"),
+    ("《{}》的「{}」：整节写成新的 {n} 词", "“{1}” of “{0}”: the whole section written anew, {2} {2|word|words}"),
     ("《{}》的「{}」：改 {n} 处", "“{1}” of “{0}”: {2} {2|edit|edits}"),
     ("《{}》的大纲改为：{}", "The outline of “{0}” becomes: {1}"),
     ("《{}》的题目改为：{}", "The title of “{0}” becomes: {1}"),
@@ -363,8 +369,9 @@ mod tests {
         assert_eq!(english_call("阅读全文：P-1 · 第 3 页起"), "Read full text: P-1 · from page 3");
         assert_eq!(english_call(&describe_call("search_fulltext", &json!({"query": "10x  Genomics", "limit": 5}))), "Search full text: 10x Genomics · limit 5");
         assert_eq!(english_call(&describe_call("library_status", &json!({}))), "Library overview");
-        assert_eq!(english_call(&describe_call("edit_section", &json!({"section": "Methods", "text": "abc"}))), "Write manuscript: Methods · 3 characters in all");
-        assert_eq!(english_call(&describe_call("edit_section", &json!({"section": "Methods", "edits": [{"old": "a", "new": "b"}]}))), "Write manuscript: Methods · 1 edit");
+        assert_eq!(english_call(&describe_call("write_section", &json!({"section": "Methods", "text": "Roots adapt to soil."}))), "Write manuscript: Methods · 4 words in all");
+        assert_eq!(english_call(&describe_call("write_section", &json!({"section": "Methods", "text": "根尖"}))), "Write manuscript: Methods · 2 characters in all");
+        assert_eq!(english_call(&describe_call("edit_section", &json!({"section": "Methods", "edits": [{"old": "a", "new": "b"}]}))), "Edit manuscript: Methods · 1 edit");
         assert_eq!(english_call(&describe_call("organise_papers", &json!({"changes": [{"id": "a"}, {"id": "b"}]}))), "Organise papers: 2 papers");
         // A connector's tool and a skill are named as they are.
         assert_eq!((english_call("Notion · search：roots"), english_call("使用技能：review")), ("Notion · search: roots".to_string(), "Using skill: review".to_string()));
@@ -395,6 +402,9 @@ mod tests {
         assert_eq!(english_of("root[Title]（最多取最新的 600 条）").as_deref(), Some("root[Title] (the latest 600 at most)"));
         assert_eq!(english_of("《Crossref》").as_deref(), Some("“Crossref”"));
         assert_eq!(english_of("《Roots》的「Methods」：改 2 处").as_deref(), Some("“Methods” of “Roots”: 2 edits"));
+        assert_eq!(english_of("《Roots》的「Methods」：整节 7409 字换成新写的 15 字").as_deref(), Some("“Methods” of “Roots”: the whole section, 7409 characters, replaced by 15 newly written"));
+        assert_eq!(english_of("已把「Methods」整节换成新写的：7409 字 → 15 字").as_deref(), Some("Replaced the whole of “Methods”: 7409 → 15 characters"));
+        assert_eq!(english_of("《Roots》的「Methods」：整节 900 词换成新写的 1 词").as_deref(), Some("“Methods” of “Roots”: the whole section, 900 words, replaced by 1 newly written"));
         assert_eq!(english_of("《Roots》的大纲改为：A、B").as_deref(), Some("The outline of “Roots” becomes: A、B"));
         assert_eq!(english_of("《Roots》的正文语言改为：英文").as_deref(), Some("The language of “Roots” becomes: English"));
         assert_eq!(english_of("1 个表格、2 张图留在 Word 文件里，导出时还在原处。").as_deref(), Some("1 table and 2 pictures stay in the Word file and are in place again on export."));

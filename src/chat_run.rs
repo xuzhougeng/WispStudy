@@ -839,6 +839,8 @@ impl Workspace {
         let first = chat.messages.len();
         let catalog = tools::catalog();
         let mut prepared = vec![];
+        // A section the conversation that writes wants to write anew and that would lose most of its words: shown in its place while the yes is waited for.
+        let mut proposal = None;
         for call in calls {
             if let Some((outside, confirm, line, details)) = outside.pop().flatten() {
                 chat.messages.push(ChatItem::Tool { call: line.clone(), result: None });
@@ -848,7 +850,15 @@ impl Workspace {
             let tool = catalog.iter().find(|t| t.name == call.name);
             // The model may name a paper by its label; one read in another library brings that library along.
             let composes = tools::MANUSCRIPT.contains(&call.name.as_str()) || ["read_manuscript", COMMENT].contains(&call.name.as_str());
-            let mut line = tools::describe_call(&call.name, call.args.as_ref().unwrap_or(&Value::Null));
+            // The person reads a section by its name, not by the id the model calls it by.
+            let named = call.args.as_ref().ok().filter(|_| composes).and_then(|args| {
+                let manuscript = wisp_core::compose::find_manuscript(store, args["manuscript"].as_str().map(str::trim).filter(|named| !named.is_empty()).or(about.as_deref()).unwrap_or("")).ok()?;
+                let name = manuscript.section(args["section"].as_str()?.trim())?.name.clone();
+                let mut args = args.clone();
+                args["section"] = Value::String(name);
+                Some(args)
+            });
+            let mut line = tools::describe_call(&call.name, named.as_ref().or(call.args.as_ref().ok()).unwrap_or(&Value::Null));
             let args = call.args.map(|mut args| {
                 ai::resolve_labels(&mut args, chat.sources());
                 args
@@ -866,11 +876,18 @@ impl Workspace {
             });
             // In the conversation that writes a manuscript the pen was handed over: writing that manuscript is not asked about again.
             let handed = about.as_ref().is_some_and(|about| tools::MANUSCRIPT.contains(&call.name.as_str()) && args.as_ref().is_ok_and(|args| args["manuscript"].as_str() == Some(about)));
+            // But for a section written anew that would lose most of its words (`compose::Replacing::drops`): the pen is for writing, and a
+            // section is not cut to a few words on a model's word alone (one model put a note to itself where 7,400 characters stood).
+            let offered = args.as_ref().ok().filter(|_| handed && call.name == "write_section").and_then(|args| wisp_core::compose::proposed(store, args, chat.sources())).filter(|proposed| proposed.replacing.drops);
+            let handed = handed && offered.is_none();
+            if proposal.is_none() { proposal = offered }
             // A call that cannot run as written has nothing to ask about: it fails by itself. Nor has one that writes a
             // new file (a Word file cited anew, slides): the person says where it goes in the save dialog, which is their yes (`place_outputs`).
             let asks = args.is_ok() && tool.is_some_and(|t| t.confirm) && !handed && !PLACED.contains(&call.name.as_str());
             // What it would change, for the card that asks; one that would be refused anyway is not asked about.
             let details = match &args {
+                // A manuscript's lines count the text as the manuscript will have it, its citations without the sentences their labels quote.
+                Ok(args) if asks && tools::MANUSCRIPT.contains(&call.name.as_str()) => wisp_core::compose::preview_for(store, &call.name, args, chat.sources()).ok(),
                 Ok(args) if asks => tools::preview_call(store, &call.name, args).ok(),
                 _ => Some(vec![]),
             };
@@ -880,8 +897,13 @@ impl Workspace {
         chat.scroll.scroll_to_bottom();
         if prepared.iter().any(|call| call.confirm) && !chat.allow_changes {
             chat.pending = Some(PendingTools { calls: prepared, first });
+            // The question is put where the text is: the section comes up, and in its place stand what it would hold and what it holds.
+            let elsewhere = proposal.as_ref().zip(about).filter(|(proposal, _)| proposal.section != lib.writing.section_id).map(|(proposal, about)| (about, proposal.section.clone()));
+            if talk == Talk::Write { lib.writing.agent.proposal = proposal }
+            if let Some((manuscript, section)) = elsewhere { self.write_show(manuscript, section, cx) }
             return cx.notify();
         }
+        if talk == Talk::Write { lib.writing.agent.proposal = None }
         self.place_outputs(talk, prepared, first, 0, cx);
     }
 
