@@ -34,6 +34,8 @@ pub enum Activity {
     #[allow(dead_code)]
     Listening,
     WaitingUser,
+    /// Nothing to do: the face on the box of a conversation between two questions.
+    Idle,
     Done,
     Paused,
 }
@@ -125,9 +127,10 @@ fn inline_sized(id: impl std::fmt::Display, activity: Activity, cell: f32) -> An
         return frame.child(face(0)).into_any_element();
     }
     // Keyed by what it does as well: another activity begins its loop anew.
+    let beats = inline_beats(activity);
     frame
-        .with_animation(SharedString::from(format!("{id}-{activity:?}")), Animation::new(Duration::from_millis(INLINE_BEATS as u64 * INLINE_BEAT_MS)).repeat(), move |frame, t| {
-            frame.child(face(((t * INLINE_BEATS as f32) as usize).min(INLINE_BEATS - 1)))
+        .with_animation(SharedString::from(format!("{id}-{activity:?}")), Animation::new(Duration::from_millis(beats as u64 * INLINE_BEAT_MS)).repeat(), move |frame, t| {
+            frame.child(face(((t * beats as f32) as usize).min(beats - 1)))
         })
         .into_any_element()
 }
@@ -136,6 +139,7 @@ fn quiet_inline(id: impl std::fmt::Display, activity: Activity, size_px: f32) ->
     let icon_size = (size_px - 5.).max(11.);
     match activity {
         Activity::WaitingUser => ui::icon("info", icon_size.max(13.), Theme::accent()).into_any_element(),
+        Activity::Idle => div().into_any_element(),
         Activity::Done => ui::icon("check", icon_size.max(13.), Theme::success()).into_any_element(),
         Activity::Paused => ui::icon("pause", icon_size.max(12.), Theme::text_tertiary()).into_any_element(),
         _ => ui::spinner(SharedString::from(format!("{id}-quiet")), icon_size, Theme::accent()).into_any_element(),
@@ -522,7 +526,7 @@ fn desk_sprite(activity: Activity, beat: usize) -> &'static [&'static str; DESK_
             2 => DESK_LISTEN_C,
             _ => DESK_LISTEN_B,
         },
-        Activity::WaitingUser => match beat % 4 {
+        Activity::WaitingUser | Activity::Idle => match beat % 4 {
             0 | 2 => DESK_WAIT_A,
             _ => DESK_WAIT_B,
         },
@@ -1214,8 +1218,14 @@ const DESK_PAUSED: &[&str; DESK_SPRITE_H] = &[
 
 const INLINE_W: usize = 12;
 const INLINE_H: usize = 9;
-/// Beats in one loop of the face.
+/// Beats in one loop of the face at work.
 const INLINE_BEATS: usize = 12;
+/// Beats in one loop of the face with nothing to do: eight seconds, most of them still.
+const IDLE_BEATS: usize = 40;
+
+fn inline_beats(activity: Activity) -> usize {
+    if activity == Activity::Idle { IDLE_BEATS } else { INLINE_BEATS }
+}
 /// How long a beat lasts.
 const INLINE_BEAT_MS: u64 = 200;
 
@@ -1262,11 +1272,11 @@ struct Pose {
     written: Option<usize>,
 }
 
-/// Four things a face of this size can be seen doing, and two it rests in. The desk has room to tell searching
+/// Four things a face of this size can be seen doing, its idling, and two it rests in. The desk has room to tell searching
 /// from reading and drawing from writing; here they share a pose.
 fn pose(activity: Activity, beat: usize) -> Pose {
     use Eyes::{At, Glad, Out, Shut};
-    let beat = beat % INLINE_BEATS;
+    let beat = beat % inline_beats(activity);
     let standing = Pose { eyes: Out, squat: false, feet: [true, true], written: None };
     match activity {
         // Along a line, a rest at its end, back to the start of the next; a blink after the third.
@@ -1282,6 +1292,9 @@ fn pose(activity: Activity, beat: usize) -> Pose {
         }
         // Looking at the reader, a foot tapping twice.
         Activity::WaitingUser => Pose { eyes: if beat == 9 { Shut } else { Out }, feet: [true, !matches!(beat, 2 | 4)], ..standing },
+        // Between two questions it stands and looks out: a blink, and once a loop a look to either side. Little enough
+        // not to draw the eye from what is being read.
+        Activity::Idle => Pose { eyes: match beat { 12 => Shut, 26..=28 => At(0, false), 30..=32 => At(2, false), _ => Out }, ..standing },
         Activity::Done => Pose { eyes: Glad, ..standing },
         Activity::Paused => Pose { eyes: Shut, ..standing },
     }
@@ -1349,7 +1362,7 @@ mod tests {
         DESK_IMPORT_A, DESK_IMPORT_B, DESK_IMPORT_C, DESK_LISTEN_A, DESK_LISTEN_B, DESK_LISTEN_C, DESK_PAUSED, DESK_READ_FLIP,
         DESK_READ_LEFT, DESK_READ_MID, DESK_READ_RIGHT, DESK_SEARCH_LEFT, DESK_SEARCH_MID, DESK_SEARCH_RIGHT, DESK_SPRITE_H,
         DESK_STRETCH, DESK_THINK_A, DESK_THINK_B, DESK_THINK_C, DESK_WAIT_A, DESK_WAIT_B, DESK_WIPE_BROW, DESK_WRITE_A,
-        DESK_WRITE_B, DESK_WRITE_C, Eyes, FACE, INLINE_BEATS, inline_frame, INLINE_H, INLINE_W, LENS_TOP, LENSES, on_pixel,
+        DESK_WRITE_B, DESK_WRITE_C, Eyes, FACE, IDLE_BEATS, INLINE_BEATS, inline_beats, inline_frame, INLINE_H, INLINE_W, LENS_TOP, LENSES, on_pixel,
         paper_stacks, pose, SPRITE_W, whole_cell,
     };
 
@@ -1383,7 +1396,8 @@ mod tests {
         }
     }
 
-    const ALL: [Activity; 11] = [
+    const ALL: [Activity; 12] = [
+        Activity::Idle,
         Activity::Reading, Activity::Searching, Activity::Thinking, Activity::Writing, Activity::Drawing, Activity::Compacting,
         Activity::Importing, Activity::Listening, Activity::WaitingUser, Activity::Done, Activity::Paused,
     ];
@@ -1391,7 +1405,7 @@ mod tests {
     #[test]
     fn the_face_keeps_its_shape_in_every_beat() {
         for activity in ALL {
-            for beat in 0..INLINE_BEATS {
+            for beat in 0..inline_beats(activity) {
                 let frame = inline_frame(activity, beat);
                 let body = if activity == Activity::Paused { b'+' } else { b'*' };
                 for (y, row) in frame.iter().enumerate() {
@@ -1444,6 +1458,10 @@ mod tests {
         // Waiting looks at the reader and taps one foot; the two at rest do not move.
         assert_eq!(inline_frame(Activity::WaitingUser, 0)[INLINE_H - 1], *b"..**....**..");
         assert_eq!(inline_frame(Activity::WaitingUser, 2)[INLINE_H - 1], *b"..**........");
+        // With nothing to do it is still but for a blink and two looks aside, in a loop of eight seconds.
+        let idle: Vec<_> = (0..IDLE_BEATS).map(|beat| inline_frame(Activity::Idle, beat)).collect();
+        assert_eq!(idle.iter().filter(|frame| **frame == idle[0]).count(), IDLE_BEATS - 7);
+        assert_eq!(idle[0], inline_frame(Activity::WaitingUser, 0));
         for still in [Activity::Done, Activity::Paused] { assert!(frames(still).iter().all(|frame| *frame == inline_frame(still, 0))) }
     }
 
