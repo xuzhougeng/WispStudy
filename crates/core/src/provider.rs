@@ -124,6 +124,11 @@ impl Model {
     }
 }
 
+/// The kind a model's name says it is (`imagegen::looks_like`, `judge::looks_like`), else one that answers in words (`""`).
+pub fn guessed_kind(model: &str) -> &'static str {
+    if crate::judge::looks_like(model) { crate::judge::KIND } else if crate::imagegen::looks_like(model) { crate::imagegen::KIND } else { "" }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Provider {

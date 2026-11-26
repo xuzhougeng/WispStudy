@@ -139,16 +139,24 @@
 
       <section id="s5">
         <h2><i>5</i>Revise one spot as you tell it</h2>
-        <p>The methods give no reason for the four time points. Go to the “Methods” section and, in the input box under the manuscript (“Tell the assistant what to change in this section”), write:</p>
-        <blockquote><cite>Tell the assistant what to change in this section</cite><p>After the sentence about sampling times add one sentence explaining why these four time points were chosen; do not make up references or data</p></blockquote>
-        <p>After you send it, the change lands directly in the manuscript: the new text is shaded and has a vertical bar on its left. Above the input box it lists how many places changed, and each can be undone with “Undo”, or you can choose “Undo all” or “Keep”. The assistant added one sentence after the sampling sentence:</p>
-        <blockquote><cite>Assistant</cite><p>The 0 hour sample serves as the baseline, and the three later time points cover the early and the later phases of the response.</p></blockquote>
+        <p>The methods give no reason for the four time points. To have the assistant change the manuscript from one sentence of yours, switch to “Assistant writes”: of the two icons beside the outline's title on the left, it is the one on the right. The conversation with the assistant takes the middle and the manuscript moves to the right. In the input box under the conversation, write:</p>
+        <blockquote><cite>Assistant writes</cite><p>In the Methods section after the sentence about sampling times add one sentence explaining why these four time points were chosen; do not make up references or data</p></blockquote>
+        <p>After you send it, the assistant reads the manuscript, then writes, and the change lands directly in it: the right side turns to “Methods”, the new sentence is shaded and has a vertical bar on its left, and the section gets a dot in the outline. Under the manuscript it lists how many places changed in this section; each can be undone with “Undo”, or you can choose “Undo all” or “Keep”. “Version 2/2” above the manuscript steps back to how it was before. In under half a minute the assistant added one sentence after the sampling sentence:</p>
+        <blockquote><cite>Assistant</cite><p>These four time points were chosen to provide an unstressed baseline (0 h) and to span the response from its earliest phase (1 h) through an intermediate stage (6 h) to a full day of exposure (24 h).</p></blockquote>
+        <p>In the conversation it says that it added no citation or data: the sentence only describes the design the time points already imply. If you had a more specific reason, such as a known timing of the osmotic response, tell it and it will revise the sentence and look for a supporting reference in the library.</p>
 
         <figure class="shot">
-          <img src="../../img/en/t/revise-06-revise.jpg" width="1372" height="870" loading="lazy" alt="The Methods section: after the sentence “Roots were sampled at 0, 1, 6 and 24 hours after transfer.” there is a new sentence shaded green. The box under the manuscript says “1 changes”, with “Undo all” and “Keep”. On the right, the assistant's comment records the request and, after “Changed. The original was”, the sampling sentence, with “Undo change” and “Mark resolved”. Below it is the comment by A. Author on “sequenced on an Illumina instrument”.">
-          <figcaption><b>Figure 6.</b> In a manuscript imported from Word, every spot the assistant changes gets a comment that records your request and the text as it was before.</figcaption>
+          <img src="../../img/en/t/revise-06-agent.jpg" width="1372" height="870" loading="lazy" alt="Assistant writes: the conversation in the middle, with the line “Read manuscript · Edit manuscript” and the assistant's explanation under the request. On the right the manuscript is at Methods: after the sentence “Roots were sampled at 0, 1, 6 and 24 hours after transfer.” there is a new shaded sentence with a bar on its left. Under it: “The assistant made 1 change in this section”, with “Undo all” and “Keep”.">
+          <figcaption><b>Figure 6.</b> Say it in “Assistant writes”: the change lands in the manuscript on the right, and the places it changed are listed under it.</figcaption>
         </figure>
-        <p>This comment is left automatically, so after the export your co-author can see what was changed here. Replacing a passage with “Polish” or “Rewrite by example” under the body leaves one as well.</p>
+        <p>Switch back to “I write” (the left one of the two icons beside the outline's title). The list of changes is still under the manuscript, so you can go on reviewing them, and the “Comments” tab on the right has a new comment by the assistant:</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/revise-06-agent-comment.jpg" width="1372" height="870" loading="lazy" alt="I write: the Methods section, the new sentence still shaded and the list of changes under the manuscript. At the top of the Comments tab on the right, the assistant's comment quotes the paragraph, records the request and, after “Changed. The original was”, the paragraph as it was, with “Undo change” and “Mark resolved”. Below it is the comment by M. Reviewer from the Word file on “sequenced on an Illumina instrument”.">
+          <figcaption><b>Figure 7.</b> In a manuscript imported from Word, every spot the assistant changes gets a comment that records your request and the text as it was before.</figcaption>
+        </figure>
+        <p>This comment is left automatically, so after the export your co-author can see what was changed here. Selecting a passage in “I write” and replacing it with “Polish” or “Rewrite by example” beside the selection leaves one as well.</p>
+        <aside class="note"><b>Note</b>“I write” has no box for telling the assistant what to change: since v0.20.0, changing the manuscript from a sentence of yours is done in “Assistant writes”. In “I write” the assistant is a set of tools beside the selection, and what they give back is yours to take or leave.</aside>
       </section>
 
       <section id="s6">
@@ -161,7 +169,7 @@
 
         <figure class="shot">
           <img src="../../img/en/t/revise-07-export.jpg" width="1372" height="870" loading="lazy" alt="The open “Export” menu: Markdown (.md), Word (.docx): original layout, with comments, Word (.docx): changes as tracked revisions, with comments, and Copy manuscript, followed by a list of citation styles with a check mark at “Citations in Word: author–year”.">
-          <figcaption><b>Figure 7.</b> The “Export” menu. A manuscript written from scratch has only one Word export.</figcaption>
+          <figcaption><b>Figure 8.</b> The “Export” menu. A manuscript written from scratch has only one Word export.</figcaption>
         </figure>
 
         <p>Choose the second one. After the export the notice reads “Exported to … (3 paragraphs changed, all as tracked changes, 6 comments)”. The 6 are the comments you and the assistant left; your co-author's 5 were already in the file. Unzip the exported file and compare it with the original:</p>
@@ -174,7 +182,7 @@
 
         <figure class="shot">
           <img src="../../img/t/revise-08-word.jpg" width="1140" height="1010" loading="lazy" alt="The exported Word file rendered in LibreOffice: in the last sentence of the second paragraph of the introduction the old words are struck through and the new words underlined; in the third paragraph “restricted to” is replaced by “with osmotic stress responses detected specifically in”, and “and” by “or”.">
-          <figcaption><b>Figure 8.</b> The introduction of the exported file opened in LibreOffice. Deletions and insertions are marked word by word, waiting for your advisor to accept or reject them one by one.</figcaption>
+          <figcaption><b>Figure 9.</b> The introduction of the exported file opened in LibreOffice. Deletions and insertions are marked word by word, waiting for your advisor to accept or reject them one by one.</figcaption>
         </figure>
         <aside class="note"><b>Tip</b>With the first export the changes leave no trace, and the old sentence survives only in the record of the assistant's comment. For a manuscript you send to your co-author for review, use the second.</aside>
       </section>
@@ -185,7 +193,7 @@
           <li>Import the Word manuscript: top-level headings start sections, your co-author's comments are read in together with the text they point to, and tables and pictures stay in the file.</li>
           <li>Check your co-author's comments one by one and mark them resolved; write your own reminders on selected text.</li>
           <li>In a review the assistant answers your co-author first and then gives a “Suggested change”; you decide whether to apply it, and an applied change can be undone.</li>
-          <li>Spots revised as you tell it get a comment automatically; on export the changes are recorded as tracked changes, and paragraphs you did not change stay exactly as they were.</li>
+          <li>To change the manuscript from a sentence of yours, switch to “Assistant writes”; every spot it changes gets a comment automatically. On export the changes are recorded as tracked changes, and paragraphs you did not change stay exactly as they were.</li>
           <li>If the manuscript is not written yet, see <a href="write.html">Write a paper: candidate sentences, citations and sources</a>; once it is revised and you want to follow newly published papers, see <a href="follow.html">Keep up with new papers, and hand the library to other tools</a>.</li>
         </ul>
       </section>
@@ -210,7 +218,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> Most screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface and a stand-in model that answers by fixed rules; Figure 8 still shows the Chinese interface and the earlier run. A real model answers differently each time, so the wording will differ when you follow along; the steps are the same.</p>
+      <p><b>About this tutorial.</b> Most screenshots were retaken in November 2026 on macOS with v0.18.0, with the English interface and a stand-in model that answers by fixed rules; Figure 9 still shows the Chinese interface and the earlier run. Figures 6 and 7 were taken again with v0.20.0 and Claude Sonnet 5.5, because the box in “I write” for telling the assistant what to change is gone and this step is now done in “Assistant writes”; the row of tools under the manuscript in Figures 1 to 5 now appears beside a selection instead. A real model answers differently each time, so the wording will differ when you follow along; the steps are the same.</p>
       <p><b>The assistant can be wrong.</b> Its suggestions and answers are for you to confirm; check key numbers and conclusions against the original.</p>
     </div>
   </div>
