@@ -385,9 +385,7 @@ impl Workbook {
                             cells[place] = said;
                         }
                     }
-                    Some("row") => {
-                        if !cells.is_empty() && !visit(row, std::mem::take(&mut cells)) { return }
-                    }
+                    Some("row") if !cells.is_empty() && !visit(row, std::mem::take(&mut cells)) => return,
                     _ => {}
                 },
             }
@@ -403,7 +401,7 @@ fn decoded(bytes: &[u8]) -> String {
     if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) { return String::from_utf8_lossy(rest).into_owned() }
     for (mark, big) in [([0xFF, 0xFE], false), ([0xFE, 0xFF], true)] {
         if let Some(rest) = bytes.strip_prefix(&mark) {
-            let units: Vec<u16> = rest.chunks_exact(2).map(|pair| if big { u16::from_be_bytes([pair[0], pair[1]]) } else { u16::from_le_bytes([pair[0], pair[1]]) }).collect();
+            let units: Vec<u16> = rest.as_chunks::<2>().0.iter().map(|pair| if big { u16::from_be_bytes(*pair) } else { u16::from_le_bytes(*pair) }).collect();
             return String::from_utf16_lossy(&units);
         }
     }
