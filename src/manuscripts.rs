@@ -125,7 +125,7 @@ fn pictures_beside(path: &std::path::Path, pictures: &[(String, std::path::PathB
 }
 
 /// The size the words of a manuscript read through are set in.
-const READ_SIZE: f32 = 15.;
+pub(crate) const READ_SIZE: f32 = 15.;
 
 impl Workspace {
     /// Save a finished chat answer in its own manuscript, never replacing an
@@ -459,6 +459,8 @@ impl Workspace {
             Cmd::WriteReading(reading) => {
                 if let Some(lib) = self.lib.as_mut() {
                     lib.writing.reading = reading;
+                    // The eye is the manuscript alone: beside its translation is the button next to it.
+                    lib.writing.facing = false;
                     if !reading { lib.writing.editor.read(cx).focus(window) }
                 }
                 if reading { self.write_snapshot("leave") }
@@ -879,6 +881,24 @@ impl Workspace {
             .on_click(self.on(Cmd::WriteReading(!reading), cx))
             .tooltip(move |_, cx| cx.new(|_| crate::write_assist::Tip(preview_tip.to_string())).into())
             .child(ui::icon("eye", 14., if reading { Theme::accent() } else { Theme::text_secondary() }));
+        // 译文对照: the preview with each paragraph's translation beside it (write_facing.rs). Another way of looking at the
+        // manuscript, so it stands right of the eye; lit while on, a click from a section being written goes straight to it.
+        let facing = reading && writing.facing;
+        let facing_tip = if facing { t("译文对照：开。再点一下收起译文，只看原文") } else { t("译文对照：预览全文，每一段的译文排在它旁边") };
+        let facing_button = div()
+            .id("write-facing")
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .size(text_px(26.))
+            .rounded(px(6.))
+            .cursor_pointer()
+            .when(facing, |d| d.bg(Theme::accent_soft()))
+            .when(!facing, |d| d.hover(|s| s.bg(Theme::hover())))
+            .on_click(self.on(Cmd::WriteFacing(!facing), cx))
+            .tooltip(move |_, cx| cx.new(|_| crate::write_assist::Tip(facing_tip.to_string())).into())
+            .child(ui::icon("languages", 14., if facing { Theme::accent() } else { Theme::text_secondary() }));
         // 引用卡片: whether a citation the pointer is on shows its card. A way of looking at the manuscript, so it stands here, in either
         // mode of 写作, and not among the tools for a paragraph. Lit while on; following a citation with a click works either way.
         let cards = !self.settings.citation_cards_hidden;
@@ -949,6 +969,7 @@ impl Workspace {
                     .child(cards_button)
                     // 预览 shows the whole manuscript as it reads, Markdown drawn; lit while it does, a click goes back to writing.
                     .child(preview)
+                    .child(facing_button)
                     .child(fill_button)
                     // The language is said even in a narrow column: there is no icon that says it. A menu button reads 文字 ⌄, as 版面 does.
                     .child(ui::ghost_button("write-language", None, None).h(text_px(26.)).px(px(7.)).gap(px(4.)).text_size(text_px(12.)).child(language.to_string()).child(ui::icon("chevron-down", 11., Theme::text_tertiary())).on_click(self.on_menu(MenuKind::WriteLanguage, cx)))
@@ -985,7 +1006,7 @@ impl Workspace {
                     if !before.is_empty() { pieces.push(crate::markdown::render_page(&format!("write-read-{n}-{at}"), &before, READ_SIZE).into_any_element()) }
                     let caption = section.body[picture.line.clone()].find(picture.caption.as_str()).filter(|_| !picture.caption.is_empty()).map(|start| read(picture.line.start + start..picture.line.start + start + picture.caption.len()));
                     let picture = manuscript::PictureLine { caption: caption.unwrap_or_else(|| picture.caption.clone()), ..picture.clone() };
-                    pieces.push(self.render_manuscript_picture(format!("write-read-picture-{n}-{at}"), &picture, window));
+                    pieces.push(self.render_manuscript_picture(format!("write-read-picture-{n}-{at}"), &picture, f32::from(theme::manuscript_width()), window));
                     from = picture.line.end;
                 }
                 let rest = manuscript::section_markdown(&read(from..section.body.len()), 1);

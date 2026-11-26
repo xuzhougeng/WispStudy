@@ -413,9 +413,8 @@ impl Workspace {
     }
 
     /// A picture where the manuscript is read through: the picture in the middle of the column, and its caption under it.
-    pub(crate) fn render_manuscript_picture(&self, id: String, picture: &manuscript::PictureLine, window: &Window) -> AnyElement {
+    pub(crate) fn render_manuscript_picture(&self, id: String, picture: &manuscript::PictureLine, width: f32, window: &Window) -> AnyElement {
         let Some(lib) = self.lib.as_ref() else { return div().into_any_element() };
-        let width = f32::from(crate::theme::manuscript_width());
         let drawn = match lib.write_figures.shot(&picture.address) {
             Shot::Ready(image) => {
                 let natural = image.size(0);

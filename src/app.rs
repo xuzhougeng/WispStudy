@@ -205,6 +205,8 @@ pub struct Writing {
     pub section_id: String,
     /// The whole manuscript is shown to be read, instead of one section to write.
     pub reading: bool,
+    /// 译文对照: while it is read so, each paragraph has its translation beside it (`write_facing.rs`).
+    pub facing: bool,
     /// The manuscript's title, edited in place.
     pub title: Entity<TextInput>,
     /// Counts the changes typed, so a pause is the timer of the last one still being the last.
@@ -1124,7 +1126,7 @@ impl Workspace {
         let (comments, heard) = crate::comments::Commenting::new(store.comments(&manuscript).unwrap_or_default(), store.manuscript_source(&manuscript).ok().flatten(), cx);
         subscriptions.extend(heard);
         let seek = crate::write_seek::Seek::new(&mut subscriptions, cx);
-        let writing = Writing { manuscripts, manuscript, section_id, reading: false, title, typed: 0, editor, find, search: Default::default(), structures: BTreeMap::new(), sorting: Sorting::default(), scroll: ScrollHandle::new(), assist: Default::default(), revise: Default::default(), comments, editor_scroll: ScrollHandle::new(), side: Side::default(), side_open: false, agent: Default::default(), seek, away: false };
+        let writing = Writing { manuscripts, manuscript, section_id, reading: false, facing: false, title, typed: 0, editor, find, search: Default::default(), structures: BTreeMap::new(), sorting: Sorting::default(), scroll: ScrollHandle::new(), assist: Default::default(), revise: Default::default(), comments, editor_scroll: ScrollHandle::new(), side: Side::default(), side_open: false, agent: Default::default(), seek, away: false };
         let citing = crate::cite::Citing::new(&store, &writing.manuscript, &mut subscriptions, cx);
         let gallery = crate::figures::Gallery::new(&mut subscriptions, cx);
         let excerpts = crate::excerpts::Excerpts::new(&mut subscriptions, cx);

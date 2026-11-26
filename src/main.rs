@@ -84,6 +84,7 @@ mod write_seek;
 mod write_agent;
 mod write_assist;
 mod write_cite;
+mod write_facing;
 mod write_source;
 
 use gpui::*;

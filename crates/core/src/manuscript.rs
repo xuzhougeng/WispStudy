@@ -338,7 +338,7 @@ fn bare_picture(body: &str, line: &markdown::Line) -> bool {
 /// How many lines of a section a table that starts at line `at` takes (`markdown::table_lines`); 0 when none
 /// does. `written` are the lines as written. A line of fenced code, an item of a list, a heading and a quotation
 /// open no table.
-fn table_rows(lines: &[markdown::Line], written: &[&str], at: usize) -> usize {
+pub(crate) fn table_rows(lines: &[markdown::Line], written: &[&str], at: usize) -> usize {
     let line = &lines[at];
     if line.code || line.item.is_some() || line.heading > 0 || line.quote > 0 { 0 } else { markdown::table_lines(&written[at..]) }
 }
