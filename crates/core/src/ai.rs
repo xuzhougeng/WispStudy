@@ -103,13 +103,19 @@ impl Profile {
     /// The key to send: the stored one, else the protocol's environment variable.
     pub fn key(&self) -> String {
         if !self.api_key.trim().is_empty() { return self.api_key.trim().to_string() }
-        if !self.key_env.trim().is_empty() { return std::env::var(self.key_env.trim()).unwrap_or_default() }
-        std::env::var(match self.protocol {
+        if !self.key_env.trim().is_empty() { return key_from_env(self.key_env.trim()) }
+        key_from_env(match self.protocol {
             Protocol::Anthropic => "ANTHROPIC_API_KEY",
             Protocol::OpenAI | Protocol::Responses => "OPENAI_API_KEY",
         })
-        .unwrap_or_default()
     }
+}
+
+/// An API key from the environment. This crate's tests read none: which model a task
+/// goes to must not depend on the keys set on the machine that runs them.
+fn key_from_env(name: &str) -> String {
+    if cfg!(test) { return String::new() }
+    std::env::var(name).unwrap_or_default()
 }
 
 /// What a label in the answer points at.
@@ -2930,7 +2936,7 @@ mod tests {
         assert!(r.body.get("cache_control").is_none() && r.body.get("tools").is_none() && r.body["fallbacks"] == "default");
         let other = plain_request(&Profile { protocol: Protocol::OpenAI, base_url: "http://x/v1".into(), api_key: "k".into(), model: "m".into(), ..Default::default() }, "S", "Q").unwrap();
         assert_eq!(other.body["messages"], json!([{"role": "system", "content": "S"}, {"role": "user", "content": "Q"}]));
-        assert!(plain_request(&Profile::default(), "S", "Q").is_err() || !Profile::default().key().is_empty());
+        assert!(plain_request(&Profile::default(), "S", "Q").is_err());
     }
 
     #[test]
