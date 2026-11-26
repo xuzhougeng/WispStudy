@@ -43,10 +43,13 @@ pub(crate) fn text_length(text: &str) -> (usize, bool) {
 
 /// That length in words: 「1200 字」 for a text with Chinese in it, 「300 词」 for one without.
 pub(crate) fn length_label(text: &str) -> String {
-    match text_length(text) {
-        (n, true) => tf!("{n} 字", "{n} characters"),
-        (n, false) => tf!("{n} 词", "{n} words"),
-    }
+    let (n, letters) = text_length(text);
+    count_label(n, letters)
+}
+
+/// A length already counted, said: in letters (字) or in words (词).
+pub(crate) fn count_label(n: usize, letters: bool) -> String {
+    if letters { tf!("{n} 字", "{n} characters") } else { tf!("{n} 词", "{n} words") }
 }
 
 impl Workspace {
@@ -107,9 +110,11 @@ impl Workspace {
         let writing = &lib.writing;
         let text = writing.editor.read(cx).text();
         let (length, characters) = (length_label(text), text.chars().filter(|c| !c.is_whitespace()).count());
+        // A section the assistant wants to write anew, waiting for a yes: what it holds and what it would, in its place.
+        let proposal = writing.agent.proposal.as_ref().filter(|proposal| agent && !writing.reading && proposal.section == writing.section_id && lib.write_chat.pending.is_some());
         // An earlier version of the section, looked at in its place.
-        let version = writing.agent.versions.shown().filter(|version| agent && version.section_id == writing.section_id);
-        let editing = !writing.reading && version.is_none();
+        let version = writing.agent.versions.shown().filter(|version| agent && proposal.is_none() && version.section_id == writing.section_id);
+        let editing = !writing.reading && version.is_none() && proposal.is_none();
         // What is selected goes with the next thing said to the assistant.
         let picked = if agent && editing { text_length(writing.editor.read(cx).selected()).0 } else { 0 };
         // What the assistant changed in this section in answer to the last question: each change to go to or take back, in either mode.
@@ -118,6 +123,8 @@ impl Workspace {
         let status = if writing.reading {
             let whole: String = writing.current().map_or(String::new(), |m| m.sections.iter().map(|s| s.body.as_str()).collect::<Vec<_>>().join("\n"));
             tf!("全文 {} · 点一节的名称，回到那一节写", "Manuscript: {} · Click a section name to edit it", length_label(&whole))
+        } else if proposal.is_some() {
+            t("助手提议的改写还没有写进稿件：允许，或不允许").to_string()
         } else if version.is_some() {
             t("这是早先的一版，不能在这里改；恢复它，或回到现在的文字").to_string()
         } else if picked > 0 {
@@ -148,7 +155,7 @@ impl Workspace {
             .mx_auto()
             .children(seek)
             .child(
-                div().flex().flex_col().flex_1().min_h_0().px(px(16.)).pb(px(8.)).when(version.is_some(), |d| d.pt(px(12.))).child(if writing.reading { self.render_manuscript_reading(window, cx) } else if let Some(version) = version { self.render_version(version, cx) } else {
+                div().flex().flex_col().flex_1().min_h_0().px(px(16.)).pb(px(8.)).when(version.is_some() || proposal.is_some(), |d| d.pt(px(12.))).child(if writing.reading { self.render_manuscript_reading(window, cx) } else if let Some(proposal) = proposal { self.render_proposal(proposal, cx) } else if let Some(version) = version { self.render_version(version, cx) } else {
                     let page = div().relative().w_full().max_w(theme::manuscript_width()).mx_auto().pl(px(18.)).pr(px(if markers.is_empty() { 18. } else { MARGIN })).py(px(14.)).text_size(text_px(15.)).line_height(theme::body_line(26.)).text_color(Theme::text());
                     div()
                         .id("write-editor")

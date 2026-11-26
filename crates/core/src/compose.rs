@@ -189,16 +189,34 @@ impl Replacing {
     }
 }
 
+/// A section a call of `write_section` would write anew, when it has words: the section (its id), what it holds
+/// and what it would hold, for the window to show the two in the section's place before the person says yes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Proposed {
+    pub section: String,
+    pub before: String,
+    pub after: String,
+    pub replacing: Replacing,
+}
+
 /// What a call of `write_section` would do to the section it names, when that section has words. The
-/// citations of the text are counted as the manuscript will have them (`label_citations`), not as the
-/// conversation wrote them: a label carries the sentence it quotes, which the manuscript does not keep.
-pub fn replacing(store: &Store, args: &Value, sources: &[Source]) -> Option<Replacing> {
+/// citations of the text are as the manuscript will have them (`label_citations`), not as the conversation
+/// wrote them: a label carries the sentence it quotes, which the manuscript does not keep. None for a call
+/// that gives no words: that one is refused by itself.
+pub fn proposed(store: &Store, args: &Value, sources: &[Source]) -> Option<Proposed> {
     let (_, section) = section_named(store, args).ok()?;
     let (papers, trash, kept) = (store.list_papers().ok()?, store.list_trash().ok()?, store.cite_keys().ok()?);
     let index = Index::new(&papers, trash.iter().map(|entry| &entry.paper), &kept);
     let mut args = args.clone();
     label_citations(&mut args, sources, &index);
-    Replacing::of(&section.body, &keyed(args["text"].as_str()?.trim(), &index))
+    let after = Some(keyed(args["text"].as_str()?.trim(), &index)).filter(|text| !text.is_empty())?;
+    let replacing = Replacing::of(&section.body, &after)?;
+    Some(Proposed { section: section.id, before: section.body.trim().to_string(), after, replacing })
+}
+
+/// `proposed`, for what it does to the section's length alone.
+pub fn replacing(store: &Store, args: &Value, sources: &[Source]) -> Option<Replacing> {
+    proposed(store, args, sources).map(|proposed| proposed.replacing)
 }
 
 /// One line of the outline `set_outline` asks for.
@@ -692,6 +710,11 @@ mod tests {
         let quoting = json!({"section": section.id, "text": "静止中心 [P1 \"WOX5 maintains the quiescent centre of the root.\"]。"});
         assert_eq!(replacing(&store, &quoting, &sources), Some(Replacing { before: length(held) as usize, after: 5, letters: true, drops: true }));
         assert_eq!(replacing(&store, &json!({"section": empty.id, "text": "一二三"}), &sources), None);
+        // The two texts, for the window to show in the section's place: what it holds, and what it would as the manuscript will have it.
+        let shown = proposed(&store, &quoting, &sources).unwrap();
+        assert_eq!((shown.section.as_str(), shown.before.as_str(), shown.after.as_str()), (section.id.as_str(), held, "静止中心 [@Zhang2021]。"));
+        // A call that gives no words is refused by itself: there is nothing to show or ask.
+        assert_eq!(proposed(&store, &json!({"section": section.id, "text": " "}), &sources), None);
         // Written anew at about its length: what became of it is said, and there is nothing to put right.
         let anew = "WOX5 维持着根尖的静止中心 [@Zhang2021]。\n\n静止中心发出的信号构成了干细胞微环境，周围的干细胞因此不分化。\n\n它受损时，邻近的干细胞分裂并取代它。";
         let done = write(&mut store, &json!({"section": section.id, "text": anew})).unwrap();

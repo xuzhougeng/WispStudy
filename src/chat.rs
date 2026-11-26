@@ -1483,7 +1483,19 @@ impl Workspace {
         if chat.busy && !chat.compacting && chat.pending.is_none() && matches!(chat.messages.last(), Some(ChatItem::Answer(text)) if !text.is_empty()) {
             items.push(div().flex().items_center().gap(px(8.)).h(text_px(18.)).child(ui::spinner(SharedString::from(format!("working-{side}")), 13., Theme::accent())).child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(elapsed(chat))).into_any_element());
         }
-        if let Some(pending) = &chat.pending {
+        // A section about to be written anew is asked about where its text is (`render_proposal`): while that is on show the
+        // conversation only says so, in a line, and does not ask the same thing a second time.
+        let in_place = chat.pending.as_ref().filter(|pending| talk == Talk::Write && pending.calls.iter().filter(|call| call.confirm).count() == 1).and_then(|_| {
+            let writing = &self.lib.as_ref()?.writing;
+            let proposal = writing.agent.proposal.as_ref().filter(|proposal| !writing.reading && proposal.section == writing.section_id)?;
+            Some(writing.section().map(|section| section.name.clone()).unwrap_or_default()).zip(Some(proposal.replacing))
+        });
+        if let Some((section, replacing)) = &in_place {
+            let count = |n: usize| crate::write::count_label(n, replacing.letters);
+            let (before, after) = (count(replacing.before), count(replacing.after));
+            items.push(div().flex().items_center().gap(px(6.)).text_size(text_px(13.)).text_color(Theme::text_secondary()).child(ui::icon("info", 14., Theme::accent())).child(tf!("助手想整节重写「{section}」（{before} → {after}），等你在稿件上允许或不允许", "The assistant wants to rewrite the whole of “{section}” ({before} → {after}); allow it or not on the manuscript")).into_any_element());
+        }
+        if let Some(pending) = chat.pending.as_ref().filter(|_| in_place.is_none()) {
             let button = |name: &str, label: &'static str, consent: Consent, this: &Self, cx: &mut Context<Self>| {
                 let id = SharedString::from(format!("consent-{name}-{side}"));
                 let shell = if consent == Consent::Once { ui::primary_button(id, label) } else { ui::secondary_button(id, label) };
