@@ -268,6 +268,12 @@ impl Workspace {
                 // `window` reads the paper on show in a window of its own, `window:<n>` the n-th paper of the list; `windowshot:<file.png>` draws the last such window.
                 "window" if arg.is_empty() => self.lib.as_ref().and_then(|l| l.selected.clone()).map(Cmd::PaperWindow),
                 "window" => self.lib.as_ref().and_then(|l| l.shown.get(arg.parse::<usize>().unwrap_or(0)).map(|&i| Cmd::PaperWindow(l.papers[i].id.clone()))),
+                // `windowkey:cmd-f`: a key as the last paper window hears it.
+                "windowkey" => {
+                    let Some(handle) = self.lib.as_ref().and_then(|l| l.windows.last()).map(|w| AnyWindowHandle::from(w.window)) else { eprintln!("windowkey: no paper window"); return };
+                    if let Ok(stroke) = Keystroke::parse(arg) { cx.defer(move |cx| { handle.update(cx, |_, window, cx| { window.dispatch_keystroke(stroke, cx); }).ok(); }) }
+                    return;
+                }
                 "windowshot" => {
                     let path = PathBuf::from(arg);
                     // Untyped: a typed handle would hold the window's root view, which drawing it needs.
@@ -822,6 +828,13 @@ impl Workspace {
                     let (view, what) = arg.split_once(';').unwrap_or((arg, "pages"));
                     let shows = match what { "theirs" => crate::pdf::Shows::Theirs, "next" => crate::pdf::Shows::Next, "map" => crate::pdf::Shows::Map, _ => crate::pdf::Shows::Pages };
                     if let (Some(pdf), Ok(view)) = (self.lib.as_ref().and_then(|lib| lib.pdf.clone()), view.parse::<usize>()) { pdf.update(cx, |pdf, cx| pdf.show_in_view(view, shows, cx)) }
+                    None
+                }
+                // `pdffind`: the find bar of the PDF on show, as its button in the bar opens it (again puts it away);
+                // `pdffind:<words>` types them into it. The key itself is `key:cmd-f`.
+                "pdffind" if arg.is_empty() => Some(Cmd::PdfFind(!self.lib.as_ref().and_then(|lib| lib.pdf.as_ref()).is_some_and(|pdf| pdf.read(cx).finding()))),
+                "pdffind" => {
+                    if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()) { pdf.update(cx, |pdf, cx| pdf.open_finder(Some(arg.to_string()), false, window, cx)) }
                     None
                 }
                 // `pdfoverview`: 页面总览 of the PDF on show, on or off.

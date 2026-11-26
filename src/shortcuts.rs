@@ -98,8 +98,18 @@ pub fn refusal(id: &str, key: &str, custom: &BTreeMap<String, String>) -> Option
     SHORTCUTS.iter().find(|s| s.id != id && same(&key_of(s.id, custom), key)).map(|other| tf!("{} 已用于「{}」。先修改或移除那个快捷键。", "{} is already used for “{}”. Change or remove that shortcut first.", pretty(key), t(other.label)))
 }
 
+/// The keys in force, for a view that is drawn while the workspace cannot be read (a paper's own window).
+struct InForce(BTreeMap<String, String>);
+impl Global for InForce {}
+
+/// How the key of a shortcut in force is shown; empty when it has none.
+pub fn shown(id: &str, cx: &App) -> String {
+    cx.try_global::<InForce>().map(|keys| pretty(&key_of(id, &keys.0))).unwrap_or_default()
+}
+
 /// Replace every key binding: the text field's, Esc, and the shortcuts as changed by `custom`.
 pub fn rebuild(custom: &BTreeMap<String, String>, cx: &mut App) {
+    cx.set_global(InForce(custom.clone()));
     cx.clear_key_bindings();
     crate::input::bind_keys(cx);
     let context = Some("Workspace");
@@ -174,9 +184,10 @@ pub fn rebuild(custom: &BTreeMap<String, String>, cx: &mut App) {
         if key.is_empty() || Keystroke::parse(&key).is_err() { continue }
         bindings.push(match binding { 0 => KeyBinding::new(&key, ZoomIn, Some("Reader")), 1 => KeyBinding::new(&key, ZoomOut, Some("Reader")), _ => KeyBinding::new(&key, ZoomFit, Some("Reader")) });
     }
-    // The same key in a PDF with the keyboard looks in the file: the deeper context is heard first.
+    // The same key in a PDF with the keyboard looks in the file: the deeper context is heard first. A paper's own
+    // window has nothing else to look in, so there the key is the file's wherever the keyboard is.
     let search = key_of("search", custom);
-    if !search.is_empty() && Keystroke::parse(&search).is_ok() { bindings.push(KeyBinding::new(&search, crate::pdf::FindInPdf, Some("PdfView"))) }
+    if !search.is_empty() && Keystroke::parse(&search).is_ok() { bindings.extend(["PdfView", "Reader"].map(|context| KeyBinding::new(&search, crate::pdf::FindInPdf, Some(context)))) }
     bindings.extend(crate::background::bindings());
     cx.bind_keys(bindings);
 }

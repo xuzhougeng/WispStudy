@@ -131,6 +131,8 @@ impl Workspace {
                 ("panel-left", "显示 / 收起侧边栏", "sidebar", Cmd::ToggleSidebar),
             ]);
             if lib.selected.is_some() { fixed.extend([("panel-left", "展开 / 收起文献详情", "detail", Cmd::ToggleWide), ("expand", "进入 / 退出阅读模式", "reading", Cmd::ToggleReading)]) }
+            // The PDF on show is searched; no key beside it, since beside the full list the search key is the list's.
+            if lib.selected.is_some() && lib.pdf.is_some() && lib.pdf_on_show() { fixed.push(("search", "在 PDF 里查找", "", Cmd::PdfFind(true))) }
             // A paper asked about with its PDF beside: the two change places.
             if lib.selected.is_some() && lib.tab == crate::app::Tab::Ask && lib.split && !self.settings.floating.on { fixed.push(("arrow-left-right", "交换 PDF 与提问的位置", "", Cmd::SwapPanes)) }
             fixed.push(("arrow-left", "回到所有文献库", "home", Cmd::GoHome));
