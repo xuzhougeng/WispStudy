@@ -382,6 +382,8 @@ pub struct Piece {
     pub quoted: Vec<Quoted>,
     /// The sentences quoted after a key no paper has, each with that key: in neither the text nor `quoted`.
     pub dropped: Vec<(String, String)>,
+    /// The citations by a label that are in the text as they were written: a label of no paper, or a citation not written as one is read.
+    pub left: Vec<cite::Left>,
 }
 
 /// Before `edit_section` or `write_section` runs for a conversation: the citations of the
@@ -395,7 +397,7 @@ pub fn label_citations(args: &mut Value, sources: &[Source], index: &Index) -> V
     let mut convert = |value: &mut Value| {
         let Some(text) = value.as_str() else { return };
         let converted = cite::convert_ai_citations(text, sources, index);
-        pieces.push(Piece { text: converted.text.clone(), quoted: converted.quoted, dropped: converted.dropped });
+        pieces.push(Piece { text: converted.text.clone(), quoted: converted.quoted, dropped: converted.dropped, left: converted.left });
         *value = json!(converted.text);
     };
     // Only what the call has: asking a JSON object for a key it lacks would put the key there.
@@ -426,11 +428,21 @@ pub fn call_with(store: &mut Store, info: &crate::libraries::LibraryInfo, name: 
     };
     let mut value = crate::tools::call_in(store, info, name, &args, fetch, download)?;
     // A label that names no paper of this conversation went into the manuscript as it was written: the model is told, to put it right.
-    let mut stray: Vec<String> = pieces.iter().flat_map(|piece| crate::ai::citation_spans(&piece.text)).flat_map(|(_, cited)| cited.into_iter().map(|one| one.label)).collect();
-    stray.dedup();
+    let mut stray: Vec<&str> = vec![];
+    for label in pieces.iter().flat_map(|piece| &piece.left).flat_map(|left| &left.unknown) {
+        if !stray.contains(&label.as_str()) { stray.push(label) }
+    }
     if !stray.is_empty() {
         value["unknownLabels"] = json!(stray);
         value["labelsHint"] = json!("unknownLabels 里的标签在这次对话里不对应任何文献，已原样留在稿件里。用 edit_section 把它们改成正确的文献标签，或去掉这几处引用。");
+    }
+    // So did a citation that names its paper and is not written as one is read, a bracket left open above all: it is in the
+    // manuscript with the sentence it quotes. The model is told that, not that its label is unknown, and to write the whole
+    // citation anew: a bracket added to what stands in the manuscript is not among the words a call converts.
+    let unread: Vec<&str> = pieces.iter().flat_map(|piece| &piece.left).filter(|left| left.unknown.is_empty()).map(|left| left.written.as_str()).collect();
+    if !unread.is_empty() {
+        value["unreadCitations"] = json!(unread);
+        value["unreadHint"] = json!("unreadCitations 里的引用写法没有读懂：方括号没有合上，或者方括号里除了标签、页码和原句还有别的字。它们没有换成稿件的引用，已连同引号里的原句原样留在稿件里。用 edit_section 改：old 用这里列出的文字，一字不多，new 只写这一处完整的引用（[P3]、[P3 p.5] 或 [P3 p.5 \"原句\"]，原句的后引号后面紧接右方括号）。只在稿件里补一个右方括号不行：引用要整处写在 new 里，才会换成稿件的引用并记下出处。");
     }
     // A sentence quoted after a key no paper has is in neither the manuscript nor the passages: the model is told, or it would be gone without a word.
     let dropped: Vec<Value> = pieces.iter().flat_map(|piece| &piece.dropped).map(|(citation, quote)| json!({"citation": citation, "quote": quote})).collect();
@@ -850,6 +862,59 @@ mod tests {
         assert_eq!((pieces[0].quoted.len(), pieces[0].dropped.len()), (1, 0));
         let done = call(&mut store, &info, "write_section", &json!({"section": section, "text": whole}), &sources, &nothing, &none).unwrap();
         assert_eq!((body(&store), done["passagesKept"].as_u64()), (args["text"].as_str().unwrap().to_string(), Some(1)));
+    }
+
+    #[test]
+    fn a_citation_not_written_as_one_is_read_stays_and_is_said() {
+        let (mut store, made, _) = library();
+        let section = made.sections[1].id.clone();
+        let (first, second) = ("HIF-1α and HIF-2α have distinct and sometimes opposing roles in tumour growth; HIF-2α drives clear cell renal carcinoma.", "The HIF-2α inhibitor belzutifan produced durable responses in renal cell carcinoma associated with VHL disease.");
+        let jonasch = store.add_paper(Paper { title: "Belzutifan for renal cell carcinoma in von Hippel-Lindau disease".into(), authors: "Jonasch, Eric".into(), year: Some(2021), abstract_text: second.into(), ..Default::default() }).unwrap();
+        let keith = store.add_paper(Paper { title: "HIF1α and HIF2α: sibling rivalry in hypoxic tumour growth and progression".into(), authors: "Keith, Brian".into(), year: Some(2012), abstract_text: first.into(), ..Default::default() }).unwrap();
+        let sources = vec![Source { label: "P1".into(), paper_id: jonasch.id.clone(), title: jonasch.title.clone(), ..Default::default() }, Source { label: "P2".into(), paper_id: keith.id.clone(), title: keith.title.clone(), ..Default::default() }];
+        let info = crate::libraries::LibraryInfo::default();
+        let nothing = |_: &str| -> Result<String, String> { Err("no network".into()) };
+        let none = |_: &str| -> Result<Vec<u8>, String> { Err("no network".into()) };
+        let body = |store: &Store| store.manuscript(&made.id).unwrap().unwrap().section(&section).unwrap().body.clone();
+        let edit = |store: &mut Store, old: &str, new: &str| call(store, &info, "edit_section", &json!({"section": section, "manuscript": made.id, "edits": [{"old": old, "new": new}]}), &sources, &nothing, &none).unwrap();
+        // The call a model made (Kimi K3): the bracket of the first citation is never closed. It was read as one citation
+        // of P2 whose sentence ran to the last quotation mark, and the words and the citation between left the manuscript.
+        let (before, between, after) = ("具体看肾透明细胞癌，HIF-2α 的地位尤其突出。HIF-1α 与 HIF-2α 虽然是同源的两个亚基，但在肿瘤生长中的作用并不相同，有时甚至相互拮抗，其中驱动肾透明细胞癌的主要是 HIF-2α ", "。这一机制认识也直接转化成了治疗手段：HIF-2α 抑制剂 belzutifan 在 VHL 病相关的肾细胞癌中取得了持久的疗效 ", "，证明靶向 HIF-2α 是治疗这类肿瘤的一条可行途径。");
+        let done = edit(&mut store, "", &format!("{before}[P2 \"{first}\"{between}[P1 \"{second}\"]{after}"));
+        // Every word is in the manuscript: the open bracket as it was written, the citation after it as a citation with its passage.
+        assert_eq!(body(&store), format!("{before}[P2 \"{first}\"{between}[@Jonasch2021]{after}"));
+        assert_eq!((done["passagesKept"].as_u64(), &done["unreadCitations"], done["quotesNotFound"].is_null(), done["unknownLabels"].is_null()), (Some(1), &json!([format!("[P2 \"{first}\"")]), true, true));
+        assert!(done["unreadHint"].as_str().unwrap().contains("方括号没有合上") && done["labelsHint"].is_null());
+        assert_eq!(store.passages(&made.id).unwrap().iter().map(|kept| (kept.paper_id.as_str(), kept.passage.as_str())).collect::<Vec<_>>(), [(jonasch.id.as_str(), second)]);
+        // What the model is handed back is what stands in the manuscript: it closes the bracket there, and the citation is one.
+        let written = done["unreadCitations"][0].as_str().unwrap().to_string();
+        let done = edit(&mut store, &written, &format!("{written}]"));
+        assert_eq!(body(&store), format!("{before}[@Keith2012]{between}[@Jonasch2021]{after}"));
+        assert_eq!((done["passagesKept"].as_u64(), done["unreadCitations"].is_null(), done["unreadHint"].is_null()), (Some(1), true, true));
+        // `p.0` is no page, with a sentence or without.
+        let done = edit(&mut store, "", "\n\n药物有效 [P1 p.0 \"The HIF-2α inhibitor belzutifan produced durable responses\"]，机制见 [P2 p.0]。");
+        assert!(body(&store).ends_with("药物有效 [@Jonasch2021]，机制见 [@Keith2012]。"));
+        assert_eq!((done["passagesKept"].as_u64(), done["unknownLabels"].is_null(), done["unreadCitations"].is_null()), (Some(1), true, true));
+        // A sentence after several papers is the last one's: kept when that paper says it, said when it does not.
+        let done = edit(&mut store, "", &format!("\n\n两个亚基作用不同 [P1; P2 \"{first}\"]，药物的证据在后 [P1; P2 \"{second}\"]。"));
+        assert!(body(&store).ends_with("两个亚基作用不同 [@Jonasch2021; @Keith2012]，药物的证据在后 [@Jonasch2021; @Keith2012]。"));
+        assert_eq!((done["passagesKept"].as_u64(), &done["quotesNotFound"]), (Some(1), &json!([second])));
+        let kept = store.passages(&made.id).unwrap();
+        assert!(kept.iter().any(|kept| kept.paper_id == keith.id && kept.passage == first && kept.claim.starts_with("两个亚基作用不同")));
+        // The same after keys.
+        let done = edit(&mut store, "", &format!("\n\n再说一遍 [@Jonasch2021; @Keith2012 p.0 \"{first}\"]。"));
+        assert!(body(&store).ends_with("再说一遍 [@Jonasch2021; @Keith2012]。"));
+        assert_eq!((done["passagesKept"].as_u64(), done["quotesDropped"].is_null(), done["quotesNotFound"].is_null()), (Some(1), true, true));
+        // A bracket left open after a key and its sentence is said the same way (what the same model sent in another run),
+        // and put right by the whole citation written anew.
+        let done = edit(&mut store, "", "\n\n静止中心靠它维持 [@Zhang2021 \"WOX5 maintains the quiescent centre of the root.\"。");
+        assert_eq!((&done["unreadCitations"], done["passagesKept"].is_null()), (&json!(["[@Zhang2021 \"WOX5 maintains the quiescent centre of the root.\""]), true));
+        let done = edit(&mut store, "[@Zhang2021 \"WOX5 maintains the quiescent centre of the root.\"", "[@Zhang2021 \"WOX5 maintains the quiescent centre of the root.\"]");
+        assert!(body(&store).ends_with("静止中心靠它维持 [@Zhang2021]。") && done["passagesKept"] == 1 && done["unreadCitations"].is_null());
+        // Only the label that names no paper is said to: words that are neither label nor page nor sentence are another matter.
+        let done = edit(&mut store, "", "\n\n还有 [P1, P9] 和 [P2 见图 2]。");
+        assert_eq!((&done["unknownLabels"], &done["unreadCitations"]), (&json!(["P9"]), &json!(["[P2 见图 2]"])));
+        assert!(body(&store).ends_with("还有 [P1, P9] 和 [P2 见图 2]。"));
     }
 
     #[test]
