@@ -55,6 +55,8 @@ pub enum MenuKind {
     Section(String),
     ManuscriptExport,
     WriteLanguage,
+    /// 译文对照: the language the manuscript is read beside.
+    WriteFacingLanguage,
     /// 写作: which papers the candidates come from.
     WriteNarrow,
     /// The menus a right click opens (`src/context.rs`): on a paper of a list, a paper in the trash, a file
@@ -291,6 +293,7 @@ impl Workspace {
                 items.push(item(t("手动录入…"), Cmd::AddManual));
             }
             MenuKind::Manuscripts | MenuKind::Section(_) | MenuKind::ManuscriptExport | MenuKind::WriteLanguage => (items, breaks) = self.manuscript_menu(&kind, cx),
+            MenuKind::WriteFacingLanguage => items = self.facing_language_menu(),
             MenuKind::WriteNarrow => items = self.narrowing_menu(),
             MenuKind::Export => {
                 items.push(item("BibTeX（.bib）", Cmd::Export(ExportKind::Bibtex)));

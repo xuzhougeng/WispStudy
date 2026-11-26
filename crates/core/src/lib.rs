@@ -22,6 +22,7 @@
 //! - `headings` headings guessed by their look in a Word file without heading styles, for the person to confirm
 //! - `pptx`     slides written as a PowerPoint file: what is on a slide is said, where it stands is decided here
 //! - `docx`     Word files for 写作: read into paragraphs and comments, written again with the text as it stands and its comments
+//! - `bilingual` 译文对照: a manuscript's blocks set beside their translation, citations kept out of what is sent
 //! - `comment`  批注: remarks on words of a manuscript, the person's, the assistant's and those a Word file came with
 //! - `revise`   an assistant's changes to a section of a manuscript: where each goes, and the words to light up
 //! - `markdown` the Markdown of an answer → blocks to draw
@@ -48,6 +49,7 @@ pub mod ai;
 pub mod annotation;
 pub mod annotpdf;
 pub mod archive;
+pub mod bilingual;
 pub mod cite;
 pub mod collected;
 pub mod citefind;

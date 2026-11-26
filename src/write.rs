@@ -61,8 +61,9 @@ impl Workspace {
         // that scrolled both would take the wheel from the manuscript at its end.
         let stacked = width < STACK_UNDER;
         let panel = if stacked { width } else if width > 1500. { 480. } else if width > 980. { 420. } else { 340. };
-        let editor = self.render_manuscript_column(if stacked { width } else { width - panel }, false, stacked, window, cx);
+        // Read through, the manuscript has the page: the panel is for the section being written.
         let reading = self.lib.as_ref().is_some_and(|lib| lib.writing.reading);
+        let editor = self.render_manuscript_column(if stacked || reading { width } else { width - panel }, false, stacked, window, cx);
         div().id("write-page").flex().size_full().when(stacked, |d| d.flex_col()).child(editor)
             .when(!reading, |d| d.child(self.render_candidates(panel, stacked, window, cx)))
             .into_any_element()
@@ -75,6 +76,9 @@ impl Workspace {
     pub(crate) fn render_manuscript_column(&mut self, width: f32, agent: bool, stacked: bool, window: &mut Window, cx: &mut Context<Self>) -> Div {
         self.comment_reveal(window, cx);
         self.seek_reveal(window, cx);
+        // 译文对照: the translations still missing are asked for before the page is drawn (write_facing.rs).
+        let facing = self.write_facing_shown();
+        if facing { self.write_facing_tend(cx) }
         let lib = self.lib.as_ref().unwrap();
         let writing = &lib.writing;
         let text = writing.editor.read(cx).text().to_string();
@@ -122,7 +126,7 @@ impl Workspace {
         // The line under it all: what there is to say of the text. The tools are beside what is selected, nowhere else.
         let status = if writing.reading {
             let whole: String = writing.current().map_or(String::new(), |m| m.sections.iter().map(|s| s.body.as_str()).collect::<Vec<_>>().join("\n"));
-            tf!("全文 {} · 点一节的名称，回到那一节写", "Manuscript: {} · Click a section name to edit it", length_label(&whole))
+            if facing { tf!("全文 {} · 译文只是对照，不写进稿件 · 点一节的名称，回到那一节写", "Manuscript: {} · The translation is only for reading, it is not written into the manuscript · Click a section name to edit it", length_label(&whole)) } else { tf!("全文 {} · 点一节的名称，回到那一节写", "Manuscript: {} · Click a section name to edit it", length_label(&whole)) }
         } else if proposal.is_some() {
             t("助手提议的改写还没有写进稿件：允许，或不允许").to_string()
         } else if version.is_some() {
@@ -138,7 +142,8 @@ impl Workspace {
         };
         // Under the bar everything is as wide as a sheet of the reading width, centred: in a wide window the
         // room is left beside the sheet, not inside its frame, and the boxes under it keep its edges.
-        let sheet = f32::from(theme::manuscript_width()) + 2. * SHEET_MARGIN + 2. + 32.;
+        // Beside its translation the sheet is two of them: each half is read at the reading width.
+        let sheet = f32::from(theme::manuscript_width()) * if facing { 2. } else { 1. } + 2. * SHEET_MARGIN + 2. + 32.;
         let inner = width.min(sheet);
         let foot = self.render_write_foot(!agent && editing, status);
         let seek = self.render_seek(window, cx);
@@ -155,7 +160,7 @@ impl Workspace {
             .mx_auto()
             .children(seek)
             .child(
-                div().flex().flex_col().flex_1().min_h_0().px(px(16.)).pb(px(8.)).when(version.is_some() || proposal.is_some(), |d| d.pt(px(12.))).child(if writing.reading { self.render_manuscript_reading(window, cx) } else if let Some(proposal) = proposal { self.render_proposal(proposal, cx) } else if let Some(version) = version { self.render_version(version, cx) } else {
+                div().flex().flex_col().flex_1().min_h_0().px(px(16.)).pb(px(8.)).when(version.is_some() || proposal.is_some(), |d| d.pt(px(12.))).child(if facing { self.render_manuscript_facing(inner - 32., window, cx) } else if writing.reading { self.render_manuscript_reading(window, cx) } else if let Some(proposal) = proposal { self.render_proposal(proposal, cx) } else if let Some(version) = version { self.render_version(version, cx) } else {
                     let page = div().relative().w_full().max_w(theme::manuscript_width()).mx_auto().pl(px(18.)).pr(px(if markers.is_empty() { 18. } else { MARGIN })).py(px(14.)).text_size(text_px(15.)).line_height(theme::body_line(26.)).text_color(Theme::text());
                     div()
                         .id("write-editor")

@@ -187,6 +187,9 @@ impl Workspace {
                     n => crate::comments::Do::Heading(n.parse().unwrap_or(0)),
                 })),
                 "reading" => Some(Cmd::WriteReading(true)),
+                // 译文对照: `wfacing` reads the manuscript beside its translation, `wfacing:off` without, `wfacing:retry` asks again
+                // for what failed, `wfacing:<code>` chooses the language (a code of `manuscript::LANGUAGES`).
+                "wfacing" => Some(match arg { "" => Cmd::WriteFacing(true), "off" => Cmd::WriteFacing(false), "retry" => Cmd::WriteFacingRetry, code => Cmd::WriteFacingLanguage(code.to_string()) }),
                 "versions" => Some(Cmd::WriteHistory),
                 // `importdoc:<path>` starts a manuscript from a Word or Markdown file; `comments` shows the comments beside the manuscript (`comments:off` the candidates);
                 // `comment:<step>` is `review`, `stop`, `write`, `save`, `cancel`, `takeall`, `import`, `fromreview` (a manuscript of the newest review the assistant wrote sections for), and by a comment's place among those of the section from 0: `take;<n>`, `back;<n>`, `drop;<n>`, `done;<n>`, `show;<n>`;

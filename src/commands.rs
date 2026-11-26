@@ -618,6 +618,12 @@ pub enum Cmd {
     MergeSection(String),
     /// The whole manuscript to read (true), or one section to write.
     WriteReading(bool),
+    /// 译文对照: the whole manuscript to read with each paragraph's translation beside it (true), or without (the preview stays).
+    WriteFacing(bool),
+    /// The language that translation is in: a code of `manuscript::LANGUAGES` (`Settings::write_facing_language`).
+    WriteFacingLanguage(String),
+    /// Ask again for the paragraphs whose translation failed.
+    WriteFacingRetry,
     /// The top-left arrow of a manuscript: out of 写作, back to the page it was opened from.
     LeaveWrite,
     ExportManuscript(ManuscriptExport),
@@ -1225,6 +1231,7 @@ impl Workspace {
             Cmd::WriteRun(reading) => self.write_run_start(reading, None, cx),
             Cmd::WriteFind => self.write_find(false, cx),
             Cmd::StepHistory(forward) => self.step_history(forward, window, cx),
+            Cmd::WriteFacing(_) | Cmd::WriteFacingLanguage(_) | Cmd::WriteFacingRetry => self.run_write_facing(cmd, cx),
             Cmd::CitationCards(on) => {
                 self.settings.citation_cards_hidden = !on;
                 self.save_settings(cx);
