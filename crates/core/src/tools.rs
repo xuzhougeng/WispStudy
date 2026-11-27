@@ -2031,7 +2031,13 @@ fn run_search(store: &mut Store, id: &str, fetch: Fetch) -> Result<Value> {
     let added: Vec<Value> = result.added.iter().take(50).map(|p| json!({"id": p.id, "title": p.title, "year": p.year})).collect();
     let mut run = json!({"batchId": batch.id, "search": search.name, "total": batch.remote_total, "fetched": batch.fetched, "added": batch.added, "skipped": batch.skipped, "addedPapers": added});
     if let Some(why) = stopped { run["stopped"] = json!(format!("取回 {} 篇后中断，这些已经导入；再运行一次会接着取回其余的。原因：{why}", batch.fetched)) }
+    if !result.invalid.is_empty() { run["invalid"] = invalid_records(&result.invalid) }
     Ok(run)
+}
+
+/// The records an import left out as they could not be kept (`Store::import_records`), for the caller to tell.
+fn invalid_records(invalid: &[crate::store::Invalid]) -> Value {
+    json!(invalid.iter().map(|record| json!({"n": record.n, "title": record.title, "why": record.why})).collect::<Vec<_>>())
 }
 
 fn undo_import(store: &mut Store, args: &Value) -> Result<Value> {
