@@ -136,8 +136,9 @@ pub enum Modal {
     Headings(Box<crate::comments::HeadingsForm>),
     /// 写作's 资料库: the figures to bring in and to put into the manuscript. Its state is `Library::write_figures`.
     WriteFigures,
-    /// 移到文献库: the papers, and the library chosen for them (`transfer.rs`); 复制到文献库 when `copy`.
-    MoveTo { papers: Vec<String>, to: Option<String>, copy: bool },
+    /// 移到文献库: the papers, and the library chosen for them (`transfer.rs`); 复制到文献库 when `copy`. `held`: those
+    /// of the papers the library chosen holds already, read when it was chosen.
+    MoveTo { papers: Vec<String>, to: Option<String>, copy: bool, held: Vec<String> },
     /// 绑定到文献库: the conversation of the home page whose manuscripts are bound, and the library chosen (`written.rs`).
     Bind { from: String, to: Option<String> },
     /// 归入已有文献: the papers whose files go under another, what narrows the papers offered, and the one chosen (`filing.rs`).
@@ -452,9 +453,11 @@ impl Workspace {
                 self.run(cmd, window, cx);
             }
             Modal::ImportReport => self.run(Cmd::CloseModal, window, cx),
-            Modal::MoveTo { papers, to, copy } => match to.clone() {
+            Modal::MoveTo { papers, to, copy, held } => match to.clone() {
+                // With papers held there already, the dialog's first button (and Enter) is 覆盖.
                 Some(to) => {
-                    let cmd = if *copy { Cmd::CopyPapers(papers.clone(), to) } else { Cmd::MovePapers(papers.clone(), to) };
+                    let way = if held.is_empty() { wisp_core::transfer::Held::Append } else { wisp_core::transfer::Held::Overwrite };
+                    let cmd = if *copy { Cmd::CopyPapers(papers.clone(), to, way) } else { Cmd::MovePapers(papers.clone(), to, way) };
                     self.run(cmd, window, cx)
                 }
                 None => self.choose_only_move_target(cx),
