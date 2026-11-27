@@ -108,6 +108,7 @@ pub mod speech;
 pub mod selection;
 pub mod settings;
 pub mod shrink;
+pub mod sight;
 pub mod skill;
 pub mod slideref;
 pub mod sources;

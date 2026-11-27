@@ -148,7 +148,7 @@ pub fn is_cjk(c: char) -> bool {
 }
 
 /// The punctuation of Chinese and Japanese, full-width forms included.
-fn cjk_mark(c: char) -> bool {
+pub(crate) fn cjk_mark(c: char) -> bool {
     matches!(c, '\u{3000}'..='\u{303f}' | '\u{ff00}'..='\u{ff0f}' | '\u{ff1a}'..='\u{ff20}' | '\u{ff3b}'..='\u{ff40}' | '\u{ff5b}'..='\u{ff65}' | '“' | '”' | '‘' | '’' | '…' | '—')
 }
 
