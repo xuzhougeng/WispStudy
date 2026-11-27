@@ -300,6 +300,9 @@ pub enum Cmd {
     ChooseMoveTarget(String),
     MovePapers(Vec<String>, String, wisp_core::transfer::Held),
     CopyPapers(Vec<String>, String, wisp_core::transfer::Held),
+    /// 打开 on the toast of one paper moved: the library it went to, opened on it at the tab it was shown at, read
+    /// when it was being read.
+    OpenMoved(String, String, Tab, bool),
     /// 归入已有文献: the dialog for the papers whose files are to go under another, the paper chosen in it, the
     /// filing, and the way back while its toast is up (`filing.rs`).
     AskFileInto(Vec<String>),
@@ -807,6 +810,7 @@ impl Workspace {
             Cmd::ChooseMoveTarget(id) => self.choose_move_target(id),
             Cmd::MovePapers(papers, to, held) => self.move_papers(papers, to, held, window, cx),
             Cmd::CopyPapers(papers, to, held) => self.copy_papers(papers, to, held, window, cx),
+            Cmd::OpenMoved(library, paper, tab, reading) => self.open_moved(&library, &paper, tab, reading, window, cx),
             Cmd::AskFileInto(papers) => self.ask_file_into(papers, window, cx),
             Cmd::ChooseFileTarget(id) => {
                 if let Some(Modal::FileInto { to, .. }) = self.modal.as_mut() { *to = Some(id) }

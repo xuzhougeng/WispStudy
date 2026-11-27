@@ -210,7 +210,8 @@ impl Workspace {
                 // `files:<n>` shows the files of the n-th paper on show under its row, or puts them away.
                 "fileinto" => self.lib.as_ref().and_then(|lib| lib.selected.clone()).map(|id| Cmd::AskFileInto(vec![id])),
                 "fileto" => self.file_targets(cx).get(arg.parse::<usize>().unwrap_or(0)).map(|id| Cmd::ChooseFileTarget(id.clone())),
-                "undofiling" | "undotagging" => self.toast.as_ref().and_then(|toast| toast.action.as_ref()).map(|(_, cmd)| cmd.clone()),
+                // `toastbutton` presses the button of whatever toast is up (打开 after 移到文献库); like a click, the toast goes.
+                "undofiling" | "undotagging" | "toastbutton" => self.toast.take().and_then(|toast| toast.action).map(|(_, cmd)| cmd),
                 // 给这 N 篇加标签 for the papers on show (`tagshown`) and 去掉标签 for the marked ones (`untag`): `tagtext:<tags>` writes
                 // in the first dialog's box, `offertag:<tag>` is a click on a tag offered under it, `chooseuntag:<tag>` one on a tag of
                 // the second; `submit` writes, `undotagging` is the toast's 撤销. `renametag:<tag>` is the sidebar's 重命名… for a tag,
