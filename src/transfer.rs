@@ -3,6 +3,9 @@
 //! for one paper the window opens the library it went to on that paper, read as it was, while moving several from a
 //! library stays in the list with a button on the toast to open the target. A conversation left with no paper and no
 //! question goes the way a removed conversation goes (its folder to `removed/`).
+//!
+//! 复制到文献库 is the same dialog (`copy`) and `Store::copy_papers`: the other library gets what a move brings, this one
+//! keeps the papers as they were, and the window stays where it is, with 打开 on the toast.
 
 use crate::app::{Cmd, Modal, Talk, Workspace};
 use crate::context::Nav;
@@ -26,11 +29,11 @@ impl Workspace {
         libraries::shelf(&self.libraries, &self.settings.library_order).into_iter().filter(|info| info.id != here).cloned().collect()
     }
 
-    pub(crate) fn ask_move_papers(&mut self, papers: Vec<String>, cx: &mut Context<Self>) {
+    pub(crate) fn ask_move_papers(&mut self, papers: Vec<String>, copy: bool, cx: &mut Context<Self>) {
         if papers.is_empty() { return }
-        if self.move_targets().is_empty() { return self.fail(t("还没有别的文献库可以移过去。"), cx) }
+        if self.move_targets().is_empty() { return self.fail(t(if copy { "还没有别的文献库可以复制过去。" } else { "还没有别的文献库可以移过去。" }), cx) }
         self.modal_error.clear();
-        self.modal = Some(Modal::MoveTo { papers, to: None });
+        self.modal = Some(Modal::MoveTo { papers, to: None, copy });
         cx.notify();
     }
 
@@ -136,8 +139,45 @@ impl Workspace {
         }
     }
 
+    /// 复制到文献库: the papers copied into `to`. Nothing here changes, so the window stays where it is, and the toast
+    /// opens the other library.
+    pub(crate) fn copy_papers(&mut self, papers: Vec<String>, to: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(target) = self.libraries.iter().find(|info| info.id == to).cloned() else { return };
+        let Some(lib) = self.lib.as_mut() else { return };
+        // Where their PDFs were read to is written first, so that it goes along.
+        lib.keep_places(cx);
+        let taken = Store::open(&target.dir).and_then(|mut store| store.copy_papers(&lib.store, &papers));
+        let taken = match taken {
+            Ok(taken) if !taken.is_empty() => taken,
+            Ok(_) => return,
+            Err(err) => return self.modal_error = crate::i18n::phrase(&format!("{err:#}")),
+        };
+        self.modal = None;
+        // A library at work off screen reads what came in, as for a move.
+        if let Some(parked) = self.parked.iter_mut().find(|lib| lib.info.id == to) { let _ = parked.reload(); }
+        self.libraries = libraries::list(&self.root);
+        window.focus(&self.focus);
+        let mut fields_left: Vec<String> = vec![];
+        for field in taken.iter().flat_map(|t| &t.fields_left) {
+            if !fields_left.contains(field) { fields_left.push(field.clone()) }
+        }
+        let count = taken.len();
+        let joined = taken.iter().filter(|t| t.joined).count();
+        let mut said = if joined == count {
+            if count == 1 { tf!("「{}」里已有这篇：文件和标注并到了那一条上。", "“{}” already had this paper: its files and annotations were added to it.", target.name) } else { tf!("「{}」里已有这 {} 篇：文件和标注并到了原有的条目上。", "“{}” already had these {} papers: their files and annotations were added to them.", target.name, count) }
+        } else if joined == 0 {
+            if count == 1 { tf!("已复制到「{}」。", "Copied to “{}”.", target.name) } else { tn!("已把 {n} 篇文献复制到「{}」。", "Copied {n} to “{}”.", count, "paper", target.name) }
+        } else {
+            tf!("已把 {} 篇文献复制到「{}」，其中 {} 篇并到了已有的条目上。", "Copied {} papers to “{}” ({} merged with existing entries).", count, target.name, joined)
+        };
+        if !fields_left.is_empty() {
+            said += &tf!("「{}」没有词条「{}」，内容没有带过来。", " “{}” has no field “{}”; its values were not brought.", target.name, fields_left.join("」「"));
+        }
+        self.say_with(said, t("打开"), Cmd::OpenLibrary(to), cx);
+    }
+
     pub(crate) fn render_move_dialog(&self, cx: &mut Context<Self>) -> Option<Div> {
-        let Some(Modal::MoveTo { papers, to }) = &self.modal else { return None };
+        let Some(Modal::MoveTo { papers, to, copy }) = &self.modal else { return None };
         let titles: Vec<&str> = papers.iter().filter_map(|id| self.lib.as_ref()?.paper(id)).map(|p| p.title.as_str()).collect();
         let what = match titles.as_slice() {
             [one] => one.to_string(),
@@ -165,15 +205,19 @@ impl Workspace {
                 .child(div().flex_none().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tn!("{n} 篇", "{n}", info.paper_count, "paper")))
                 .on_click(self.on(Cmd::ChooseMoveTarget(info.id.clone()), cx))
         });
-        let note = match (papers.len() > 1, draft) {
-            (false, true) => t("PDF、标注、读到的位置和关于它的对话都一起过去；这段对话里不再有它。"),
-            (false, false) => t("PDF、标注、读到的位置和关于它的对话都一起过去，收录状态回到待判断；原来的那条留在本库的回收站里。"),
-            (true, true) => t("PDF、标注、读到的位置和各自的对话都一起过去；这段对话里不再有它们。"),
-            (true, false) => t("PDF、标注、读到的位置和各自的对话都一起过去，收录状态回到待判断；原来的条目留在本库的回收站里。"),
+        let note = match (papers.len() > 1, draft, *copy) {
+            (false, true, false) => t("PDF、标注、读到的位置和关于它的对话都一起过去；这段对话里不再有它。"),
+            (false, false, false) => t("PDF、标注、读到的位置和关于它的对话都一起过去，收录状态回到待判断；原来的那条留在本库的回收站里。"),
+            (true, true, false) => t("PDF、标注、读到的位置和各自的对话都一起过去；这段对话里不再有它们。"),
+            (true, false, false) => t("PDF、标注、读到的位置和各自的对话都一起过去，收录状态回到待判断；原来的条目留在本库的回收站里。"),
+            (false, true, true) => t("PDF、标注、读到的位置和关于它的对话都复制一份过去；这段对话里仍然有它。"),
+            (false, false, true) => t("PDF、标注、读到的位置和关于它的对话都复制一份过去，在那边收录状态是待判断；这里的这条不变。"),
+            (true, true, true) => t("PDF、标注、读到的位置和各自的对话都复制一份过去；这段对话里仍然有它们。"),
+            (true, false, true) => t("PDF、标注、读到的位置和各自的对话都复制一份过去，在那边收录状态是待判断；这里的条目不变。"),
         };
         Some(
             ui::dialog(460.)
-                .child(ui::dialog_title(t("移到文献库")))
+                .child(ui::dialog_title(t(if *copy { "复制到文献库" } else { "移到文献库" })))
                 .child(
                     div().id("modal-body").flex().flex_col().flex_1().min_h_0().overflow_y_scroll().gap(px(10.)).px(px(20.)).py(px(8.))
                         .child(div().font_weight(FontWeight::MEDIUM).line_height(text_px(21.)).child(what))
@@ -184,7 +228,7 @@ impl Workspace {
                 .child(
                     div().flex().flex_none().justify_end().gap(px(8.)).px(px(20.)).py(px(14.))
                         .child(ui::secondary_button("modal-cancel", t("取消")).on_click(self.on(Cmd::CloseModal, cx)))
-                        .child(ui::primary_button("modal-ok", t("移过去").to_string()).when(to.is_none(), |d| d.opacity(0.4)).when(to.is_some(), |d| d.on_click(self.on(Cmd::SubmitModal, cx)))),
+                        .child(ui::primary_button("modal-ok", t(if *copy { "复制过去" } else { "移过去" }).to_string()).when(to.is_none(), |d| d.opacity(0.4)).when(to.is_some(), |d| d.on_click(self.on(Cmd::SubmitModal, cx)))),
                 ),
         )
     }

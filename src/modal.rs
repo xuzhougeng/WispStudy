@@ -136,8 +136,8 @@ pub enum Modal {
     Headings(Box<crate::comments::HeadingsForm>),
     /// 写作's 资料库: the figures to bring in and to put into the manuscript. Its state is `Library::write_figures`.
     WriteFigures,
-    /// 移到文献库: the papers, and the library chosen for them (`transfer.rs`).
-    MoveTo { papers: Vec<String>, to: Option<String> },
+    /// 移到文献库: the papers, and the library chosen for them (`transfer.rs`); 复制到文献库 when `copy`.
+    MoveTo { papers: Vec<String>, to: Option<String>, copy: bool },
     /// 绑定到文献库: the conversation of the home page whose manuscripts are bound, and the library chosen (`written.rs`).
     Bind { from: String, to: Option<String> },
     /// 归入已有文献: the papers whose files go under another, what narrows the papers offered, and the one chosen (`filing.rs`).
@@ -452,10 +452,10 @@ impl Workspace {
                 self.run(cmd, window, cx);
             }
             Modal::ImportReport => self.run(Cmd::CloseModal, window, cx),
-            Modal::MoveTo { papers, to } => match to.clone() {
+            Modal::MoveTo { papers, to, copy } => match to.clone() {
                 Some(to) => {
-                    let papers = papers.clone();
-                    self.run(Cmd::MovePapers(papers, to), window, cx)
+                    let cmd = if *copy { Cmd::CopyPapers(papers.clone(), to) } else { Cmd::MovePapers(papers.clone(), to) };
+                    self.run(cmd, window, cx)
                 }
                 None => self.choose_only_move_target(cx),
             },

@@ -167,8 +167,9 @@ const PHRASES: &[(&str, &str)] = &[
     ("{} 不在这项技能的文件夹里。", "{0} is not in this skill’s folder."),
     ("无法移除技能：{}", "The skill could not be removed: {0}"),
     ("无法恢复技能：{}", "The skill could not be put back: {0}"),
-    // Why a paper could not be moved into another library (`transfer`).
+    // Why a paper could not be moved or copied into another library (`transfer`).
     ("「{}」在这个文献库的回收站里：先把它恢复，再移过来。", "“{0}” is in this library’s trash: restore it first, then move it."),
+    ("「{}」在这个文献库的回收站里：先把它恢复，再复制过来。", "“{0}” is in this library’s trash: restore it first, then copy it."),
     ("无法复制文件「{}」：{}", "Could not copy file “{0}”: {1}"),
 ];
 
@@ -459,6 +460,7 @@ mod tests {
         // Why a skill was not brought in or shown, and why a paper could not move.
         assert_eq!((english_of("已经有名为 plain 的技能文件夹。").as_deref(), english_of("无法读取 references/a.md：denied").as_deref()), (Some("There is already a skill folder named plain."), Some("references/a.md could not be read: denied")));
         assert_eq!(english_of("「Root hairs」在这个文献库的回收站里：先把它恢复，再移过来。").as_deref(), Some("“Root hairs” is in this library’s trash: restore it first, then move it."));
+        assert_eq!(english_of("「Root hairs」在这个文献库的回收站里：先把它恢复，再复制过来。").as_deref(), Some("“Root hairs” is in this library’s trash: restore it first, then copy it."));
         for source in ["Zotero 本地导入", "PDF 导入", "网址导入", "导入 · refs.bib"] { assert!(english_of(source).is_some_and(|english| !chinese(&english)), "{source}") }
         for note in ["题目一致", "DOI 一致", "题目有 87% 的词相同", "年份 2019", "年份是 2019，不是 2020", "作者里有 Wang", "作者里没有 Wang"] { assert!(english_of(note).is_some_and(|english| !chinese(&english)), "{note}") }
     }

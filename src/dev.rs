@@ -194,13 +194,11 @@ impl Workspace {
                 // `importdoc:<path>` starts a manuscript from a Word or Markdown file; `comments` shows the comments beside the manuscript (`comments:off` the candidates);
                 // `comment:<step>` is `review`, `stop`, `write`, `save`, `cancel`, `takeall`, `import`, `fromreview` (a manuscript of the newest review the assistant wrote sections for), and by a comment's place among those of the section from 0: `take;<n>`, `back;<n>`, `drop;<n>`, `done;<n>`, `show;<n>`;
                 // `wish:<text>` / `commenttext:<text>` leave text in the review's box / the comment being written; `exportdoc:<path>` / `exportdoc:track;<path>` write the manuscript as a Word file there.
-                // 移到文献库 for the marked papers or the selected one: the dialog; `moveto:<n>` chooses the n-th library it offers, `submit` moves.
-                "movepaper" => self.lib.as_ref().and_then(|lib| {
-                    if lib.marked.len() > 1 {
-                        Some(Cmd::AskMovePapers(lib.shown.iter().map(|&i| lib.papers[i].id.clone()).filter(|id| lib.marked.contains(id)).collect()))
-                    } else {
-                        lib.selected.clone().map(|id| Cmd::AskMovePapers(vec![id]))
-                    }
+                // 移到文献库 (`copypaper`: 复制到文献库) for the marked papers or the selected one: the dialog; `moveto:<n>` chooses the n-th library it offers, `submit` moves or copies.
+                "movepaper" | "copypaper" => self.lib.as_ref().and_then(|lib| {
+                    let ids: Vec<String> = if lib.marked.len() > 1 { lib.shown.iter().map(|&i| lib.papers[i].id.clone()).filter(|id| lib.marked.contains(id)).collect() } else { lib.selected.clone().into_iter().collect() };
+                    if ids.is_empty() { return None }
+                    Some(if name == "copypaper" { Cmd::AskCopyPapers(ids) } else { Cmd::AskMovePapers(ids) })
                 }),
                 "moveto" => self.move_targets().get(arg.parse::<usize>().unwrap_or(0)).map(|info| Cmd::ChooseMoveTarget(info.id.clone())),
                 // 归入已有文献 for the selected paper: the dialog; `fileto:<n>` chooses the n-th paper it offers, `submit` files; `undofiling` is the toast's 撤销.

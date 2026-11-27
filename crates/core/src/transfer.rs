@@ -1,9 +1,10 @@
-//! 移到文献库: a paper taken from one library (or a conversation, a draft) into another, with what is its own
-//! there: its files (copied, each once by its bytes), their text, parts and the place they were read to, the
+//! 移到文献库 and 复制到文献库: a paper taken from one library (or a conversation, a draft) into another, with what is
+//! its own there: its files (copied, each once by its bytes), their text, parts and the place they were read to, the
 //! highlights, boxes, notes and pieces marked on them, its conversations, the figures cut from it and the
 //! methods and introductions kept from it, with their links to those figures. Its custom fields go to the fields of the same name
 //! and kind; the rest are named in the answer. Its screening decision does not go: it was made against the
-//! other library's goal, and the paper waits here. The library it came from keeps it in its trash, so nothing is lost by a move.
+//! other library's goal, and the paper waits here. Moved, the library it came from keeps it in its trash, so nothing
+//! is lost by a move; copied, that library keeps it as it was.
 //! A paper this library already holds (the same DOI, PMID or title, or one of the same files) is not added
 //! twice: what the moved one brings is joined to it, blanks filled, tags and notes added.
 
@@ -70,8 +71,9 @@ fn put_by_file(from: &Connection, tx: &Transaction, old: &str, new: &str) -> Res
 }
 
 impl Store {
-    /// The paper here that is `paper` (by DOI, PMID or title, or holding one of `files` by bytes); errs when it is in the trash.
-    fn held_here(&self, paper: &Paper, file_names: &[String], files: &[Vec<Value>]) -> Result<Option<String>> {
+    /// The paper here that is `paper` (by DOI, PMID or title, or holding one of `files` by bytes); errs when it is in
+    /// the trash, saying it is to be restored before the paper is moved here, or copied (`keep`).
+    fn held_here(&self, paper: &Paper, file_names: &[String], files: &[Vec<Value>], keep: bool) -> Result<Option<String>> {
         let mut held = existing_paper(&self.db, paper)?;
         for file in files {
             if held.is_some() { break }
@@ -79,13 +81,30 @@ impl Store {
             if sha.is_empty() { continue }
             held = self.db.query_row("SELECT paper_id FROM resources WHERE sha256 = ?1 ORDER BY added_at, id LIMIT 1", [sha], |r| r.get(0)).optional()?;
         }
-        if let Some(held) = &held && self.in_trash(held)? { bail!("「{}」在这个文献库的回收站里：先把它恢复，再移过来。", paper.title) }
+        if let Some(held) = &held && self.in_trash(held)? {
+            if keep { bail!("「{}」在这个文献库的回收站里：先把它恢复，再复制过来。", paper.title) }
+            bail!("「{}」在这个文献库的回收站里：先把它恢复，再移过来。", paper.title)
+        }
         Ok(held)
     }
 
-    /// Take the papers `ids` of `from` into this library, in order. Checked beforehand so a paper in this library's
-    /// trash or a missing file stops the whole lot before any paper moves.
+    /// Take the papers `ids` of `from` into this library, in order (移到文献库). Checked beforehand so a paper in this
+    /// library's trash or a missing file stops the whole lot before any paper moves.
     pub fn take_papers(&mut self, from: &mut Store, ids: &[String]) -> Result<Vec<Taken>> {
+        let ordered = self.ready_to_take(from, ids, false)?;
+        ordered.iter().map(|id| self.take_paper(from, id)).collect()
+    }
+
+    /// Copy the papers `ids` of `from` into this library, in order (复制到文献库): what `take_papers` brings, while
+    /// `from` keeps them as they were.
+    pub fn copy_papers(&mut self, from: &Store, ids: &[String]) -> Result<Vec<Taken>> {
+        let ordered = self.ready_to_take(from, ids, true)?;
+        ordered.iter().map(|id| self.bring_paper(from, id, true)).collect()
+    }
+
+    /// `ids` once each, in order, after checking that none is in this library's trash and that every file to copy is
+    /// there: one that is not stops the whole lot before any paper is taken.
+    fn ready_to_take(&self, from: &Store, ids: &[String], keep: bool) -> Result<Vec<String>> {
         if from.root() == self.root() { bail!("这篇文献已经在这个文献库里。") }
         let mut ordered = vec![];
         for id in ids {
@@ -94,7 +113,7 @@ impl Store {
         for id in &ordered {
             let paper = from.get_paper(id)?;
             let (file_names, files) = rows(&from.db, "resources", "paper_id", id)?;
-            let held = self.held_here(&paper, &file_names, &files)?;
+            let held = self.held_here(&paper, &file_names, &files, keep)?;
             for file in &files {
                 let sha = text(&file_names, file, "sha256");
                 if let (Some(held), false) = (&held, sha.is_empty()) && self.db.query_row("SELECT 1 FROM resources WHERE paper_id = ?1 AND sha256 = ?2", params![held, sha], |_| Ok(())).optional()?.is_some() { continue }
@@ -102,16 +121,24 @@ impl Store {
                 std::fs::metadata(&source).map_err(|err| anyhow!("无法复制文件「{}」：{err}", text(&file_names, file, "title")))?;
             }
         }
-        ordered.iter().map(|id| self.take_paper(from, id)).collect()
+        Ok(ordered)
     }
 
     /// Take the paper `id` of `from` into this library (see the module). `from` keeps it in its trash.
     pub fn take_paper(&mut self, from: &mut Store, id: &str) -> Result<Taken> {
+        let taken = self.bring_paper(from, id, false)?;
+        from.trash_paper(id)?;
+        Ok(taken)
+    }
+
+    /// Write the paper `id` of `from` into this library with what is its own there (see the module), `from` left as
+    /// it is. `keep` (a copy) only changes what is said when the paper is in this library's trash.
+    fn bring_paper(&mut self, from: &Store, id: &str, keep: bool) -> Result<Taken> {
         if from.root() == self.root() { bail!("这篇文献已经在这个文献库里。") }
         let paper = from.get_paper(id)?;
         let (file_names, files) = rows(&from.db, "resources", "paper_id", id)?;
         // The paper here: the same record, or one holding one of the same files.
-        let held = self.held_here(&paper, &file_names, &files)?;
+        let held = self.held_here(&paper, &file_names, &files, keep)?;
         let mut target = match &held {
             Some(held) => {
                 let here = self.get_paper(held)?;
@@ -168,10 +195,12 @@ impl Store {
             file_ids.insert(old.clone(), new);
             copied.push((old, row));
         }
-        // The pictures of the figures cut from it, copied the same way; one whose picture is gone stays behind.
+        // The pictures of the figures cut from it, copied the same way; one whose picture is gone stays behind, and
+        // one this library has already (the paper copied here before) is not copied again.
         let (figure_names, figures) = rows(&from.db, "figures", "paper_id", id)?;
         let mut pictures: Vec<Vec<Value>> = vec![];
         for figure in figures {
+            if self.db.query_row("SELECT 1 FROM figures WHERE id = ?1", [text(&figure_names, &figure, "id")], |_| Ok(())).optional()?.is_some() { continue }
             let path = text(&figure_names, &figure, "local_path");
             let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
             let relative = format!("figures/{}-{name}", new_id("G"));
@@ -239,7 +268,6 @@ impl Store {
             put(&tx, "conversation_images", &names, images, |_, _| {})?;
         }
         tx.commit()?;
-        from.trash_paper(id)?;
         Ok(taken)
     }
 
@@ -691,6 +719,51 @@ mod tests {
         assert_eq!((taken[0].joined, taken[1].joined), (false, true));
         assert_eq!(to.list_papers().unwrap().len(), 2);
         assert!(from.in_trash(&first).unwrap() && from.in_trash(&second.id).unwrap());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_paper_copied_stays_where_it_was() {
+        let dir = temp_dir("copy");
+        let (mut from, id) = source(&dir);
+        let png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x10\x00\x00\x00\x10\x08\x02\x00\x00\x00";
+        let mut blot = crate::figure::Figure { paper_id: id.clone(), label: "Fig. 2".into(), ..Default::default() };
+        from.add_figure(&mut blot, png).unwrap();
+        let mut to = Store::open(&dir.join("to")).unwrap();
+        let taken = to.copy_papers(&from, std::slice::from_ref(&id)).unwrap();
+        assert_eq!(taken.len(), 1);
+        assert_eq!((taken[0].joined, taken[0].files, taken[0].marks), (false, 1, 3));
+        // Here as a move brings it: its file, its conversation, its figure, and its own decision still to make.
+        let here = to.get_paper(&taken[0].paper).unwrap();
+        assert_eq!((here.screening.as_str(), here.notes.as_str()), ("pending", "读过第二节"));
+        let files = to.paper_files(&here.id).unwrap();
+        assert_eq!(std::fs::read(to.root().join(&files[0].local_path)).unwrap(), b"%PDF-1.4 root hairs");
+        assert_eq!((to.list_conversations(&here.id).unwrap().len(), to.list_figures().unwrap().len()), (1, 1));
+        // There, nothing changed: not in the trash, the decision, the file, the conversation as they were.
+        assert!(!from.in_trash(&id).unwrap());
+        let there = from.get_paper(&id).unwrap();
+        assert_eq!(there.screening, "included");
+        let theirs = from.paper_files(&id).unwrap();
+        assert!(from.root().join(&theirs[0].local_path).is_file());
+        assert_eq!((from.list_conversations(&id).unwrap().len(), from.list_figures().unwrap().len()), (1, 1));
+        // Copied a second time: the paper here takes nothing twice, not even the figure's picture.
+        let again = to.copy_papers(&from, std::slice::from_ref(&id)).unwrap();
+        assert_eq!((again[0].joined, again[0].files, again[0].marks), (true, 0, 0));
+        assert_eq!((to.list_papers().unwrap().len(), to.paper_files(&here.id).unwrap().len(), to.list_figures().unwrap().len()), (1, 1, 1));
+        assert_eq!(std::fs::read_dir(to.root().join("figures")).unwrap().count(), 1);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_paper_in_the_trash_here_is_not_copied() {
+        let dir = temp_dir("copy-trashed");
+        let (from, id) = source(&dir);
+        let mut to = Store::open(&dir.join("to")).unwrap();
+        let here = to.add_paper(Paper { title: "Root hairs and ethylene".into(), doi: "10.1234/root".into(), ..Default::default() }).unwrap();
+        to.trash_paper(&here.id).unwrap();
+        let refused = to.copy_papers(&from, std::slice::from_ref(&id)).unwrap_err().to_string();
+        assert!(refused.contains("再复制过来"), "{refused}");
+        assert_eq!(to.paper_files(&here.id).unwrap().len(), 0);
         std::fs::remove_dir_all(dir).ok();
     }
 }

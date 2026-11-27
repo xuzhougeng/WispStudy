@@ -233,14 +233,20 @@ impl Workspace {
                 if let Some(file) = pdf { items.push(item(reveal_label(), Cmd::RevealFile(file.id.clone()))) }
 
                 breaks.push(items.len());
-                if !self.move_targets().is_empty() { items.push(item(t("移到文献库…"), Cmd::AskMovePapers(vec![id.clone()]))) }
+                if !self.move_targets().is_empty() {
+                    items.push(item(t("移到文献库…"), Cmd::AskMovePapers(vec![id.clone()])));
+                    items.push(item(t("复制到文献库…"), Cmd::AskCopyPapers(vec![id.clone()])));
+                }
                 items.push(MenuItem { label: t("移到回收站").into(), checked: false, note: Some(crate::shortcuts::pretty("secondary-backspace").into()), cmd: Cmd::TrashPaper(id.clone()) });
             }
             // The 信息 tab's ⋯ (detail.rs): the paper's filing and removing, by the names and notes of the menu above.
             MenuKind::PaperMore(id) => {
                 if lib.paper(id).is_none() { return (items, breaks) }
                 if self.can_file(std::slice::from_ref(id)) { items.push(item(t("归入已有文献…"), Cmd::AskFileInto(vec![id.clone()]))) }
-                if !self.move_targets().is_empty() { items.push(item(t("移到文献库…"), Cmd::AskMovePapers(vec![id.clone()]))) }
+                if !self.move_targets().is_empty() {
+                    items.push(item(t("移到文献库…"), Cmd::AskMovePapers(vec![id.clone()])));
+                    items.push(item(t("复制到文献库…"), Cmd::AskCopyPapers(vec![id.clone()])));
+                }
                 if !items.is_empty() { breaks.push(items.len()) }
                 items.push(MenuItem { label: t("移到回收站").into(), checked: false, note: Some(crate::shortcuts::pretty("secondary-backspace").into()), cmd: Cmd::TrashPaper(id.clone()) });
             }
@@ -274,7 +280,10 @@ impl Workspace {
                 items.push(item(t("复制 BibTeX"), Cmd::CopyText(wisp_core::export::bibtex(&papers))));
 
                 breaks.push(items.len());
-                if !self.move_targets().is_empty() { items.push(item(&tn!("把 {n} 篇移到文献库…", "Move {n} to library…", count, "paper"), Cmd::AskMovePapers(ids.clone()))) }
+                if !self.move_targets().is_empty() {
+                    items.push(item(&tn!("把 {n} 篇移到文献库…", "Move {n} to library…", count, "paper"), Cmd::AskMovePapers(ids.clone())));
+                    items.push(item(&tn!("把 {n} 篇复制到文献库…", "Copy {n} to library…", count, "paper"), Cmd::AskCopyPapers(ids.clone())));
+                }
                 items.push(MenuItem { label: tf!("把 {count} 篇移到回收站…", "Move {count} papers to trash…").into(), checked: false, note: Some(crate::shortcuts::pretty("secondary-backspace").into()), cmd: Cmd::AskTrashPapers(ids.clone()) });
             }
             MenuKind::Trashed(id) => {

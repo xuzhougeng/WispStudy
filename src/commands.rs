@@ -293,10 +293,13 @@ pub enum Cmd {
     UndoTagging(wisp_core::organise::Tagged),
     FindPdfsOf(Vec<String>),
     AskTrashPapers(Vec<String>),
-    /// 移到文献库: the dialog for one paper or several marked ones, a library chosen in it, and the move (`transfer.rs`).
+    /// 移到文献库 and 复制到文献库: the dialog for one paper or several marked ones, a library chosen in it, and the
+    /// move or the copy (`transfer.rs`).
     AskMovePapers(Vec<String>),
+    AskCopyPapers(Vec<String>),
     ChooseMoveTarget(String),
     MovePapers(Vec<String>, String),
+    CopyPapers(Vec<String>, String),
     /// 归入已有文献: the dialog for the papers whose files are to go under another, the paper chosen in it, the
     /// filing, and the way back while its toast is up (`filing.rs`).
     AskFileInto(Vec<String>),
@@ -799,12 +802,14 @@ impl Workspace {
                 window.focus(&self.focus);
             }
             Cmd::Draft(what) => self.run_draft(what, window, cx),
-            Cmd::AskMovePapers(papers) => self.ask_move_papers(papers, cx),
+            Cmd::AskMovePapers(papers) => self.ask_move_papers(papers, false, cx),
+            Cmd::AskCopyPapers(papers) => self.ask_move_papers(papers, true, cx),
             Cmd::ChooseMoveTarget(id) => {
                 if let Some(Modal::MoveTo { to, .. }) = self.modal.as_mut() { *to = Some(id) }
                 self.modal_error.clear();
             }
             Cmd::MovePapers(papers, to) => self.move_papers(papers, to, window, cx),
+            Cmd::CopyPapers(papers, to) => self.copy_papers(papers, to, window, cx),
             Cmd::AskFileInto(papers) => self.ask_file_into(papers, window, cx),
             Cmd::ChooseFileTarget(id) => {
                 if let Some(Modal::FileInto { to, .. }) = self.modal.as_mut() { *to = Some(id) }
