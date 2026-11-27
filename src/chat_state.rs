@@ -204,6 +204,8 @@ pub struct Chat {
     pub(crate) squeezed: bool,
     /// What the question last asked used, where the service says what it read from its cache (DeepSeek): the line under the answer.
     pub spent: Option<Spent>,
+    /// Per-conversation thinking effort override (`None` follows the default in Settings › AI).
+    pub effort: Option<String>,
 }
 
 /// What a question used, over all the requests it took: the service's own counts (`wisp_core::usage`), about what
@@ -323,6 +325,7 @@ impl Chat {
             overflow: None,
             squeezed: false,
             spent: None,
+            effort: None,
         }
     }
 
@@ -460,6 +463,7 @@ impl Chat {
         self.overflow = None;
         self.squeezed = false;
         self.spent = None;
+        self.effort = None;
         self.input.update(cx, |input, cx| {
             input.choosing = false;
             input.set_text("", cx);

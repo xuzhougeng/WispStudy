@@ -69,6 +69,14 @@ pub(crate) fn is_zero(n: &usize) -> bool {
 /// The thinking settings a profile may have, and what they are called.
 pub const EFFORTS: [(&str, &str); 7] = [("", "默认"), ("off", "关闭"), ("low", "低"), ("medium", "中"), ("high", "高"), ("xhigh", "极高"), ("max", "最高")];
 
+pub fn is_effort(key: &str) -> bool {
+    EFFORTS.iter().any(|(known, _)| *known == key)
+}
+
+pub fn effort_label(key: &str) -> &'static str {
+    EFFORTS.iter().find(|(known, _)| *known == key).map_or("默认", |(_, name)| *name)
+}
+
 pub const ANTHROPIC_BASE: &str = "https://api.anthropic.com";
 pub const DEFAULT_MODEL: &str = "claude-opus-5-5";
 

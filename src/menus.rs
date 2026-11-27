@@ -36,6 +36,10 @@ pub enum MenuKind {
     AddProvider,
     /// How hard the n-th model of the provider on show thinks.
     ModelEffort(usize),
+    /// Default thinking effort for chat conversations (设置 › AI › 任务 › 助手).
+    DefaultChatEffort,
+    /// Per-conversation thinking effort for a chat box.
+    ChatEffort(crate::app::Place),
     /// What kind of model the candidate in `new_model` is to be added as (设置 › AI › 模型).
     NewModelKind,
     /// How large the PDF's pages are drawn.
@@ -463,6 +467,21 @@ impl Workspace {
                 // What kind of model it is: the name tells when it is added, and here it can be said otherwise.
                 for (kind, name) in [("", t("对话模型")), (wisp_core::imagegen::KIND, t("生图模型")), (wisp_core::judge::KIND, t("判断模型"))] {
                     items.push(MenuItem { label: name.into(), checked: model.kind == kind, note: None, cmd: Cmd::SetModelKind(index, kind.to_string()) });
+                }
+            }
+            MenuKind::DefaultChatEffort => {
+                let model_effort = self.settings.profile_for_or_default(Task::Chat).effort;
+                for (key, name) in ai::EFFORTS {
+                    let note = (key.is_empty() && !model_effort.is_empty()).then(|| tf!("随模型：{}", "Model: {}", t(ai::effort_label(&model_effort))).into());
+                    items.push(MenuItem { label: t(name).into(), checked: self.settings.chat_effort == key, note, cmd: Cmd::SetDefaultChatEffort(key.to_string()) });
+                }
+            }
+            MenuKind::ChatEffort(place) => {
+                let overridden = self.chat_effort_override(place).is_some();
+                let default = self.settings.default_chat_effort();
+                let current = self.chat_profile(place).effort;
+                for (key, name) in ai::EFFORTS {
+                    items.push(MenuItem { label: t(name).into(), checked: current == key, note: (overridden && key == default).then(|| t("默认设置").into()), cmd: Cmd::SetChatEffort(place, key.to_string()) });
                 }
             }
             MenuKind::NewModelKind => {

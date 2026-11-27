@@ -166,6 +166,11 @@ pub enum Cmd {
     SetWebSearchEngine(String),
     /// 设置 › AI › 任务 › 文字识别: an engine's key, `ocr::AUTO` or `ocr::OFF`.
     SetOcrEngine(String),
+    /// 设置 › AI › 任务 › 语音输入: an engine's key, `asr::AUTO` or `asr::OFF`.
+    SetAsrEngine(String),
+    /// Start or stop recording speech for a chat input box, or cancel active recording.
+    VoiceToggle(crate::app::Place),
+    VoiceCancel,
     /// The voice 朗读 reads in, a key of `speech::VOICES`.
     SetSpeechVoice(String),
     /// The Latin or the Chinese interface font; empty is the platform's own.
@@ -205,6 +210,10 @@ pub enum Cmd {
     RemoveModel(usize),
     /// How hard the n-th model of the provider on show thinks, a key of `ai::EFFORTS`.
     SetEffort(usize, String),
+    /// Default thinking effort for chat conversations (设置 › AI › 任务 › 助手), a key of `ai::EFFORTS`.
+    SetDefaultChatEffort(String),
+    /// Per-conversation thinking effort for a chat box, a key of `ai::EFFORTS`.
+    SetChatEffort(crate::app::Place, String),
     /// How many tokens the n-th model of the provider on show takes in; 0 leaves it to its name.
     SetModelContext(usize, usize),
     /// What kind the n-th model of the provider on show is: one that answers in words (empty), draws, or judges.
@@ -770,6 +779,7 @@ impl Workspace {
                 cx.notify();
             }
             Cmd::GoHome => {
+                self.voice.cancel();
                 self.write_snapshot("leave");
                 // A manuscript begun on the home page and left with nothing in it is not kept.
                 let blank = self.retire_blank_writing();
@@ -982,6 +992,13 @@ impl Workspace {
                 self.save_settings(cx);
                 cx.notify();
             }
+            Cmd::SetAsrEngine(engine) => {
+                self.settings.asr.engine = engine;
+                self.save_settings(cx);
+                cx.notify();
+            }
+            Cmd::VoiceToggle(place) => self.voice_toggle(place, cx),
+            Cmd::VoiceCancel => self.voice_cancel(cx),
             Cmd::SetJournalZone(value) => {
                 self.settings.journal_zone = value;
                 self.save_settings(cx);
@@ -1037,6 +1054,8 @@ impl Workspace {
             Cmd::SetNewModelKind(kind) => self.set_new_model_kind(kind, cx),
             Cmd::RemoveModel(index) => self.remove_model(index, cx),
             Cmd::SetEffort(index, value) => self.set_effort(index, value, cx),
+            Cmd::SetDefaultChatEffort(value) => self.set_default_chat_effort(value, cx),
+            Cmd::SetChatEffort(place, value) => self.set_chat_effort(place, value, cx),
             Cmd::SetModelContext(index, tokens) => self.set_model_context(index, tokens, cx),
             Cmd::SetModelKind(index, kind) => {
                 let Some(provider) = self.settings_view.as_ref().map(|view| view.provider()) else { return };
@@ -2429,6 +2448,8 @@ impl Workspace {
         } else if self.dismiss_font_picker(window, cx) || self.settings_up(cx) {
         } else if self.settings_view.is_some() {
             self.close_settings(window, cx);
+        } else if self.voice.is_recording() {
+            self.voice_cancel(cx);
         } else if self.tutorials.is_some() && self.lib.is_none() {
             self.run(Cmd::Tutorial(crate::tutorial::Do::Close), window, cx);
         } else if let Some(pdf) = self.lib.as_ref().and_then(|lib| lib.pdf.clone()).filter(|pdf| pdf.read(cx).overview_open()) {

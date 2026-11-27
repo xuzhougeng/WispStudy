@@ -79,6 +79,7 @@ mod transfer;
 mod translate;
 mod ui;
 mod updater;
+mod voice;
 mod works;
 mod write;
 mod write_find;
