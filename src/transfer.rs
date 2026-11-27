@@ -1,8 +1,8 @@
 //! 移到文献库: one paper or several marked ones of the library (or conversation) on show moved into another library,
 //! chosen in a dialog (`Modal::MoveTo`, from the right-click menu). The engine's `Store::take_papers` does the moving;
-//! for one paper the window opens the library it went to on that paper, read as it was, while moving several from a
-//! library stays in the list with a button on the toast to open the target. A conversation left with no paper and no
-//! question goes the way a removed conversation goes (its folder to `removed/`).
+//! the window stays where it is, so that papers can be moved one after another, with 打开 on the toast to go after
+//! them (one paper: opened there as it was shown here, read when it was being read). A conversation left with no paper
+//! and no question goes the way a removed conversation goes (its folder to `removed/`), and the window with its papers.
 //!
 //! 复制到文献库 is the same dialog (`copy`) and `Store::copy_papers`: the other library gets what a move brings, this one
 //! keeps the papers as they were, and the window stays where it is, with 打开 on the toast.
@@ -10,7 +10,7 @@
 //! Papers the library chosen holds already are read as it is chosen (`Store::held_papers`): the dialog names them and
 //! asks what becomes of them, 追加 or 覆盖 (`Held`), 覆盖 being its first button.
 
-use crate::app::{Cmd, Modal, Talk, Workspace};
+use crate::app::{Cmd, Modal, Tab, Talk, Workspace};
 use crate::context::Nav;
 use crate::i18n::t;
 use crate::theme::{self, Theme, text_px};
@@ -128,30 +128,31 @@ impl Workspace {
         let from = lib.info.clone();
         // A conversation that held only these papers, where nothing was asked, has nothing left to go back to.
         let empty = from.draft && lib.store.list_papers().is_ok_and(|papers| papers.is_empty()) && lib.chat(Talk::Library).messages.is_empty() && lib.store.list_conversations("").is_ok_and(|kept| kept.iter().all(|c| c.questions == 0));
-        if taken.len() == 1 || empty {
+        // The window stays where it is, so that papers can be moved one after another, and 打开 on the toast goes after
+        // them: to the one paper as it was shown here, or to the library. A conversation the move emptied is gone, and
+        // the window goes with its papers.
+        let open = match taken.as_slice() {
+            [only] => Cmd::OpenMoved(to.clone(), only.paper.clone(), tab, reading),
+            _ => Cmd::OpenLibrary(to.clone()),
+        };
+        if empty {
             self.close_library(cx);
-            if empty && let Err(err) = libraries::remove(&self.root, &from) { self.fail(format!("{err:#}"), cx) }
+            if let Err(err) = libraries::remove(&self.root, &from) { self.fail(format!("{err:#}"), cx) }
             self.libraries = libraries::list(&self.root);
-            self.open_library(&to, window, cx);
-            if let [only] = taken.as_slice() {
-                if self.lib.as_ref().is_none_or(|lib| lib.info.id != to || lib.paper(&only.paper).is_none()) { return }
-                self.select(Some(only.paper.clone()), window, cx);
-                self.run(Cmd::SetTab(tab), window, cx);
-                if let Some(lib) = self.lib.as_mut() { lib.reading = reading }
-                let mut said = if only.joined { joined_one(&target.name, held) } else { tf!("已移到「{}」。", "Moved to “{}”.", target.name) };
-                if !empty { said += &tf!("原来的那条在「{}」的回收站里。", " The original is in the trash of “{}”.", from.name) }
-                if !fields_left.is_empty() { said += &tf!("这里没有词条「{}」，它的内容没有带过来。", " This library has no field “{}”; its values were not brought.", fields_left.join("」「")) }
-                return self.say(said, cx);
-            }
+            self.run(open.clone(), window, cx);
         } else {
             if let Some(parked) = self.parked.iter_mut().find(|lib| lib.info.id == to) { let _ = parked.reload(); }
             self.change(cx, |_| Ok(()));
+            // The paper read has left: the list is shown, and the next paper opened is not read for it.
+            if reading && let Some(lib) = self.lib.as_mut() { lib.reading = false }
             self.libraries = libraries::list(&self.root);
             window.focus(&self.focus);
         }
         let count = taken.len();
         let joined = taken.iter().filter(|t| t.joined).count();
-        let mut said = if joined == 0 {
+        let mut said = if count == 1 {
+            if joined == 1 { joined_one(&target.name, held) } else { tf!("已移到「{}」。", "Moved to “{}”.", target.name) }
+        } else if joined == 0 {
             tn!("已把 {n} 篇文献移到「{}」。", "Moved {n} to “{}”.", count, "paper", target.name)
         } else if joined == count {
             joined_all(&target.name, count, held)
@@ -161,20 +162,22 @@ impl Workspace {
             tf!("已把 {} 篇文献移到「{}」，其中 {} 篇并到了已有的条目上。", "Moved {} papers to “{}” ({} merged with existing entries).", count, target.name, joined)
         };
         if !empty {
-            said += &if self.lib.as_ref().is_some_and(|lib| lib.info.id == from.id) {
-                tf!("原来的条目在本库的回收站里。", " The originals are in this library's trash.")
-            } else {
-                tf!("原来的条目在「{}」的回收站里。", " The originals are in the trash of “{}”.", from.name)
-            };
+            said += &if count == 1 { tf!("原来的那条在本库的回收站里。", " The original is in this library's trash.") } else { tf!("原来的条目在本库的回收站里。", " The originals are in this library's trash.") };
         }
         if !fields_left.is_empty() {
             said += &tf!("「{}」没有词条「{}」，内容没有带过来。", " “{}” has no field “{}”; its values were not brought.", target.name, fields_left.join("」「"));
         }
-        if self.lib.as_ref().is_some_and(|lib| lib.info.id == from.id) {
-            self.say_with(said, t("打开"), Cmd::OpenLibrary(to), cx);
-        } else {
-            self.say(said, cx);
-        }
+        if empty { self.say(said, cx) } else { self.say_with(said, t("打开"), open, cx) }
+    }
+
+    /// The library a paper was moved to, opened on that paper at the tab it was shown at, read when it was being read
+    /// (`Cmd::OpenMoved`). One that has left that library since leaves the library opened at its list.
+    pub(crate) fn open_moved(&mut self, library: &str, paper: &str, tab: Tab, reading: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_library(library, window, cx);
+        if self.lib.as_ref().is_none_or(|lib| lib.info.id != library || lib.paper(paper).is_none()) { return }
+        self.select(Some(paper.to_string()), window, cx);
+        self.run(Cmd::SetTab(tab), window, cx);
+        if let Some(lib) = self.lib.as_mut() { lib.reading = reading }
     }
 
     /// 复制到文献库: the papers copied into `to`. Nothing here changes, so the window stays where it is, and the toast
