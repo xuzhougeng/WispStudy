@@ -26,6 +26,8 @@ async-channel = "2"
 resvg = "0.45"
 # 朗读's sound out to the speakers (`src/read_aloud.rs`); playback only, no decoders.
 rodio = { version = "0.23", default-features = false, features = ["playback"] }
+# 语音输入's microphone capture (`src/voice.rs`).
+cpal = "0.18"
 
 # The tray icon that a window closed into the background comes back from (`src/background.rs`).
 [target.'cfg(target_os = "windows")'.dependencies]

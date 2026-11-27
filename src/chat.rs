@@ -755,7 +755,7 @@ impl Workspace {
         self.fold_mentions(Place::Chat(talk), cx);
         // A drag that ended anywhere but in the conversation says nothing: the flag is put right here.
         if !cx.has_active_drag() { self.pinning = false }
-        let profile = self.settings.profile_for_or_default(wisp_core::settings::Task::Chat);
+        let profile = self.chat_profile(Place::Chat(talk));
         let configured = !profile.key().is_empty();
         // Something from a PDF went to this conversation (#205): its box, drawn below when there is a model, takes the keyboard.
         if let Some(lib) = self.lib.as_mut() && configured && lib.focus_box == Some(talk) {
@@ -766,7 +766,7 @@ impl Workspace {
         let chat = lib.chat(talk);
         // The paper's box says how many papers a question is about, as the empty conversation over it does.
         if talk == Talk::Paper { chat.input.update(cx, |input, _| input.set_placeholder(paper_placeholder(lib.talk_papers().len()))) }
-        let model = profile.title();
+        let (model, effort) = (profile.title(), profile.effort);
         // Ids of the two conversations' elements must differ: both can be on screen.
         let side = talk.side();
         // A conversation of the home page not yet made a library: its title, what it has kept, and the way to make it one (`draft.rs`).
@@ -974,7 +974,7 @@ impl Workspace {
                     .child(ui::secondary_button("review-toggle", if chat.review_open { t("返回对话") } else { t("查看记录") }).h(text_px(26.)).on_click(self.on(Cmd::ToggleReview, cx))))
             })
             .child(body)
-            .when(configured, |d| d.child(self.render_composer(talk, chat, &model, window, cx).px(px(side_pad))))
+            .when(configured, |d| d.child(self.render_composer(talk, chat, &model, &effort, window, cx).px(px(side_pad))))
             // An old conversation on show without a model: it can be read, and says what asking on needs.
             .when(!configured && !listing && !chat.messages.is_empty(), |d| {
                 d.child(
@@ -1951,7 +1951,7 @@ impl Workspace {
     /// The box the next question is written in: its pictures, a button to
     /// add more, the text, and the button that sends it or stops the answer.
     /// Over it, the slash commands that match what is being typed.
-    fn render_composer(&self, talk: Talk, chat: &Chat, model: &str, window: &mut Window, cx: &mut Context<Self>) -> Div {
+    fn render_composer(&self, talk: Talk, chat: &Chat, model: &str, effort: &str, window: &mut Window, cx: &mut Context<Self>) -> Div {
         let side = talk.side();
         let focused = chat.input.focus_handle(cx).is_focused(window);
         let commands = if focused { chat.slash_list(&self.settings.commands, &self.skills_on(), cx) } else { vec![] };
@@ -2127,10 +2127,11 @@ impl Workspace {
                             .gap(px(6.))
                             .child(ui::ghost_button(SharedString::from(format!("chat-attach-{side}")), Some("plus"), None).h(text_px(30.)).min_w(px(30.)).rounded(px(15.)).on_click(self.on(Cmd::AttachImages(talk), cx)))
                             .child(div().id(SharedString::from(format!("chat-input-{side}"))).flex().items_start().flex_1().min_w_0().my(px(5.)).max_h(px(170.)).overflow_y_scroll().track_scroll(&chat.input_scroll).text_size(text_px(13.)).line_height(text_px(20.)).text_color(Theme::text()).child(chat.input.clone()))
+                            .children(self.voice_control(SharedString::from(format!("chat-voice-{side}")), Place::Chat(talk), cx))
                             .child(if chat.busy { round(format!("chat-stop-{side}"), "square", true).on_click(self.on(Cmd::StopChat(talk), cx)) } else { round(format!("chat-send-{side}"), "send", ready).on_click(self.on(Cmd::Ask(talk), cx)) }),
                     ),
             )
-            .child(div().flex().gap(px(8.)).px(px(4.)).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(div().flex_1().min_w_0().truncate().child(if talk == Talk::Paper { t("Enter 发送 · 回答可能有误，请对照原文") } else { t("Enter 发送，Shift+Enter 换行 · 回答可能有误，请对照原文") })).child(self.model_button(SharedString::from(format!("chat-model-{side}")), model, cx)))
+            .child(div().flex().items_center().gap(px(6.)).px(px(4.)).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(div().flex_1().min_w_0().truncate().child(if talk == Talk::Paper { t("Enter 发送 · 回答可能有误，请对照原文") } else { t("Enter 发送，Shift+Enter 换行 · 回答可能有误，请对照原文") })).child(self.model_button(SharedString::from(format!("chat-model-{side}")), model, cx)).child(self.effort_button(SharedString::from(format!("chat-effort-{side}")), Place::Chat(talk), effort, cx)))
     }
 
     /// The model that answers, under a conversation's box (a library's and the home page's): picked here as in
@@ -2151,6 +2152,101 @@ impl Workspace {
             .on_click(self.on_menu(MenuKind::TaskModel(wisp_core::settings::Task::Chat), cx))
             .child(div().min_w_0().truncate().child(model.to_string()))
             .child(ui::icon("chevron-down", 10., Theme::text_tertiary()))
+    }
+
+    /// The thinking effort for this conversation, beside the model under its box (`MenuKind::ChatEffort`).
+    pub(crate) fn effort_button(&self, id: SharedString, place: Place, effort: &str, cx: &mut Context<Self>) -> Stateful<Div> {
+        let label = t(ai::effort_label(effort));
+        div()
+            .id(id)
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(2.))
+            .px(px(4.))
+            .rounded(px(4.))
+            .text_color(Theme::text_tertiary())
+            .cursor_pointer()
+            .hover(|s| s.bg(Theme::hover()).text_color(Theme::text_secondary()))
+            .on_click(self.on_menu(MenuKind::ChatEffort(place), cx))
+            .child(tf!("思考 · {label}", "Thinking · {label}"))
+            .child(ui::icon("chevron-down", 10., Theme::text_tertiary()))
+    }
+
+    /// The microphone / recording control in a chat composer (`voice.rs`).
+    pub(crate) fn voice_control(&self, id: SharedString, place: Place, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if let Some(elapsed) = self.voice.recording_at(place) {
+            let secs = elapsed.as_secs();
+            return Some(
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(px(4.))
+                    .child(
+                        div()
+                            .id(id)
+                            .flex()
+                            .flex_none()
+                            .items_center()
+                            .gap(px(5.))
+                            .h(text_px(30.))
+                            .px(px(10.))
+                            .rounded(px(15.))
+                            .bg(Theme::danger().opacity(0.12))
+                            .border_1()
+                            .border_color(Theme::danger().opacity(0.35))
+                            .text_size(text_px(12.))
+                            .text_color(Theme::danger())
+                            .cursor_pointer()
+                            .hover(|s| s.bg(Theme::danger().opacity(0.18)))
+                            .tooltip(ui::tip(t("点击结束录音并转成文字（Esc 取消）")))
+                            .on_click(self.on(Cmd::VoiceToggle(place), cx))
+                            .child(ui::icon("square", 11., Theme::danger()))
+                            .child(format!("{}:{:02}", secs / 60, secs % 60)),
+                    )
+                    .child(ui::ghost_button(SharedString::from(format!("{}-cancel", place_key(place))), Some("x"), None).h(text_px(26.)).min_w(px(26.)).rounded(px(13.)).tooltip(ui::tip(t("取消录音"))).on_click(self.on(Cmd::VoiceCancel, cx)))
+                    .into_any_element(),
+            );
+        }
+        if self.voice.transcribing_at(place) {
+            return Some(
+                div()
+                    .id(id)
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(px(5.))
+                    .h(text_px(30.))
+                    .px(px(10.))
+                    .rounded(px(15.))
+                    .bg(Theme::bg_sunken())
+                    .text_size(text_px(12.))
+                    .text_color(Theme::text_secondary())
+                    .child(ui::spinner(SharedString::from(format!("{}-spin", place_key(place))), 13., Theme::accent()))
+                    .child(t("识别中…"))
+                    .into_any_element(),
+            );
+        }
+        if wisp_core::asr::ready(&self.settings, "").is_err() { return None }
+        let busy_elsewhere = self.voice.busy_elsewhere(place);
+        Some(
+            ui::ghost_button(id, Some("mic"), None)
+                .h(text_px(30.))
+                .min_w(px(30.))
+                .rounded(px(15.))
+                .when(busy_elsewhere, |d| d.opacity(0.4).cursor_default().tooltip(ui::tip(t("另一处正在录音"))))
+                .when(!busy_elsewhere, |d| d.tooltip(ui::tip(t("语音输入"))).on_click(self.on(Cmd::VoiceToggle(place), cx)))
+                .into_any_element(),
+        )
+    }
+}
+
+/// Stable key fragment for a voice control's child element IDs.
+fn place_key(place: Place) -> &'static str {
+    match place {
+        Place::Home => "home",
+        Place::Chat(talk) => talk.side(),
     }
 }
 

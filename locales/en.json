@@ -2285,5 +2285,18 @@
   "边写边查": "Write and look things up as you go",
   "在右边直接写，或者告诉助手要写什么：它会到 PubMed、Europe PMC 等文献数据库里找文献，起草和修改稿件。要引用已有文献库里的文献，把稿件绑定到那个文献库（上方的链环）；想把这里收进的文献留成一个新的文献库，点「建成文献库」。": "Write on the right, or tell the assistant what to write: it finds papers in PubMed, Europe PMC and other databases, drafts and revises the manuscript. To cite papers of a library you already have, bind the manuscript to that library (the link above); to keep the papers gathered here as a new library, click Make it a library.",
   "工作动画": "Work animation",
-  "等待助手阅读、检索或生成时，显示像素研究员动画。": "Show the pixel researcher animation while the assistant reads, searches or writes."
+  "等待助手阅读、检索或生成时，显示像素研究员动画。": "Show the pixel researcher animation while the assistant reads, searches or writes.",
+  "默认思考强度": "Default thinking effort",
+  "新对话默认使用的思考强度，可在对话框下按次调整。": "Default thinking effort for new chats; adjustable under the chat box.",
+  "默认设置": "Default setting",
+  "语音输入": "Voice input",
+  "在对话输入框里按麦克风说话，转成文字。音频发给所选的服务，按时长计费。": "Click the microphone in a chat box to dictate text. Audio is sent to the selected service and billed by duration.",
+  "这里的 Key 只用于语音输入；清空后用「模型」里 DeepSeek 服务的 Key。": "This key is used only for voice input; clear it to use the DeepSeek service key under Models.",
+  "音频上传给 DeepSeek，自动识别语种，按秒计费；单次最长 120 秒、8 MB。": "Audio is uploaded to DeepSeek, language is detected automatically, billed per second; up to 120 s and 8 MB per clip.",
+  "点击结束录音并转成文字（Esc 取消）": "Click to stop recording and transcribe (Esc to cancel)",
+  "取消录音": "Cancel recording",
+  "识别中…": "Transcribing…",
+  "另一处正在录音": "Recording elsewhere",
+  "说话时间太短，没有识别到内容。": "Recording was too short to recognize any speech.",
+  "没有识别到说话内容。": "No speech was recognized."
 }

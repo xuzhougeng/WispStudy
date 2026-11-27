@@ -10,6 +10,7 @@ use serde_json::Value;
 use std::io::{BufRead, BufReader};
 use std::time::Duration;
 use wisp_core::ai::{self, ChatEvent, HttpRequest, Protocol, TurnReader};
+use wisp_core::asr;
 use wisp_core::imagegen;
 use wisp_core::lookup::{self, Identifier};
 use wisp_core::model::Paper;
@@ -120,6 +121,39 @@ pub fn get_text(url: &str) -> Result<String, String> {
         }
     }
     Err(held_back(host, sources::more_allowed(url, &contact)))
+}
+
+/// How long an audio transcription upload may take.
+const ASR_WAIT: Duration = Duration::from_secs(60);
+
+/// Transcribe `audio` (named `name`) with the engine `asked` (empty: as settings say).
+pub fn transcribe(asked: &str, name: &str, audio: &[u8]) -> Result<asr::Transcript, String> {
+    let settings = wisp_core::settings::Settings::load(&wisp_core::settings::settings_file()).map_err(|e| format!("{e:#}"))?;
+    let ready = asr::ready(&settings, asked)?;
+    send_audio(&asr::request(&ready, name, audio)?, ready.engine)
+}
+
+/// Send an audio upload and wait for its transcript, retrying when the service is too busy to start.
+pub fn send_audio(upload: &asr::Upload, engine: &'static asr::Engine) -> Result<asr::Transcript, String> {
+    let agent = patient_agent(Some(ASR_WAIT), &upload.proxy, ASR_WAIT)?;
+    let mut tries = 0;
+    loop {
+        let mut call = agent.post(&upload.url);
+        for (name, value) in &upload.headers { call = call.header(name, value) }
+        let last = tries >= RETRY_WAITS.len();
+        match call.send(upload.body.as_slice()) {
+            Ok(mut response) if last || !matches!(response.status().as_u16(), 429 | 500 | 502 | 503) => {
+                let status = response.status().as_u16();
+                let text = response.body_mut().with_config().limit(4 << 20).read_to_string().map_err(|e| format!("{} 语音输入的返回内容没有读完：{e}", engine.name))?;
+                return asr::read(engine, status, &text);
+            }
+            Ok(_) => {}
+            Err(err) if last || matches!(err, ureq::Error::Timeout(_)) => return Err(format!("{} 语音输入：{}", engine.name, network_error(err))),
+            Err(_) => {}
+        }
+        std::thread::sleep(Duration::from_millis(RETRY_WAITS[tries]));
+        tries += 1;
+    }
 }
 
 /// Said when NCBI turns down the key of the settings.
@@ -649,6 +683,23 @@ data: [DONE]\n\n");
         let late = send_file(&ocr::request(&ocr::Ready { base, ..ready }, "scan.pdf", b"%PDF").unwrap(), deepseek).unwrap_err();
         server.join().unwrap();
         assert!(late.contains("限定的时间") && late.contains("OCR did not finish in time"), "{late}");
+    }
+
+    #[test]
+    fn an_audio_clip_sent_to_be_transcribed() {
+        let deepseek = asr::engine("deepseek").unwrap();
+        let (base, server) = serve("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{\"request_id\": \"asr-1\", \"text\": \"帮我找几篇文献\", \"duration_ms\": 1800}");
+        let ready = asr::Ready { engine: deepseek, key: "k".into(), proxy: "direct".into(), base: format!("{base}/v1") };
+        let upload = asr::request(&ready, "speech.wav", b"RIFFtestwav").unwrap();
+        let transcript = send_audio(&upload, deepseek).unwrap();
+        assert_eq!((transcript.text.as_str(), transcript.duration_ms), ("帮我找几篇文献", Some(1800)));
+        let asked = server.join().unwrap();
+        assert!(asked.starts_with("POST /v1/tools/asr ") && asked.to_lowercase().contains("authorization: bearer k") && asked.to_lowercase().contains("content-type: multipart/form-data; boundary=wisp-study-"), "{asked}");
+        assert!(asked.contains("name=\"file\"; filename=\"speech.wav\"") && asked.contains("RIFFtestwav"), "{asked}");
+        let (base, server) = serve("HTTP/1.1 402 Payment Required\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n{\"error\": {\"message\": \"Insufficient Balance\"}}");
+        let refused = send_audio(&asr::request(&asr::Ready { base, ..ready }, "speech.wav", b"RIFF").unwrap(), deepseek).unwrap_err();
+        server.join().unwrap();
+        assert_eq!(refused, "DeepSeek 语音输入：账户余额不足（HTTP 402）：Insufficient Balance");
     }
 
     /// Serve one canned HTTP response on a local port; returns the base URL and the request it received.

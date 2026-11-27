@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 use wisp_core::ai::{self, Protocol};
+use wisp_core::asr;
 use wisp_core::provider::{self, Provider};
 use wisp_core::libraries;
 use wisp_core::ocr;
@@ -127,10 +128,12 @@ pub struct SettingsView {
     search_keys: Vec<Entity<TextInput>>,
     /// The key of each engine of 文字识别 that has one of its own (`ocr_engines_with_keys`), in the order of `ocr::ENGINES`.
     ocr_keys: Vec<Entity<TextInput>>,
-    /// DeepSeek's key is the model service's (模型): a field of its own is shown, for 网页搜索 and for 文字识别,
+    /// The key of each voice-input engine, in the order of `asr::ENGINES`.
+    asr_keys: Vec<Entity<TextInput>>,
+    /// DeepSeek's key is the model service's (模型): a field of its own is shown, for 网页搜索, 文字识别 and 语音输入,
     /// only where an earlier build kept one, so that it can be seen and taken away. Decided on opening, so
     /// that a field being emptied does not leave under the caret.
-    deepseek_fields: [bool; 2],
+    deepseek_fields: [bool; 3],
     /// Whose name the comments and tracked changes of a Word export carry.
     pub(crate) author: Entity<TextInput>,
     /// 写作's list of citation styles (cite_styles.rs).
@@ -553,6 +556,15 @@ impl Workspace {
                         input
                     })
                     .collect();
+                let asr_keys: Vec<Entity<TextInput>> = asr::ENGINES
+                    .iter()
+                    .map(|engine| {
+                        let stored = self.settings.asr.keys.get(engine.key).cloned().unwrap_or_default();
+                        let input = cx.new(|cx| TextInput::new("API Key", cx).with_text(&stored));
+                        input.update(cx, |input, _| input.masked = true);
+                        input
+                    })
+                    .collect();
                 let mut subscriptions = vec![
                     cx.subscribe_in(&font_search, window, |this, input, event: &InputEvent, window, cx| {
                         if *event == InputEvent::Changed {
@@ -611,11 +623,22 @@ impl Workspace {
                         cx.notify();
                     }));
                 }
+                for (engine, input) in asr::ENGINES.iter().zip(&asr_keys) {
+                    subscriptions.push(cx.subscribe(input, |this, input, event: &InputEvent, cx| {
+                        if *event != InputEvent::Changed { return }
+                        let key = input.read(cx).text().trim().to_string();
+                        let keys = &mut this.settings.asr.keys;
+                        if key.is_empty() { keys.remove(engine.key); } else { keys.insert(engine.key.to_string(), key); }
+                        if this.settings.asr.engine.trim() == engine.key && asr::key_for(&this.settings, engine).0.is_empty() { this.settings.asr.engine = asr::AUTO.into() }
+                        this.save_settings(cx);
+                        cx.notify();
+                    }));
+                }
                 let (styles, heard) = self.style_browser_new(window, cx);
                 subscriptions.push(heard);
                 let kept = |keys: &std::collections::BTreeMap<String, String>| keys.get("deepseek").is_some_and(|key| !key.trim().is_empty());
-                let deepseek_fields = [kept(&self.settings.web_search.keys), kept(&self.settings.ocr.keys)];
-                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, contact_email, ncbi_key, reach: None, reach_asked: 0, typed: 0, search_keys, ocr_keys, deepseek_fields, author, styles, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, skill: None, recording: None, shortcut_error: None, balance: None, trials: vec![], trial_runs: 0, storage: None, measuring: false, storage_run: 0, storage_open: None, purging: None, _subscriptions: subscriptions });
+                let deepseek_fields = [kept(&self.settings.web_search.keys), kept(&self.settings.ocr.keys), kept(&self.settings.asr.keys)];
+                self.settings_view = Some(SettingsView { page, ai_tab: AiTab::default(), custom_tab: crate::custom::Tab::default(), scroll: ScrollHandle::new(), provider: index, protocol: shown.protocol, fields, proxy, contact_email, ncbi_key, reach: None, reach_asked: 0, typed: 0, search_keys, ocr_keys, asr_keys, deepseek_fields, author, styles, translation_prompt, font_search, font_names, font_picker: None, font_scroll: ScrollHandle::new(), command: None, connector: None, skill: None, recording: None, shortcut_error: None, balance: None, trials: vec![], trial_runs: 0, storage: None, measuring: false, storage_run: 0, storage_open: None, purging: None, _subscriptions: subscriptions });
                 self.read_balance_shown(cx);
             }
         }
@@ -1133,6 +1156,14 @@ impl Workspace {
         let Some(model) = self.settings.providers.get_mut(view.provider).and_then(|p| p.models.get_mut(index)) else { return };
         if model.effort == effort { return }
         model.effort = effort;
+        self.save_settings(cx);
+        cx.notify();
+    }
+
+    /// Default thinking effort for chat conversations (设置 › AI › 任务 › 助手).
+    pub fn set_default_chat_effort(&mut self, effort: String, cx: &mut Context<Self>) {
+        if !ai::is_effort(&effort) || self.settings.chat_effort == effort { return }
+        self.settings.chat_effort = effort;
         self.save_settings(cx);
         cx.notify();
     }
@@ -1950,7 +1981,7 @@ impl Workspace {
             .iter()
             .enumerate()
             .map(|(i, model)| {
-                let effort = ai::EFFORTS.iter().find(|(key, _)| *key == model.effort).map_or(t("默认"), |(_, name)| t(name));
+                let effort = t(ai::effort_label(&model.effort));
                 // A model that draws has no thinking to set: how it is asked for a picture stands in its place.
                 let (draws, judges) = (model.draws(), model.judges());
                 let asked = wisp_core::imagegen::Interface::from_key(&model.interface).map_or(t("自动"), |interface| t(interface.name()));
@@ -2180,12 +2211,35 @@ impl Workspace {
         // leaves the difference under it.
         let column = self.column_width(window);
         let card = |rows: Vec<AnyElement>| group(None, rows).w(px(column));
+        let chat_model_effort = settings.profile_for_or_default(Task::Chat).effort;
+        let chat_effort_detail = if settings.chat_effort.is_empty() && !chat_model_effort.is_empty() {
+            tf!("新对话默认使用的思考强度，可在对话框下按次调整。当前模型设为「{}」。", "Default thinking effort for new chats; adjustable under the chat box. Current model is set to {}.", t(ai::effort_label(&chat_model_effort)))
+        } else {
+            t("新对话默认使用的思考强度，可在对话框下按次调整。").to_string()
+        };
+        let chat_effort_picker = div()
+            .id("task-chat-effort")
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(4.))
+            .h(text_px(28.))
+            .px(px(10.))
+            .rounded(px(7.))
+            .cursor_pointer()
+            .text_size(text_px(12.))
+            .text_color(Theme::text_secondary())
+            .bg(Theme::hover())
+            .hover(|s| s.bg(Theme::pressed()))
+            .on_click(self.on_menu(MenuKind::DefaultChatEffort, cx))
+            .child(t(ai::effort_label(&settings.chat_effort)))
+            .child(ui::icon("chevron-down", 12., Theme::text_tertiary()));
         div()
             .flex()
             .flex_col()
             .w(px(column))
             .gap(px(16.))
-            .child(card(vec![head(0, Task::Chat, "sparkle", "助手和单篇文献的对话。向导拟检索式、图片库里看图写图注和标签、写作页的改写、润色、配引用、找引用的出处和让助手改稿也用它；看图需要能读图片的模型。", self, cx)]))
+            .child(card(vec![head(0, Task::Chat, "sparkle", "助手和单篇文献的对话。向导拟检索式、图片库里看图写图注和标签、写作页的改写、润色、配引用、找引用的出处和让助手改稿也用它；看图需要能读图片的模型。", self, cx), sub(row(t("默认思考强度"), Some(chat_effort_detail.into()), chat_effort_picker))]))
             .child(card(vec![head(1, Task::Screen, "list-todo", "逐篇阅读文献：筛选页的批量建议、复核和单篇再问，以及提取页按词条填写。文献多的时候，可以给它一个更快、更便宜的模型；也可以交给 Jev 这样的判断模型，它读摘要，只给结论和把握，不写理由，把握不足的留给你。选了判断模型时，提取仍用助手的模型。", self, cx), sub(row(t("同时阅读的篇数"), Some(t("批量筛选时同时发出的请求数。服务限速时调小。").into()), segmented("workers", workers, WORKERS.iter().position(|count| *count == settings.screen_workers).unwrap_or(usize::MAX), self, cx)))]))
             .child(card(vec![head(2, Task::Translate, "scan-text", "翻译题目、摘要、PDF 里选中的文字和对照译文的全文；写作页把你写的话变成候选句的检索词也用它。翻译用不着思考：可以给它一个把「思考」设为关闭的小模型。", self, cx), sub(row(t("同时翻译的篇数"), Some(t("批量翻译标题、摘要，或对照翻译全文的段落时同时发出的请求数。服务限速时调小。").into()), segmented("translate-workers", translators, WORKERS.iter().position(|count| *count == settings.translate_workers).unwrap_or(usize::MAX), self, cx))), prompt]))
             .child(card(vec![head(3, Task::Structure, "file-text", "写作页的准备工作：把全文按导言、方法、结果、讨论分开，以及读出扫描件页面上的文字（需要能看图的模型）。", self, cx)]))
@@ -2443,7 +2497,34 @@ impl Workspace {
                 reading.push(engine(t(reader.name).into(), Some(about.into()), mark(n, reader.key, lacks, in_use, picked, usable, Cmd::SetOcrEngine(reader.key.into()), self, cx), key));
             }
         }
-        vec![card(search), card(reading)]
+
+        // 语音输入.
+        let picked = settings.asr.engine.trim();
+        let on = picked != asr::OFF;
+        let in_use = asr::ready(settings, "").ok().map(|ready| ready.engine.key);
+        let mut voice = vec![head("mic", "语音输入", "在对话输入框里按麦克风说话，转成文字。音频发给所选的服务，按时长计费。", (in_use.is_none() && picked.is_empty()).then_some("填上一个引擎的 Key 就能用"), "asr-on", on, Cmd::SetAsrEngine(if on { asr::OFF } else { asr::AUTO }.into()), self, cx)];
+        if on {
+            let offset = websearch::ENGINES.len() + ocr::ENGINES.len();
+            for (i, (transcriber, input)) in asr::ENGINES.iter().zip(&view.asr_keys).enumerate() {
+                let n = offset + i;
+                let has_key = !asr::key_for(settings, transcriber).0.is_empty();
+                let stored = settings.asr.keys.get(transcriber.key).is_some_and(|key| !key.trim().is_empty());
+                let shared = transcriber.key == "deepseek";
+                let field = !shared || view.deepseek_fields[2];
+                let about = if shared && field {
+                    Some(t("这里的 Key 只用于语音输入；清空后用「模型」里 DeepSeek 服务的 Key。").into())
+                } else if shared {
+                    Some(t("音频上传给 DeepSeek，自动识别语种，按秒计费；单次最长 120 秒、8 MB。").into())
+                } else if has_key && !stored {
+                    Some(tf!("正在使用环境变量 {}。", "Using environment variable {}.", transcriber.key_env).into())
+                } else {
+                    None
+                };
+                let key = if field { own(n, input, transcriber.site, self, cx) } else { borrowed(n, has_key, self, cx) };
+                voice.push(engine(transcriber.name.into(), about, mark(n, transcriber.key, "缺少 API Key", in_use, picked, has_key, Cmd::SetAsrEngine(transcriber.key.into()), self, cx), key));
+            }
+        }
+        vec![card(search), card(reading), card(voice)]
     }
 
     fn storage_page(&self, cx: &mut Context<Self>) -> AnyElement {

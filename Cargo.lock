@@ -8703,6 +8703,7 @@ version = "0.21.0"
 dependencies = [
  "anyhow",
  "async-channel 2.5.0",
+ "cpal",
  "dirs 7.0.0",
  "gpui",
  "hayro",

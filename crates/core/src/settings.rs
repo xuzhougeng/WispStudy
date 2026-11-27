@@ -78,6 +78,8 @@ pub struct Settings {
     legacy_profiles: Vec<Profile>,
     /// Which model (`provider::Model::id`) each task uses.
     pub tasks: Tasks,
+    /// Default thinking effort for chat conversations, a key of `ai::EFFORTS`; empty means "默认".
+    pub chat_effort: String,
     /// How many papers the screening assistant reads at the same time, 1 to `MAX_SCREEN_WORKERS`.
     pub screen_workers: usize,
     /// How many texts a batch translation asks for at the same time, 1 to `MAX_SCREEN_WORKERS`.
@@ -134,6 +136,8 @@ pub struct Settings {
     pub web_search: crate::websearch::WebSearchSettings,
     /// Which engine reads the pages of a file that gives no text, and the keys of the engines (设置 › AI › 任务 › 文字识别).
     pub ocr: crate::ocr::OcrSettings,
+    /// Which engine turns speech into text, and the keys of the engines (设置 › AI › 任务 › 语音输入).
+    pub asr: crate::asr::AsrSettings,
     /// Changed shortcuts by id; an empty key means the shortcut is removed.
     pub shortcuts: BTreeMap<String, String>,
     /// How wide the reader made the detail panel, in logical pixels; 0 is the width it comes with.
@@ -201,7 +205,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let providers = provider::DEFAULT_PRESETS.iter().filter_map(|key| provider::preset(key)).map(Provider::from_preset).collect();
-        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), play_speed: 1., commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, work_animation: true, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), proxy_off: false, contact_email: String::new(), ncbi_api_key: String::new(), contact_hint_dismissed: false, web_search: Default::default(), ocr: Default::default(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, pdf_split_free: false, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, write_facing_language: String::new(), library_order: vec![], days_used: 0, last_used_day: String::new(), star_answered: false, home_list: false, tour_step: 0, tour_done: false };
+        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), chat_effort: String::new(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), play_speed: 1., commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, work_animation: true, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), proxy_off: false, contact_email: String::new(), ncbi_api_key: String::new(), contact_hint_dismissed: false, web_search: Default::default(), ocr: Default::default(), asr: Default::default(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, pdf_split_free: false, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, write_facing_language: String::new(), library_order: vec![], days_used: 0, last_used_day: String::new(), star_answered: false, home_list: false, tour_step: 0, tour_done: false };
         settings.tidy();
         settings
     }
@@ -555,6 +559,8 @@ impl Settings {
         self.font_size = font_size(self.font_size);
         self.font_family = self.font_family.trim().to_string();
         self.cjk_font_family = self.cjk_font_family.trim().to_string();
+        self.chat_effort = self.chat_effort.trim().to_string();
+        if !crate::ai::is_effort(&self.chat_effort) { self.chat_effort.clear() }
         // DeepSeek used to be set up with its larger model first, and a task without a model of its own takes the first
         // (`profile_for`): the smaller, cheaper one is the default now. A list still as it was set up is put in the new
         // order; one the person changed is theirs, and so is every task bound to a model, which goes by the model's id.
@@ -649,6 +655,21 @@ impl Settings {
     /// default, which works as soon as its API key is in the environment.
     pub fn profile_for_or_default(&self, task: Task) -> Profile {
         self.profile_for(task).unwrap_or_default()
+    }
+
+    /// Default thinking effort for chat conversations: `chat_effort` when set, else the chat model's own `effort`.
+    pub fn default_chat_effort(&self) -> String {
+        if !self.chat_effort.is_empty() { self.chat_effort.clone() } else { self.profile_for_or_default(Task::Chat).effort }
+    }
+
+    /// The chat profile with an optional per-conversation thinking effort override (`Some("")` explicitly picks "默认").
+    pub fn chat_profile(&self, override_effort: Option<&str>) -> Profile {
+        let mut profile = self.profile_for_or_default(Task::Chat);
+        profile.effort = match override_effort {
+            Some(effort) if crate::ai::is_effort(effort) => effort.to_string(),
+            _ => self.default_chat_effort(),
+        };
+        profile
     }
 
     /// Add a provider, its models given ids, and return its place in `providers`.
@@ -1206,6 +1227,43 @@ mod tests {
         assert!(!reloaded.work_animation);
         settings.reset_appearance();
         assert!(settings.work_animation);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn chat_effort_defaults_persists_and_overrides_in_order() {
+        let mut settings = Settings::default();
+        assert_eq!((settings.chat_effort.as_str(), settings.default_chat_effort().as_str()), ("", ""));
+        assert_eq!(settings.chat_profile(None).effort, "");
+
+        // An older settings file without `chatEffort` keeps the default; an unknown value is tidied away.
+        let dir = std::env::temp_dir().join(format!("wisp-effort-{}", crate::model::new_id("T")));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, r#"{"dataDir": "", "chatEffort": "turbo"}"#).unwrap();
+        let mut loaded = Settings::load(&path).unwrap();
+        assert_eq!(loaded.chat_effort, "");
+
+        // Valid `chatEffort` persists across save/load.
+        loaded.chat_effort = "medium".into();
+        loaded.save(&path).unwrap();
+        let reloaded = Settings::load(&path).unwrap();
+        assert_eq!(reloaded.chat_effort, "medium");
+
+        // Precedence: per-conversation override > settings.chat_effort > model.effort.
+        settings.providers[0].models[0].effort = "low".into();
+        assert_eq!(settings.default_chat_effort(), "low");
+        assert_eq!(settings.chat_profile(None).effort, "low");
+        assert_eq!(settings.chat_profile(Some("high")).effort, "high");
+        assert_eq!(settings.chat_profile(Some("")).effort, "");
+        assert_eq!(settings.chat_profile(Some("turbo")).effort, "low");
+
+        settings.chat_effort = "medium".into();
+        assert_eq!(settings.default_chat_effort(), "medium");
+        assert_eq!(settings.chat_profile(None).effort, "medium");
+        assert_eq!(settings.chat_profile(Some("off")).effort, "off");
+        assert_eq!(settings.chat_profile(Some("")).effort, "");
+        assert_eq!(settings.chat_profile(Some("turbo")).effort, "medium");
         std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -91,6 +91,8 @@ pub struct Home {
     pub later: Option<(String, usize)>,
     /// What the `@` being typed in the box can name (the libraries on the shelf), and how its mentions are drawn (`mention.rs`).
     pub mentions: crate::mention::Mentions,
+    /// Per-conversation thinking effort override before the draft is created.
+    pub effort: Option<String>,
     _heard: Subscription,
 }
 
@@ -111,7 +113,7 @@ impl Home {
             input
         });
         let heard = cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| this.home_input(*event, window, cx));
-        Home { input, files: vec![], collect: false, waiting: None, focus: false, open: false, greeting: None, listing: false, later: None, mentions: Default::default(), _heard: heard }
+        Home { input, files: vec![], collect: false, waiting: None, focus: false, open: false, greeting: None, listing: false, later: None, mentions: Default::default(), effort: None, _heard: heard }
     }
 }
 
@@ -170,8 +172,10 @@ impl Workspace {
             Do::Send => self.draft_send(window, cx),
             Do::Write => {
                 let asked = self.home.input.read(cx).text().to_string();
+                let effort = self.home.effort.take();
                 self.home.input.update(cx, |input, cx| input.set_text("", cx));
                 self.write_unbound(asked, window, cx);
+                if let Some(lib) = self.lib.as_mut() { lib.library_chat.effort = effort }
             }
             Do::Start(WRITE) => return self.run_draft(Do::Write, window, cx),
             Do::Start(n) => {
@@ -306,6 +310,7 @@ impl Workspace {
         self.libraries = libraries::list(&self.root);
         self.open_library(&info.id, window, cx);
         let Some(lib) = self.lib.as_mut().filter(|lib| lib.info.id == info.id) else { return };
+        lib.library_chat.effort = self.home.effort.take();
         lib.library_chat.input.update(cx, |input, cx| input.set_text(&text, cx));
         lib.library_chat.input.read(cx).focus(window);
         lib.library_chat.documents = cited.into_iter().chain(decks).collect();
@@ -441,7 +446,8 @@ impl Workspace {
         let input = &self.home.input;
         let focused = input.focus_handle(cx).is_focused(window);
         let ready = !input.read(cx).text().trim().is_empty() || !self.home.files.is_empty();
-        let model = self.settings.profile_for_or_default(Task::Chat).title();
+        let profile = self.chat_profile(crate::mention::Place::Home);
+        let model = profile.title();
         let send = div().id("home-send").flex().flex_none().items_center().justify_center().size(px(30.)).rounded(px(15.)).bg(if ready { Theme::accent() } else { Theme::groove() }).cursor_pointer().hover(|s| s.opacity(0.88)).child(ui::icon("send", 15., if ready { Theme::on_accent() } else { Theme::text_tertiary() })).on_click(self.on(Cmd::Draft(Do::Send), cx));
         let card = div()
             .flex()
@@ -465,9 +471,11 @@ impl Workspace {
                     .gap(px(6.))
                     .child(ui::ghost_button("home-attach", Some("plus"), None).h(text_px(30.)).min_w(px(30.)).rounded(px(15.)).tooltip(ui::tip(t("添加 Word 文件或 PDF"))).on_click(self.on(Cmd::Draft(Do::Pick), cx)))
                     .child(div().flex().flex_1().min_w_0().py(px(5.)).max_h(px(170.)).overflow_hidden().text_size(text_px(13.)).line_height(text_px(20.)).text_color(Theme::text()).child(input.clone()))
+                    .children(self.voice_control("home-voice".into(), crate::mention::Place::Home, cx))
                     .child(send),
             );
         let model_button = self.model_button("home-model".into(), &model, cx);
+        let effort_button = self.effort_button("home-effort".into(), crate::mention::Place::Home, &profile.effort, cx);
         let shelved = self.libraries.iter().any(|info| !info.draft);
         let starts = STARTS.iter().enumerate().filter(|(n, _)| *n != ACROSS || shelved).map(|(n, (icon, label, ..))| {
             div().id(("home-start", n)).flex().flex_none().items_center().gap(px(6.)).h(text_px(28.)).px(px(8.)).rounded(px(6.)).text_size(text_px(12.)).text_color(Theme::text_secondary()).cursor_pointer().hover(|s| s.bg(Theme::hover()).text_color(Theme::text())).active(|s| s.bg(Theme::pressed())).on_click(self.on(Cmd::Draft(Do::Start(n)), cx)).child(ui::icon(icon, 13., Theme::text_tertiary())).child(t(label))
@@ -479,7 +487,7 @@ impl Workspace {
             .gap(px(6.))
             .when_some(mentioning, |d, popup| d.child(popup))
             .child(card)
-            .child(div().flex().items_center().gap(px(8.)).px(px(4.)).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(div().flex_1().min_w_0().truncate().child(t("Enter 发送，Shift+Enter 换行 · 回答可能有误，请对照原文"))).child(model_button))
+            .child(div().flex().items_center().gap(px(6.)).px(px(4.)).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(div().flex_1().min_w_0().truncate().child(t("Enter 发送，Shift+Enter 换行 · 回答可能有误，请对照原文"))).child(model_button).child(effort_button))
             // The starts stand where the box's text begins, not at the card's rounded edge.
             .child(div().flex().flex_wrap().items_center().gap(px(2.)).ml(px(-8.)).children(starts))
     }

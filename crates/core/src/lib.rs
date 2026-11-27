@@ -29,6 +29,7 @@
 //! - `panes`    分栏: the reading area as columns on an eight-unit grid, and what a window of a given width shows of a layout
 //! - `table`    副表: a table kept as a file (`.xlsx`, `.csv`, `.tsv`) read row by row, for the tool `read_table`
 //! - `ai`       context building, request bodies and stream parsing for 文献库提问
+//! - `asr`      语音输入: speech-to-text audio preparation and request/response handling
 //! - `podcast`  播客: a paper talked over by two hosts, the script asked of a model and its sound kept as WAV
 //! - `playback` the player of 朗读 and 播客: speeds, seeking, where a kept podcast goes on, speech played faster at the same pitch
 //! - `speech`   朗读: a paper's text in pieces for DeepSeek's speech service, and the sound it sends
@@ -49,6 +50,7 @@ pub mod ai;
 pub mod annotation;
 pub mod annotpdf;
 pub mod archive;
+pub mod asr;
 pub mod bilingual;
 pub mod cite;
 pub mod collected;

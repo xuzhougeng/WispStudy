@@ -278,6 +278,33 @@ impl Workspace {
         self.ask(Talk::Library, cx);
     }
 
+    /// The per-conversation thinking effort override, if set.
+    pub(crate) fn chat_effort_override(&self, place: crate::mention::Place) -> Option<&str> {
+        match place {
+            crate::mention::Place::Home => self.home.effort.as_deref(),
+            crate::mention::Place::Chat(talk) => self.lib.as_ref().and_then(|lib| lib.chat(talk).effort.as_deref()),
+        }
+    }
+
+    /// The chat profile with any per-conversation thinking effort override applied.
+    pub(crate) fn chat_profile(&self, place: crate::mention::Place) -> ai::Profile {
+        self.settings.chat_profile(self.chat_effort_override(place))
+    }
+
+    /// Set the thinking effort for the current conversation (clearing the override when it matches the default).
+    pub(crate) fn set_chat_effort(&mut self, place: crate::mention::Place, effort: String, cx: &mut Context<Self>) {
+        if !ai::is_effort(&effort) { return }
+        let next = (effort != self.settings.default_chat_effort()).then_some(effort);
+        match place {
+            crate::mention::Place::Home => self.home.effort = next,
+            crate::mention::Place::Chat(talk) => {
+                let Some(lib) = self.lib.as_mut() else { return };
+                lib.chat_mut(talk).effort = next;
+            }
+        }
+        cx.notify();
+    }
+
     /// Ask what is in the box; or, with `again`, a question asked before
     /// (its words, pictures and files), leaving the box alone. True when it was sent.
     fn send_question(&mut self, talk: Talk, again: Option<(String, Vec<ChatImage>, Vec<String>)>, cx: &mut Context<Self>) -> bool {
@@ -668,7 +695,7 @@ impl Workspace {
     /// it arrives, then either the end of the answer or the tools it asked
     /// for. False when the request could not be made.
     fn chat_step(&mut self, talk: Talk, cx: &mut Context<Self>) -> bool {
-        let profile = self.settings.profile_for_or_default(Task::Chat);
+        let profile = self.chat_profile(crate::mention::Place::Chat(talk));
         // Beside the library's tools: the connectors' and the one that reads a skill.
         let outside: Vec<_> = self.outside_tools().into_iter().map(|(tool, _)| tool).collect();
         // Web search is offered only while an engine can be asked: switched off or without a key, the model would only hear why not.

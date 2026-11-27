@@ -117,6 +117,7 @@ cat >"${app}/Contents/Info.plist" <<EOF
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>NSMicrophoneUsageDescription</key><string>Wisp Study needs access to your microphone for voice input.</string>
   <key>NSHumanReadableCopyright</key><string>© 2026 xuzhougeng</string>
   <!-- PDFs open with the app (Open With, a file dropped on the Dock icon) without it taking them over as their default. -->
   <key>CFBundleDocumentTypes</key>
@@ -135,16 +136,28 @@ plutil -lint "${app}/Contents/Info.plist" >/dev/null
 
 # Sign from the inside out: the command line beside the app's own binary, then the bundle.
 if [[ -n "${identity}" ]]; then
+  entitlements="${work}/entitlements.plist"
+  cat >"${entitlements}" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.device.audio-input</key><true/>
+</dict>
+</plist>
+EOF
   sign=(codesign --force --options runtime --timestamp --sign "${identity}")
   if [[ -n "${CODESIGN_KEYCHAIN:-}" ]]; then sign+=(--keychain "${CODESIGN_KEYCHAIN}"); fi
+  app_sign=("${sign[@]}" --entitlements "${entitlements}")
   echo "signing with ${identity}"
 else
   sign=(codesign --force --sign -)
+  app_sign=("${sign[@]}")
   echo "no WISP_MACOS_SIGNING_IDENTITY: signing ad hoc"
 fi
 "${sign[@]}" "${macos_dir}/wisp"
-"${sign[@]}" "${macos_dir}/wisp_study"
-"${sign[@]}" "${app}"
+"${app_sign[@]}" "${macos_dir}/wisp_study"
+"${app_sign[@]}" "${app}"
 codesign --verify --strict "${app}"
 
 # Apple's verdict on one file: submit it, wait, and fail unless it is accepted.
