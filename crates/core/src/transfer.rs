@@ -1,11 +1,15 @@
-//! 移到文献库: a paper taken from one library (or a conversation, a draft) into another, with what is its own
-//! there: its files (copied, each once by its bytes), their text, parts and the place they were read to, the
+//! 移到文献库 and 复制到文献库: a paper taken from one library (or a conversation, a draft) into another, with what is
+//! its own there: its files (copied, each once by its bytes), their text, parts and the place they were read to, the
 //! highlights, boxes, notes and pieces marked on them, its conversations, the figures cut from it and the
 //! methods and introductions kept from it, with their links to those figures. Its custom fields go to the fields of the same name
 //! and kind; the rest are named in the answer. Its screening decision does not go: it was made against the
-//! other library's goal, and the paper waits here. The library it came from keeps it in its trash, so nothing is lost by a move.
+//! other library's goal, and the paper waits here. Moved, the library it came from keeps it in its trash, so nothing
+//! is lost by a move; copied, that library keeps it as it was.
 //! A paper this library already holds (the same DOI, PMID or title, or one of the same files) is not added
-//! twice: what the moved one brings is joined to it, blanks filled, tags and notes added.
+//! twice: what comes is joined to it, as the person chose (`Held`). 追加 keeps what is there and adds what comes:
+//! blanks filled, tags and notes added. 覆盖 lets what comes win wherever both have something: its details, notes,
+//! tags, reading state and star, and the marks, conversations, methods and introductions both have (by id). Either
+//! way the record keeps its id and this library's decision on it, and nothing only it had is taken away.
 
 use crate::model::*;
 use crate::store::{Store, copy_hashed, existing_paper, write_paper};
@@ -13,6 +17,16 @@ use anyhow::{Result, anyhow, bail};
 use rusqlite::types::Value;
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use std::collections::HashMap;
+
+/// What becomes of a paper the library it goes to already holds (see the module).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Held {
+    /// 追加: what is there stays, what comes is added.
+    #[default]
+    Append,
+    /// 覆盖: what comes wins wherever both have something.
+    Overwrite,
+}
 
 /// What came of a move.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -48,10 +62,16 @@ fn text(names: &[String], row: &[Value], column: &str) -> String {
 }
 
 /// Write rows into `table`, each changed first by `change` (a column's name, its value); a row whose key is
-/// already there stays as it is. How many were written.
-fn put(tx: &Transaction, table: &str, names: &[String], rows: Vec<Vec<Value>>, change: impl Fn(&str, &mut Value)) -> Result<usize> {
+/// already there stays as it is, or, with `over`, takes the values that come (updated, not deleted and written
+/// again, so nothing hanging from it goes). How many were written.
+fn put(tx: &Transaction, table: &str, names: &[String], rows: Vec<Vec<Value>>, over: bool, change: impl Fn(&str, &mut Value)) -> Result<usize> {
     let marks: Vec<String> = (1..=names.len()).map(|i| format!("?{i}")).collect();
-    let sql = format!("INSERT OR IGNORE INTO {table}({}) VALUES ({})", names.join(", "), marks.join(", "));
+    let sql = if over {
+        let set: Vec<String> = names.iter().map(|name| format!("{name} = excluded.{name}")).collect();
+        format!("INSERT INTO {table}({}) VALUES ({}) ON CONFLICT DO UPDATE SET {}", names.join(", "), marks.join(", "), set.join(", "))
+    } else {
+        format!("INSERT OR IGNORE INTO {table}({}) VALUES ({})", names.join(", "), marks.join(", "))
+    };
     let mut written = 0;
     for mut row in rows {
         for (name, value) in names.iter().zip(row.iter_mut()) { change(name, value) }
@@ -64,14 +84,15 @@ fn put(tx: &Transaction, table: &str, names: &[String], rows: Vec<Vec<Value>>, c
 fn put_by_file(from: &Connection, tx: &Transaction, old: &str, new: &str) -> Result<()> {
     for table in ["fulltext_text", "structures", "sentences", "file_origins", "reading_places", "ocr_pages"] {
         let (names, found) = rows(from, table, "resource_id", old)?;
-        put(tx, table, &names, found, |name, value| if name == "resource_id" { *value = Value::Text(new.into()) })?;
+        put(tx, table, &names, found, false, |name, value| if name == "resource_id" { *value = Value::Text(new.into()) })?;
     }
     Ok(())
 }
 
 impl Store {
-    /// The paper here that is `paper` (by DOI, PMID or title, or holding one of `files` by bytes); errs when it is in the trash.
-    fn held_here(&self, paper: &Paper, file_names: &[String], files: &[Vec<Value>]) -> Result<Option<String>> {
+    /// The paper here that is `paper` (by DOI, PMID or title, or holding one of `files` by bytes); errs when it is in
+    /// the trash, saying it is to be restored before the paper is moved here, or copied (`keep`).
+    fn held_here(&self, paper: &Paper, file_names: &[String], files: &[Vec<Value>], keep: bool) -> Result<Option<String>> {
         let mut held = existing_paper(&self.db, paper)?;
         for file in files {
             if held.is_some() { break }
@@ -79,13 +100,48 @@ impl Store {
             if sha.is_empty() { continue }
             held = self.db.query_row("SELECT paper_id FROM resources WHERE sha256 = ?1 ORDER BY added_at, id LIMIT 1", [sha], |r| r.get(0)).optional()?;
         }
-        if let Some(held) = &held && self.in_trash(held)? { bail!("「{}」在这个文献库的回收站里：先把它恢复，再移过来。", paper.title) }
+        if let Some(held) = &held && self.in_trash(held)? {
+            if keep { bail!("「{}」在这个文献库的回收站里：先把它恢复，再复制过来。", paper.title) }
+            bail!("「{}」在这个文献库的回收站里：先把它恢复，再移过来。", paper.title)
+        }
         Ok(held)
     }
 
-    /// Take the papers `ids` of `from` into this library, in order. Checked beforehand so a paper in this library's
-    /// trash or a missing file stops the whole lot before any paper moves.
-    pub fn take_papers(&mut self, from: &mut Store, ids: &[String]) -> Result<Vec<Taken>> {
+    /// The papers of `ids` (of `from`) that this library holds already, for the person to choose what becomes of
+    /// them (`Held`); errs when one is in this library's trash, as taking it would. `keep`: they are to be copied.
+    pub fn held_papers(&self, from: &Store, ids: &[String], keep: bool) -> Result<Vec<String>> {
+        let mut held = vec![];
+        for id in ids {
+            let paper = from.get_paper(id)?;
+            let (file_names, files) = rows(&from.db, "resources", "paper_id", id)?;
+            if self.held_here(&paper, &file_names, &files, keep)?.is_some() && !held.contains(id) { held.push(id.clone()) }
+        }
+        Ok(held)
+    }
+
+    /// Take the papers `ids` of `from` into this library, in order (移到文献库), one held here already joined as
+    /// `held` says. Checked beforehand so a paper in this library's trash or a missing file stops the whole lot
+    /// before any paper moves.
+    pub fn take_papers(&mut self, from: &mut Store, ids: &[String], held: Held) -> Result<Vec<Taken>> {
+        let ordered = self.ready_to_take(from, ids, false)?;
+        let mut taken = vec![];
+        for id in &ordered {
+            taken.push(self.bring_paper(from, id, false, held)?);
+            from.trash_paper(id)?;
+        }
+        Ok(taken)
+    }
+
+    /// Copy the papers `ids` of `from` into this library, in order (复制到文献库): what `take_papers` brings, while
+    /// `from` keeps them as they were.
+    pub fn copy_papers(&mut self, from: &Store, ids: &[String], held: Held) -> Result<Vec<Taken>> {
+        let ordered = self.ready_to_take(from, ids, true)?;
+        ordered.iter().map(|id| self.bring_paper(from, id, true, held)).collect()
+    }
+
+    /// `ids` once each, in order, after checking that none is in this library's trash and that every file to copy is
+    /// there: one that is not stops the whole lot before any paper is taken.
+    fn ready_to_take(&self, from: &Store, ids: &[String], keep: bool) -> Result<Vec<String>> {
         if from.root() == self.root() { bail!("这篇文献已经在这个文献库里。") }
         let mut ordered = vec![];
         for id in ids {
@@ -94,7 +150,7 @@ impl Store {
         for id in &ordered {
             let paper = from.get_paper(id)?;
             let (file_names, files) = rows(&from.db, "resources", "paper_id", id)?;
-            let held = self.held_here(&paper, &file_names, &files)?;
+            let held = self.held_here(&paper, &file_names, &files, keep)?;
             for file in &files {
                 let sha = text(&file_names, file, "sha256");
                 if let (Some(held), false) = (&held, sha.is_empty()) && self.db.query_row("SELECT 1 FROM resources WHERE paper_id = ?1 AND sha256 = ?2", params![held, sha], |_| Ok(())).optional()?.is_some() { continue }
@@ -102,17 +158,38 @@ impl Store {
                 std::fs::metadata(&source).map_err(|err| anyhow!("无法复制文件「{}」：{err}", text(&file_names, file, "title")))?;
             }
         }
-        ordered.iter().map(|id| self.take_paper(from, id)).collect()
+        Ok(ordered)
     }
 
     /// Take the paper `id` of `from` into this library (see the module). `from` keeps it in its trash.
     pub fn take_paper(&mut self, from: &mut Store, id: &str) -> Result<Taken> {
+        let taken = self.bring_paper(from, id, false, Held::Append)?;
+        from.trash_paper(id)?;
+        Ok(taken)
+    }
+
+    /// Write the paper `id` of `from` into this library with what is its own there (see the module), `from` left as
+    /// it is; one held here already is joined as `held` says. `keep` (a copy) only changes what is said when the
+    /// paper is in this library's trash.
+    fn bring_paper(&mut self, from: &Store, id: &str, keep: bool, held_as: Held) -> Result<Taken> {
         if from.root() == self.root() { bail!("这篇文献已经在这个文献库里。") }
         let paper = from.get_paper(id)?;
         let (file_names, files) = rows(&from.db, "resources", "paper_id", id)?;
         // The paper here: the same record, or one holding one of the same files.
-        let held = self.held_here(&paper, &file_names, &files)?;
+        let held = self.held_here(&paper, &file_names, &files, keep)?;
+        let over = held.is_some() && held_as == Held::Overwrite;
         let mut target = match &held {
+            Some(held) if over => {
+                // What comes, with blanks filled from what is here; the record, its decision and the values of
+                // this library's fields stay this library's (the fields that come are written over them below).
+                let here = self.get_paper(held)?;
+                let mut overwritten = crate::lookup::merge_lookup(paper.clone(), here.clone());
+                (overwritten.id, overwritten.screening, overwritten.screening_reason, overwritten.reviewed_at) = (here.id, here.screening, here.screening_reason, here.reviewed_at);
+                (overwritten.fields, overwritten.added_at, overwritten.updated_at) = (here.fields, here.added_at, crate::time::now_iso());
+                if overwritten.tags.is_empty() { overwritten.tags = here.tags }
+                if overwritten.notes.trim().is_empty() { overwritten.notes = here.notes }
+                overwritten
+            }
             Some(held) => {
                 let here = self.get_paper(held)?;
                 let tags = clean_strings(here.tags.iter().chain(&paper.tags));
@@ -143,11 +220,13 @@ impl Store {
         // (a copy already made stays in papers/, named by no record).
         let mut file_ids: HashMap<String, String> = HashMap::new();
         let mut copied: Vec<(String, Vec<Value>)> = vec![];
+        let mut shared: Vec<(String, String)> = vec![];
         for file in files {
             let (old, sha) = (text(&file_names, &file, "id"), text(&file_names, &file, "sha256"));
             let same: Option<String> = if sha.is_empty() { None } else { self.db.query_row("SELECT id FROM resources WHERE paper_id = ?1 AND sha256 = ?2", params![target.id, sha], |r| r.get(0)).optional()? };
             if let Some(same) = same {
-                file_ids.insert(old, same);
+                file_ids.insert(old.clone(), same.clone());
+                shared.push((old, same));
                 continue;
             }
             let new = new_id("R");
@@ -168,10 +247,12 @@ impl Store {
             file_ids.insert(old.clone(), new);
             copied.push((old, row));
         }
-        // The pictures of the figures cut from it, copied the same way; one whose picture is gone stays behind.
+        // The pictures of the figures cut from it, copied the same way; one whose picture is gone stays behind, and
+        // one this library has already (the paper copied here before) is not copied again.
         let (figure_names, figures) = rows(&from.db, "figures", "paper_id", id)?;
         let mut pictures: Vec<Vec<Value>> = vec![];
         for figure in figures {
+            if self.db.query_row("SELECT 1 FROM figures WHERE id = ?1", [text(&figure_names, &figure, "id")], |_| Ok(())).optional()?.is_some() { continue }
             let path = text(&figure_names, &figure, "local_path");
             let name = std::path::Path::new(&path).file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
             let relative = format!("figures/{}-{name}", new_id("G"));
@@ -205,11 +286,18 @@ impl Store {
         write_paper(&tx, &target)?;
         let mut taken = Taken { paper: target.id.clone(), joined: held.is_some(), files: copied.len(), fields_left, ..Default::default() };
         for (old, row) in copied {
-            put(&tx, "resources", &file_names, vec![row], |_, _| {})?;
+            put(&tx, "resources", &file_names, vec![row], false, |_, _| {})?;
             put_by_file(&from.db, &tx, &old, &file_ids[&old])?;
         }
+        // A file both have: the place it was read to there, when what comes wins.
+        if over {
+            for (old, same) in shared {
+                let (names, places) = rows(&from.db, "reading_places", "resource_id", &old)?;
+                put(&tx, "reading_places", &names, places, true, |name, value| if name == "resource_id" { *value = Value::Text(same.clone()) })?;
+            }
+        }
         for (field, row) in kept_fields {
-            put(&tx, "paper_fields", &field_names, vec![row], |name, value| match name {
+            put(&tx, "paper_fields", &field_names, vec![row], over, |name, value| match name {
                 "paper_id" => *value = Value::Text(target.id.clone()),
                 "field_id" => *value = Value::Text(field.clone()),
                 _ => {}
@@ -217,29 +305,28 @@ impl Store {
         }
         for table in ["pdf_annotations", "pdf_shapes", "pdf_cuts", "pdf_texts"] {
             let (names, found) = rows(&from.db, table, "paper_id", id)?;
-            taken.marks += put(&tx, table, &names, found, to_paper)?;
+            taken.marks += put(&tx, table, &names, found, over, to_paper)?;
         }
-        put(&tx, "figures", &figure_names, pictures, to_paper)?;
+        put(&tx, "figures", &figure_names, pictures, false, to_paper)?;
         // Its methods and introductions, and their links to the figures this library holds now; a link to one it does
         // not stays behind.
         let (excerpt_names, excerpts) = rows(&from.db, "excerpts", "paper_id", id)?;
         let excerpt_ids: Vec<String> = excerpts.iter().map(|row| text(&excerpt_names, row, "id")).collect();
-        put(&tx, "excerpts", &excerpt_names, excerpts, to_paper)?;
+        put(&tx, "excerpts", &excerpt_names, excerpts, over, to_paper)?;
         for excerpt in excerpt_ids {
             let (names, links) = rows(&from.db, "excerpt_figures", "excerpt_id", &excerpt)?;
             let held = |row: &Vec<Value>| tx.query_row("SELECT 1 FROM figures WHERE id = ?1", [text(&names, row, "figure_id")], |_| Ok(())).optional().ok().flatten().is_some();
             let links: Vec<Vec<Value>> = links.into_iter().filter(held).collect();
-            put(&tx, "excerpt_figures", &names, links, |_, _| {})?;
+            put(&tx, "excerpt_figures", &names, links, false, |_, _| {})?;
         }
         let (names, conversations) = rows(&from.db, "conversations", "paper_id", id)?;
         let conversation_ids: Vec<String> = conversations.iter().map(|row| text(&names, row, "id")).collect();
-        put(&tx, "conversations", &names, conversations, to_paper)?;
+        put(&tx, "conversations", &names, conversations, over, to_paper)?;
         for conversation in conversation_ids {
             let (names, images) = rows(&from.db, "conversation_images", "conversation_id", &conversation)?;
-            put(&tx, "conversation_images", &names, images, |_, _| {})?;
+            put(&tx, "conversation_images", &names, images, false, |_, _| {})?;
         }
         tx.commit()?;
-        from.trash_paper(id)?;
         Ok(taken)
     }
 
@@ -367,15 +454,15 @@ impl Store {
             let mut talks = |tx: &Transaction, about: &str| -> Result<()> {
                 let (names, found) = rows(&from.db, "conversations", "paper_id", about)?;
                 conversations.extend(found.iter().map(|row| text(&names, row, "id")));
-                put(tx, "conversations", &names, found, said)?;
+                put(tx, "conversations", &names, found, false, said)?;
                 Ok(())
             };
             talks(&tx, "")?;
             for (manuscript, (source_names, source_rows)) in manuscripts.iter().zip(sources) {
                 let (names, found) = rows(&from.db, "manuscripts", "id", &manuscript.id)?;
-                put(&tx, "manuscripts", &names, found, |_, _| {})?;
+                put(&tx, "manuscripts", &names, found, false, |_, _| {})?;
                 let (names, found) = rows(&from.db, "manuscript_sections", "manuscript_id", &manuscript.id)?;
-                put(&tx, "manuscript_sections", &names, found, rewritten(&["body"]))?;
+                put(&tx, "manuscript_sections", &names, found, false, rewritten(&["body"]))?;
                 for section in &manuscript.sections {
                     // An earlier version's number is each library's own.
                     let (mut names, mut found) = rows(&from.db, "section_snapshots", "section_id", &section.id)?;
@@ -383,29 +470,29 @@ impl Store {
                         names.remove(at);
                         for row in &mut found { row.remove(at); }
                     }
-                    put(&tx, "section_snapshots", &names, found, rewritten(&["body"]))?;
+                    put(&tx, "section_snapshots", &names, found, false, rewritten(&["body"]))?;
                 }
-                put(&tx, "manuscript_sources", &source_names, source_rows, |_, _| {})?;
+                put(&tx, "manuscript_sources", &source_names, source_rows, false, |_, _| {})?;
                 let (names, found) = rows(&from.db, "manuscript_comments", "manuscript_id", &manuscript.id)?;
-                put(&tx, "manuscript_comments", &names, found, rewritten(&["quote", "suggestion", "replaced"]))?;
+                put(&tx, "manuscript_comments", &names, found, false, rewritten(&["quote", "suggestion", "replaced"]))?;
                 // A passage of a paper that did not come has nothing to stand on here.
                 let (names, found) = rows(&from.db, "cite_passages", "manuscript_id", &manuscript.id)?;
                 let found: Vec<Vec<Value>> = found.into_iter().filter(|row| ids.contains_key(&text(&names, row, "paper_id"))).collect();
-                put(&tx, "cite_passages", &names, found, |name, value| {
+                put(&tx, "cite_passages", &names, found, false, |name, value| {
                     if name == "paper_id" && let Value::Text(old) = value && let Some(new) = ids.get(old.as_str()) { *value = Value::Text(new.clone()) }
                 })?;
                 talks(&tx, &manuscript.id)?;
             }
             for conversation in &conversations {
                 let (names, images) = rows(&from.db, "conversation_images", "conversation_id", conversation)?;
-                put(&tx, "conversation_images", &names, images, |_, _| {})?;
+                put(&tx, "conversation_images", &names, images, false, |_, _| {})?;
                 // A review lives with its conversation.
                 let (names, reviews) = rows(&from.db, "review_conversations", "conversation_id", conversation)?;
                 for review in reviews.iter().map(|row| text(&names, row, "review_id")) {
                     let (names, found) = rows(&from.db, "review_projects", "id", &review)?;
-                    put(&tx, "review_projects", &names, found, said)?;
+                    put(&tx, "review_projects", &names, found, false, said)?;
                 }
-                put(&tx, "review_conversations", &names, reviews, |_, _| {})?;
+                put(&tx, "review_conversations", &names, reviews, false, |_, _| {})?;
             }
             tx.commit()?;
             taken.conversations = conversations.len();
@@ -681,16 +768,109 @@ mod tests {
         let trashed = to.add_paper(Paper { title: "Auxin transport in roots".into(), doi: "10.1234/auxin".into(), ..Default::default() }).unwrap();
         to.trash_paper(&trashed.id).unwrap();
         // The second is in the target's trash: the first does not move either.
-        assert!(to.take_papers(&mut from, &[first.clone(), second.id.clone()]).unwrap_err().to_string().contains("回收站"));
+        assert!(to.take_papers(&mut from, &[first.clone(), second.id.clone()], Held::Append).unwrap_err().to_string().contains("回收站"));
         assert!(!from.in_trash(&first).unwrap() && !from.in_trash(&second.id).unwrap());
         assert!(to.list_papers().unwrap().is_empty());
 
         to.restore_paper(&trashed.id).unwrap();
-        let taken = to.take_papers(&mut from, &[first.clone(), second.id.clone(), first.clone()]).unwrap();
+        let taken = to.take_papers(&mut from, &[first.clone(), second.id.clone(), first.clone()], Held::Append).unwrap();
         assert_eq!(taken.len(), 2);
         assert_eq!((taken[0].joined, taken[1].joined), (false, true));
         assert_eq!(to.list_papers().unwrap().len(), 2);
         assert!(from.in_trash(&first).unwrap() && from.in_trash(&second.id).unwrap());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_paper_copied_stays_where_it_was() {
+        let dir = temp_dir("copy");
+        let (mut from, id) = source(&dir);
+        let png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x10\x00\x00\x00\x10\x08\x02\x00\x00\x00";
+        let mut blot = crate::figure::Figure { paper_id: id.clone(), label: "Fig. 2".into(), ..Default::default() };
+        from.add_figure(&mut blot, png).unwrap();
+        let mut to = Store::open(&dir.join("to")).unwrap();
+        let taken = to.copy_papers(&from, std::slice::from_ref(&id), Held::Append).unwrap();
+        assert_eq!(taken.len(), 1);
+        assert_eq!((taken[0].joined, taken[0].files, taken[0].marks), (false, 1, 3));
+        // Here as a move brings it: its file, its conversation, its figure, and its own decision still to make.
+        let here = to.get_paper(&taken[0].paper).unwrap();
+        assert_eq!((here.screening.as_str(), here.notes.as_str()), ("pending", "读过第二节"));
+        let files = to.paper_files(&here.id).unwrap();
+        assert_eq!(std::fs::read(to.root().join(&files[0].local_path)).unwrap(), b"%PDF-1.4 root hairs");
+        assert_eq!((to.list_conversations(&here.id).unwrap().len(), to.list_figures().unwrap().len()), (1, 1));
+        // There, nothing changed: not in the trash, the decision, the file, the conversation as they were.
+        assert!(!from.in_trash(&id).unwrap());
+        let there = from.get_paper(&id).unwrap();
+        assert_eq!(there.screening, "included");
+        let theirs = from.paper_files(&id).unwrap();
+        assert!(from.root().join(&theirs[0].local_path).is_file());
+        assert_eq!((from.list_conversations(&id).unwrap().len(), from.list_figures().unwrap().len()), (1, 1));
+        // Copied a second time: the paper here takes nothing twice, not even the figure's picture.
+        let again = to.copy_papers(&from, std::slice::from_ref(&id), Held::Append).unwrap();
+        assert_eq!((again[0].joined, again[0].files, again[0].marks), (true, 0, 0));
+        assert_eq!((to.list_papers().unwrap().len(), to.paper_files(&here.id).unwrap().len(), to.list_figures().unwrap().len()), (1, 1, 1));
+        assert_eq!(std::fs::read_dir(to.root().join("figures")).unwrap().count(), 1);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_paper_in_the_trash_here_is_not_copied() {
+        let dir = temp_dir("copy-trashed");
+        let (from, id) = source(&dir);
+        let mut to = Store::open(&dir.join("to")).unwrap();
+        let here = to.add_paper(Paper { title: "Root hairs and ethylene".into(), doi: "10.1234/root".into(), ..Default::default() }).unwrap();
+        to.trash_paper(&here.id).unwrap();
+        let refused = to.copy_papers(&from, std::slice::from_ref(&id), Held::Append).unwrap_err().to_string();
+        assert!(refused.contains("再复制过来"), "{refused}");
+        assert!(to.held_papers(&from, std::slice::from_ref(&id), true).unwrap_err().to_string().contains("再复制过来"));
+        assert_eq!(to.paper_files(&here.id).unwrap().len(), 0);
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_paper_held_is_appended_to_or_overwritten() {
+        let dir = temp_dir("overwrite");
+        let (mut from, id) = source(&dir);
+        let mut to = Store::open(&dir.join("to")).unwrap();
+        let mut field = FieldDef { name: "方法".into(), kind: FieldKind::Text, ..Default::default() };
+        to.save_field(&mut field).unwrap();
+        let first = to.copy_papers(&from, std::slice::from_ref(&id), Held::Append).unwrap()[0].clone();
+        // Here, the copy is decided on, given a journal, a tag of its own and a conversation of its own.
+        let mut here = to.get_paper(&first.paper).unwrap();
+        (here.screening, here.journal, here.tags) = ("included".into(), "Plant Cell".into(), vec!["根毛".into(), "这边的".into()]);
+        to.save_paper(&mut here).unwrap();
+        to.db.execute("INSERT INTO conversations(id, paper_id, title, questions, created_at, updated_at) VALUES ('C-here', ?1, '这边问的', 1, 'now', 'now')", [&here.id]).unwrap();
+        // There, it is read on: other notes and tags, unread again, the highlight and the conversation changed.
+        let mut there = from.get_paper(&id).unwrap();
+        (there.notes, there.tags, there.reading) = ("改过的笔记".into(), vec!["乙烯".into()], "unread".into());
+        there.fields = there.fields.into_keys().map(|field| (field, vec!["空间转录组".into()])).collect();
+        from.save_paper(&mut there).unwrap();
+        from.db.execute("UPDATE pdf_annotations SET quote = 'Root hairs grow fast' WHERE id = 'A-1'", []).unwrap();
+        from.db.execute("UPDATE conversations SET title = '方法有哪些', questions = 2 WHERE id = 'C-1'", []).unwrap();
+        assert_eq!(to.held_papers(&from, std::slice::from_ref(&id), true).unwrap(), vec![id.clone()]);
+
+        // 追加: what is here stays; the notes that came are added to those here (the same, so once).
+        let appended = to.copy_papers(&from, std::slice::from_ref(&id), Held::Append).unwrap()[0].clone();
+        assert!(appended.joined && appended.paper == here.id);
+        let kept = to.get_paper(&here.id).unwrap();
+        assert_eq!((kept.notes.as_str(), kept.reading.as_str(), kept.tags.clone()), ("读过第二节\n\n改过的笔记", "read", vec!["根毛".to_string(), "这边的".to_string(), "乙烯".to_string()]));
+        let quote: String = to.db.query_row("SELECT quote FROM pdf_annotations WHERE id = 'A-1'", [], |r| r.get(0)).unwrap();
+        assert_eq!(quote, "Root hairs grow");
+
+        // 覆盖: what came wins wherever both have something; the record, its decision and what only it had stay.
+        let overwritten = to.copy_papers(&from, std::slice::from_ref(&id), Held::Overwrite).unwrap()[0].clone();
+        assert!(overwritten.joined && overwritten.paper == here.id);
+        let now = to.get_paper(&here.id).unwrap();
+        assert_eq!((now.notes.as_str(), now.reading.as_str(), now.tags.clone()), ("改过的笔记", "unread", vec!["乙烯".to_string()]));
+        assert_eq!((now.screening.as_str(), now.journal.as_str()), ("included", "Plant Cell"));
+        assert_eq!(now.fields.get(&field.id), Some(&vec!["空间转录组".to_string()]));
+        let quote: String = to.db.query_row("SELECT quote FROM pdf_annotations WHERE id = 'A-1'", [], |r| r.get(0)).unwrap();
+        assert_eq!(quote, "Root hairs grow fast");
+        let titles: Vec<String> = to.list_conversations(&here.id).unwrap().into_iter().map(|c| c.title).collect();
+        assert!(titles.contains(&"方法有哪些".to_string()) && titles.contains(&"这边问的".to_string()) && titles.len() == 2, "{titles:?}");
+        assert_eq!((to.list_papers().unwrap().len(), to.paper_files(&here.id).unwrap().len()), (1, 1));
+        // There, nothing changed by either.
+        assert_eq!(from.get_paper(&id).unwrap().notes, "改过的笔记");
         std::fs::remove_dir_all(dir).ok();
     }
 }
