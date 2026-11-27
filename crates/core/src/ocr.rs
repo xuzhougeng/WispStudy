@@ -1,13 +1,15 @@
 //! 文字识别 (OCR): the text of a file whose pages give none (a scan, a
-//! font without an encoding), read off the pages by a service. Every engine
-//! is one entry of `ENGINES`; one that takes the file itself also has an arm
-//! in `request` and `read`, and nothing else knows which engines there are.
-//! Nothing here sends a request: `wisp_net::read_file` does, and the tool
-//! `ocr_pdf` is handed it (`tools::Reach`).
+//! font without an encoding), read off the pages by a service or by the
+//! system the app runs on. Every engine is one entry of `ENGINES`; one that
+//! is sent the file itself also has an arm in `request` and `read`, and
+//! nothing else knows which engines there are. Nothing here sends a request
+//! or asks the system: `wisp_net::read_file` does, and the tool `ocr_pdf` is
+//! handed it (`tools::Reach`).
 //!
 //! What an engine answered is kept as it came (`Page::raw`, the table
-//! `ocr_pages`): recognition costs, and the places it gives (`blocks`) are
-//! for a text layer over the page that is still to be drawn.
+//! `ocr_pages`): recognition costs, and the places it gives (`blocks`, and
+//! `sight::Seen` for the system's) are for a text layer over the page that
+//! is still to be drawn.
 
 use crate::settings::{Settings, Task};
 use serde::{Deserialize, Serialize};
@@ -33,13 +35,26 @@ pub struct Engine {
 /// The engine that is a model of 设置 › AI looking at pictures of the pages, one page a request.
 pub const MODEL: &str = "model";
 
-/// The engines, in the order 自动 tries them. A new one that takes the file is a row here and an arm in `request` and `read`.
-pub const ENGINES: [Engine; 2] = [
+/// The engine that is the system's own recognition (macOS Vision, Windows.Media.Ocr): no key, no bill, and
+/// the file stays on the machine. It reads pictures of the pages, which `wisp_net::sight` draws.
+pub const SYSTEM: &str = "system";
+
+/// The engines, in the order 自动 tries them: a service the person has a key for reads tables and formulas
+/// as such; without one the system reads, which costs nothing; a model's look at the pages comes last, since
+/// any model counts as one that can be asked and only a request tells whether it sees pictures. A new engine
+/// that is sent the file is a row here and an arm in `request` and `read`.
+pub const ENGINES: [Engine; 3] = [
     // https://api-docs.deepseek.com/zh-cn/guides/ocr/: the key of DeepSeek's chat API, the whole file in one request.
     Engine { key: "deepseek", name: "DeepSeek OCR", key_env: "DEEPSEEK_API_KEY", site: "https://platform.deepseek.com/api_keys", pages: 1000, bytes: 100 << 20 },
+    Engine { key: SYSTEM, name: "系统文字识别", key_env: "", site: "", pages: 0, bytes: 0 },
     // The model of 写作's groundwork (`Task::Structure`), which has to be one that sees pictures.
     Engine { key: MODEL, name: "看图模型", key_env: "", site: "", pages: 0, bytes: 0 },
 ];
+
+/// Whether the system this was built for has a recognition of its own.
+pub fn system_reads() -> bool {
+    cfg!(any(target_os = "macos", target_os = "windows"))
+}
 
 /// `OcrSettings::engine` for the first engine that can be asked.
 pub const AUTO: &str = "";
@@ -98,14 +113,18 @@ fn key_from(settings: &Settings, engine: &'static Engine, env: &dyn Fn(&str) -> 
 /// The engine a file is read with: `asked` (an `Engine::key`) when given, else the one chosen in settings, else
 /// the first that can be asked. The error is a sentence for the person or the model, saying what is missing.
 pub fn ready(settings: &Settings, asked: &str) -> Result<Ready, String> {
-    ready_from(settings, asked, &|name| std::env::var(name).ok())
+    ready_from(settings, asked, &|name| std::env::var(name).ok(), system_reads())
 }
 
-fn ready_from(settings: &Settings, asked: &str, env: &dyn Fn(&str) -> Option<String>) -> Result<Ready, String> {
+/// `ready` with the environment and the system given: `system` is whether the system reads pages itself.
+fn ready_from(settings: &Settings, asked: &str, env: &dyn Fn(&str) -> Option<String>, system: bool) -> Result<Ready, String> {
     let chosen = settings.ocr.engine.trim();
     if asked.trim().is_empty() && chosen == OFF { return Err("文字识别已在「设置 › AI › 任务」关闭。".into()) }
     let wanted = if asked.trim().is_empty() { chosen } else { asked.trim() };
     let one = |engine: &'static Engine| -> Result<Ready, String> {
+        if engine.key == SYSTEM {
+            return if system { Ok(Ready { engine, key: String::new(), proxy: String::new(), base: String::new() }) } else { Err("这个系统没有自带的文字识别（macOS 和 Windows 有）：请用 DeepSeek OCR 或看图模型。".into()) };
+        }
         if engine.key == MODEL {
             // A model that cannot be asked yet says what it lacks; whether it sees pictures only a request tells.
             return match settings.profile_for(Task::Structure).filter(|profile| profile.missing().is_none()) {
@@ -155,6 +174,7 @@ pub fn request(ready: &Ready, name: &str, file: &[u8]) -> Result<Upload, String>
             Ok(Upload { url: deepseek_endpoint(&ready.base), headers: vec![("Authorization".into(), format!("Bearer {}", ready.key)), ("Content-Type".into(), kind)], body, proxy: ready.proxy.clone() })
         }
         MODEL => Err("看图模型按页面的图片读，不接受整个文件。".into()),
+        SYSTEM => Err("系统文字识别在本机读页面，文件不上传。".into()),
         other => Err(format!("没有这个文字识别引擎：{other}。")),
     }
 }
@@ -660,10 +680,37 @@ mod tests {
         settings
     }
 
-    /// `ready` with the environment given, not the process's.
+    /// `ready` with the environment given, not the process's, on a system that reads no pages itself.
     fn ready(settings: &Settings, asked: &str, env: &[(&str, &str)]) -> Result<Ready, String> {
+        ready_on(false, settings, asked, env)
+    }
+
+    fn ready_on(system: bool, settings: &Settings, asked: &str, env: &[(&str, &str)]) -> Result<Ready, String> {
         let env: Vec<(String, String)> = env.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
-        ready_from(settings, asked, &|name| env.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()))
+        ready_from(settings, asked, &|name| env.iter().find(|(k, _)| k == name).map(|(_, v)| v.clone()), system)
+    }
+
+    #[test]
+    fn the_system_reads_when_no_service_has_a_key() {
+        // Nothing configured: the system's own recognition, which needs nothing.
+        let bare = settings_with(AUTO, &[]);
+        let found = ready_on(true, &bare, "", &[]).unwrap();
+        assert_eq!((found.engine.key, found.key.as_str(), found.author(&bare).as_str()), (SYSTEM, "", "系统文字识别"));
+        // A service with a key comes first; the system before a model's look at the pages.
+        assert_eq!(ready_on(true, &bare, "", &[("DEEPSEEK_API_KEY", "env")]).unwrap().engine.key, "deepseek");
+        let mut seeing = settings_with(AUTO, &[]);
+        seeing.add_provider(Provider { name: "视觉".into(), base_url: "https://example.com/v1".into(), api_key: "k".into(), models: vec![crate::provider::Model { model: "v".into(), ..Default::default() }], ..Default::default() });
+        assert_eq!(ready_on(true, &seeing, "", &[]).unwrap().engine.key, SYSTEM);
+        // Chosen in settings or asked for by name, whatever else could read; switched off, only when named.
+        assert_eq!(ready_on(true, &settings_with(SYSTEM, &[("deepseek", "dk")]), "", &[]).unwrap().engine.key, SYSTEM);
+        assert_eq!(ready_on(true, &settings_with("deepseek", &[("deepseek", "dk")]), "System", &[]).unwrap().engine.key, SYSTEM);
+        assert!(ready_on(true, &settings_with(OFF, &[]), "", &[]).unwrap_err().contains("关闭"));
+        assert_eq!(ready_on(true, &settings_with(OFF, &[]), SYSTEM, &[]).unwrap().engine.key, SYSTEM);
+        // Where the system has none, it says so when asked for, and 自动 passes it by.
+        assert!(ready_on(false, &bare, SYSTEM, &[]).unwrap_err().contains("没有自带的文字识别"));
+        assert_eq!(ready_on(false, &seeing, "", &[]).unwrap().engine.key, MODEL);
+        // It is sent no file.
+        assert!(request(&found, "a.pdf", b"x").unwrap_err().contains("不上传"));
     }
 
     #[test]
@@ -677,7 +724,7 @@ mod tests {
         assert!(none.contains("设置 › AI › 模型") && none.contains("能看图的模型"), "{none}");
         // Asked by name, whatever settings chose; an unknown name says which there are.
         assert!(ready(&settings_with(MODEL, &[]), "DeepSeek", &[]).unwrap_err().contains("DEEPSEEK_API_KEY"));
-        assert!(ready(&stored, "tesseract", &[]).unwrap_err().contains("deepseek、model"));
+        assert!(ready(&stored, "tesseract", &[]).unwrap_err().contains("deepseek、system、model"));
         // Switched off: said so, unless an engine is named.
         let off = settings_with(OFF, &[("deepseek", "dk")]);
         assert!(ready(&off, "", &[]).unwrap_err().contains("关闭"));

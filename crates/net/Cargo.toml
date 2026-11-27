@@ -2,7 +2,7 @@
 name = "wisp_net"
 version = "0.21.0"
 edition = "2024"
-description = "Wisp Study's HTTP: metadata lookups, literature searches, the streamed chat request and the update check. Blocking, on ureq."
+description = "What Wisp Study reaches outside itself for: HTTP (metadata lookups, literature searches, the streamed chat request, the update check; blocking, on ureq), a PDF's pages as pictures, and the system's own text recognition."
 license = "MIT"
 
 [dependencies]
@@ -12,6 +12,20 @@ ureq = { version = "3", features = ["json", "socks-proxy"] }
 async-channel = "2"
 # The code verifier and state of a browser sign-in (`oauth`).
 getrandom = "0.3"
+# The pages of a PDF as pictures (`pages`): the renderer the window draws with, and PNG for what a model is sent.
+hayro = "0.9"
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+# The system's own text recognition (`sight`): Vision on macOS, Windows.Media.Ocr on Windows. The versions the
+# tree already holds through the sound and the window.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSData", "NSDictionary", "NSEnumerator", "NSError", "NSRange", "NSString"] }
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
+objc2-vision = { version = "0.3", default-features = false, features = ["std", "VNObservation", "VNRecognizeTextRequest", "VNRequest", "VNRequestHandler", "objc2-core-foundation"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = ["Foundation_Collections", "Globalization", "Graphics_Imaging", "Media_Ocr", "Storage_Streams"] }
 
 [lints]
 workspace = true

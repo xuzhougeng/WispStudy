@@ -1060,6 +1060,11 @@ impl Workspace {
                         _ => nth(arg).map(|id| Cmd::AskRenameChat(talk, id)),
                     }
                 }
+                // What stands below the fold of a long page of settings: the page scrolled down by so many pixels.
+                "settingsdown" => {
+                    self.scroll_settings(arg.parse().unwrap_or(0.), cx);
+                    return;
+                }
                 "settings" => Some(match arg {
                     "ai" | "models" => Cmd::AiTab(AiTab::Models),
                     "tasks" => Cmd::AiTab(AiTab::Tasks),

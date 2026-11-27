@@ -1,10 +1,14 @@
 //! The network: metadata lookups, literature searches, the streamed chat
 //! request and the update check. Shared by the app and `wisp`. Everything
-//! here blocks, so the app runs it on the background executor.
+//! here blocks, so the app runs it on the background executor. Beside the
+//! network, what else a tool is lent that core cannot do by itself: a PDF's
+//! pages as pictures (`pages`) and the system's own reading of them (`sight`).
 
 pub mod mcp;
 pub mod notes;
 pub mod oauth;
+pub mod pages;
+pub mod sight;
 
 use serde_json::Value;
 use std::io::{BufRead, BufReader};
@@ -510,13 +514,20 @@ pub fn reach() -> wisp_core::tools::Reach<'static> {
 }
 
 /// Have the engine `asked` (empty: as settings say) read the pages of the file `name` holds. Settings are read anew
-/// each time, as for a web search. Only an engine that takes the file itself is asked from here: a model that
-/// looks at pictures of the pages needs them drawn, which the window does.
+/// each time, as for a web search. A model that looks at pictures of the pages is not asked from here: it reads
+/// a file in parts, one request a page, which is the window's run (`sorting.rs`).
 pub fn read_file(asked: &str, name: &str, file: &[u8]) -> Result<ocr::Reading, String> {
     let settings = wisp_core::settings::Settings::load(&wisp_core::settings::settings_file()).map_err(|e| format!("{e:#}"))?;
     let ready = ocr::ready(&settings, asked)?;
-    if ready.engine.key == ocr::MODEL { return Err("看图模型按页面的图片读，这里画不出页面：请在桌面应用里用它，或在「设置 › AI › 模型」的 DeepSeek 服务里填写 Key。".into()) }
-    Ok(ocr::Reading { engine: ready.engine, pages: send_file(&ocr::request(&ready, name, file)?, ready.engine)? })
+    if ready.engine.key == ocr::MODEL { return Err("看图模型一页一页地读，只在桌面应用里用：这里请用系统文字识别（engine 为 system），或在「设置 › AI › 模型」的 DeepSeek 服务里填写 Key。".into()) }
+    Ok(ocr::Reading { engine: ready.engine, pages: read_with(&ready, name, file)? })
+}
+
+/// The pages of a file as an engine that takes the whole file reads them: the system's own on this machine, or a
+/// service the file is sent to.
+pub fn read_with(ready: &ocr::Ready, name: &str, file: &[u8]) -> Result<Vec<ocr::Page>, String> {
+    if ready.engine.key == ocr::SYSTEM { return sight::read(file) }
+    send_file(&ocr::request(ready, name, file)?, ready.engine)
 }
 
 /// How long an engine may take over one file, the upload included: DeepSeek gives up after three minutes itself.

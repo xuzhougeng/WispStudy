@@ -393,7 +393,7 @@ pub fn catalog() -> Vec<ToolDef> {
         scoped(
             "ocr_pdf",
             "识别 PDF 页面上的文字",
-            "文字识别（OCR）：为读不出文字的 PDF（扫描件、字体没有文字编码的文件；list_papers 的 fulltext 为 textless）读出页面上的文字，按页保存，之后提问、找句子和写作都用得上，并记下是哪个引擎读的。引擎在「设置 › AI › 任务 › 文字识别」选择：DeepSeek OCR 把整个文件上传到 DeepSeek 识别，每个文件最多 1000 页、100 MB，按页计费。只处理没有读出文字的 PDF，已有文字的不动；例外是点名的文件（给了 resourceId 或 paperId）识别过、却有页面没读出文字时，只把这些页再送去读一次，读出的文字放回原处（结果里的 retriedPages、filledPages 是送去几页、读出几页）。设了打开密码的读不了。给 resourceId 只读这个附件，给 paperId 读这篇文献的 PDF，都不给时处理文献库里所有读不出文字的 PDF（一次最多 limit 个，结果里的 remaining 是还剩几个）。",
+            "文字识别（OCR）：为读不出文字的 PDF（扫描件、字体没有文字编码的文件；list_papers 的 fulltext 为 textless）读出页面上的文字，按页保存，之后提问、找句子和写作都用得上，并记下是哪个引擎读的。引擎在「设置 › AI › 任务 › 文字识别」选择：DeepSeek OCR 把整个文件上传到 DeepSeek 识别，每个文件最多 1000 页、100 MB，按页计费；系统文字识别（system，macOS 和 Windows 自带）在本机读，不上传、不计费。只处理没有读出文字的 PDF，已有文字的不动；例外是点名的文件（给了 resourceId 或 paperId）识别过、却有页面没读出文字时，只把这些页再送去读一次，读出的文字放回原处（结果里的 retriedPages、filledPages 是送去几页、读出几页）。设了打开密码的读不了。给 resourceId 只读这个附件，给 paperId 读这篇文献的 PDF，都不给时处理文献库里所有读不出文字的 PDF（一次最多 limit 个，结果里的 remaining 是还剩几个）。",
             json!({
                 "resourceId": {"type": "string", "description": "要识别的 PDF 附件 ID，见 get_paper 的 files。"},
                 "paperId": {"type": "string", "description": "识别这篇文献里读不出文字的 PDF。"},

@@ -977,45 +977,6 @@ mod device {
     }
 }
 
-/// The pages of a PDF from `skip` on, at most `limit` of them, as PNG
-/// pictures for a model to read a file that gives no text of its own, and
-/// how many pages the file has. One and a half pixels per point: enough
-/// to read print by, and small enough to send.
-pub fn page_pictures(path: &Path, skip: usize, limit: usize) -> Result<(Vec<Vec<u8>>, usize), String> {
-    pictures_of(path, |index| index >= skip, limit)
-}
-
-/// Pictures of these pages (from 0) of a PDF, in order: pages read again.
-pub fn page_pictures_at(path: &Path, at: &[usize]) -> Result<Vec<Vec<u8>>, String> {
-    let (pictures, _) = pictures_of(path, |index| at.contains(&index), at.len())?;
-    if pictures.len() != at.len() { return Err(t("要读的页面不在这个 PDF 里。").into()) }
-    Ok(pictures)
-}
-
-fn pictures_of(path: &Path, wanted: impl Fn(usize) -> bool, limit: usize) -> Result<(Vec<Vec<u8>>, usize), String> {
-    use hayro::hayro_interpret::InterpreterSettings;
-    use hayro::hayro_syntax::Pdf;
-    use hayro::vello_cpu::color::palette::css::WHITE;
-    use hayro::{PixmapSettings, RenderCache, RenderSettings, render};
-    let data = std::fs::read(path).map_err(|err| tf!("无法读取文件：{err}", "Cannot read file: {err}"))?;
-    let pdf = Pdf::new(data).map_err(|err| tf!("无法解析这个 PDF（{err:?}）。", "Cannot parse this PDF ({err:?})."))?;
-    let (cache, interpreter, settings) = (RenderCache::new(), InterpreterSettings::default(), RenderSettings::default());
-    let mut out = vec![];
-    let count = pdf.pages().len();
-    for page in pdf.pages().iter().enumerate().filter(|(index, _)| wanted(*index)).map(|(_, page)| page).take(limit) {
-        let (w, h) = page.render_dimensions();
-        let scale = 1.5_f32.min(2000. / w.max(h).max(1.));
-        let pixmap = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| render(page, &cache, &interpreter, &settings, &PixmapSettings { x_scale: scale, y_scale: scale, bg_color: WHITE }))).map_err(|_| t("这个 PDF 的页面画不出来。").to_string())?;
-        // On an opaque white background premultiplied colour is the colour itself.
-        let picture = image::RgbaImage::from_raw(pixmap.width() as u32, pixmap.height() as u32, pixmap.data_as_u8_slice().to_vec()).ok_or(t("这个 PDF 的页面画不出来。"))?;
-        let mut png = vec![];
-        image::DynamicImage::ImageRgba8(picture).to_rgb8().write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).map_err(|err| tf!("页面图像写不出来：{err}", "Cannot write page image: {err}"))?;
-        out.push(png);
-    }
-    if out.is_empty() { return Err(t("这个 PDF 没有页面。").into()) }
-    Ok((out, count))
-}
-
 fn worker(path: PathBuf, requests: mpsc::Receiver<Request>, replies: async_channel::Sender<Reply>) {
     use hayro::hayro_interpret::{Context, InterpreterCache, InterpreterSettings, TransformExt, interpret_page};
     use hayro::hayro_syntax::Pdf;

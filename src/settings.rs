@@ -983,6 +983,13 @@ impl Workspace {
         cx.notify();
     }
 
+    /// The page of settings on show scrolled down by so many pixels (the `settingsdown` debug step).
+    #[cfg(debug_assertions)]
+    pub(crate) fn scroll_settings(&mut self, down: f32, cx: &mut Context<Self>) {
+        if let Some(view) = &self.settings_view { view.scroll.set_offset(point(px(0.), px(-down))) }
+        cx.notify();
+    }
+
     #[cfg(debug_assertions)]
     pub(crate) fn search_settings_fonts(&mut self, query: &str, cx: &mut Context<Self>) {
         if let Some(view) = &self.settings_view { view.font_search.update(cx, |input, cx| input.set_text(query, cx)) }
@@ -2486,6 +2493,10 @@ impl Workspace {
                     let model = settings.profile_for(Task::Structure).filter(|profile| profile.missing().is_none());
                     let key = small(model.map_or_else(|| t("「整理全文」的模型还不能用").into(), |profile| profile.title().into())).into_any_element();
                     (t("上面「整理全文」的模型把页面当图片一页一页地读，要用能看图的模型。"), key, "缺少模型")
+                } else if reader.key == ocr::SYSTEM {
+                    // Nothing to fill in: it is there or it is not.
+                    let key = small(if usable { t("不需要 Key") } else { t("这个系统没有") }.into()).into_any_element();
+                    (t("用系统自带的文字识别在这台电脑上读：文件不上传，不计费。表格和公式读成普通文字。"), key, "这个系统没有")
                 } else {
                     let input = keys.next();
                     let key = match input.filter(|_| view.deepseek_fields[1]) {

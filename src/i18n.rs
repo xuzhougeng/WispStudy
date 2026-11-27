@@ -130,6 +130,10 @@ const PHRASES: &[(&str, &str)] = &[
     ("没有找到这篇文献：{}", "Paper not found: {0}"),
     // Why a file gave no text (`fulltext`), and what the tools say of a paper without one.
     ("无法读取文件：{}", "The file could not be read: {0}"),
+    // Pages drawn as pictures and read by the system (`wisp_net::pages`, `wisp_net::sight`).
+    ("无法解析这个 PDF（{}）。", "Cannot parse this PDF ({0})."),
+    ("页面图像写不出来：{}", "Cannot write page image: {0}"),
+    ("系统文字识别没有读成：{}", "The system's text recognition could not read it: {0}"),
     ("不支持提取 .{} 文件的文字。", "Extracting text from .{0} files is not supported."),
     ("「{}」没有保存全文，只有书目信息和摘要。", "“{0}” has no full text stored, only its record and abstract."),
     ("这篇文献的全文只有 {n} 页。", "This paper’s full text has only {0} {0|page|pages}."),

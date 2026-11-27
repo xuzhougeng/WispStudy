@@ -55,6 +55,8 @@ impl Workspace {
         // Pages are read by the engine of 文字识别 (设置 › AI › 任务), which may be the model that sorts.
         let engine = if reading { Some(wisp_core::ocr::ready(&self.settings, "")) } else { None };
         let by_model = engine.as_ref().is_none_or(|engine| engine.as_ref().is_ok_and(|ready| ready.engine.key == wisp_core::ocr::MODEL));
+        // The system's own recognition is this machine's work, and takes what it has of it for one file.
+        let by_system = engine.as_ref().is_some_and(|engine| engine.as_ref().is_ok_and(|ready| ready.engine.key == wisp_core::ocr::SYSTEM));
         let author = match &engine {
             Some(Ok(ready)) => ready.author(&self.settings),
             _ => profile.labelled(),
@@ -90,7 +92,7 @@ impl Workspace {
         sorting.engine = engine;
         let run = sorting.run;
         // A model reads a file's pages one after another; two files at a time is as much as a service takes kindly.
-        for _ in 0..if reading && by_model { workers.min(2) } else { workers } {
+        for _ in 0..if by_system { 1 } else if reading && by_model { workers.min(2) } else { workers } {
             self.write_run_next(run, cx);
         }
         cx.notify();
@@ -110,7 +112,7 @@ impl Workspace {
         let Some(file_id) = lib.writing.sorting.todo.pop() else { return };
         let Some(file) = lib.files.iter().find(|f| f.id == file_id).cloned() else { return self.write_run_next(run, cx) };
         let (title, summary) = lib.paper(&file.paper_id).map(|p| (p.title.clone(), p.abstract_text.clone())).unwrap_or_default();
-        // An engine that takes the file itself; a model looks at pictures of the pages instead.
+        // An engine that takes the file itself (a service, or the system on this machine); a model looks at pictures of the pages instead.
         let engine = lib.writing.sorting.engine.clone().filter(|ready| lib.writing.sorting.reading && ready.engine.key != wisp_core::ocr::MODEL);
         let author = engine.as_ref().map_or_else(|| profile.labelled(), |ready| ready.engine.name.to_string());
         let engine_key = engine.as_ref().map_or("", |ready| ready.engine.key);
@@ -134,19 +136,19 @@ impl Workspace {
                 if !blank.is_empty() {
                     // Only those pages go (a file the reader here cannot cut goes whole, and they are taken from it).
                     let sent = wisp_core::ocr::only_pages(&bytes, &blank).unwrap_or(bytes);
-                    let read = wisp_net::send_file(&wisp_core::ocr::request(&ready, &file_name, &sent)?, ready.engine)?;
+                    let read = wisp_net::read_with(&ready, &file_name, &sent)?;
                     let whole = wisp_core::ocr::refill(&pages, &raw, &blank, read)?;
                     if still_blank(&whole, &blank) { return Err(blank_left(blank.len())) }
                     return Ok(Made::Recognised(whole));
                 }
-                let pages = wisp_net::send_file(&wisp_core::ocr::request(&ready, &file_name, &bytes)?, ready.engine)?;
+                let pages = wisp_net::read_with(&ready, &file_name, &bytes)?;
                 if pages.iter().all(|page| page.text.trim().is_empty()) { return Err(t("页面上没有识别出文字。").to_string()) }
                 Ok(Made::Recognised(pages))
             } else if reading && !blank.is_empty() {
                 // A model looks at pictures of those pages, as many as one run reads.
                 let at: Vec<usize> = blank.iter().copied().take(READ_PAGES).collect();
                 let mut read = vec![];
-                for picture in crate::pdf::page_pictures_at(&path, &at)? {
+                for picture in wisp_net::pages::pictures_at(&path, &at)? {
                     let request = ai::read_page_request(&profile, ai::ImageData { media_type: "image/png".into(), data: ai::base64(&picture) })?;
                     read.push(wisp_core::ocr::Page { text: ai::page_reading(&wisp_net::complete(request, protocol)?), ..Default::default() });
                 }
@@ -156,7 +158,7 @@ impl Workspace {
                 Ok(Made::Read(whole.into_iter().map(|page| page.text).collect(), count))
             } else if reading {
                 let mut pages = before;
-                let (pictures, count) = crate::pdf::page_pictures(&path, pages.len(), READ_PAGES)?;
+                let (pictures, count) = wisp_net::pages::pictures(&path, pages.len(), READ_PAGES)?;
                 for picture in pictures {
                     let request = ai::read_page_request(&profile, ai::ImageData { media_type: "image/png".into(), data: ai::base64(&picture) })?;
                     pages.push(ai::page_reading(&wisp_net::complete(request, protocol)?));
