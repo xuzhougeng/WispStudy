@@ -328,10 +328,20 @@ pub struct Skipped {
     pub in_trash: bool,
 }
 
+/// A record of a list that could not be kept as it is (`Paper::validate`): its place in the list from 1, its title and why.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Invalid {
+    pub n: usize,
+    pub title: String,
+    pub why: String,
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ImportResult {
     pub added: Vec<Paper>,
     pub skipped: Vec<Skipped>,
+    /// Left out by `Store::import_records`; `import_papers` fails instead.
+    pub invalid: Vec<Invalid>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -731,8 +741,27 @@ impl Store {
         }
     }
 
+    /// The records of a file or a search: one that cannot be kept as it is
+    /// stays out, in `invalid` with its place and why, and the others come in
+    /// as `import_papers` takes them. A list of fifty with one bad DOI is
+    /// forty-nine papers and a sentence, not nothing.
+    pub fn import_records(&mut self, papers: Vec<Paper>) -> Result<ImportResult> {
+        let (mut valid, mut invalid) = (vec![], vec![]);
+        for (i, mut paper) in papers.into_iter().enumerate() {
+            paper.normalize();
+            match paper.validate() {
+                Ok(()) => valid.push(paper),
+                Err(why) => invalid.push(Invalid { n: i + 1, title: paper.title, why }),
+            }
+        }
+        let mut result = self.import_papers(valid)?;
+        result.invalid = invalid;
+        Ok(result)
+    }
+
     /// Insert a batch in one transaction: an invalid record rolls everything
-    /// back, a known paper is skipped and reported, so rerunning an import is safe.
+    /// back (one paper at a time, the caller shows why; a list goes through
+    /// `import_records`), a known paper is skipped and reported, so rerunning an import is safe.
     pub fn import_papers(&mut self, papers: Vec<Paper>) -> Result<ImportResult> {
         let tx = self.db.transaction()?;
         let mut result = ImportResult::default();
@@ -1207,7 +1236,7 @@ impl Store {
     /// over because the library holds them count as retrieved and skipped.
     pub fn import_batch(&mut self, search_id: &str, label: &str, found: crate::sources::Found, limit: usize) -> Result<(ImportBatch, ImportResult)> {
         let fetched = found.papers.len() + found.passed;
-        let result = self.import_papers(found.papers)?;
+        let result = self.import_records(found.papers)?;
         let depth = if found.stopped.is_none() { limit } else { 0 };
         let batch = ImportBatch { id: new_id("B"), search_id: search_id.into(), label: label.into(), started_at: now_iso(), remote_total: found.total, fetched, added: result.added.len(), skipped: result.skipped.len() + found.passed, error: found.stopped.unwrap_or_default(), depth, ..Default::default() };
         let tx = self.db.transaction()?;
@@ -1956,6 +1985,24 @@ mod tests {
         // Reopening reads the same library.
         assert_eq!(Store::open(&dir).unwrap().list_papers().unwrap().len(), 2);
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_bad_record_stays_out_of_a_list() {
+        let dir = temp_dir("records");
+        let mut store = Store::in_memory(&dir).unwrap();
+        store.add_paper(paper("Held", "10.1000/held")).unwrap();
+        let list = vec![paper("First", "10.1000/one"), paper("Bad DOI", "http://www.nature.com/nmeth/journal/vaop/ncurrent/abs/nmeth.3696.html"), paper("Held", "10.1000/held"), paper("Last", "")];
+        // One paper at a time, or a list taken whole: the bad record stops it all, as before.
+        assert!(store.import_papers(list.clone()).is_err());
+        assert_eq!(store.list_papers().unwrap().len(), 1);
+        let result = store.import_records(list).unwrap();
+        assert_eq!(result.added.iter().map(|p| p.title.as_str()).collect::<Vec<_>>(), ["First", "Last"]);
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(result.invalid.len(), 1);
+        assert_eq!((result.invalid[0].n, result.invalid[0].title.as_str()), (2, "Bad DOI"));
+        assert!(result.invalid[0].why.starts_with("DOI 格式不正确"), "{}", result.invalid[0].why);
+        assert_eq!(store.list_papers().unwrap().len(), 3);
     }
 
     #[test]

@@ -1,6 +1,6 @@
 //! BibTeX and RIS readers: what reference managers and publisher sites export.
 
-use crate::model::{Paper, clean_strings, normalize_doi, split_list};
+use crate::model::{Paper, clean_strings, normalize_doi, normalize_pmid, split_list, valid_doi};
 
 /// Read a file by its content: RIS records start with `TY  -`, anything
 /// holding an `@entry{` is BibTeX.
@@ -69,6 +69,8 @@ fn bib_entry(kind: &str, body: &str) -> Option<Paper> {
     let get = |name: &str| fields.iter().find(|(n, _)| n == name).map(|(_, v)| v.clone()).unwrap_or_default();
     let title = get("title");
     if title.is_empty() { return None }
+    let (doi, page) = doi_field(&get("doi"));
+    let url = Some(get("url")).filter(|url| !url.is_empty()).unwrap_or(page);
     let mut paper = Paper {
         title,
         authors: get("author").split(" and ").map(str::trim).filter(|a| !a.is_empty() && *a != "others").collect::<Vec<_>>().join("; "),
@@ -77,9 +79,9 @@ fn bib_entry(kind: &str, body: &str) -> Option<Paper> {
         issue: [get("number"), get("issue")].into_iter().find(|v| !v.is_empty()).unwrap_or_default(),
         pages: crate::model::clean_pages(&[get("pages"), get("eid"), get("article-number")].into_iter().find(|v| !v.is_empty()).unwrap_or_default()),
         year: [get("year"), get("date")].iter().find_map(|v| first_year(v)),
-        doi: normalize_doi(&get("doi")),
-        pmid: get("pmid"),
-        url: get("url"),
+        doi,
+        pmid: pmid_field(&get("pmid")),
+        url,
         abstract_text: get("abstract"),
         tags: split_list(&get("keywords")),
         notes: get("annote"),
@@ -232,6 +234,28 @@ fn first_year(value: &str) -> Option<i32> {
     digits.windows(4).find(|w| w.iter().all(char::is_ascii_digit)).and_then(|w| w.iter().collect::<String>().parse().ok()).filter(|y| (1800..=2200).contains(y))
 }
 
+/// A DOI field as reference managers fill it: the DOI, a DOI with a word
+/// beside it (`10.1038/nmeth.3696 [doi]`), a link that carries one
+/// (`…/doi/10.1002/…`), or the publisher's page with none (EndNote writes
+/// `http://www.nature.com/…/nmeth.3696.html` there). The DOI when one is
+/// written, else empty, so one odd field does not stop the record; and a web
+/// address that is not a DOI link, for the record's link when it has none.
+fn doi_field(value: &str) -> (String, String) {
+    let doi = normalize_doi(value);
+    if valid_doi(&doi) { return (doi, String::new()) }
+    let value = value.trim();
+    let lower = value.to_lowercase();
+    let page = lower.starts_with("http://") || lower.starts_with("https://");
+    let doi = (if page { crate::webpage::doi_in_address(value) } else { None }).or_else(|| crate::lookup::find_doi(value)).unwrap_or_default();
+    (doi, if page { value.to_string() } else { String::new() })
+}
+
+/// A PMID field: the number, with or without its label or PubMed link; anything else is left out.
+fn pmid_field(value: &str) -> String {
+    let pmid = normalize_pmid(value);
+    if pmid.bytes().all(|b| b.is_ascii_digit()) { pmid } else { String::new() }
+}
+
 // ---- RIS
 
 /// Records between `TY  -` and `ER  -`.
@@ -242,6 +266,8 @@ pub fn parse_ris(text: &str) -> Vec<Paper> {
     let mut last_tag = String::new();
     // `SP` and `EP`; some files write the whole range in `SP`.
     let (mut first_page, mut last_page) = (String::new(), String::new());
+    // A page address written as the DOI (EndNote), the link when `UR` gives none.
+    let mut doi_page = String::new();
     for line in text.lines() {
         let line = line.trim_end();
         let tagged = line.len() >= 5 && line.is_char_boundary(2) && line.is_char_boundary(5) && &line[2..5] == "  -" && line[..2].chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit());
@@ -259,6 +285,7 @@ pub fn parse_ris(text: &str) -> Vec<Paper> {
             current = Some(Paper { publication_status: status.to_string(), ..Default::default() });
             authors.clear();
             (first_page, last_page) = (String::new(), String::new());
+            doi_page.clear();
             continue;
         }
         let Some(paper) = current.as_mut() else { continue };
@@ -277,20 +304,25 @@ pub fn parse_ris(text: &str) -> Vec<Paper> {
             "SP" if tagged => first_page = value,
             "EP" if tagged => last_page = value,
             "PY" | "Y1" | "DA" if paper.year.is_none() => paper.year = first_year(&value),
-            "DO" => paper.doi = normalize_doi(&value),
+            "DO" => {
+                let (doi, page) = doi_field(&value);
+                if !doi.is_empty() { paper.doi = doi }
+                if doi_page.is_empty() { doi_page = page }
+            }
             "AB" | "N2" => append(&mut paper.abstract_text, &value),
             "KW" => paper.tags.push(value),
             "UR" if paper.url.is_empty() => paper.url = value,
             "N1" => append(&mut paper.notes, &value),
-            "AN" if value.to_lowercase().starts_with("pmid") || (paper.pmid.is_empty() && value.bytes().all(|b| b.is_ascii_digit())) => paper.pmid = crate::model::normalize_pmid(&value),
+            "AN" if value.to_lowercase().starts_with("pmid") || (paper.pmid.is_empty() && value.bytes().all(|b| b.is_ascii_digit())) => paper.pmid = pmid_field(&value),
             "ER" => {
                 let mut done = current.take().unwrap();
                 done.authors = authors.join("; ");
                 done.tags = clean_strings(&done.tags);
                 done.pages = crate::model::clean_pages(&if last_page.is_empty() || first_page.contains('-') { first_page.clone() } else { format!("{first_page}-{last_page}") });
-                // "doi:10.…" sometimes hides in the URL or notes.
-                if done.doi.is_empty() && let Some(at) = done.url.find("doi.org/") {
-                    done.doi = normalize_doi(&done.url[at..]);
+                if done.url.is_empty() { done.url = std::mem::take(&mut doi_page) }
+                // The DOI sometimes stands only in the link: `doi.org/10.…`, `…/doi/10.…`.
+                if done.doi.is_empty() && let Some(doi) = crate::webpage::doi_in_address(&done.url) {
+                    done.doi = doi;
                 }
                 if !done.title.is_empty() { papers.push(done) }
             }
@@ -427,5 +459,35 @@ mod tests {
         assert_eq!(papers[1].publication_status, "preprint");
         assert_eq!(papers[1].source, "RIS 导入");
         assert!(parse_references("just words", "x").is_err());
+    }
+
+    #[test]
+    fn odd_doi_fields() {
+        // EndNote writes the publisher's page as the DOI (issue 350): no DOI, the page kept as the link.
+        let nature = "http://www.nature.com/nmeth/journal/vaop/ncurrent/abs/nmeth.3696.html#supplementary-information";
+        let text = format!("TY  - JOUR\nTI  - Page as DOI\nDO  - {nature}\nER  - \n\
+            TY  - JOUR\nTI  - Page as DOI, own link\nDO  - {nature}\nUR  - https://example.org/own\nER  - \n\
+            TY  - JOUR\nTI  - Word beside it\nDO  - 10.1038/NMETH.3696 [doi]\nER  - \n\
+            TY  - JOUR\nTI  - Link with a DOI\nDO  - https://onlinelibrary.wiley.com/doi/full/10.1111/nph.17000\nER  - \n\
+            TY  - JOUR\nTI  - DOI only in the link\nUR  - https://onlinelibrary.wiley.com/doi/10.1111/nph.18000\nAN  - PMID: 12345\nER  - \n\
+            TY  - JOUR\nTI  - Two DOI lines\nDO  - 10.1000/kept\nDO  - n/a\nAN  - PMID: none\nER  - \n");
+        let papers = parse_ris(&text);
+        let read: Vec<(&str, &str, &str)> = papers.iter().map(|p| (p.doi.as_str(), p.url.as_str(), p.pmid.as_str())).collect();
+        assert_eq!(read, [
+            ("", nature, ""),
+            ("", "https://example.org/own", ""),
+            ("10.1038/nmeth.3696", "", ""),
+            ("10.1111/nph.17000", "https://onlinelibrary.wiley.com/doi/full/10.1111/nph.17000", ""),
+            ("10.1111/nph.18000", "https://onlinelibrary.wiley.com/doi/10.1111/nph.18000", "12345"),
+            ("10.1000/kept", "", ""),
+        ]);
+        let bib = format!("@article{{a, title = {{Page as DOI}}, doi = {{{nature}}}, pmid = {{n/a}}}}\n@article{{b, title = {{Labelled}}, doi = {{doi: 10.1000/b}}, pmid = {{PMID: 678}}, url = {{https://example.org/b}}}}");
+        let papers = parse_bibtex(&bib);
+        assert_eq!((papers[0].doi.as_str(), papers[0].url.as_str(), papers[0].pmid.as_str()), ("", nature, ""));
+        assert_eq!((papers[1].doi.as_str(), papers[1].url.as_str(), papers[1].pmid.as_str()), ("10.1000/b", "https://example.org/b", "678"));
+        for mut paper in papers {
+            paper.normalize();
+            assert_eq!(paper.validate(), Ok(()));
+        }
     }
 }

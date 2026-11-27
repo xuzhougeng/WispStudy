@@ -335,6 +335,9 @@ impl Workspace {
         let mut added = vec![];
         let mut skipped = 0;
         let mut errors = vec![];
+        // Records a file holds that could not be kept as they are: the rest of the file comes in all the same.
+        let mut left_out = vec![];
+        let several = others.len() > 1;
         for path in others {
             let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
             let parsed = std::fs::read(&path).map_err(|e| tf!("无法读取 {name}：{e}", "Cannot read {name}: {e}")).and_then(|bytes| import::parse_references(&String::from_utf8_lossy(&bytes), &tf!("导入 · {name}", "Import · {name}")).map_err(|e| format!("{name}：{e}")));
@@ -342,21 +345,30 @@ impl Workspace {
                 Ok(papers) => {
                     let mut result = None;
                     self.change(cx, |lib| {
-                        result = Some(lib.store.import_papers(papers)?);
+                        result = Some(lib.store.import_records(papers)?);
                         Ok(())
                     });
                     if let Some(result) = result {
                         skipped += result.skipped.len();
                         added.extend(result.added.into_iter().map(|p| p.id));
+                        let file = if several { format!("{name} ") } else { String::new() };
+                        left_out.extend(result.invalid.into_iter().map(|record| {
+                            let title = if record.title.chars().count() > 40 { format!("{}…", record.title.chars().take(40).collect::<String>()) } else { record.title };
+                            tf!("{file}第 {} 条「{title}」：{}", "{file}record {} “{title}”: {}", record.n, record.why)
+                        }));
                     }
                 }
                 Err(err) => errors.push(err),
             }
         }
+        let done = tf!("导入 {} 篇{}", "Imported {} papers{}", added.len(), if skipped > 0 { tf!("，跳过 {skipped} 篇已有的", ", skipped {skipped} existing") } else { String::new() });
         if !errors.is_empty() {
             self.fail(errors.join("；"), cx);
+        } else if !left_out.is_empty() {
+            let more = if left_out.len() > 2 { tf!("等 {} 条", " and {} more", left_out.len() - 2) } else { String::new() };
+            self.fail(tf!("{done}；{} 条没有收进：{}{more}。", "{done}; {} not taken in: {}{more}.", left_out.len(), left_out.iter().take(2).cloned().collect::<Vec<_>>().join("；")), cx);
         } else if !added.is_empty() || skipped > 0 {
-            self.say(tf!("导入 {} 篇{}。", "Imported {} papers{}.", added.len(), if skipped > 0 { tf!("，跳过 {skipped} 篇已有的", ", skipped {skipped} existing") } else { String::new() }), cx);
+            self.say(tf!("{done}。", "{done}."), cx);
         }
         if pdfs.is_empty() { return }
         let Some(lib) = self.lib.as_mut() else { return };

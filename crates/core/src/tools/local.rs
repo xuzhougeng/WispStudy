@@ -48,12 +48,14 @@ pub(super) fn import_references(store: &mut Store, args: &Value) -> Result<Value
     let name = path.file_name().unwrap_or_default().to_string_lossy();
     let papers = import::parse_references(&String::from_utf8_lossy(&bytes), &format!("导入 · {name}")).map_err(anyhow::Error::msg)?;
     let total = papers.len();
-    let result = store.import_papers(papers)?;
-    Ok(json!({
+    let result = store.import_records(papers)?;
+    let mut out = json!({
         "path": path, "total": total, "added": result.added.len(), "skipped": result.skipped.len(),
         "addedPapers": result.added.iter().map(|p| json!({"id": p.id, "title": p.title})).collect::<Vec<_>>(),
         "skippedPapers": result.skipped.iter().map(|p| json!({"title": p.title, "existingId": p.existing_id, "inTrash": p.in_trash})).collect::<Vec<_>>(),
-    }))
+    });
+    if !result.invalid.is_empty() { out["invalid"] = super::invalid_records(&result.invalid) }
+    Ok(out)
 }
 
 #[derive(Default, Serialize)]
