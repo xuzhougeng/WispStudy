@@ -541,6 +541,8 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     ("structures", "pages_read", "INTEGER NOT NULL DEFAULT 0"),
     ("structures", "page_count", "INTEGER NOT NULL DEFAULT 0"),
     ("manuscript_sections", "bare", "INTEGER NOT NULL DEFAULT 0"),
+    // How deep in the outline a section stands: 1 a section, 2 a subsection of the one before it, 3 a subsection of a subsection (`Section::level`).
+    ("manuscript_sections", "level", "INTEGER NOT NULL DEFAULT 1"),
     // The style a manuscript cites in; empty follows the settings (`Manuscript::cite_style`).
     ("manuscripts", "cite_style", "TEXT NOT NULL DEFAULT ''"),
     ("import_batches", "depth", "INTEGER NOT NULL DEFAULT 0"),

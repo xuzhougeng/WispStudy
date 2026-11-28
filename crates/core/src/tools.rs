@@ -649,7 +649,7 @@ pub fn catalog() -> Vec<ToolDef> {
         scoped(
             "set_outline",
             "定大纲",
-            "设定写作页一份稿件的大纲：它有哪些节、各叫什么、按什么顺序，也可以改题目和正文语言（只改这两样时不给 sections，大纲保持原样）。sections 是完整的新大纲：保留的节带上它的 id（或现在的名称），可以改名、改类型、换位置；不带 id 的是新加的节。没有列出的节，从没写过内容的会去掉，写过内容的不会删除，排到最后并在 kept 里说明。kind 是这一节相当于论文的哪一部分，决定写这一节时参考文献库里文献的哪一部分；综述自拟的各节用 other。只在用户要求拟定或调整大纲时使用。",
+            "设定写作页一份稿件的大纲：它有哪些节、各叫什么、按什么顺序、哪些是小节，也可以改题目和正文语言（只改这两样时不给 sections，大纲保持原样）。sections 是完整的新大纲：保留的节带上它的 id（或现在的名称），可以改名、改类型、换位置、改层级；不带 id 的是新加的节。没有列出的节，从没写过内容的会去掉，写过内容的不会删除，排到最后并在 kept 里说明。level 是层级，最多三级：1 是一节，2 是排在它后面、属于它的小节（例如方法下的各项方法、结果下的各个结果），3 是小节下面的小节。kind 是这一节相当于论文的哪一部分，决定写这一节时参考文献库里文献的哪一部分；新加的小节不给 kind 时用它所属那一节的；综述自拟的各节用 other。只在用户要求拟定或调整大纲时使用。",
             json!({
                 "manuscript": {"type": "string", "description": "稿件的 ID 或题目；只有一份稿件时可以省略。"},
                 "title": {"type": "string", "description": "稿件的新题目；省略时不改。"},
@@ -662,7 +662,8 @@ pub fn catalog() -> Vec<ToolDef> {
                         "properties": {
                             "id": {"type": "string", "description": "保留现有的一节：它的 ID 或现在的名称。新加的节不写。"},
                             "name": {"type": "string", "description": "这一节的名称。"},
-                            "kind": {"type": "string", "enum": keys(&crate::structure::SECTIONS), "description": "相当于论文的哪一部分；省略时现有的节保持原样，新加的节按名称判断。"},
+                            "kind": {"type": "string", "enum": keys(&crate::structure::SECTIONS), "description": "相当于论文的哪一部分；省略时现有的节保持原样，新加的节按名称判断，名称看不出时随它所属的那一节。"},
+                            "level": {"type": "integer", "minimum": 1, "maximum": crate::manuscript::MOST_LEVELS, "description": "层级：1 是一节，2 是前面最近的 1 级节下的小节，3 是前面最近的 2 级小节下的小节。省略时现有的节保持原样，新加的节是 1。"},
                         },
                         "required": ["name"],
                     },
@@ -750,7 +751,7 @@ pub fn fitted(name: &str, args: &Value) -> Result<Value, String> {
 
 /// A value as the parameter `wanted` describes reads it, where a model wrote it another way and what it meant is
 /// plain: a list, an object, a number or a yes written as a string is what the string says (and so each item of a
-/// list), and an empty string where anything but words is read is nothing given. Any other value stays as it is:
+/// list and each value of an object), and an empty string where anything but words is read is nothing given. Any other value stays as it is:
 /// what a tool makes of a value of another kind is the tool's to say.
 fn fit(value: &Value, wanted: &Value) -> Value {
     let parsed = |text: &str, is: fn(&Value) -> bool| serde_json::from_str::<Value>(text.trim()).ok().filter(is);
@@ -758,7 +759,9 @@ fn fit(value: &Value, wanted: &Value) -> Value {
         ("array", Value::Array(items)) => Value::Array(items.iter().map(|item| fit(item, &wanted["items"])).collect()),
         ("array" | "object" | "boolean" | "integer" | "number", Value::String(text)) if text.trim().is_empty() => Value::Null,
         ("array", Value::String(text)) => parsed(text, Value::is_array).map_or_else(|| value.clone(), |list| fit(&list, wanted)),
-        ("object", Value::String(text)) => parsed(text, Value::is_object).unwrap_or_else(|| value.clone()),
+        ("object", Value::String(text)) => parsed(text, Value::is_object).map_or_else(|| value.clone(), |object| fit(&object, wanted)),
+        // Each of an object's values as its own property reads it: the level of a section in an outline written as "2".
+        ("object", Value::Object(map)) => Value::Object(map.iter().map(|(key, value)| (key.clone(), wanted["properties"].get(key).map_or_else(|| value.clone(), |property| fit(value, property)))).collect()),
         ("integer" | "number", Value::String(text)) => parsed(text, Value::is_number).unwrap_or_else(|| value.clone()),
         ("boolean", Value::String(text)) => parsed(text, Value::is_boolean).unwrap_or_else(|| value.clone()),
         _ => value.clone(),
@@ -2234,7 +2237,7 @@ fn list_manuscripts(store: &mut Store) -> Result<Value> {
             "title": m.shown_title(),
             "language": m.language,
             "updatedAt": m.updated_at,
-            "sections": m.sections.iter().map(|s| json!({"id": s.id, "name": s.name, "kind": s.kind, "characters": s.body.chars().count()})).collect::<Vec<_>>(),
+            "sections": crate::compose::outline_of(m),
         })).collect::<Vec<_>>(),
     }))
 }
@@ -2287,11 +2290,12 @@ fn read_manuscript(store: &mut Store, args: &Value) -> Result<Value> {
         if found.is_empty() { bail!("这份稿件没有名为「{section}」的节。现有：{}", manuscript.sections.iter().map(|s| format!("「{}」", s.name)).collect::<Vec<_>>().join("、")) }
         found
     };
+    let numbers: std::collections::HashMap<&str, String> = manuscript.sections.iter().map(|s| s.id.as_str()).zip(crate::manuscript::numbers(&manuscript.sections)).collect();
     Ok(json!({
         "id": manuscript.id,
         "title": manuscript.shown_title(),
         "language": manuscript.language,
-        "sections": sections.iter().map(|s| json!({"id": s.id, "name": s.name, "kind": s.kind, "body": s.body, "comments": comments.iter().filter(|c| c.section_id == s.id && c.state != crate::comment::DONE).map(|c| json!({"quote": c.quote, "comment": c.body, "by": c.author, "from": c.origin, "proposes": c.suggestion})).collect::<Vec<_>>(), "passages": passages.iter().filter(|p| p.section_id == s.id && p.found()).map(|p| json!({"paperId": p.paper_id, "sentence": p.claim, "passage": p.passage, "in": p.part, "page": p.page, "from": p.origin})).collect::<Vec<_>>()})).collect::<Vec<_>>(),
+        "sections": sections.iter().map(|s| json!({"id": s.id, "number": numbers.get(s.id.as_str()), "level": s.level, "name": s.name, "kind": s.kind, "body": s.body, "comments": comments.iter().filter(|c| c.section_id == s.id && c.state != crate::comment::DONE).map(|c| json!({"quote": c.quote, "comment": c.body, "by": c.author, "from": c.origin, "proposes": c.suggestion})).collect::<Vec<_>>(), "passages": passages.iter().filter(|p| p.section_id == s.id && p.found()).map(|p| json!({"paperId": p.paper_id, "sentence": p.claim, "passage": p.passage, "in": p.part, "page": p.page, "from": p.origin})).collect::<Vec<_>>()})).collect::<Vec<_>>(),
     }))
 }
 
@@ -3518,6 +3522,7 @@ pub(crate) mod tests {
         let fit = fitted("edit_section", &json!({"section": "导言", "edits": "[{\"old\": \"a\", \"new\": \"b\"}, \"{\\\"old\\\": \\\"c\\\", \\\"new\\\": \\\"d\\\"}\"]"})).unwrap();
         assert_eq!((fit["edits"][0]["new"].as_str(), fit["edits"][1]["old"].as_str()), (Some("b"), Some("c")));
         assert_eq!(fitted("list_papers", &json!({"limit": "5", "library": null})).unwrap(), json!({"limit": 5, "library": null}));
+        assert_eq!(fitted("set_outline", &json!({"sections": [{"name": "方法"}, {"name": "细胞培养", "level": "2"}]})).unwrap(), json!({"sections": [{"name": "方法"}, {"name": "细胞培养", "level": 2}]}));
         assert_eq!(fitted("find_sentences", &json!({"section": "introduction", "context": " true"})).unwrap(), json!({"section": "introduction", "context": true}));
         // An empty string where a list is read is nothing given, and a tool that needs the list says so.
         assert_eq!(fitted("list_papers", &json!({"tags": "", "limit": " "})).unwrap(), json!({"tags": null, "limit": null}));

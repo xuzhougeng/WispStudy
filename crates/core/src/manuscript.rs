@@ -140,7 +140,7 @@ pub fn length_said(text: &str) -> String {
     }
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Section {
     pub id: String,
@@ -151,6 +151,70 @@ pub struct Section {
     pub updated_at: String,
     /// Text that stood under no heading in the file the manuscript came from: its name is the manuscript's own and is not written back.
     pub bare: bool,
+    /// How deep in the outline it stands, as a heading's level does in Word: 1 is a section, 2 a subsection of
+    /// the nearest section before it that is less deep (a method of 方法, a result of 结果), up to `MOST_LEVELS`.
+    /// The outline is the sections in their order with their levels; what is under a section is the sections
+    /// after it that are deeper (`under`), and a section moves, rises and sinks with them.
+    pub level: u8,
+}
+
+impl Default for Section {
+    fn default() -> Self {
+        Section { id: String::new(), name: String::new(), kind: String::new(), body: String::new(), updated_at: String::new(), bare: false, level: 1 }
+    }
+}
+
+/// How deep an outline goes: sections, their subsections, and the subsections of those.
+pub const MOST_LEVELS: u8 = 3;
+
+/// The levels of an outline made such as one can be: the first at the top, none deeper than one under the one
+/// before it, none deeper than `MOST_LEVELS`. What a file, a model or a removed section left out of order.
+pub fn fit_levels(levels: &mut [u8]) {
+    let mut before = 0;
+    for level in levels.iter_mut() {
+        *level = (*level).clamp(1, MOST_LEVELS).min(before + 1);
+        before = *level;
+    }
+}
+
+/// The section at `at` with what is under it: it and the sections after it that are deeper, as places in `sections`.
+pub fn under(sections: &[Section], at: usize) -> Range<usize> {
+    let level = sections[at].level;
+    let end = sections[at + 1..].iter().position(|section| section.level <= level).map_or(sections.len(), |n| at + 1 + n);
+    at..end
+}
+
+/// The section the one at `at` is a subsection of: the nearest before it that is less deep.
+pub fn parent(sections: &[Section], at: usize) -> Option<usize> {
+    let level = sections[at].level;
+    sections[..at].iter().rposition(|section| section.level < level)
+}
+
+/// The section beside the one at `at` under the same section and as deep, before it or after it: what it changes places with.
+pub fn sibling(sections: &[Section], at: usize, after: bool) -> Option<usize> {
+    let level = sections[at].level;
+    if after {
+        let next = under(sections, at).end;
+        sections.get(next).filter(|section| section.level == level).map(|_| next)
+    } else {
+        let before = sections[..at].iter().rposition(|section| section.level <= level)?;
+        (sections[before].level == level).then_some(before)
+    }
+}
+
+/// Each section's number in the outline: 3, then 3.1 and 3.2 for the subsections of the third section.
+pub fn numbers(sections: &[Section]) -> Vec<String> {
+    let mut counts = [0usize; MOST_LEVELS as usize];
+    sections
+        .iter()
+        .map(|section| {
+            let depth = section.level.clamp(1, MOST_LEVELS) as usize;
+            counts[depth - 1] += 1;
+            counts[depth..].iter_mut().for_each(|count| *count = 0);
+            // A level the outline skipped counts as the first of it, as Word numbers headings.
+            counts[..depth].iter().map(|count| (*count).max(1).to_string()).collect::<Vec<_>>().join(".")
+        })
+        .collect()
 }
 
 /// An earlier version of a section's text.
@@ -173,6 +237,8 @@ pub struct Arrange {
     pub name: String,
     /// A key of `structure::SECTIONS`.
     pub kind: String,
+    /// How deep in the outline (`Section::level`).
+    pub level: u8,
 }
 
 /// What arranging a manuscript's sections came to.
@@ -184,6 +250,17 @@ pub struct Arranged {
     pub removed: Vec<String>,
     /// The names of the sections that were not asked for and stay, because something was written in them.
     pub kept: Vec<String>,
+}
+
+/// Where `Store::split_section` cuts a section, and what the paragraph at the cut becomes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Cut {
+    /// It opens a new section, as deep as the one cut, under no name of the file's.
+    Paragraph,
+    /// It names a new section as deep as the one cut.
+    Heading,
+    /// It names a subsection of the one cut.
+    Subheading,
 }
 
 impl Manuscript {
@@ -261,8 +338,16 @@ pub fn worth_keeping(latest: Option<&str>, body: &str) -> bool {
 
 // ---- export
 
-fn sections_with_text(manuscript: &Manuscript) -> impl Iterator<Item = (&str, &str)> {
-    manuscript.sections.iter().map(|section| (section.name.trim(), section.body.trim())).filter(|(_, body)| !body.is_empty())
+/// Whether something is written in the section at `at` or under it: a section of its own subsections alone
+/// (方法 with a method in each) is written with its heading.
+pub fn written_under(sections: &[Section], at: usize) -> bool {
+    sections[under(sections, at)].iter().any(|section| !section.body.trim().is_empty())
+}
+
+/// The sections an export writes, with their names trimmed and their texts: (level, name, text).
+fn sections_with_text(manuscript: &Manuscript) -> impl Iterator<Item = (u8, &str, &str)> {
+    let sections = &manuscript.sections;
+    sections.iter().enumerate().filter(|(at, _)| written_under(sections, *at)).map(|(_, section)| (section.level, section.name.trim(), section.body.trim()))
 }
 
 /// The paragraphs of a text: each line that is not blank.
@@ -410,10 +495,11 @@ pub fn section_markdown(body: &str, under: u8) -> String {
 /// The manuscript as Markdown: the title, then each section with text under its name.
 pub fn markdown(manuscript: &Manuscript) -> String {
     let mut out = format!("# {}\n", manuscript.shown_title());
-    for (name, body) in sections_with_text(manuscript) {
-        out.push_str(&format!("\n## {}\n\n", if name.is_empty() { "Section" } else { name }));
-        out.push_str(&section_markdown(body, 2));
-        out.push('\n');
+    for (level, name, body) in sections_with_text(manuscript) {
+        // The title is the first level: a section is the second, a subsection the third.
+        let depth = level + 1;
+        out.push_str(&format!("\n{} {}\n", "#".repeat(depth as usize), if name.is_empty() { "Section" } else { name }));
+        if !body.is_empty() { out.push_str(&format!("\n{}\n", section_markdown(body, depth))) }
     }
     out
 }
@@ -421,7 +507,7 @@ pub fn markdown(manuscript: &Manuscript) -> String {
 /// The manuscript as plain text, for the clipboard: headings on lines of their own, without the Markdown.
 pub fn plain_text(manuscript: &Manuscript) -> String {
     let mut out = format!("{}\n", manuscript.shown_title());
-    for (name, body) in sections_with_text(manuscript) {
+    for (_, name, body) in sections_with_text(manuscript) {
         out.push_str(&format!("\n{name}\n\n"));
         // A picture is its caption here; one without a caption says nothing.
         let said: Vec<String> = markdown::lines(body).iter().filter(|line| !bare_picture(body, line)).map(|line| markdown::plain_line(body, line).trim().to_string()).filter(|line| !line.is_empty()).collect();
@@ -432,10 +518,10 @@ pub fn plain_text(manuscript: &Manuscript) -> String {
 }
 
 /// A line of a section as a paragraph of a Word file: a heading written in
-/// the section as a heading a level under the section's, the words with
-/// their bold, italic, strike-through and code. Empty for a line that says
-/// nothing (blank, a fence, a rule).
-fn word_paragraph(body: &str, line: &markdown::Line) -> String {
+/// the section as a heading as many levels under the section's (of `level`)
+/// as it has marks, the words with their bold, italic, strike-through and
+/// code. Empty for a line that says nothing (blank, a fence, a rule).
+fn word_paragraph(body: &str, line: &markdown::Line, level: u8) -> String {
     let mut runs = String::new();
     for piece in &line.pieces {
         let text = match piece.part {
@@ -455,12 +541,10 @@ fn word_paragraph(body: &str, line: &markdown::Line) -> String {
     }
     if runs.trim().is_empty() || body[line.range.clone()].trim().is_empty() { return String::new() }
     let style = match (line.heading, line.quote, line.code) {
-        (1, 0, _) => "Heading2",
-        (2, 0, _) => "Heading3",
-        (3.., 0, _) => "Heading4",
-        (_, 1.., _) => "Quote",
-        (_, _, true) => "Code",
-        _ => "",
+        (1.., 0, _) => format!("Heading{}", (line.heading + level).min(6)),
+        (_, 1.., _) => "Quote".into(),
+        (_, _, true) => "Code".into(),
+        _ => String::new(),
     };
     let style = if style.is_empty() { String::new() } else { format!("<w:pPr><w:pStyle w:val=\"{style}\"/></w:pPr>") };
     format!("<w:p>{style}{runs}</w:p>")
@@ -574,8 +658,8 @@ fn document(manuscript: &Manuscript, tables: bool) -> Vec<u8> {
         format!("<w:p>{style}<w:r><w:t xml:space=\"preserve\">{}</w:t></w:r></w:p>", xml_escape(text))
     };
     let mut body = paragraph("Title", manuscript.shown_title());
-    for (name, text) in sections_with_text(manuscript) {
-        body.push_str(&paragraph("Heading1", name));
+    for (level, name, text) in sections_with_text(manuscript) {
+        body.push_str(&paragraph(&format!("Heading{level}"), name));
         let lines = markdown::lines(text);
         let written: Vec<&str> = lines.iter().map(|line| &text[line.range.clone()]).collect();
         let mut at = 0;
@@ -589,7 +673,7 @@ fn document(manuscript: &Manuscript, tables: bool) -> Vec<u8> {
                 continue;
             }
             // A picture's line is its caption: the picture itself is put over it when the file is written (`wanted`).
-            if !bare_picture(text, &lines[at]) { body.push_str(&word_paragraph(text, &lines[at])) }
+            if !bare_picture(text, &lines[at]) { body.push_str(&word_paragraph(text, &lines[at], level)) }
             at += 1;
         }
     }
@@ -612,6 +696,8 @@ fn document(manuscript: &Manuscript, tables: bool) -> Vec<u8> {
 <w:style w:type=\"paragraph\" w:styleId=\"Heading2\"><w:name w:val=\"heading 2\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before=\"240\" w:after=\"120\"/><w:outlineLvl w:val=\"1\"/></w:pPr><w:rPr><w:b/><w:sz w:val=\"27\"/></w:rPr></w:style>\
 <w:style w:type=\"paragraph\" w:styleId=\"Heading3\"><w:name w:val=\"heading 3\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before=\"200\" w:after=\"80\"/><w:outlineLvl w:val=\"2\"/></w:pPr><w:rPr><w:b/><w:sz w:val=\"25\"/></w:rPr></w:style>\
 <w:style w:type=\"paragraph\" w:styleId=\"Heading4\"><w:name w:val=\"heading 4\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before=\"160\" w:after=\"80\"/><w:outlineLvl w:val=\"3\"/></w:pPr><w:rPr><w:b/><w:i/></w:rPr></w:style>\
+<w:style w:type=\"paragraph\" w:styleId=\"Heading5\"><w:name w:val=\"heading 5\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before=\"120\" w:after=\"60\"/><w:outlineLvl w:val=\"4\"/></w:pPr><w:rPr><w:i/></w:rPr></w:style>\
+<w:style w:type=\"paragraph\" w:styleId=\"Heading6\"><w:name w:val=\"heading 6\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/><w:qFormat/><w:pPr><w:keepNext/><w:spacing w:before=\"120\" w:after=\"60\"/><w:outlineLvl w:val=\"5\"/></w:pPr><w:rPr><w:i/><w:color w:val=\"595959\"/></w:rPr></w:style>\
 <w:style w:type=\"paragraph\" w:styleId=\"Quote\"><w:name w:val=\"Quote\"/><w:basedOn w:val=\"Normal\"/><w:next w:val=\"Normal\"/><w:qFormat/><w:pPr><w:ind w:left=\"720\"/></w:pPr><w:rPr><w:i/><w:color w:val=\"595959\"/></w:rPr></w:style>\
 <w:style w:type=\"paragraph\" w:styleId=\"Code\"><w:name w:val=\"Code\"/><w:basedOn w:val=\"Normal\"/><w:qFormat/><w:pPr><w:spacing w:after=\"0\" w:line=\"240\" w:lineRule=\"auto\"/></w:pPr><w:rPr><w:rFonts w:ascii=\"Consolas\" w:hAnsi=\"Consolas\"/><w:sz w:val=\"20\"/></w:rPr></w:style>\
 </w:styles>"
@@ -685,7 +771,7 @@ pub struct Draft {
     pub headings: Vec<headings::Guess>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DraftSection {
     pub name: String,
     /// A key of `structure::SECTIONS`.
@@ -693,6 +779,14 @@ pub struct DraftSection {
     /// The text before the first heading: the name is not a heading of the file.
     pub bare: bool,
     pub paragraphs: Vec<String>,
+    /// How deep in the outline (`Section::level`): the file's highest headings are 1.
+    pub level: u8,
+}
+
+impl Default for DraftSection {
+    fn default() -> Self {
+        DraftSection { name: String::new(), kind: String::new(), bare: false, paragraphs: vec![], level: 1 }
+    }
 }
 
 /// A comment the file came with.
@@ -740,8 +834,12 @@ fn title_of(lines: &[Line]) -> Option<usize> {
 }
 
 /// The manuscript a file's paragraphs make, and the section each of them
-/// went to (none for the title). With `by_name`, a file without headings
-/// is cut at the names every paper has.
+/// went to (none for the title). The file's highest headings are its
+/// sections, the headings one and two levels under them subsections
+/// (`MOST_LEVELS`), each of the kind its name says or else of the section
+/// it is under; a heading deeper still stays in the text, a Markdown one
+/// with as many marks as it is levels under its section. With `by_name`,
+/// a file without headings is cut at the names every paper has.
 fn outline(mut lines: Vec<Line>, file_name: &str, by_name: bool) -> (Draft, Vec<Option<usize>>) {
     // A file without heading styles: the headings every paper has are told by their names.
     if by_name && lines.iter().all(|line| line.level.is_none()) {
@@ -762,9 +860,16 @@ fn outline(mut lines: Vec<Line>, file_name: &str, by_name: bool) -> (Draft, Vec<
             places.push(None);
             continue;
         }
-        if line.level.is_some() && line.level == top {
-            let kind = structure::canonical(&line.text).filter(|kind| is_kind(kind)).unwrap_or("other");
-            draft.sections.push(DraftSection { name: line.text.clone(), kind: kind.to_string(), bare: false, paragraphs: vec![] });
+        // How far under the file's highest headings this one is: a section's heading is 0, a subsection's 1.
+        let down = line.level.zip(top).map(|(level, top)| level.saturating_sub(top));
+        if let Some(down) = down.filter(|down| *down < MOST_LEVELS) {
+            let mut levels: Vec<u8> = draft.sections.iter().map(|section| section.level).chain([down + 1]).collect();
+            fit_levels(&mut levels);
+            let level = levels[levels.len() - 1];
+            // A subsection whose name says no part is of the part of the section it is under: a method of 方法.
+            let over = draft.sections.iter().rev().find(|section| section.level < level).map(|section| section.kind.clone());
+            let kind = structure::canonical(&line.text).filter(|kind| is_kind(kind)).map(str::to_string).or(over).unwrap_or_else(|| "other".to_string());
+            draft.sections.push(DraftSection { name: line.text.clone(), kind, bare: false, paragraphs: vec![], level });
         } else {
             if draft.sections.is_empty() {
                 let name = match (top.is_some(), chinese) {
@@ -773,13 +878,20 @@ fn outline(mut lines: Vec<Line>, file_name: &str, by_name: bool) -> (Draft, Vec<
                     (false, true) => "正文",
                     (false, false) => "Text",
                 };
-                draft.sections.push(DraftSection { name: name.to_string(), kind: "other".to_string(), bare: true, paragraphs: vec![] });
+                draft.sections.push(DraftSection { name: name.to_string(), kind: "other".to_string(), bare: true, ..Default::default() });
             }
-            if let Some(section) = draft.sections.last_mut() { section.paragraphs.push(line.kept.clone()) }
+            if let Some(section) = draft.sections.last_mut() {
+                // A heading of a Markdown file deeper than the outline goes: its marks say how far under the section it is.
+                let kept = match (line.level, top) {
+                    (Some(level), Some(top)) if line.kept.starts_with('#') => format!("{} {}", "#".repeat(level.saturating_sub(top + section.level - 1).max(1) as usize), line.text),
+                    _ => line.kept.clone(),
+                };
+                section.paragraphs.push(kept);
+            }
         }
         places.push(Some(draft.sections.len() - 1));
     }
-    if draft.sections.is_empty() { draft.sections.push(DraftSection { name: if chinese { "正文" } else { "Text" }.to_string(), kind: "other".to_string(), bare: true, paragraphs: vec![] }) }
+    if draft.sections.is_empty() { draft.sections.push(DraftSection { name: if chinese { "正文" } else { "Text" }.to_string(), kind: "other".to_string(), bare: true, ..Default::default() }) }
     (draft, places)
 }
 
@@ -1076,11 +1188,11 @@ pub fn wanted(manuscript: &Manuscript, source: Option<&Source>, comments: &[Comm
         }
         None => out.push(paragraph(manuscript.shown_title(), docx::Role::Title)),
     }
-    for section in &manuscript.sections {
-        // A file made here leaves out the sections without text; one written again keeps every heading it had.
-        if source.is_none() && section.body.trim().is_empty() { continue }
+    for (n, section) in manuscript.sections.iter().enumerate() {
+        // A file made here leaves out the sections with nothing written in them or under them; one written again keeps every heading it had.
+        if source.is_none() && !written_under(&manuscript.sections, n) { continue }
         let heading = (source.is_none() || !section.bare).then(|| {
-            out.push(paragraph(section.name.trim(), docx::Role::Heading));
+            out.push(docx::Wanted { depth: section.level, ..paragraph(section.name.trim(), docx::Role::Heading) });
             out.len() - 1
         });
         let start = out.len();
@@ -1173,7 +1285,7 @@ impl Store {
         let mut sections = vec![];
         for (position, section) in draft.sections.iter().enumerate() {
             let section_id = new_id("S");
-            tx.execute("INSERT INTO manuscript_sections(id, manuscript_id, position, name, kind, body, updated_at, bare) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)", params![section_id, id, position as i64, section.name.trim(), if is_kind(&section.kind) { section.kind.as_str() } else { "other" }, section.paragraphs.join("\n\n"), now, section.bare])?;
+            tx.execute("INSERT INTO manuscript_sections(id, manuscript_id, position, name, kind, body, updated_at, bare, level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)", params![section_id, id, position as i64, section.name.trim(), if is_kind(&section.kind) { section.kind.as_str() } else { "other" }, section.paragraphs.join("\n\n"), now, section.bare, section.level])?;
             sections.push(section_id);
         }
         for (n, theirs) in draft.comments.iter().enumerate() {
@@ -1319,8 +1431,32 @@ pub(crate) fn migrate_drafts(db: &mut Connection) -> Result<()> {
 
 // ---- the store
 
+/// A row of `manuscript_sections`, read from the columns `SECTION_COLUMNS` names in their order.
 fn read_section(r: &rusqlite::Row) -> rusqlite::Result<Section> {
-    Ok(Section { id: r.get(0)?, name: r.get(1)?, kind: r.get(2)?, body: r.get(3)?, updated_at: r.get(4)?, bare: r.get(5)? })
+    Ok(Section { id: r.get(0)?, name: r.get(1)?, kind: r.get(2)?, body: r.get(3)?, updated_at: r.get(4)?, bare: r.get(5)?, level: r.get(6)? })
+}
+
+/// What `read_section` reads.
+const SECTION_COLUMNS: &str = "id, name, kind, body, updated_at, bare, level";
+
+/// Put a manuscript's levels in order (`fit_levels`) after a change that can leave a section deeper than the one before it allows.
+fn fit_outline(db: &Connection, manuscript_id: &str) -> Result<()> {
+    let rows: Vec<(String, u8)> = {
+        let mut stmt = db.prepare("SELECT id, level FROM manuscript_sections WHERE manuscript_id = ?1 ORDER BY position, id")?;
+        stmt.query_map([manuscript_id], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?
+    };
+    let mut levels: Vec<u8> = rows.iter().map(|(_, level)| *level).collect();
+    fit_levels(&mut levels);
+    for ((id, was), now) in rows.iter().zip(levels) {
+        if *was != now { db.execute("UPDATE manuscript_sections SET level = ?2 WHERE id = ?1", params![id, now])?; }
+    }
+    Ok(())
+}
+
+/// The sections of a manuscript in this order, by their ids.
+fn put_in_order(db: &Connection, order: &[&str]) -> Result<()> {
+    for (position, id) in order.iter().enumerate() { db.execute("UPDATE manuscript_sections SET position = ?2 WHERE id = ?1", params![id, position as i64])?; }
+    Ok(())
 }
 
 impl Store {
@@ -1364,12 +1500,12 @@ impl Store {
     }
 
     fn sections_of(&self, manuscript_id: &str) -> Result<Vec<Section>> {
-        let mut stmt = self.db.prepare("SELECT id, name, kind, body, updated_at, bare FROM manuscript_sections WHERE manuscript_id = ?1 ORDER BY position, id")?;
+        let mut stmt = self.db.prepare(&format!("SELECT {SECTION_COLUMNS} FROM manuscript_sections WHERE manuscript_id = ?1 ORDER BY position, id"))?;
         Ok(stmt.query_map([manuscript_id], read_section)?.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     fn section_row(&self, id: &str) -> Result<(String, Section)> {
-        let found = self.db.query_row("SELECT id, name, kind, body, updated_at, bare, manuscript_id FROM manuscript_sections WHERE id = ?1", [id], |r| Ok((r.get(6)?, read_section(r)?))).optional()?;
+        let found = self.db.query_row(&format!("SELECT {SECTION_COLUMNS}, manuscript_id FROM manuscript_sections WHERE id = ?1"), [id], |r| Ok((r.get(7)?, read_section(r)?))).optional()?;
         found.ok_or_else(|| anyhow::anyhow!("没有这一节：{id}"))
     }
 
@@ -1429,7 +1565,7 @@ impl Store {
     pub fn manuscript_blank(&self, id: &str) -> Result<bool> {
         let Some(manuscript) = self.manuscript(id)? else { return Ok(false) };
         let shape: Vec<(String, &str)> = manuscript.sections.iter().map(|section| (section.name.clone(), section.kind.as_str())).collect();
-        let untouched = manuscript.title.is_empty() && manuscript.sections.iter().all(|section| section.body.trim().is_empty()) && LANGUAGES.iter().any(|(code, _)| imrad(code) == shape);
+        let untouched = manuscript.title.is_empty() && manuscript.sections.iter().all(|section| section.body.trim().is_empty() && section.level == 1) && LANGUAGES.iter().any(|(code, _)| imrad(code) == shape);
         if !untouched { return Ok(false) }
         let kept = |sql: &str| -> Result<bool> { Ok(self.db.query_row(sql, [id], |_| Ok(())).optional()?.is_some()) };
         Ok(!(kept("SELECT 1 FROM section_snapshots WHERE section_id IN (SELECT id FROM manuscript_sections WHERE manuscript_id = ?1)")?
@@ -1470,6 +1606,25 @@ impl Store {
         Ok(self.section_row(&id)?.1)
     }
 
+    /// A subsection added under a section, after what is under it already: a method under 方法, a result under 结果.
+    pub fn add_subsection(&mut self, parent_id: &str, name: &str, kind: &str) -> Result<Section> {
+        if !is_kind(kind) { bail!("没有这种部分：{kind}") }
+        if name.trim().is_empty() { bail!("这一节需要一个名称。") }
+        let (manuscript, parent) = self.section_row(parent_id)?;
+        if parent.level >= MOST_LEVELS { bail!("大纲最多分 {MOST_LEVELS} 级，这一节下面不能再加小节。") }
+        let sections = self.sections_of(&manuscript)?;
+        let Some(at) = sections.iter().position(|section| section.id == parent_id) else { bail!("没有这一节：{parent_id}") };
+        let id = new_id("S");
+        let mut order: Vec<&str> = sections.iter().map(|section| section.id.as_str()).collect();
+        order.insert(under(&sections, at).end, &id);
+        let tx = self.db.transaction()?;
+        tx.execute("INSERT INTO manuscript_sections(id, manuscript_id, position, name, kind, body, updated_at, level) VALUES (?1, ?2, 0, ?3, ?4, '', ?5, ?6)", params![id, manuscript, name.trim(), kind, now_iso(), parent.level + 1])?;
+        put_in_order(&tx, &order)?;
+        tx.commit()?;
+        self.touch_manuscript(&manuscript)?;
+        Ok(self.section_row(&id)?.1)
+    }
+
     /// Give a section another name and kind.
     pub fn edit_section(&mut self, id: &str, name: &str, kind: &str) -> Result<()> {
         if !is_kind(kind) { bail!("没有这种部分：{kind}") }
@@ -1498,10 +1653,10 @@ impl Store {
         for one in wanted {
             if one.id.is_empty() {
                 let id = new_id("S");
-                tx.execute("INSERT INTO manuscript_sections(id, manuscript_id, position, name, kind, body, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, '', ?6)", params![id, manuscript_id, position, one.name.trim(), one.kind, now])?;
+                tx.execute("INSERT INTO manuscript_sections(id, manuscript_id, position, name, kind, body, updated_at, level) VALUES (?1, ?2, ?3, ?4, ?5, '', ?6, ?7)", params![id, manuscript_id, position, one.name.trim(), one.kind, now, one.level])?;
                 arranged.added.push(id);
             } else {
-                tx.execute("UPDATE manuscript_sections SET position = ?2, name = ?3, kind = ?4 WHERE id = ?1", params![one.id, position, one.name.trim(), one.kind])?;
+                tx.execute("UPDATE manuscript_sections SET position = ?2, name = ?3, kind = ?4, level = ?5 WHERE id = ?1", params![one.id, position, one.name.trim(), one.kind, one.level])?;
             }
             position += 1;
         }
@@ -1516,43 +1671,86 @@ impl Store {
                 position += 1;
             }
         }
+        fit_outline(&tx, manuscript_id)?;
         tx.commit()?;
         self.touch_manuscript(manuscript_id)?;
         Ok(arranged)
     }
 
-    /// Move a section by `by` places (negative: towards the start), within the manuscript.
+    /// Move a section with what is under it by `by` places among the sections beside it (`sibling`; negative:
+    /// towards the start). It stays under the section it is under: past the first or the last of them it stops.
     pub fn move_section(&mut self, id: &str, by: i64) -> Result<()> {
         let (manuscript, _) = self.section_row(id)?;
-        let mut order: Vec<String> = self.sections_of(&manuscript)?.into_iter().map(|section| section.id).collect();
-        let Some(from) = order.iter().position(|other| other == id) else { return Ok(()) };
-        let to = (from as i64 + by).clamp(0, order.len() as i64 - 1) as usize;
-        if to == from { return Ok(()) }
-        let moved = order.remove(from);
-        order.insert(to, moved);
+        let mut sections = self.sections_of(&manuscript)?;
+        let Some(mut at) = sections.iter().position(|other| other.id == id) else { return Ok(()) };
+        let mut moved = false;
+        for _ in 0..by.unsigned_abs() {
+            let Some(other) = sibling(&sections, at, by > 0) else { break };
+            let (ours, theirs) = (under(&sections, at), under(&sections, other));
+            // The two stand next to each other: the later one goes before the earlier.
+            let (first, second) = if by > 0 { (ours, theirs) } else { (theirs, ours) };
+            let later: Vec<Section> = sections.drain(second.clone()).collect();
+            sections.splice(first.start..first.start, later);
+            at = if by > 0 { first.start + second.len() } else { first.start };
+            moved = true;
+        }
+        if !moved { return Ok(()) }
         let tx = self.db.transaction()?;
-        for (position, section) in order.iter().enumerate() { tx.execute("UPDATE manuscript_sections SET position = ?2 WHERE id = ?1", params![section, position as i64])?; }
+        put_in_order(&tx, &sections.iter().map(|section| section.id.as_str()).collect::<Vec<_>>())?;
         tx.commit()?;
         self.touch_manuscript(&manuscript)
     }
 
-    /// Remove a section with its snapshots. The window asks first when it has text.
+    /// A section one level deeper, a subsection of the section before it as deep as it was, or one level less
+    /// deep; what is under it goes with it, and the order stays. Less deep, the sections after it that were
+    /// beside it are under it then, as headings are in Word.
+    pub fn indent_section(&mut self, id: &str, deeper: bool) -> Result<()> {
+        let (manuscript, _) = self.section_row(id)?;
+        let sections = self.sections_of(&manuscript)?;
+        let Some(at) = sections.iter().position(|other| other.id == id) else { bail!("没有这一节：{id}") };
+        let block = under(&sections, at);
+        if deeper {
+            if sibling(&sections, at, false).is_none() { bail!("前面没有同一级的节，这一节不能成为它的小节。") }
+            if sections[block.clone()].iter().any(|section| section.level >= MOST_LEVELS) { bail!("大纲最多分 {MOST_LEVELS} 级。") }
+        } else if sections[at].level <= 1 {
+            bail!("这已经是最上一级。")
+        }
+        let tx = self.db.transaction()?;
+        for section in &sections[block] { tx.execute("UPDATE manuscript_sections SET level = ?2 WHERE id = ?1", params![section.id, if deeper { section.level + 1 } else { section.level - 1 }])?; }
+        fit_outline(&tx, &manuscript)?;
+        tx.commit()?;
+        self.touch_manuscript(&manuscript)
+    }
+
+    /// Remove a section with its snapshots. The window asks first when it has text. Its subsections stay where
+    /// they are, a level less deep: they do not become the section's before it.
     pub fn remove_section(&mut self, id: &str) -> Result<()> {
         let (manuscript, _) = self.section_row(id)?;
-        self.db.execute("DELETE FROM manuscript_sections WHERE id = ?1", [id])?;
+        let sections = self.sections_of(&manuscript)?;
+        let tx = self.db.transaction()?;
+        if let Some(at) = sections.iter().position(|other| other.id == id) {
+            for section in &sections[under(&sections, at)][1..] { tx.execute("UPDATE manuscript_sections SET level = ?2 WHERE id = ?1", params![section.id, section.level - 1])?; }
+        }
+        tx.execute("DELETE FROM manuscript_sections WHERE id = ?1", [id])?;
+        fit_outline(&tx, &manuscript)?;
+        tx.commit()?;
         self.touch_manuscript(&manuscript)
     }
 
     /// Cut a section in two at the paragraph `at` (its bytes in the section's
-    /// text). With `heading` that paragraph is the new section's name, as a
-    /// heading typed without a heading style is: written back to a Word
-    /// file it stays the paragraph it was. Without, the paragraph opens the
-    /// new section, whose name is the manuscript's own (`bare`) and goes into
-    /// no file. The comments on what moved go with it. The section's text is
-    /// kept as a snapshot first. The new section; the heading of a `bare`
-    /// section's first paragraph names that section instead, which leaves
-    /// none empty behind.
-    pub fn split_section(&mut self, id: &str, at: Range<usize>, heading: bool) -> Result<Section> {
+    /// text). Cut at a heading (`Cut::Heading`, `Cut::Subheading`) that
+    /// paragraph is the new section's name, as a heading typed without a
+    /// heading style is: written back to a Word file it stays the paragraph
+    /// it was. Otherwise the paragraph opens the new section, whose name is
+    /// the manuscript's own (`bare`) and goes into no file. The new section is
+    /// as deep as the one cut, a level deeper for a subheading; it comes
+    /// before the subsections of the one cut, which are then under it, as the
+    /// text after the cut is. The comments on what moved go with it. The
+    /// section's text is kept as a snapshot first. The new section; the
+    /// heading of a `bare` section's first paragraph names that section
+    /// instead, which leaves none empty behind.
+    pub fn split_section(&mut self, id: &str, at: Range<usize>, cut: Cut) -> Result<Section> {
+        let heading = cut != Cut::Paragraph;
         let (manuscript, section) = self.section_row(id)?;
         let body = section.body.as_str();
         if at.start > at.end || at.end > body.len() || !body.is_char_boundary(at.start) || !body.is_char_boundary(at.end) { bail!("这一段已经不在这一节里了。") }
@@ -1573,7 +1771,8 @@ impl Store {
             (if short.len() < first.len() { format!("{short}…") } else { short }, after)
         };
         let kind = if heading { structure::canonical(&name).filter(|kind| is_kind(kind)).unwrap_or(&section.kind).to_string() } else { section.kind.clone() };
-        if heading && section.bare && before.is_empty() {
+        let level = if cut == Cut::Subheading { (section.level + 1).min(MOST_LEVELS) } else { section.level };
+        if heading && section.bare && before.is_empty() && cut == Cut::Heading {
             self.take_snapshot(id, "split")?;
             self.db.execute("UPDATE manuscript_sections SET name = ?2, kind = ?3, body = ?4, bare = 0, updated_at = ?5 WHERE id = ?1", params![id, name, kind, after, now_iso()])?;
             self.touch_manuscript(&manuscript)?;
@@ -1593,7 +1792,7 @@ impl Store {
         let tx = self.db.transaction()?;
         tx.execute("UPDATE manuscript_sections SET body = ?2, updated_at = ?3 WHERE id = ?1", params![id, before, now])?;
         tx.execute("UPDATE manuscript_sections SET position = position + 1 WHERE manuscript_id = ?1 AND position > ?2", params![manuscript, position])?;
-        tx.execute("INSERT INTO manuscript_sections(id, manuscript_id, position, name, kind, body, updated_at, bare) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)", params![new, manuscript, position + 1, name, kind, after, now, !heading])?;
+        tx.execute("INSERT INTO manuscript_sections(id, manuscript_id, position, name, kind, body, updated_at, bare, level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)", params![new, manuscript, position + 1, name, kind, after, now, !heading, level])?;
         // A comment goes where its words are now: one about the heading's words goes with the heading.
         for (comment, quote) in quotes {
             let stays = quote.trim().is_empty() || comment::locate(before, &quote, None).is_some();
@@ -1605,6 +1804,7 @@ impl Store {
             let opening: String = claim.chars().take(24).collect();
             if !opening.is_empty() && !before.contains(&opening) && after.contains(&opening) { tx.execute("UPDATE cite_passages SET section_id = ?2 WHERE id = ?1", params![passage, new])?; }
         }
+        fit_outline(&tx, &manuscript)?;
         tx.commit()?;
         self.touch_manuscript(&manuscript)?;
         Ok(self.section_row(&new)?.1)
@@ -1628,6 +1828,7 @@ impl Store {
         tx.execute("UPDATE manuscript_comments SET section_id = ?2 WHERE section_id = ?1", params![id, previous])?;
         tx.execute("UPDATE cite_passages SET section_id = ?2 WHERE section_id = ?1", params![id, previous])?;
         tx.execute("DELETE FROM manuscript_sections WHERE id = ?1", [id])?;
+        fit_outline(&tx, &manuscript)?;
         tx.commit()?;
         self.touch_manuscript(&manuscript)?;
         Ok(self.section_row(&previous)?.1)
@@ -1834,6 +2035,80 @@ mod tests {
         assert_eq!(names, [("Root hairs".to_string(), "other".to_string()), ("Abstract".into(), "abstract".into()), ("Introduction".into(), "introduction".into()), ("Architecture".into(), "results".into())]);
     }
 
+    fn outline_of(levels: &[u8]) -> Vec<Section> {
+        levels.iter().enumerate().map(|(n, level)| Section { id: format!("S{n}"), level: *level, ..Default::default() }).collect()
+    }
+
+    #[test]
+    fn an_outline_is_its_sections_with_their_levels() {
+        let mut levels = [2, 3, 1, 3, 0, 5, 2];
+        fit_levels(&mut levels);
+        assert_eq!(levels, [1, 2, 1, 2, 1, 2, 2]);
+        // 导言; 方法 with two methods, the second with a part of its own; 结果 with one result.
+        let sections = outline_of(&[1, 1, 2, 2, 3, 1, 2]);
+        assert_eq!(numbers(&sections), ["1", "2", "2.1", "2.2", "2.2.1", "3", "3.1"]);
+        assert_eq!((under(&sections, 1), under(&sections, 3), under(&sections, 6)), (1..5, 3..5, 6..7));
+        assert_eq!((parent(&sections, 4), parent(&sections, 2), parent(&sections, 0)), (Some(3), Some(1), None));
+        assert_eq!((sibling(&sections, 1, true), sibling(&sections, 1, false), sibling(&sections, 2, false), sibling(&sections, 2, true), sibling(&sections, 3, true)), (Some(5), Some(0), None, Some(3), None));
+        // A level skipped counts as the first of it.
+        assert_eq!(numbers(&outline_of(&[1, 3])), ["1", "1.1.1"]);
+    }
+
+    #[test]
+    fn subsections_move_rise_and_sink_with_what_is_under_them() {
+        let mut store = store();
+        let made = store.create_manuscript("", "en").unwrap();
+        let id = |store: &Store, name: &str| store.manuscript(&made.id).unwrap().unwrap().sections.iter().find(|s| s.name == name).unwrap().id.clone();
+        let shape = |store: &Store| store.manuscript(&made.id).unwrap().unwrap().sections.iter().map(|s| format!("{}{}", "-".repeat(s.level as usize - 1), s.name)).collect::<Vec<_>>().join(" ");
+        let methods = id(&store, "Methods");
+        let cells = store.add_subsection(&methods, "Cell culture", "methods").unwrap();
+        let imaging = store.add_subsection(&methods, "Imaging", "methods").unwrap();
+        let confocal = store.add_subsection(&imaging.id, "Confocal", "methods").unwrap();
+        assert_eq!((cells.level, imaging.level, confocal.level), (2, 2, 3));
+        assert!(store.add_subsection(&confocal.id, "Lenses", "methods").unwrap_err().to_string().contains("最多分 3 级"));
+        let results = id(&store, "Results");
+        let first = store.add_subsection(&results, "Result 1", "results").unwrap();
+        assert_eq!(shape(&store), "Abstract Introduction Methods -Cell culture -Imaging --Confocal Results -Result 1 Discussion");
+        // A method moves past the one beside it with what is under it, and no further than the first under 方法.
+        store.move_section(&imaging.id, -5).unwrap();
+        assert_eq!(shape(&store), "Abstract Introduction Methods -Imaging --Confocal -Cell culture Results -Result 1 Discussion");
+        store.move_section(&first.id, 1).unwrap();
+        assert_eq!(shape(&store), "Abstract Introduction Methods -Imaging --Confocal -Cell culture Results -Result 1 Discussion");
+        // 方法 goes after 结果 with all its methods, and back.
+        store.move_section(&methods, 1).unwrap();
+        assert_eq!(shape(&store), "Abstract Introduction Results -Result 1 Methods -Imaging --Confocal -Cell culture Discussion");
+        store.move_section(&methods, -1).unwrap();
+        // Deeper: a part of the method before it; not past the third level, and not without a section beside it before.
+        store.indent_section(&cells.id, true).unwrap();
+        assert_eq!(shape(&store), "Abstract Introduction Methods -Imaging --Confocal --Cell culture Results -Result 1 Discussion");
+        assert!(store.indent_section(&cells.id, true).unwrap_err().to_string().contains("最多分 3 级"));
+        assert!(store.indent_section(&imaging.id, true).unwrap_err().to_string().contains("前面没有同一级"));
+        assert!(store.indent_section(&methods, false).is_err());
+        // Less deep with what is under it, the order as it was; and back under 方法.
+        store.indent_section(&imaging.id, false).unwrap();
+        assert_eq!(shape(&store), "Abstract Introduction Methods Imaging -Confocal -Cell culture Results -Result 1 Discussion");
+        store.indent_section(&imaging.id, true).unwrap();
+        // A section removed leaves its subsections where they are, a level up, and not under the section before it.
+        store.remove_section(&imaging.id).unwrap();
+        assert_eq!(shape(&store), "Abstract Introduction Methods -Confocal -Cell culture Results -Result 1 Discussion");
+        store.remove_section(&methods).unwrap();
+        assert_eq!(shape(&store), "Abstract Introduction Confocal Cell culture Results -Result 1 Discussion");
+        // A paragraph made a subheading is a subsection of the section it was in, before its other subsections.
+        store.save_section_body(&results, "Overview.\n\nRoot length\n\nRoots grew.").unwrap();
+        let start = "Overview.\n\n".len();
+        let length = store.split_section(&results, start..start + "Root length".len(), Cut::Subheading).unwrap();
+        assert_eq!((length.name.as_str(), length.level, length.body.as_str()), ("Root length", 2, "Roots grew."));
+        assert_eq!(shape(&store), "Abstract Introduction Confocal Cell culture Results -Root length -Result 1 Discussion");
+        // Merged back, the result after it is under 结果 still.
+        store.merge_section(&length.id).unwrap();
+        assert_eq!(shape(&store), "Abstract Introduction Confocal Cell culture Results -Result 1 Discussion");
+        // A manuscript somebody gave subsections is no longer the blank one 写作 starts with.
+        let blank = store.create_manuscript("", "en").unwrap();
+        assert!(store.manuscript_blank(&blank.id).unwrap());
+        store.indent_section(&blank.sections[1].id, true).unwrap();
+        assert!(!store.manuscript_blank(&blank.id).unwrap());
+    }
+
     #[test]
     fn snapshots_are_kept_only_on_change_bounded_and_restoring_is_undoable() {
         let mut store = store();
@@ -1923,13 +2198,39 @@ mod tests {
         let draft = from_markdown(text, "notes/draft.md");
         assert_eq!((draft.title.as_str(), draft.language.as_str()), ("Roots and shoots", "en"));
         let shown: Vec<(&str, &str, bool, Vec<&str>)> = draft.sections.iter().map(|s| (s.name.as_str(), s.kind.as_str(), s.bare, s.paragraphs.iter().map(String::as_str).collect())).collect();
-        assert_eq!(shown, [("Front matter", "other", true, vec!["A line before any heading."]), ("Introduction", "introduction", false, vec!["Roots grow down. 根向下生长。", "- one\n- two", "### Hairs", "Short."]), ("方法", "methods", false, vec!["```\ncode  line\n```"])]);
+        assert_eq!(shown, [("Front matter", "other", true, vec!["A line before any heading."]), ("Introduction", "introduction", false, vec!["Roots grow down. 根向下生长。", "- one\n- two"]), ("Hairs", "introduction", false, vec!["Short."]), ("方法", "methods", false, vec!["```\ncode  line\n```"])]);
+        assert_eq!(draft.sections.iter().map(|s| s.level).collect::<Vec<_>>(), [1, 1, 2, 1]);
         // One `#` heading before the rest is the title; without any heading the file's name is, and the text is one section.
         let draft = from_markdown("# 根的综述\n\n## 引言\n\n根向下生长，吸收水分。\n", "x.md");
         assert_eq!((draft.title.as_str(), draft.language.as_str(), draft.sections.len(), draft.sections[0].name.as_str(), draft.sections[0].kind.as_str()), ("根的综述", "zh", 1, "引言", "introduction"));
         let draft = from_markdown("只有一段话，没有标题，写得长一点才不会被当成题目。\n\n第二段。", "随手记.txt");
         assert_eq!((draft.title.as_str(), draft.sections.len(), draft.sections[0].name.as_str(), draft.sections[0].bare), ("随手记", 1, "正文", true));
         assert_eq!(from_markdown("", "empty.md").sections.len(), 1);
+    }
+
+    #[test]
+    fn subsections_are_written_a_level_under_their_section_and_read_back_so() {
+        let section = |name: &str, level: u8, body: &str| Section { name: name.into(), kind: "methods".into(), body: body.into(), level, ..Default::default() };
+        // 方法 has no text of its own, a method none either but a part of it has: both are written with their headings.
+        let manuscript = Manuscript { title: "T".into(), sections: vec![section("Methods", 1, ""), section("Cell culture", 2, "Cells grew.\n\n# Media\n\nDMEM."), section("Unwritten", 2, ""), section("Imaging", 2, ""), section("Confocal", 3, "Zeiss.")], ..Default::default() };
+        let written = markdown(&manuscript);
+        assert_eq!(written, "# T\n\n## Methods\n\n### Cell culture\n\nCells grew.\n\n#### Media\n\nDMEM.\n\n### Imaging\n\n#### Confocal\n\nZeiss.\n");
+        let xml = String::from_utf8_lossy(&docx(&manuscript)).to_string();
+        for (style, text) in [("Heading1", "Methods"), ("Heading2", "Cell culture"), ("Heading3", "Media"), ("Heading2", "Imaging"), ("Heading3", "Confocal")] {
+            assert!(xml.contains(&format!("<w:pStyle w:val=\"{style}\"/></w:pPr><w:r><w:t xml:space=\"preserve\">{text}<")), "{style} {text}");
+        }
+        assert!(!xml.contains("Unwritten") && xml.contains("w:styleId=\"Heading6\""));
+        // A file's headings one and two levels under its highest are subsections, of the part of the section they are
+        // under; a heading deeper still stays in the text, with as many marks as it is levels under its section.
+        let draft = from_markdown("# T\n\n## Methods\n\nIntro.\n\n### Cells\n\nGrew.\n\n#### Media\n\nDMEM.\n\n##### Brand\n\nGibco.\n\n## Results\n\n#### Roots\n\nLong.\n", "x.md");
+        let shown: Vec<(&str, u8, &str, Vec<&str>)> = draft.sections.iter().map(|s| (s.name.as_str(), s.level, s.kind.as_str(), s.paragraphs.iter().map(String::as_str).collect())).collect();
+        assert_eq!(shown, [("Methods", 1, "methods", vec!["Intro."]), ("Cells", 2, "methods", vec!["Grew."]), ("Media", 3, "methods", vec!["DMEM.", "# Brand", "Gibco."]), ("Results", 1, "results", vec![]), ("Roots", 2, "results", vec!["Long."])]);
+        let mut store = store();
+        let made = store.import_manuscript(&draft, "markdown", "x.md", None).unwrap();
+        assert_eq!(numbers(&made.sections), ["1", "1.1", "1.1.1", "2", "2.1"]);
+        // What was exported comes back as the same outline.
+        let again = from_markdown(&written, "T.md");
+        assert_eq!(again.sections.iter().map(|s| (s.name.as_str(), s.level)).collect::<Vec<_>>(), [("Methods", 1), ("Cell culture", 2), ("Media", 3), ("Imaging", 2), ("Confocal", 3)]);
     }
 
     #[test]
@@ -1983,6 +2284,28 @@ mod tests {
         let mut paragraphs = wanted(&written, None, &[], None, &|_| None);
         paragraphs[1 + 1].notes.push(docx::Note { range: 11..15, author: "Li Hua".into(), date: "2026-01-02T03:04:05Z".into(), body: "How far down?".into() });
         docx::rewrite(&docx(&written), &paragraphs, &docx::Options::default()).unwrap().bytes
+    }
+
+    #[test]
+    fn a_subsection_written_into_a_word_file_looks_like_its_subsections() {
+        let dir = std::env::temp_dir().join(format!("wisp-manuscript-{}", new_id("T")));
+        let mut store = Store::open(&dir).unwrap();
+        let section = |name: &str, level: u8, body: &str| Section { name: name.into(), kind: "other".into(), body: body.into(), level, ..Default::default() };
+        let written = Manuscript { title: "Roots".into(), language: "en".into(), sections: vec![section("Methods", 1, "We grew plants."), section("Plant growth", 2, "In soil."), section("Results", 1, "Grew.")], ..Default::default() };
+        let bytes = docx(&written);
+        let draft = from_word(&docx::read(&bytes).unwrap(), "Roots.docx");
+        assert_eq!(draft.sections.iter().map(|s| (s.name.as_str(), s.level)).collect::<Vec<_>>(), [("Methods", 1), ("Plant growth", 2), ("Results", 1)]);
+        let made = store.import_manuscript(&draft, "docx", "Roots.docx", Some(&bytes)).unwrap();
+        // A result added under 结果: the nearest heading before it is the section's, but it is set like the file's subsections.
+        let length = store.add_subsection(&made.sections[2].id, "Root length", "results").unwrap();
+        store.save_section_body(&length.id, "Longer.").unwrap();
+        let now = store.manuscript(&made.id).unwrap().unwrap();
+        let (out, from_file) = store.manuscript_word(&now, &[], false, "Xu", cite::Style::AuthorYear).unwrap();
+        assert!(from_file);
+        let read = docx::read(&out.bytes).unwrap();
+        let level = |text: &str| read.paragraphs.iter().find(|p| p.text == text).and_then(|p| p.level);
+        assert_eq!((level("Results"), level("Plant growth"), level("Root length")), (Some(1), Some(2), Some(2)));
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -2093,7 +2416,7 @@ mod tests {
         store.add_comment(&made.id, &section.id, "酶解", "哪种酶？", "Xu", comment::PERSON).unwrap();
         store.add_comment(&made.id, &section.id, "快速的发展", "多快？", "Xu", comment::PERSON).unwrap();
         let start = section.body.find("原生质体的制备").unwrap();
-        let split = store.split_section(&section.id, start..start + "原生质体的制备".len(), true).unwrap();
+        let split = store.split_section(&section.id, start..start + "原生质体的制备".len(), Cut::Heading).unwrap();
         assert_eq!((split.name.as_str(), split.kind.as_str(), split.bare), ("原生质体的制备", "other", false));
         let now = store.manuscript(&made.id).unwrap().unwrap();
         assert_eq!(now.sections.iter().map(|s| s.name.as_str()).collect::<Vec<_>>(), ["摘要", "单细胞转录组测序技术的发展（图1）", "原生质体的制备"]);
@@ -2109,14 +2432,14 @@ mod tests {
         assert!(store.comments(&made.id).unwrap().iter().all(|c| c.section_id == section.id));
         unchanged(&store);
         let start = merged.body.find("植物细胞").unwrap();
-        let cut = store.split_section(&merged.id, start..start + 3, false).unwrap();
+        let cut = store.split_section(&merged.id, start..start + 3, Cut::Paragraph).unwrap();
         assert_eq!((cut.name.as_str(), cut.bare, cut.body.as_str()), ("植物细胞有细胞壁，需要先酶解制备…", true, "植物细胞有细胞壁，需要先酶解制备原生质体，这一步骤可能改变部分基因的表达。\n\n展望\n\n随着空间转录组等技术的发展，单细胞水平的研究将更加深入。"));
         unchanged(&store);
-        assert!(store.split_section(&made.sections[0].id, 0..0, false).is_err() && store.merge_section(&made.sections[0].id).is_err());
+        assert!(store.split_section(&made.sections[0].id, 0..0, Cut::Paragraph).is_err() && store.merge_section(&made.sections[0].id).is_err());
 
         // Taken in without a section: the first paragraph set as a heading names the one there is.
         let whole = store.import_manuscript(&from_word_with(&read, "综述.docx", Some(&[])), "docx", "综述.docx", Some(&bytes)).unwrap();
-        let named = store.split_section(&whole.sections[0].id, 0.."摘要".len(), true).unwrap();
+        let named = store.split_section(&whole.sections[0].id, 0.."摘要".len(), Cut::Heading).unwrap();
         assert_eq!((named.id == whole.sections[0].id, named.name.as_str(), named.kind.as_str(), named.bare, named.body.starts_with("单细胞转录组测序技术能够")), (true, "摘要", "abstract", false, true));
         let now = store.manuscript(&whole.id).unwrap().unwrap();
         let (out, _) = store.manuscript_word(&now, &[], false, "Xu", cite::Style::AuthorYear).unwrap();
@@ -2126,7 +2449,7 @@ mod tests {
         let first = &typed.sections[0];
         store.save_section_body(&first.id, "Opening words.\n\n**Methods**\n\nWe grew roots.").unwrap();
         let start = "Opening words.\n\n".len();
-        let methods = store.split_section(&first.id, start..start + "**Methods**".len(), true).unwrap();
+        let methods = store.split_section(&first.id, start..start + "**Methods**".len(), Cut::Heading).unwrap();
         assert_eq!((methods.name.as_str(), methods.kind.as_str(), methods.body.as_str()), ("Methods", "methods", "We grew roots."));
         std::fs::remove_dir_all(&dir).ok();
     }

@@ -338,7 +338,7 @@ impl ManuscriptFile {
 fn manuscript_json(manuscript: &crate::manuscript::Manuscript) -> Value {
     json!({
         "id": manuscript.id, "title": manuscript.shown_title(), "language": manuscript.language,
-        "sections": manuscript.sections.iter().map(|s| json!({"id": s.id, "name": s.name, "kind": s.kind, "characters": s.body.chars().count()})).collect::<Vec<_>>(),
+        "sections": crate::compose::outline_of(manuscript),
     })
 }
 

@@ -32,6 +32,8 @@ const DRAWER_SHARE: f32 = 0.46;
 /// What the empty manuscript says: to the person who writes it, and beside the conversation in which the assistant does.
 pub(crate) const PLACEHOLDER: &str = "在这里写，中文或别的语言都可以，先写下想表达的意思。写好一段，选中它：旁边出现「找句子」「配引用」「润色」这些工具。";
 const PLACEHOLDER_AGENT: &str = "这一节还是空的。在左边告诉助手要写什么，它会写在这里；也可以自己动笔。";
+/// Over a section that has subsections: its own text is what comes before them.
+const PLACEHOLDER_OVER: &str = "这里写小节之前的概述，也可以空着。它的各个小节在下面，点一个单独写。";
 
 /// How long a text is, as a writer counts it: a Chinese, Japanese or Korean
 /// letter is one, and so is every word of a language that spaces them.
@@ -103,12 +105,19 @@ impl Workspace {
         };
         let pictures = self.manuscript_shots(&shown, cx);
         let lib = self.lib.as_ref().unwrap();
+        // How many subsections the section being written has (those right under it, as the outline counts them): 结果 shows its results under its own text.
+        let subsections = lib.writing.current().and_then(|m| {
+            let at = m.sections.iter().position(|s| s.id == lib.writing.section_id)?;
+            Some(m.sections[wisp_core::manuscript::under(&m.sections, at)].iter().filter(|s| s.level == m.sections[at].level + 1).count())
+        }).unwrap_or(0);
         lib.writing.editor.update(cx, |input, _| {
             input.set_marks(noted.into_iter().chain(changed).chain(found).collect());
             input.set_links(links);
             input.set_folds(folds);
             input.set_pictures(pictures);
-            input.set_placeholder(if agent { PLACEHOLDER_AGENT } else { PLACEHOLDER });
+            input.set_placeholder(if subsections > 0 { PLACEHOLDER_OVER } else if agent { PLACEHOLDER_AGENT } else { PLACEHOLDER });
+            // Over its subsections a section's own text is a few lines: they follow it, not a page left blank.
+            input.min_lines = if subsections > 0 { 3 } else { 14 };
         });
         let lib = self.lib.as_ref().unwrap();
         let writing = &lib.writing;
@@ -133,6 +142,10 @@ impl Workspace {
             t("这是早先的一版，不能在这里改；恢复它，或回到现在的文字").to_string()
         } else if picked > 0 {
             tf!("{length} · 已选中 {picked} 字：对助手说的话会针对它", "{length} · {picked} selected: what you say to the assistant is about it")
+        } else if subsections > 0 && characters == 0 {
+            tf!("下面是它的 {subsections} 个小节，点一个单独写", "Its {subsections} subsections are below: click one to write it alone")
+        } else if subsections > 0 {
+            tf!("{length} · 已保存 · 下面是它的 {subsections} 个小节，点一个单独写", "{length} · Saved · Its {subsections} subsections are below: click one to write it alone")
         } else if characters == 0 {
             if agent { t("这一节还没有写：让助手写，或自己动笔") } else { t("随写随存") }.to_string()
         } else if agent {
@@ -162,6 +175,9 @@ impl Workspace {
             .child(
                 div().flex().flex_col().flex_1().min_h_0().px(px(16.)).pb(px(8.)).when(version.is_some() || proposal.is_some(), |d| d.pt(px(12.))).child(if facing { self.render_manuscript_facing(inner - 32., window, cx) } else if writing.reading { self.render_manuscript_reading(window, cx) } else if let Some(proposal) = proposal { self.render_proposal(proposal, cx) } else if let Some(version) = version { self.render_version(version, cx) } else {
                     let page = div().relative().w_full().max_w(theme::manuscript_width()).mx_auto().pl(px(18.)).pr(px(if markers.is_empty() { 18. } else { MARGIN })).py(px(14.)).text_size(text_px(15.)).line_height(theme::body_line(26.)).text_color(Theme::text());
+                    // What is under the section, after its own text in the same scroll: the results of 结果, each opened alone with a click.
+                    let under = self.render_under_section(window, cx);
+                    let writing = &self.lib.as_ref().unwrap().writing;
                     div()
                         .id("write-editor")
                         .flex_1()
@@ -171,7 +187,7 @@ impl Workspace {
                         // No frame of its own: the column's lines already say where the manuscript is. One line under it, where the text scrolls away.
                         .border_b_1()
                         .border_color(Theme::line())
-                        .child(if agent { page.child(writing.editor.clone()) } else { page.child(crate::input::with_selection_toolbar(&writing.editor, self.render_assist_bar(cx))) }.children(markers).children(bars))
+                        .child(div().flex().flex_col().w_full().child(if agent { page.child(writing.editor.clone()) } else { page.child(crate::input::with_selection_toolbar(&writing.editor, self.render_assist_bar(cx))) }.children(markers).children(bars)).children(under))
                         .into_any_element()
                 }),
             )

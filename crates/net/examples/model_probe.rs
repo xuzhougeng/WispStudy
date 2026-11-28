@@ -44,6 +44,8 @@ enum Wants {
     Fill,
     /// The section is another text altogether.
     Rewrite,
+    /// The section is cut into subsections under it, its paragraphs in them as they were, nothing else changed.
+    Split,
 }
 
 struct Case {
@@ -56,12 +58,13 @@ struct Case {
     wants: Wants,
 }
 
-const CASES: [Case; 5] = [
+const CASES: [Case; 6] = [
     Case { name: "sentence", says: "改一句", middles: 1, ask: "第 3 节里「HIF-1α 在常氧下被降解」说得太粗了，改成说明是经 VHL 介导的泛素化、被蛋白酶体降解。只改这一处，别的一个字都不要动。", wants: Wants::Change(0) },
     Case { name: "paragraph", says: "重写一段", middles: 1, ask: "第 3 节第二段太啰嗦，重写得紧凑一些，意思和引用不变。", wants: Wants::Change(1) },
     Case { name: "long", says: "长节里改一句", middles: 46, ask: "第 3 节里「HIF-1α 在常氧下被降解」说得太粗了，改成说明是经 VHL 介导的泛素化、被蛋白酶体降解。只改这一处，别的一个字都不要动。", wants: Wants::Change(0) },
     Case { name: "empty", says: "写空的一节", middles: 1, ask: "把第 4 节「展望」写出来，两三句话就行，不用查文献。", wants: Wants::Fill },
     Case { name: "rewrite", says: "整节重写", middles: 1, ask: "第 3 节整节重写，压缩到 150 字以内，引用保留。我确认要整节重写，直接动笔。", wants: Wants::Rewrite },
+    Case { name: "subsections", says: "分成小节", middles: 1, ask: "第 3 节的三段各讲一件事，把它分成三个小节：「HIF 的调控」「在肿瘤中的作用」「靶向药物」，三段原文一字不改地分别放进去。", wants: Wants::Split },
 ];
 
 /// The paragraphs of the section a case works on.
@@ -70,15 +73,25 @@ fn paragraphs(case: &Case) -> Vec<String> {
     std::iter::once(FIRST.to_string()).chain(middles).chain(std::iter::once(LAST.to_string())).collect()
 }
 
-/// The paragraphs of the case's section that no longer stand in `body` as they did, the one meant to change apart.
-/// None where the whole section was to be written anew.
-fn gone(case: &Case, body: &str) -> usize {
+/// The paragraphs of the case's section that no longer stand in it as they did, the one meant to change apart: in
+/// its text, or for a section cut into subsections in its text and theirs. None where the whole section was to be
+/// written anew.
+fn gone(case: &Case, manuscript: &wisp_core::manuscript::Manuscript) -> usize {
     let meant = match case.wants {
         Wants::Change(meant) => Some(meant),
-        Wants::Fill => None,
+        Wants::Fill | Wants::Split => None,
         Wants::Rewrite => return 0,
     };
+    let body = held(case, manuscript);
     paragraphs(case).iter().enumerate().filter(|(at, paragraph)| Some(*at) != meant && !body.contains(paragraph.as_str())).count()
+}
+
+/// What the case's section holds: its text, and for a section to be cut into subsections theirs after it.
+fn held(case: &Case, manuscript: &wisp_core::manuscript::Manuscript) -> String {
+    let sections = &manuscript.sections;
+    if sections.len() < 3 { return String::new() }
+    let within = if matches!(case.wants, Wants::Split) { wisp_core::manuscript::under(sections, 2) } else { 2..3 };
+    sections[within].iter().map(|section| section.body.trim()).collect::<Vec<_>>().join("\n\n")
 }
 
 /// How a run ended, by what the manuscript holds afterwards.
@@ -239,7 +252,7 @@ fn talk(options: &Options, model: &str, case: &'static Case, root: &Path, run: &
                 let ended = compose::call_with(&mut store, &info, &call.name, &args, &ctx.sources, &offline, &nothing, tools::Reach::default());
                 if tools::MANUSCRIPT.contains(&call.name.as_str()) {
                     // What the section holds right after the call: what the person would be looking at.
-                    let cut = store.manuscript(&manuscript_id).ok().flatten().and_then(|now| now.sections.get(2).map(|section| gone(case, &section.body))).unwrap_or(0);
+                    let cut = store.manuscript(&manuscript_id).ok().flatten().map(|now| gone(case, &now)).unwrap_or(0);
                     run.wrote.push(Wrote { name: call.name.clone(), sent: args, ended: ended.clone(), asks, cut });
                 }
                 ended
@@ -262,7 +275,16 @@ fn judge(case: &Case, before: &wisp_core::manuscript::Manuscript, after: &wisp_c
     let untouched = if wrote.is_empty() { Outcome::Nothing } else if wrote.iter().all(|call| call.ended.is_err()) { Outcome::Refused } else { Outcome::Other("它调用了写稿件的工具，稿件却和原来一样".into()) };
     let held = paragraphs(case);
     let section = body(after, 2);
-    let lost = gone(case, &section);
+    let lost = gone(case, after);
+    if let Wants::Split = case.wants {
+        if lost > 0 { return Outcome::Lost(lost) }
+        // The other sections as they were, by their ids: the subsections come between them.
+        let changed = before.sections.iter().enumerate().filter(|(at, _)| *at != 2).any(|(_, was)| after.section(&was.id).is_none_or(|now| now.body.trim() != was.body.trim() || now.level != was.level));
+        if changed { return Outcome::Other("别的节也被改了".into()) }
+        let subsections = after.sections.get(2).map_or(0, |_| wisp_core::manuscript::under(&after.sections, 2).len() - 1);
+        if subsections == 0 { return if after.sections.len() == before.sections.len() && section == body(before, 2) { untouched } else { Outcome::Other("没有分成小节".into()) } }
+        return Outcome::Right;
+    }
     // The outline as it was, and the other sections with it: a case is about one section.
     if after.sections.len() != before.sections.len() { return Outcome::Other("大纲变了".into()) }
     let elsewhere = |but: &[usize]| (0..before.sections.len()).filter(|at| !but.contains(at)).any(|at| body(before, at) != body(after, at));
@@ -285,6 +307,7 @@ fn judge(case: &Case, before: &wisp_core::manuscript::Manuscript, after: &wisp_c
             if section.is_empty() { return Outcome::Lost(held.len()) }
             Outcome::Right
         }
+        Wants::Split => unreachable!("judged above"),
     }
 }
 

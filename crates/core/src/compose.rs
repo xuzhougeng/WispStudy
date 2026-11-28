@@ -40,6 +40,12 @@ fn names(sections: &[Section]) -> String {
     sections.iter().map(|s| format!("「{}」", s.name)).collect::<Vec<_>>().join("、")
 }
 
+/// The outline as the tools say it: each section with its number (3.1 is the first subsection of the third section) and level.
+pub fn outline_of(manuscript: &Manuscript) -> Vec<Value> {
+    let numbers = manuscript::numbers(&manuscript.sections);
+    manuscript.sections.iter().zip(numbers).map(|(s, number)| json!({"id": s.id, "number": number, "level": s.level, "name": s.name, "kind": s.kind, "characters": s.body.chars().count()})).collect()
+}
+
 /// The manuscript `wanted` names by id or title; the only one when nothing is said.
 pub fn find_manuscript(store: &Store, wanted: &str) -> Result<Manuscript> {
     let manuscripts = store.manuscripts()?;
@@ -226,6 +232,8 @@ struct Line {
     of: String,
     name: String,
     kind: String,
+    /// How deep in the outline, when the call says.
+    level: Option<u8>,
 }
 
 /// The tool `set_outline`: the sections a manuscript is to have, in order,
@@ -247,7 +255,14 @@ pub fn outline(store: &mut Store, args: &Value) -> Result<Value> {
     if asked.len() > MOST_SECTIONS { bail!("一份稿件最多 {MOST_SECTIONS} 节。") }
     let mut lines = vec![];
     for one in asked {
-        let line = Line { of: word(one, "id").to_string(), name: word(one, "name").to_string(), kind: word(one, "kind").to_string() };
+        let level = match &one["level"] {
+            Value::Null => None,
+            value => match value.as_u64() {
+                Some(level) if (1..=manuscript::MOST_LEVELS as u64).contains(&level) => Some(level as u8),
+                _ => bail!("level 是 1 到 {} 的整数：1 是一节，2 是它下面的小节，3 是小节下面的小节。", manuscript::MOST_LEVELS),
+            },
+        };
+        let line = Line { of: word(one, "id").to_string(), name: word(one, "name").to_string(), kind: word(one, "kind").to_string(), level };
         if !line.kind.is_empty() && !manuscript::is_kind(&line.kind) { bail!("没有这种类型：{}。可以是：{}", line.kind, SECTIONS.iter().map(|(key, _)| *key).collect::<Vec<_>>().join("、")) }
         lines.push(line);
     }
@@ -260,14 +275,17 @@ pub fn outline(store: &mut Store, args: &Value) -> Result<Value> {
         if found.is_none() && !line.of.is_empty() { bail!("这份稿件没有「{}」这一节。现有：{}。新加的一节不要带 id。", line.of, names(&manuscript.sections)) }
         let name = if line.name.is_empty() { found.map(|s| s.name.clone()).unwrap_or_default() } else { line.name.clone() };
         if name.is_empty() { bail!("每一节都需要 name。") }
-        // A new section's kind is what its name says, when it says: that is where its candidate sentences come from.
+        // A section kept keeps its level unless one is given; a new one is a section unless it is said to be a subsection.
+        let level = line.level.or(found.map(|s| s.level)).unwrap_or(1);
+        // A new section's kind is what its name says, when it says, else that of the section it is under: that is where its candidate sentences come from.
+        let over = wanted.iter().rev().find(|one: &&manuscript::Arrange| one.level < level).map(|one| one.kind.clone());
         let kind = match (line.kind.as_str(), found) {
             ("", Some(section)) => section.kind.clone(),
-            ("", None) => structure::canonical(&name).filter(|kind| manuscript::is_kind(kind)).unwrap_or("other").to_string(),
+            ("", None) => structure::canonical(&name).filter(|kind| manuscript::is_kind(kind)).map(str::to_string).or(over).unwrap_or_else(|| "other".to_string()),
             (kind, _) => kind.to_string(),
         };
         if let Some(section) = found { taken.push(&section.id) }
-        wanted.push(manuscript::Arrange { id: found.map(|s| s.id.clone()).unwrap_or_default(), name, kind });
+        wanted.push(manuscript::Arrange { id: found.map(|s| s.id.clone()).unwrap_or_default(), name, kind, level });
     }
     let arranged = if wanted.is_empty() { manuscript::Arranged::default() } else { store.arrange_sections(&manuscript.id, &wanted)? };
     if let Some(title) = title { store.rename_manuscript(&manuscript.id, title)? }
@@ -277,7 +295,7 @@ pub fn outline(store: &mut Store, args: &Value) -> Result<Value> {
         "manuscript": now.id,
         "title": now.shown_title(),
         "language": now.language,
-        "sections": now.sections.iter().map(|s| json!({"id": s.id, "name": s.name, "kind": s.kind, "characters": s.body.chars().count()})).collect::<Vec<_>>(),
+        "sections": outline_of(&now),
         "added": arranged.added,
         "removed": arranged.removed,
     });
@@ -333,14 +351,15 @@ pub fn note(asked: &Asked) -> String {
     let manuscript = asked.manuscript;
     let language = crate::ai::language_name(&manuscript.language);
     let mut out = format!(
-        "【写作模式】你在主导这份稿件的写作：用户在窗口右边看着稿件，在这里和你对话，由你动笔。\n稿件：《{}》（ID {}），正文用{language}写。\n大纲（节 ID · 名称 · 类型 · 现有字数）：\n",
+        "【写作模式】你在主导这份稿件的写作：用户在窗口右边看着稿件，在这里和你对话，由你动笔。\n稿件：《{}》（ID {}），正文用{language}写。\n大纲（编号 节 ID · 名称 · 类型 · 现有字数；3.1 是第 3 节下的第一个小节）：\n",
         manuscript.shown_title(),
         manuscript.id
     );
-    for (n, section) in manuscript.sections.iter().enumerate() {
+    for (section, number) in manuscript.sections.iter().zip(manuscript::numbers(&manuscript.sections)) {
         let kind = SECTIONS.iter().find(|(key, _)| *key == section.kind).map_or(section.kind.as_str(), |(_, name)| name);
         let length = section.body.chars().filter(|c| !c.is_whitespace()).count();
-        out.push_str(&format!("{}. {} · {} · {kind} · {}{}\n", n + 1, section.id, section.name, if length == 0 { "未写".to_string() } else { format!("{length} 字") }, if section.id == asked.showing { " ← 右边正显示这一节" } else { "" }));
+        let indent = "  ".repeat(section.level.saturating_sub(1) as usize);
+        out.push_str(&format!("{indent}{number} {} · {} · {kind} · {}{}\n", section.id, section.name, if length == 0 { "未写".to_string() } else { format!("{length} 字") }, if section.id == asked.showing { " ← 右边正显示这一节" } else { "" }));
     }
     let selection = asked.selection.trim();
     if !selection.is_empty() {
@@ -352,6 +371,7 @@ pub fn note(asked: &Asked) -> String {
     out.push_str(&format!(
         "做法：\n\
 - 稿件只通过工具改动：edit_section 逐处修改一节，write_section 写出一节的全文（只用于空的一节，或用户明确要整节重写的一节），set_outline 调整各节、题目和正文语言（用户要的语言和上面写的不一样时，先用它改过来）。节里已有文字时用 edit_section：用户写的句子，要求之外的一字不动。要写进稿件的正文不要贴在对话里；对话里用几句话说明做了什么、依据哪些文献、参照了哪几篇的写法、还缺什么，让用户去右边看稿。\n\
+- 一节下面可以有小节（大纲里缩进的、编号像 3.1 的），最多三级（3.1.1）：方法里的每一项方法、结果里的每一个结果各是一个小节，各自用 write_section、edit_section 写，不要写进上一级的那一节；有小节的一节，自己的正文只是小节前的一两句概述，可以空着。要分小节或调整层级，用 set_outline 的 level。\n\
 - 动笔前先读：要改的一节用 read_manuscript 读它现在的文字，用户可能刚亲手改过，以稿件现在的文字为准；edit_section 的 old 要从中逐字摘出。\n\
 - 论断要有出处：先用 find_sentences、find_citations、search_fulltext 等在文献库里找到文献和原句，再写。写进稿件的引用和回答里一样，尽量带上它所依据的原句：[P3 p.5 \"逐字摘出的原句\"]，出自摘要的原句不写页码：[P3 \"逐字摘出的原句\"]，实在没有可摘的原句才写 [P3]。写入时会换成稿件的引用格式，引的那句原文会记为这处引用的出处，用户点一下就能核对。文献库里找不到依据的论断不要配引用，更不要编造文献；在对话里指出来。\n\
 - {}\n\
@@ -789,6 +809,25 @@ mod tests {
     }
 
     #[test]
+    fn an_outline_has_subsections_of_the_part_they_are_under() {
+        let (mut store, made, _) = library();
+        let methods = made.sections[2].clone();
+        // Two methods under 方法, a result under 结果; a level too deep for where it stands is one under the section before it.
+        let done = outline(&mut store, &json!({"sections": [{"id": methods.id, "name": "方法"}, {"name": "细胞培养", "level": 2}, {"name": "成像", "level": 2}, {"name": "共聚焦", "level": 3}, {"name": "结果"}, {"name": "根长", "level": 3}, {"name": "Discussion", "kind": "discussion"}]})).unwrap();
+        let now = store.manuscript(&made.id).unwrap().unwrap();
+        let shown: Vec<(&str, u8, &str)> = now.sections.iter().map(|s| (s.name.as_str(), s.level, s.kind.as_str())).collect();
+        assert_eq!(shown, [("方法", 1, "methods"), ("细胞培养", 2, "methods"), ("成像", 2, "methods"), ("共聚焦", 3, "methods"), ("结果", 1, "results"), ("根长", 2, "results"), ("Discussion", 1, "discussion")]);
+        assert_eq!(done["sections"].as_array().unwrap().iter().map(|s| s["number"].as_str().unwrap()).collect::<Vec<_>>(), ["1", "1.1", "1.2", "1.2.1", "2", "2.1", "3"]);
+        // A section kept keeps its level when none is given; the model is told the outline with its numbers.
+        outline(&mut store, &json!({"sections": [{"name": "方法"}, {"name": "细胞培养"}, {"name": "成像"}, {"name": "共聚焦"}, {"name": "结果"}, {"name": "根长"}, {"name": "Discussion"}]})).unwrap();
+        let now = store.manuscript(&made.id).unwrap().unwrap();
+        assert_eq!(now.sections.iter().map(|s| s.level).collect::<Vec<_>>(), [1, 2, 2, 3, 1, 2, 1]);
+        let told = note(&Asked { manuscript: &now, showing: "", selection: "" });
+        assert!(told.contains(&format!("  1.2.1 {} · 共聚焦 · 方法", now.sections[3].id)) && told.contains("最多三级"), "{told}");
+        assert!(outline(&mut store, &json!({"sections": [{"name": "方法", "level": 4}]})).unwrap_err().to_string().contains("level 是 1 到 3"));
+    }
+
+    #[test]
     fn a_conversations_citations_become_the_manuscripts_with_their_passages() {
         let (mut store, made, paper) = library();
         let section = made.sections[1].id.clone();
@@ -942,8 +981,8 @@ mod tests {
         let now = store.manuscript(&made.id).unwrap().unwrap();
         let said = note(&Asked { manuscript: &now, showing: &now.sections[1].id, selection: " 六个字 " });
         assert!(said.contains(&format!("（ID {}）", now.id)) && said.contains("正文用中文写"));
-        assert!(said.contains(&format!("2. {} · {} · 导言 · 6 字 ← 右边正显示这一节", now.sections[1].id, now.sections[1].name)));
-        assert!(said.contains(&format!("1. {} · {} · 摘要 · 未写\n", now.sections[0].id, now.sections[0].name)));
+        assert!(said.contains(&format!("2 {} · {} · 导言 · 6 字 ← 右边正显示这一节", now.sections[1].id, now.sections[1].name)));
+        assert!(said.contains(&format!("1 {} · {} · 摘要 · 未写\n", now.sections[0].id, now.sections[0].name)));
         assert!(said.contains(&format!("用户在「{}」里选中了下面这段文字", now.sections[1].name)) && said.contains("\n六个字\n"));
         assert!(!note(&Asked { manuscript: &now, showing: "", selection: "" }).contains("选中了"));
         // How to write: after the library's sentences of the same part, asked for in the manuscript's language when the tool knows it.

@@ -177,9 +177,16 @@ impl Workspace {
                     None
                 }
                 "section" => Some(Cmd::EditSection((!arg.is_empty()).then(|| arg.to_string()))),
-                // `split` / `split:heading` cut the section at the caret's paragraph (that paragraph a new section's first / its heading); `merge` puts the section being written back into the one before;
+                // `subsection` asks for a subsection under the section being written; `indent` / `outdent` make it one level deeper / less deep.
+                "subsection" => self.lib.as_ref().map(|lib| Cmd::AddSubsection(lib.writing.section_id.clone())),
+                "indent" | "outdent" => self.lib.as_ref().map(|lib| Cmd::IndentSection(lib.writing.section_id.clone(), name == "indent")),
+                // `split` / `split:heading` / `split:sub` cut the section at the caret's paragraph (that paragraph a new section's first / its heading / a subsection's heading); `merge` puts the section being written back into the one before;
                 // `headings:<n>` / `headings:all` / `headings:none` tick in the dialog of a Word file without heading styles (`submit` imports).
-                "split" => Some(Cmd::SplitSection(arg == "heading")),
+                "split" => Some(Cmd::SplitSection(match arg {
+                    "heading" => wisp_core::manuscript::Cut::Heading,
+                    "sub" => wisp_core::manuscript::Cut::Subheading,
+                    _ => wisp_core::manuscript::Cut::Paragraph,
+                })),
                 "merge" => self.lib.as_ref().map(|lib| Cmd::MergeSection(lib.writing.section_id.clone())),
                 "headings" => Some(Cmd::Comment(match arg {
                     "all" => crate::comments::Do::Headings(true),
