@@ -968,7 +968,8 @@ impl Workspace {
         let mut card = div().flex().flex_col().gap(px(8.)).w(px(half)).ml(px(-9.)).px(px(10.)).py(px(8.)).rounded(px(6.)).border_1().border_color(Theme::line()).bg(Theme::bg_sunken());
         card = card.child(div().flex().items_center().child(div().flex_1().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(t(if compared.single { "几个模型各译一版" } else { "三种译法" }))).child(ui::icon_action(SharedString::from(format!("{key}-compare-close")), "x", Theme::text_tertiary(), t("收起")).on_click(self.on(Cmd::Translate(Do::CompareClose), cx))));
         for (n, (said, text, busy, error)) in rows.into_iter().enumerate() {
-            let id = compared.comparison.rows.get(if compared.single { n } else { 0 }).map_or(String::new(), |row| row.profile.clone());
+            // Rows of one asking: their ids go by the model they are from and their place.
+            let id = compared.comparison.rows.get(if compared.single { n } else { 0 }).map_or(0, |row| hashed(&row.model));
             let head = div().flex().items_center().gap(px(6.)).child(div().flex_1().min_w_0().truncate().text_size(text_px(11.)).text_color(Theme::text_secondary()).child(said))
                 .when(busy, |d| d.child(ui::spinner(SharedString::from(format!("{key}-compare-{n}-{id}")), 11., Theme::text_tertiary())))
                 .when(!busy && !text.trim().is_empty(), |d| d.child(ui::ghost_button(SharedString::from(format!("{key}-take-{n}-{id}")), None, Some(t("采用").into())).h(text_px(22.)).px(px(6.)).text_size(text_px(12.)).on_click(self.on(Cmd::Translate(Do::CompareTake(n)), cx))));
