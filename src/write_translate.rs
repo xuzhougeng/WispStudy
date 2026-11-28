@@ -74,6 +74,8 @@ pub enum Do {
     FixCites(usize),
     /// 重译: what the person wrote set aside, the unit translated anew.
     Redo(usize),
+    /// 全部重译: every block the model translated asked of it again, the person's left as they are.
+    RedoAll,
     /// 只带改动: ask for the translation with only the change of the source carried over.
     Carry(usize),
     TakeCarry(usize),
@@ -205,6 +207,9 @@ pub struct Run {
     /// Each job's instructions, by its key: a block's carry the glossary's terms it holds.
     pub prompts: HashMap<String, String>,
     pub run: TranslationRun,
+    /// 全部重译: every job asked of the model, not taken from what is kept, and its answer written over the model's
+    /// translation of the block even where that is up to date. A stop ends it: what came stays, the rest as it was.
+    pub again: bool,
 }
 
 pub struct Translating {
@@ -506,21 +511,53 @@ impl Workspace {
     }
 
     /// The units of a version a model translates by itself (`follow::wanted`), asked for unless a run for it is
-    /// going, the person stopped it, or they failed and wait for 重试.
+    /// going, the person stopped it, or they failed and wait for 重试. With them, the model's translations that
+    /// leave out a term of the glossary (`follow::lacking`: made before the term was in the table or changed),
+    /// each asked once under the instructions that carry the term; what the model then gives is kept, the mark
+    /// saying what it still lacks.
     fn translate_follow(&mut self, id: &str, language: &str, cx: &mut Context<Self>) {
         let rules = self.translate_rules(id, language);
         let Some(lib) = self.lib.as_ref() else { return };
         let translate = &lib.writing.translate;
         if translate.paused || translate.run.as_ref().is_some_and(|run| run.run.batch.running()) { return }
         let Some(version) = translate.kept.get(&(id.to_string(), language.to_string())) else { return };
-        let failed = |sent: &str| matches!(lib.translations.get(&Self::translate_key(language, sent, &rules)), Some(Translated::Failed(_)));
-        let texts: Vec<String> = follow::wanted(&version.kept, &version.pairs).into_iter().map(|u| version.units[u].sent.clone()).filter(|sent| !failed(sent)).collect();
+        let asked = |sent: &str| lib.translations.get(&Self::translate_key(language, sent, &rules));
+        let mut texts: Vec<String> = follow::wanted(&version.kept, &version.pairs).into_iter().map(|u| version.units[u].sent.clone()).filter(|sent| !matches!(asked(sent), Some(Translated::Failed(_)))).collect();
+        for u in follow::lacking(&version.units, &version.kept, &version.pairs, &rules.0) {
+            let (sent, kept) = (&version.units[u].sent, version.pairs[u].map(|k| version.kept[k].text.trim()));
+            // Not asked yet under these instructions, or answered with what the unit does not hold yet.
+            let again = match asked(sent) {
+                None => true,
+                Some(Translated::Done(text)) => Some(text.trim()) != kept,
+                Some(_) => false,
+            };
+            if again && !texts.contains(sent) { texts.push(sent.clone()) }
+        }
         if texts.is_empty() { return }
-        self.translate_start(id, language, texts, cx);
+        self.translate_start(id, language, texts, false, cx);
     }
 
-    /// A run over these texts of a version, as many in flight as 设置 › AI › 任务 says.
-    fn translate_start(&mut self, id: &str, language: &str, texts: Vec<String>, cx: &mut Context<Self>) {
+    /// 全部重译: every unit that is the model's (`follow::models`) asked again from the source as it stands, under
+    /// today's glossary and requirement, past what is kept (`Run::again`); the person's blocks stay, and the toast
+    /// says how many. A run going is replaced.
+    fn translate_redo_all(&mut self, cx: &mut Context<Self>) {
+        let Some((id, language)) = self.translate_shown() else { return };
+        let Some(lib) = self.lib.as_mut() else { return };
+        let translate = &mut lib.writing.translate;
+        let Some(version) = translate.kept.get(&(id.clone(), language.clone())) else { return };
+        let texts: Vec<String> = follow::models(&version.kept, &version.pairs).into_iter().map(|u| version.units[u].sent.clone()).collect();
+        let theirs = version.pairs.iter().filter(|k| k.is_some_and(|k| version.kept[k].edited)).count();
+        if let Some(run) = translate.run.as_mut() { run.run.batch.stop() }
+        translate.paused = false;
+        if texts.is_empty() { return self.say(t("没有模型译的段落可重译：每一段都是你改过或审校过的。"), cx) }
+        let blocks = texts.len();
+        self.translate_start(&id, &language, texts, true, cx);
+        self.say(if theirs == 0 { tf!("正在重译 {blocks} 段", "Retranslating {blocks} blocks") } else { tf!("正在重译 {blocks} 段；你改过或审校过的 {theirs} 段不动", "Retranslating {blocks} blocks; the {theirs} you edited or reviewed stay as they are") }, cx);
+    }
+
+    /// A run over these texts of a version, as many in flight as 设置 › AI › 任务 says; `again` asks each of the
+    /// model past what is kept (`Run::again`).
+    fn translate_start(&mut self, id: &str, language: &str, texts: Vec<String>, again: bool, cx: &mut Context<Self>) {
         let profile = self.settings.profile_for_or_default(Task::Translate);
         let rules = self.translate_rules(id, language);
         let workers = self.settings.translate_workers.max(1);
@@ -535,7 +572,7 @@ impl Workspace {
             batch.jobs.push_back(Job { key, text: text.to_string(), papers: 1 });
         }
         let prompt = bilingual::prompt(language);
-        lib.writing.translate.run = Some(Run { manuscript: id.to_string(), language: language.to_string(), prompts, run: TranslationRun { batch, model: profile.labelled(), profile, prompt, workers } });
+        lib.writing.translate.run = Some(Run { manuscript: id.to_string(), language: language.to_string(), prompts, run: TranslationRun { batch, model: profile.labelled(), profile, prompt, workers }, again });
         self.translate_follow_next(cx);
     }
 
@@ -555,19 +592,19 @@ impl Workspace {
                 None => Some((job.key.clone(), job.text.clone(), Err(t("没有取得译文，请重试。").into()))),
             })
             .collect();
-        let (id, language) = (run.manuscript.clone(), run.language.clone());
+        let (id, language, again) = (run.manuscript.clone(), run.language.clone(), run.again);
         for (key, text, result) in settled {
             if let Some(run) = self.lib.as_mut().and_then(|lib| lib.writing.translate.run.as_mut()) {
                 run.run.batch.finish(&key, result.clone().map(|_| ()), false)
             }
-            if let Ok(translated) = result { self.translate_put(&id, &language, &text, &translated, cx) }
+            if let Ok(translated) = result { self.translate_put(&id, &language, &text, &translated, again, cx) }
         }
         loop {
             let Some(run) = self.lib.as_mut().and_then(|lib| lib.writing.translate.run.as_mut()) else { return };
             if run.run.batch.working.len() >= run.run.workers { break }
             let Some(job) = run.run.batch.take() else { break };
             let (profile, prompt) = (run.run.profile.clone(), run.prompts.get(&job.key).cloned().unwrap_or_else(|| run.run.prompt.clone()));
-            self.translate_text(&job.text, &profile, &prompt, true, false, cx);
+            self.translate_text(&job.text, &profile, &prompt, true, again, cx);
             let Some(lib) = self.lib.as_mut() else { return };
             let done = match lib.translations.get(&job.key) {
                 Some(Translated::Busy) => continue,
@@ -578,14 +615,17 @@ impl Workspace {
             if let Some(run) = lib.writing.translate.run.as_mut() {
                 run.run.batch.finish(&job.key, done.clone().map(|_| ()), true)
             }
-            if let Ok(translated) = done { self.translate_put(&id, &language, &job.text, &translated, cx) }
+            if let Ok(translated) = done { self.translate_put(&id, &language, &job.text, &translated, again, cx) }
         }
         cx.notify();
     }
 
-    /// A model's translation of `sent` written into every unit of the version that says it and follows by itself.
-    fn translate_put(&mut self, id: &str, language: &str, sent: &str, translated: &str, cx: &mut Context<Self>) {
+    /// A model's translation of `sent` written into every unit of the version that says it and follows by itself:
+    /// one not yet translated, one whose source changed, one whose translation leaves out a term of the glossary,
+    /// and under 全部重译 (`again`) any the model made.
+    fn translate_put(&mut self, id: &str, language: &str, sent: &str, translated: &str, again: bool, cx: &mut Context<Self>) {
         self.translate_settled(id, language, cx);
+        let terms = self.translate_rules(id, language).0;
         let Some(lib) = self.lib.as_mut() else { return };
         let Some(version) = lib.writing.translate.kept.get_mut(&(id.to_string(), language.to_string())) else { return };
         let mut failed = None;
@@ -593,7 +633,8 @@ impl Workspace {
             if version.units[u].sent.trim() != sent.trim() { continue }
             let made = follow::made(&version.units[u], translated);
             let one = match version.pairs[u] {
-                Some(k) if version.kept[k].edited || version.kept[k].source == version.kept[k].anchor => continue,
+                Some(k) if version.kept[k].edited => continue,
+                Some(k) if version.kept[k].source == version.kept[k].anchor && (version.kept[k].text == made.text || !(again || glossary::lacks_term(&version.units[u].sent, &version.kept[k].text, &terms))) => continue,
                 Some(k) => {
                     let old = &mut version.kept[k];
                     (old.text, old.source, old.cites) = (made.text, made.source, made.cites);
@@ -836,6 +877,7 @@ impl Workspace {
                 self.say(t("已补齐这一段的引用标记。"), cx);
             }
             Do::Redo(at) => self.translate_redo(at, cx),
+            Do::RedoAll => self.translate_redo_all(cx),
             Do::Carry(at) => self.translate_carry(at, cx),
             Do::TakeCarry(at) => {
                 let Some((_, _, _, Some(kept))) = self.translate_unit(at) else { return };
@@ -978,7 +1020,7 @@ impl Workspace {
         }, cx);
         if let Some(lib) = self.lib.as_mut() { lib.writing.translate.paused = false }
         let busy = self.lib.as_ref().and_then(|lib| lib.writing.translate.run.as_ref()).is_some_and(|run| run.run.batch.running());
-        if !busy { self.translate_start(&id, &language, vec![unit.sent], cx) }
+        if !busy { self.translate_start(&id, &language, vec![unit.sent], false, cx) }
     }
 
     /// 只带改动: the model is given the source then and now and the person's translation, and gives that
@@ -1253,7 +1295,7 @@ impl Workspace {
             }
             Some(_) => false,
             None => {
-                self.translate_start(id, language, vec![sent.to_string()], cx);
+                self.translate_start(id, language, vec![sent.to_string()], false, cx);
                 true
             }
         }
@@ -1531,6 +1573,13 @@ impl Workspace {
         let item = |label: String, cmd: Cmd| MenuItem { label: label.into(), checked: false, note: None, cmd };
         let mut items = vec![MenuItem { label: t("只看译稿").into(), checked: translate.alone, note: None, cmd: Cmd::Translate(Do::Alone(!translate.alone)) }];
         let mut breaks = vec![items.len()];
+        // 全部重译, with how many blocks it asks for and how many of the person's it leaves.
+        if let Some(version) = translate.kept.get(&(id.clone(), language.clone())) {
+            let blocks = follow::models(&version.kept, &version.pairs).len();
+            let theirs = version.pairs.iter().filter(|k| k.is_some_and(|k| version.kept[k].edited)).count();
+            let note = if theirs == 0 { tf!("{blocks} 段", "{blocks} blocks") } else { tf!("{blocks} 段 · 手改的 {theirs} 段不动", "{blocks} blocks · {theirs} edited kept") };
+            if blocks > 0 { items.push(MenuItem { label: t("全部重译").into(), checked: false, note: Some(note.into()), cmd: Cmd::Translate(Do::RedoAll) }) }
+        }
         items.push(item(t("设为主稿").to_string(), Cmd::Translate(Do::Primary)));
         if let Some(version) = translate.kept.get(&(id, language.clone())) {
             let aside = version.aside();
@@ -1736,7 +1785,8 @@ impl Workspace {
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(self.on(Cmd::Translate(Do::Edit(u)), cx));
             column = match (shown, state, &asked) {
-                (shown, State::Untranslated | State::Changed, Some(Translated::Busy)) if !kept.is_some_and(|k| k.edited) => {
+                // 已译 and asked: made again for a term of the glossary it left out (`follow::lacking`).
+                (shown, State::Untranslated | State::Changed | State::Translated, Some(Translated::Busy)) if !kept.is_some_and(|k| k.edited) => {
                     column.children(shown.map(|shown| div().opacity(0.5).child(shown).into_any_element())).child(spinner(format!("{key}-busy")))
                 }
                 (None, State::Untranslated, Some(Translated::Failed(error))) => {
@@ -2109,6 +2159,7 @@ impl Workspace {
             "nextedit" => Do::EditNext,
             "fixcites" => Do::FixCites(at()),
             "redo" => Do::Redo(at()),
+            "redoall" => Do::RedoAll,
             "carry" => Do::Carry(at()),
             "take" => Do::TakeCarry(at()),
             "leave" => Do::LeaveCarry(at()),

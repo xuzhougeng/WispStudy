@@ -2424,6 +2424,8 @@
   "译稿": "Version",
   "采用": "Take",
   "重译": "Retranslate",
+  "全部重译": "Retranslate all",
+  "没有模型译的段落可重译：每一段都是你改过或审校过的。": "Nothing to retranslate: every block is one you edited or reviewed.",
   "，": ", ",
   "保留成译稿": "Keep as version",
   "让对照的几个模型各译一版，挑一版用（设置 › AI 里选对照的模型；只有一个时，给三种译法）": "Have the compared models each translate it and pick one (choose them in Settings › AI; with one model, three kinds of translation)",

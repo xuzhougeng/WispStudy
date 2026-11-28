@@ -264,14 +264,28 @@ fn worth_checking(value: &str, signed: bool) -> bool {
     signed || value.contains('.') || value.parse::<u64>().map_or(true, |n| n > 10)
 }
 
+/// The terms of `terms` (pairs as `pairs` gives them) that `source` holds and `translation` does not hold the
+/// counterpart of, each counterpart once. None for a translation not yet made.
+fn unused<'a>(source: &str, translation: &str, terms: &'a [(String, String)]) -> Vec<&'a (String, String)> {
+    let mut out: Vec<&(String, String)> = vec![];
+    if translation.trim().is_empty() { return out }
+    for pair in terms {
+        if occurs(source, &pair.0) && !occurs(translation, &pair.1) && !out.iter().any(|(_, wanted)| wanted == &pair.1) { out.push(pair) }
+    }
+    out
+}
+
+/// Whether `translation` leaves out the counterpart of a term of `terms` that `source` holds: a translation made
+/// before the term was in the table, or before its counterpart was changed, or by a model that did not keep to it.
+pub fn lacks_term(source: &str, translation: &str, terms: &[(String, String)]) -> bool {
+    !unused(source, translation, terms).is_empty()
+}
+
 /// What `translation` lacks of `source`: each term of `terms` (pairs as `pairs` gives them) the source holds and the
 /// translation does not hold the counterpart of, then each number of the source it does not have.
 pub fn check(source: &str, translation: &str, terms: &[(String, String)]) -> Vec<Lack> {
-    let mut lacks = vec![];
-    if translation.trim().is_empty() { return lacks }
-    for (term, wanted) in terms {
-        if occurs(source, term) && !occurs(translation, wanted) && !lacks.iter().any(|lack| matches!(lack, Lack::Term { wanted: w, .. } if w == wanted)) { lacks.push(Lack::Term { source: term.clone(), wanted: wanted.clone() }) }
-    }
+    if translation.trim().is_empty() { return vec![] }
+    let mut lacks: Vec<Lack> = unused(source, translation, terms).into_iter().map(|(term, wanted)| Lack::Term { source: term.clone(), wanted: wanted.clone() }).collect();
     let (source, translation) = (without_citations(source), without_citations(translation));
     let had: Vec<String> = numbers(&translation, true).into_iter().chain(numbers(&translation, false)).map(|(_, value, _)| value).collect();
     for (written, value, signed) in numbers(&source, false) {
@@ -470,6 +484,20 @@ mod tests {
         assert_eq!(check("CO2 和 AtSHR1 [@Li2019 p.12]", "CO₂ and AtSHR1", &[]), vec![]);
         assert_eq!(check("第 12 页", "", &[]), vec![]);
         assert_eq!(check("１２ 株", "12 plants", &[]), vec![]);
+    }
+
+    #[test]
+    fn a_translation_may_leave_out_a_term() {
+        let terms = pairs(&[Term { id: 1, zh: "底层基因".into(), other: "foundational gene".into(), language: "en".into() }], "zh", "en");
+        let source = "我们整理出一份底层基因列表。";
+        assert!(lacks_term(source, "We compiled an underlying gene list.", &terms));
+        // Its plural and a capital at the head of a sentence are the term.
+        assert!(!lacks_term(source, "We compiled a list of foundational genes.", &terms));
+        assert!(!lacks_term(source, "Foundational gene lists were compiled.", &terms));
+        // A source without the term, a translation not yet made, no table.
+        assert!(!lacks_term("其余的基因不稳定。", "The other genes are unstable.", &terms));
+        assert!(!lacks_term(source, "", &terms));
+        assert!(!lacks_term(source, "We compiled an underlying gene list.", &[]));
     }
 
     #[test]

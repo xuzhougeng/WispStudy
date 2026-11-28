@@ -220,7 +220,7 @@ impl Workspace {
                     }
                 },
                 // 翻译 (write_translate.rs): `wtranslate:<code>` works on the version in that language, made when there is none;
-                // by a unit's place among the manuscript's units from 0 (the title, each section's name and blocks): `edit;<n>`, `redo;<n>`,
+                // by a unit's place among the manuscript's units from 0 (the title, each section's name and blocks): `edit;<n>`, `redo;<n>` (`redoall`: 全部重译),
                 // `carry;<n>`, `take;<n>`, `leave;<n>`, `check;<n>`, `compare;<n>` (the models compared, each a version) and `pick;<n>` (the n-th taken); `type;<text>` writes the unit edited, `done`, `next`, `retry`, `stop`,
                 // `primary`, `remove`, `alone` / `together`; `body;<section from 0>;<text>` sets a section's text (¶ between paragraphs);
                 // `dump;<file>` writes each unit's state and translation as JSON.
@@ -1022,8 +1022,8 @@ impl Workspace {
                     return;
                 }
                 "menu" => {
-                    let kind = match arg { "sort" => MenuKind::Sort, "columns" => MenuKind::Columns, "year" => MenuKind::Filter(FilterKey::Year), "impact" => MenuKind::Filter(FilterKey::Impact), "zones" => MenuKind::Filter(FilterKey::Zone), "zoom" => MenuKind::PdfZoom, "pdfsplit" => MenuKind::PdfSplit, "pdfmore" => MenuKind::PdfMore, "panes" => MenuKind::Panes, "layout" => MenuKind::Layout, "pdffiles" => MenuKind::PdfFiles, "fulltext" => MenuKind::Filter(FilterKey::Fulltext), "source" => MenuKind::Filter(FilterKey::Source), "manuscripts" => MenuKind::Manuscripts, "export" => MenuKind::ManuscriptExport, "retry" => MenuKind::ExtractRetry, "record" => MenuKind::ScreenRecord, "podcasts" => MenuKind::Podcasts, "speed" => MenuKind::PlaySpeed, "facinglang" => MenuKind::WriteFacingLanguage, "translatelang" => MenuKind::TranslateLanguage, _ => MenuKind::Add };
-                    self.open_menu(kind, point(px(if matches!(arg, "zoom" | "manuscripts" | "export" | "retry") { 900. } else if matches!(arg, "facinglang" | "translatelang") { 600. } else { 20. }), px(120.)), cx);
+                    let kind = match arg { "sort" => MenuKind::Sort, "columns" => MenuKind::Columns, "year" => MenuKind::Filter(FilterKey::Year), "impact" => MenuKind::Filter(FilterKey::Impact), "zones" => MenuKind::Filter(FilterKey::Zone), "zoom" => MenuKind::PdfZoom, "pdfsplit" => MenuKind::PdfSplit, "pdfmore" => MenuKind::PdfMore, "panes" => MenuKind::Panes, "layout" => MenuKind::Layout, "pdffiles" => MenuKind::PdfFiles, "fulltext" => MenuKind::Filter(FilterKey::Fulltext), "source" => MenuKind::Filter(FilterKey::Source), "manuscripts" => MenuKind::Manuscripts, "export" => MenuKind::ManuscriptExport, "retry" => MenuKind::ExtractRetry, "record" => MenuKind::ScreenRecord, "podcasts" => MenuKind::Podcasts, "speed" => MenuKind::PlaySpeed, "facinglang" => MenuKind::WriteFacingLanguage, "translatelang" => MenuKind::TranslateLanguage, "translatemore" => MenuKind::TranslateMore, _ => MenuKind::Add };
+                    self.open_menu(kind, point(px(if matches!(arg, "zoom" | "manuscripts" | "export" | "retry") { 900. } else if matches!(arg, "facinglang" | "translatelang") { 600. } else if arg == "translatemore" { 760. } else { 20. }), px(120.)), cx);
                     return;
                 }
                 "search" => {
