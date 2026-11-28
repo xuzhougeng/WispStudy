@@ -1010,9 +1010,11 @@ impl Workspace {
 
     /// Run a turn's tools off the main thread, then hand the results to
     /// the model with the next step. Calls that only read run side by
-    /// side; a turn that changes the library runs in the order it was
-    /// given. Without the person's consent (`allowed`) the calls that asked
-    /// for it are answered with a refusal and the others still run.
+    /// side; a turn that changes the library, or writes through a
+    /// connector, runs in the order it was given (`in_order`), and only
+    /// a change to the library has it read again. Without the person's
+    /// consent (`allowed`) the calls that asked for it are answered with
+    /// a refusal and the others still run.
     pub(crate) fn execute_tools(&mut self, talk: Talk, calls: Vec<PreparedCall>, first: usize, allowed: bool, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
         let info = lib.info.clone();
@@ -1033,7 +1035,7 @@ impl Workspace {
         let offer = calls.iter().filter(|call| call.name == OFFER).filter_map(|call| call.args.as_ref().ok().and_then(|args| wisp_core::offer::parse(args).ok())).next_back();
         let library = info.id.clone();
         let executor = cx.background_executor().clone();
-        let tasks: Vec<gpui::Task<Vec<(String, String, bool, String)>>> = if wrote || calls.len() == 1 {
+        let tasks: Vec<gpui::Task<Vec<(String, String, bool, String)>>> = if in_order(&calls, allowed) {
             vec![executor.spawn(async move { calls.into_iter().map(|call| run_tool(&root, &info, &sources, call, allowed)).collect() })]
         } else {
             calls
@@ -1376,6 +1378,15 @@ impl Workspace {
     }
 }
 
+/// Whether a turn's calls run one after another in the order the model gave them, not side by side: when there is
+/// one, or when one of them changes something and will run. That is a tool that writes the library, or a connector's
+/// that is not read-only: those are asked about (`outside_call`), so one runs once allowed and, refused, runs nothing.
+/// Two calls that add to the same page land as they were asked for.
+fn in_order(calls: &[PreparedCall], allowed: bool) -> bool {
+    let changes = |call: &PreparedCall| call.writes || (call.confirm && matches!(call.outside, Some(crate::custom::Outside::Connector(..))));
+    calls.len() == 1 || calls.iter().any(|call| changes(call) && (allowed || !call.confirm))
+}
+
 /// Run one tool call for the assistant on a connection of its own (the
 /// window's stays free while a PDF's text is extracted): the call's id,
 /// what the model reads, whether it failed, and the line for the window.
@@ -1418,5 +1429,62 @@ fn run_tool(root: &std::path::Path, info: &LibraryInfo, sources: &std::sync::Mut
     match result {
         Ok(value) => (call.id, tools::output_text(&value), false, shown),
         Err(err) => (call.id, err, true, shown),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // Not `super::*`: that would bring in gpui's own `test` attribute.
+    use super::in_order;
+    use crate::chat_state::PreparedCall;
+    use crate::custom::Outside;
+    use serde_json::Value;
+    use wisp_core::connector::Connector;
+
+    fn call(writes: bool, confirm: bool, outside: Option<Outside>) -> PreparedCall {
+        PreparedCall { id: String::new(), name: String::new(), args: Ok(Value::Null), writes, confirm, line: String::new(), details: vec![], outside }
+    }
+
+    // As `outside_call` makes them: a connector's tool that is not read-only is asked about, a read-only one and a skill are not.
+    fn connector(read_only: bool) -> PreparedCall {
+        call(false, !read_only, Some(Outside::Connector(Connector::default(), "pages.create".into())))
+    }
+
+    fn skill() -> PreparedCall {
+        call(false, false, Some(Outside::Said(Ok("说明".into()))))
+    }
+
+    #[test]
+    fn a_turn_that_writes_through_a_connector_runs_in_order() {
+        // Allowed now, or 始终允许 earlier in the conversation: both come as `allowed`.
+        assert!(in_order(&[connector(false), connector(false)], true));
+        assert!(in_order(&[connector(true), connector(false), skill()], true));
+        // Refused, they run nothing: the reads beside them go side by side.
+        assert!(!in_order(&[connector(false), connector(false)], false));
+        assert!(!in_order(&[connector(true), connector(false)], false));
+    }
+
+    #[test]
+    fn reads_run_side_by_side() {
+        assert!(!in_order(&[connector(true), connector(true)], true));
+        assert!(!in_order(&[connector(true), skill()], true));
+        assert!(!in_order(&[call(false, false, None), call(false, false, None)], true));
+        // One call has no one to run beside.
+        assert!(in_order(&[connector(true)], true));
+    }
+
+    #[test]
+    fn a_connector_write_that_cannot_run_as_written_is_no_write() {
+        // Arguments that did not parse: not asked about (`outside_call`), and the call fails by itself.
+        let broken = PreparedCall { args: Err("参数不是 JSON".into()), ..call(false, false, Some(Outside::Connector(Connector::default(), "pages.create".into()))) };
+        assert!(!in_order(&[broken, connector(true)], true));
+    }
+
+    #[test]
+    fn a_turn_that_writes_the_library_runs_in_order_as_before() {
+        // A write that is not asked about runs whatever the answer; one that is asked about, only once allowed.
+        assert!(in_order(&[call(true, false, None), call(false, false, None)], false));
+        assert!(in_order(&[call(true, true, None), call(false, false, None)], true));
+        assert!(!in_order(&[call(true, true, None), call(false, false, None)], false));
     }
 }
