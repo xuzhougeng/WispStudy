@@ -38,11 +38,11 @@
   <header class="doc-head">
     <p class="kicker">Tutorial 18 · Follow up</p>
     <h1>Several topics at once: work in the background, ask across libraries</h1>
-    <p class="lead">You have more than one topic on the go: plant single-cell transcriptomics and root hair development, each with a library of its own. In this tutorial one library's assistant screens its papers in the background while you work in the other, and it is done when you come back. Then, on the home page, you ask the assistant a question that spans both libraries: it looks in both, every source of its answer says which library it comes from, and a click takes you to that paper in that library.</p>
+    <p class="lead">You have more than one topic on the go: plant single-cell transcriptomics and root hair development, each with a library of its own. In this tutorial one library's assistant screens its papers in the background while you work in the other, and it is done when you come back. Then, on the home page, you ask the assistant a question that spans both libraries: it looks in both, every source of its answer says which library it comes from, and a click takes you to that paper in that library. Last, you copy a paper both topics can use into the other library, and choose between appending and overwriting where that library already has the same paper.</p>
     <dl class="facts">
-      <div><dt>Scenario</dt><dd>“<span lang="zh-CN">植物单细胞转录组</span>” (plant single-cell transcriptomics) has 40 papers waiting to be screened, “<span lang="zh-CN">根毛发育</span>” (root hair development) 30 papers just brought in from PubMed; do the two meet anywhere on root hairs?</dd></div>
+      <div><dt>Scenario</dt><dd>“<span lang="zh-CN">植物单细胞转录组</span>” (plant single-cell transcriptomics) has 40 papers waiting to be screened, “<span lang="zh-CN">根毛发育</span>” (root hair development) 30 papers just brought in from PubMed; do the two meet anywhere on root hairs? A root atlas on the single-cell side would serve the root hair side too.</dd></div>
       <div><dt>Needs</dt><dd>Two libraries, and a model provider set up in “Settings › AI”.</dd></div>
-      <div><dt>Time</dt><dd>About 10 minutes, of which screening 40 papers took a little over a minute in the background.</dd></div>
+      <div><dt>Time</dt><dd>About 15 minutes, of which screening 40 papers took a little over a minute in the background.</dd></div>
     </dl>
   </header>
 
@@ -56,6 +56,8 @@
         <li><a href="#s4">Done: a line at the top of the window</a></li>
         <li><a href="#s5">Back home, ask both libraries</a></li>
         <li><a href="#s6">Sources that name their library</a></li>
+        <li><a href="#s7">One paper for both: copy it over</a></li>
+        <li><a href="#s8">Already there: append or overwrite</a></li>
         <li class="plain"><a href="#recap">Recap</a></li>
       </ol>
     </nav>
@@ -139,6 +141,51 @@
         <aside class="note warn"><b>Note</b>In a conversation of the home page, the other libraries are read-only: the assistant can list papers, search and read full texts and read marks, but not add tags, change a status or import papers; open that library to change it. The “Assistant” inside a library still keeps to that library.</aside>
       </section>
 
+      <section id="s7">
+        <h2><i>7</i>One paper for both: copy it over</h2>
+        <p>The answer in the last section said that “<span lang="zh-CN">根毛发育</span>” holds no single-cell study. That gap can be filled from the other library. “<span lang="zh-CN">植物单细胞转录组</span>” has a single-nucleus atlas of Tartary buckwheat roots (Hou et al., 2025, International journal of biological macromolecules), whose abstract says it maps the developmental trajectories of root hair and cortex cells. The single-cell topic still needs it, so it should not be moved; copy it, and both topics have it.</p>
+        <p>In “<span lang="zh-CN">植物单细胞转录组</span>”, type buckwheat into the search box above the list, and this paper is the only one left. Right-click it: in the last group of the menu, under “Move to library…”, is “Copy to library…” (it is also under the “⋯” at the end of the row of buttons on the details' “Info” tab).</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/libraries-08-copy-menu.jpg" width="1372" height="867" loading="lazy" alt="The library <span lang="zh-CN">植物单细胞转录组</span> with buckwheat in the search box; the list holds only Single - nucleus transcriptomics uncovers the spatiotemporal development of roots…, and its Info tab is open at the right. A context menu over its row: View information, Ask about paper; Favorites, Mark as Unread, Mark as Skimmed, Mark as Read closely; Edit title, information and fields…, Look up by DOI…, Add PDF or attachment…, Find open full text; Copy title, Copy DOI, Copy BibTeX, Open web page; and a last group of Move to library…, Copy to library… (under the pointer) and Move to trash.">
+          <figcaption><b>Figure 8.</b> A paper's context menu: “Copy to library…” comes under “Move to library…”.</figcaption>
+        </figure>
+
+        <p>The dialog is titled “Copy to library”. Under the paper's title are the libraries it can be copied to, here only “<span lang="zh-CN">根毛发育</span>” (30 papers), and a line saying that its PDFs, annotations, reading position and conversations about it are copied over, where its screening starts as pending, and that the paper here stays as it is. Click “Copy”.</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/libraries-09-copy-dialog.jpg" width="1372" height="867" loading="lazy" alt="The Copy to library dialog: the buckwheat paper's full title; a line saying its PDFs, annotations, reading position and conversations about it are copied over, where its screening starts as pending, and the paper here stays as it is; the row <span lang="zh-CN">根毛发育</span>, 30 papers, chosen; the buttons Cancel and Copy.">
+          <figcaption><b>Figure 9.</b> “Copy to library”: the paper here stays as it is, and the other library gets a copy.</figcaption>
+        </figure>
+
+        <p>The window does not move: it stays in “<span lang="zh-CN">植物单细胞转录组</span>”, the paper is still in the list, and the library still holds 40 papers. The top of the window says “Copied to “<span lang="zh-CN">根毛发育</span>”.”, with “Open” beside it to go and look. “<span lang="zh-CN">根毛发育</span>” now holds 31 papers, and the newcomer's screening is “Pending”: whether it belongs is judged again, for the root hair topic.</p>
+        <aside class="note"><b>Tip</b>After copying, the two are separate: an annotation added or a note changed on one side does not reach the other. When a paper belongs only to the new topic and the old library has no use for it, use “Move to library…”: the paper goes over with its PDFs and annotations, and the original stays in this library's trash. Since v0.22.0 the window stays where it is after a move too, so you can move the next paper right away.</aside>
+      </section>
+
+      <section id="s8">
+        <h2><i>8</i>Already there: append or overwrite</h2>
+        <p>Next you come across another paper about root hair cells: a multi-organ single-cell atlas of oak (Hui et al., 2026, PLoS genetics), in which QrIAA14 is enriched in root hair cells, the cells next to them and the root cap. Tag it and the buckwheat paper “<span lang="zh-CN">根毛</span>” (root hair), click that tag in the sidebar, and the list shows these two. Click the first, hold <kbd>⌘</kbd> (<kbd>Ctrl</kbd> on Windows) and click the second to select both; right-click, and the last group of the menu reads “Copy 2 papers to library…”.</p>
+        <p>Click it and choose “<span lang="zh-CN">根毛发育</span>”: a line in a warning colour appears in the dialog, saying that “<span lang="zh-CN">根毛发育</span>” already has 2 of them, with their titles. The buckwheat paper is the one copied in the last section; the oak paper was also fetched by “<span lang="zh-CN">根毛发育</span>”'s own search, so each library has a record of it. Two lines below say what each way does, and the buttons become “Cancel”, “Append” and “Overwrite”:</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/libraries-10-held.jpg" width="1372" height="867" loading="lazy" alt="The list of <span lang="zh-CN">植物单细胞转录组</span> narrowed to the tag <span lang="zh-CN">根毛</span>: two papers, both selected. The Copy to library dialog: “Multi-organ single-cell transcript…” (2 papers in all); a line saying their PDFs, annotations, reading positions and conversations are copied over, where their screening starts as pending, and the papers here stay as they are; the row <span lang="zh-CN">根毛发育</span>, 31 papers, chosen; a line in a warning colour saying <span lang="zh-CN">根毛发育</span> already has 2 of them, with their titles; two lines explaining Append and Overwrite; the buttons Cancel, Append and Overwrite, Overwrite being the main one.">
+          <figcaption><b>Figure 10.</b> The other library already has 2 of them: the dialog asks first whether to append or overwrite.</figcaption>
+        </figure>
+
+        <ul>
+          <li><strong>Append</strong>: everything already there stays; the tags, notes, PDFs and annotations from here are added, and empty details filled in.</li>
+          <li><strong>Overwrite</strong>: wherever both have something, this side wins, including the title and other details, notes, tags, reading state and annotations; what only that side has stays, and its screening is unchanged.</li>
+        </ul>
+        <p>Neither adds a paper to “<span lang="zh-CN">根毛发育</span>”. Here only the tag should go over, and nothing of the records there needs changing, so click “Append”. The default button is “Overwrite”, which <kbd>Enter</kbd> presses; appending takes a click. The top of the window says ““<span lang="zh-CN">根毛发育</span>” already had these 2 papers: their files and annotations were added to them.” Click “Open” beside it to go to “<span lang="zh-CN">根毛发育</span>”, and click “<span lang="zh-CN">根毛</span>” in the sidebar:</p>
+
+        <figure class="shot">
+          <img src="../../img/en/t/libraries-11-appended.jpg" width="1372" height="867" loading="lazy" alt="The library <span lang="zh-CN">根毛发育</span>, with Tags: <span lang="zh-CN">根毛</span> on the filter bar and two papers in the list: Multi-organ single-cell transcriptomic atlas identifi… (Hui, Wenkai et al. · PLoS genetics · #<span lang="zh-CN">根毛</span>) and Single - nucleus transcriptomics uncovers the spa… (Hou, Yukang et al. · #<span lang="zh-CN">根毛</span>), both Linked and Unread; the foot says Showing 2 / 31 papers. At the right, the buckwheat paper's Info tab: Unread, Pending, Linked, and #<span lang="zh-CN">根毛</span> under Tags.">
+          <figcaption><b>Figure 11.</b> After appending, both papers in “<span lang="zh-CN">根毛发育</span>” carry the tag, and their screening is still that library's own “Pending”.</figcaption>
+        </figure>
+
+        <p>The library still holds 31 papers; nothing was added. From here each library judges for itself whether to include them: a paper included for the single-cell topic may be left out for the root hair one.</p>
+      </section>
+
       <section id="recap" class="recap">
         <h2>Recap</h2>
         <ul>
@@ -146,6 +193,8 @@
           <li>The home page's card and the bottom of another library's sidebar say how far it is, and a click goes back; when it is done, the top of the window says so.</li>
           <li>A question across libraries is asked on the home page: click “Ask my libraries”, or just say “look in my libraries for …”.</li>
           <li>The source cards of the answer name each paper's library, and a click opens that paper there; the other libraries are read-only in that conversation.</li>
+          <li>A paper both topics can use: right-click, “Copy to library…”. The original stays as it is, the other library gets a copy whose screening starts at “Pending”, and from then on each side changes its own.</li>
+          <li>Where the other library already has the same paper, the dialog asks first: “Append” keeps what is there and adds what is here, “Overwrite” lets this side win wherever both have something; neither adds a paper.</li>
           <li>Next: write the screening suggestions in, see “Confirm the screening decisions” in <a href="start.html#s6">Start from a topic</a>.</li>
         </ul>
       </section>
@@ -170,7 +219,7 @@
       </ol>
     </div>
     <div class="colophon">
-      <p><b>About this tutorial.</b> The screenshots come from one real run in November 2026 on macOS with v0.19.0, with the English interface; the Chinese page shows a run of its own with the Chinese interface, whose numbers differ. Screening used GPT-6.1 Sol and the question Claude Sonnet 5.5, both through a local gateway; the 30 root hair papers were fetched from PubMed that day. A model judges and answers differently each time, so numbers and wording will differ when you follow along; the steps are the same.</p>
+      <p><b>About this tutorial.</b> The screenshots come from one real run in November 2026 on macOS with v0.19.0, with the English interface; the Chinese page shows a run of its own with the Chinese interface, whose numbers differ. Screening used GPT-6.1 Sol and the question Claude Sonnet 5.5, both through a local gateway; the 30 root hair papers were fetched from PubMed that day. Sections 7 and 8 come from another run, on November 28, 2026 with v0.22.0 and the English interface: both libraries were fetched anew from PubMed, 40 single-cell studies of plant roots and 30 root hair studies, so the lists differ from the earlier sections; no model was used in them. A model judges and answers differently each time, so numbers and wording will differ when you follow along; the steps are the same.</p>
       <p><b>The assistant can be wrong.</b> Its suggestions and answers need your confirmation; check key numbers and conclusions against the original.</p>
     </div>
   </div>
