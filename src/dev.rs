@@ -206,6 +206,17 @@ impl Workspace {
                 // for what failed, `wfacing:interleave` / `wfacing:beside` puts each translation under its paragraph / beside it,
                 // `wfacing:<code>` chooses the language (a code of `manuscript::LANGUAGES`).
                 "wfacing" => Some(match arg { "" => Cmd::WriteFacing(true), "off" => Cmd::WriteFacing(false), "retry" => Cmd::WriteFacingRetry, "interleave" => Cmd::WriteFacingInterleave(true), "beside" => Cmd::WriteFacingInterleave(false), code => Cmd::WriteFacingLanguage(code.to_string()) }),
+                // 写作's search (write_seek.rs): `wseek:<words>` opens the bar over the manuscript with the words typed (an ASCII comma
+                // or colon ends them); `wseek:next` / `wseek:prev` go to the next or previous place, `wseek:close` puts the bar away.
+                "wseek" => match arg {
+                    "next" => Some(Cmd::Seek(crate::write_seek::Do::Step(true))),
+                    "prev" => Some(Cmd::Seek(crate::write_seek::Do::Step(false))),
+                    "close" => Some(Cmd::Seek(crate::write_seek::Do::Close)),
+                    words => {
+                        self.dev_seek(words, window, cx);
+                        return;
+                    }
+                },
                 // 翻译 (write_translate.rs): `wtranslate:<code>` works on the version in that language, made when there is none;
                 // by a unit's place among the manuscript's units from 0 (the title, each section's name and blocks): `edit;<n>`, `redo;<n>`,
                 // `carry;<n>`, `take;<n>`, `leave;<n>`, `check;<n>`, `compare;<n>` (the models compared, each a version) and `pick;<n>` (the n-th taken); `type;<text>` writes the unit edited, `done`, `next`, `retry`, `stop`,
