@@ -12,6 +12,7 @@ use crate::ui;
 use gpui::{prelude::FluentBuilder, *};
 use wisp_core::manuscript::{self, LANGUAGES, Manuscript, Section};
 use wisp_core::structure::SECTIONS;
+use std::ops::Range;
 
 /// What a manuscript is exported as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -352,12 +353,18 @@ impl Workspace {
         self.write_show(id, section, cx);
     }
 
-    /// Typing in a section: keep the text now, and a snapshot once typing pauses.
+    /// Typing in a section: keep the text now, and a snapshot once typing pauses. A heading finished as it is typed
+    /// is a section from there (`write_headings`).
     pub(crate) fn write_typed(&mut self, text: String, cx: &mut Context<Self>) {
+        // Writing on, the person keeps the sections the headings made: 撤销 would put back the text before what is typed now.
+        if matches!(self.toast.as_ref().and_then(|toast| toast.action.as_ref()), Some((_, Cmd::Unsplit(_)))) { self.toast = None }
         let Some(lib) = self.lib.as_mut() else { return };
         let section = lib.writing.section_id.clone();
         if section.is_empty() { return }
         if let Err(err) = lib.store.save_section_body(&section, &text) { return self.fail(tf!("草稿没有保存：{err:#}", "Draft not saved: {err:#}"), cx) }
+        // A line break put in after `## …`, by Enter or a paste.
+        let put = lib.writing.editor.read(cx).put().filter(|put| text.get(put.clone()).is_some_and(|put| put.contains('\n')));
+        if let Some(put) = put.filter(|put| !manuscript::finished_headings(&text, put.clone()).is_empty()) { return self.write_headings(&section, put, cx) }
         if let Some(kept) = lib.writing.section_mut() { kept.body = text }
         lib.writing.typed += 1;
         let (typed, library) = (lib.writing.typed, lib.info.id.clone());
@@ -370,6 +377,30 @@ impl Workspace {
             .ok();
         })
         .detach();
+    }
+
+    /// Headings finished in the section being written, its text already kept (`Store::split_at_headings`): `#` is a
+    /// section, `##` a subsection, `###` a part of one, each with the text after it. The caret goes on where it was,
+    /// now in the last section made, and the toast says what became of the heading with the way back (design rule 40).
+    fn write_headings(&mut self, section: &str, put: Range<usize>, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        let typed = match lib.store.split_at_headings(section, put) {
+            Ok(Some(typed)) => typed,
+            Ok(None) => return,
+            Err(err) => return self.fail(format!("{err:#}"), cx),
+        };
+        lib.writing.search.asked = None;
+        self.write_reload(Some(typed.section.id.clone()), cx);
+        let Some(lib) = self.lib.as_ref() else { return };
+        lib.writing.editor.update(cx, |editor, cx| editor.select_range(typed.caret..typed.caret, cx));
+        let number = lib.writing.current().and_then(|m| m.sections.iter().position(|s| s.id == typed.section.id).map(|at| manuscript::numbers(&m.sections)[at].clone())).unwrap_or_default();
+        let (made, name) = (typed.back.made.len(), typed.section.name.clone());
+        let said = match made {
+            0 => tf!("这一节的名称成了「{name}」", "This section is named “{name}” now"),
+            1 => tf!("「{name}」成了第 {number} 节", "“{name}” is section {number} now"),
+            _ => tf!("{made} 个标题成了新的节，写到了第 {number} 节「{name}」", "{made} headings are sections now; writing on in {number} “{name}”"),
+        };
+        self.say_undoable(said, Cmd::Unsplit(typed.back), cx);
     }
 
     pub(crate) fn write_title_typed(&mut self, title: String, cx: &mut Context<Self>) {
@@ -510,6 +541,17 @@ impl Workspace {
                         self.write_reload(Some(made.id.clone()), cx);
                         // A section cut off without a heading is given its name by the person.
                         if cut != manuscript::Cut::Paragraph { if let Some(lib) = self.lib.as_ref() { lib.writing.editor.read(cx).focus(window) } } else { return self.run_manuscript(Cmd::EditSection(Some(made.id)), window, cx) }
+                    }
+                    Err(err) => self.fail(format!("{err:#}"), cx),
+                }
+            }
+            Cmd::Unsplit(back) => {
+                let Some(lib) = self.lib.as_mut() else { return };
+                match lib.store.unsplit(&back) {
+                    Ok(was) => {
+                        lib.writing.search.asked = None;
+                        self.write_reload(Some(was.id), cx);
+                        if let Some(lib) = self.lib.as_ref() { lib.writing.editor.update(cx, |editor, cx| editor.select_range(back.caret..back.caret, cx)) }
                     }
                     Err(err) => self.fail(format!("{err:#}"), cx),
                 }
@@ -1189,20 +1231,27 @@ impl Workspace {
         if block.len() < 2 { return None }
         // The open section is the page's first level: its subsections are drawn a level under it.
         let top = manuscript.sections[at].level;
+        // Centred by a row that the editor's column stretches, as 预览 is. A width in percent does not reach this
+        // far down the column: with `w_full().mx_auto()` the block was as wide as its longest line and stood in the
+        // middle, so under 铺满 the subsections began right of the section's own text and had a short rule.
         Some(
             div()
                 .flex()
-                .flex_col()
-                .gap(px(14.))
-                .w_full()
-                .max_w(theme::manuscript_width())
-                .mx_auto()
-                .px(px(18.))
-                .pt(px(14.))
-                .pb(px(24.))
-                .border_t_1()
-                .border_color(Theme::line())
-                .children((block.start + 1..block.end).map(|n| self.render_section_read(n, top, true, window, cx)))
+                .justify_center()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(14.))
+                        .w_full()
+                        .max_w(theme::manuscript_width())
+                        .px(px(18.))
+                        .pt(px(14.))
+                        .pb(px(24.))
+                        .border_t_1()
+                        .border_color(Theme::line())
+                        .children((block.start + 1..block.end).map(|n| self.render_section_read(n, top, true, window, cx))),
+                )
                 .into_any_element(),
         )
     }

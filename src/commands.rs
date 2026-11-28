@@ -660,6 +660,8 @@ pub enum Cmd {
     SplitSection(wisp_core::manuscript::Cut),
     /// Put a section back into the one before it.
     MergeSection(String),
+    /// Headings typed in a section made sections: take it back, the text as it was typed (the toast's 撤销).
+    Unsplit(wisp_core::manuscript::Unsplit),
     /// The whole manuscript to read (true), or one section to write.
     WriteReading(bool),
     /// 译文对照: what is on show read with each paragraph's translation beside it (true): the section being written, or
@@ -1256,7 +1258,7 @@ impl Workspace {
                 }
                 if page == Page::Screen { self.round_arrived(window, cx) }
             }
-            Cmd::WriteSection(_) | Cmd::PickSection(_) | Cmd::WriteManuscript(_) | Cmd::NewManuscript | Cmd::AskRemoveManuscript(_) | Cmd::RemoveManuscript(_) | Cmd::WriteLanguage(_) | Cmd::EditSection(_) | Cmd::AddSubsection(_) | Cmd::PickSectionKind(_) | Cmd::MoveSection(..) | Cmd::IndentSection(..) | Cmd::AskRemoveSection(_) | Cmd::RemoveSection(_) | Cmd::SplitSection(_) | Cmd::MergeSection(_) | Cmd::WriteReading(_) | Cmd::LeaveWrite | Cmd::ExportManuscript(_) | Cmd::WriteHistory | Cmd::HistoryPick(_) => self.run_manuscript(cmd, window, cx),
+            Cmd::WriteSection(_) | Cmd::PickSection(_) | Cmd::WriteManuscript(_) | Cmd::NewManuscript | Cmd::AskRemoveManuscript(_) | Cmd::RemoveManuscript(_) | Cmd::WriteLanguage(_) | Cmd::EditSection(_) | Cmd::AddSubsection(_) | Cmd::PickSectionKind(_) | Cmd::MoveSection(..) | Cmd::IndentSection(..) | Cmd::AskRemoveSection(_) | Cmd::RemoveSection(_) | Cmd::SplitSection(_) | Cmd::MergeSection(_) | Cmd::Unsplit(_) | Cmd::WriteReading(_) | Cmd::LeaveWrite | Cmd::ExportManuscript(_) | Cmd::WriteHistory | Cmd::HistoryPick(_) => self.run_manuscript(cmd, window, cx),
             Cmd::FigureTag(_) | Cmd::OpenFigure(_) | Cmd::FigureSource(_) | Cmd::AskFigure(_) | Cmd::CopyFigure(_) | Cmd::SaveFigure(_) | Cmd::AskRemoveFigure(_) | Cmd::RemoveFigure(_) | Cmd::FigureAddTag(_) | Cmd::FigureInfer(_) | Cmd::DrawFigure | Cmd::FigureDraw | Cmd::FigureShape(_) => self.run_figures(cmd, window, cx),
             Cmd::WriteCiteFrom(id, from) => {
                 self.cite_paper(&id, Some(from), cx);
