@@ -502,7 +502,7 @@ mod tests {
         store.remove_passage(&again[0].id).unwrap();
         assert_eq!(store.passages(&manuscript.id).unwrap().len(), 1);
         // A section merged into the one before takes its passages along; a paper in the trash shows none, and gets them back.
-        let merged = store.merge_section(&second).unwrap();
+        let merged = store.merge_section(&second).unwrap().section;
         assert_eq!(store.passages(&manuscript.id).unwrap().iter().map(|p| p.section_id == merged.id).collect::<Vec<_>>(), [true]);
         store.trash_paper(&a.id).unwrap();
         assert!(store.passages(&manuscript.id).unwrap().is_empty());

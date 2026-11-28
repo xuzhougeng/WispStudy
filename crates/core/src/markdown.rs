@@ -170,7 +170,8 @@ fn rule(line: &str) -> bool {
     marks.len() >= 3 && matches!(marks[0], '-' | '*' | '_') && marks.iter().all(|c| *c == marks[0])
 }
 
-fn fence(line: &str) -> Option<(char, usize, &str)> {
+/// A fence of code: its character, how many of it, and what follows them.
+pub(crate) fn fence(line: &str) -> Option<(char, usize, &str)> {
     let t = line.trim_start();
     let c = t.chars().next().filter(|c| matches!(c, '`' | '~'))?;
     let n = t.chars().take_while(|&x| x == c).count();

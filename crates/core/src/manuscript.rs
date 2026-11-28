@@ -205,19 +205,126 @@ pub fn sibling(sections: &[Section], at: usize, after: bool) -> Option<usize> {
     }
 }
 
-/// Each section's number in the outline: 3, then 3.1 and 3.2 for the subsections of the third section.
+/// Each section's number in the outline: 3, then 3.1 and 3.2 for the subsections of the third section. The
+/// headings written in a section's text are numbered with them (`contents`): after `## Plant material` in the
+/// text of 方法 (3.1), its first subsection is 3.2.
 pub fn numbers(sections: &[Section]) -> Vec<String> {
-    let mut counts = [0usize; MOST_LEVELS as usize];
-    sections
-        .iter()
-        .map(|section| {
-            let depth = section.level.clamp(1, MOST_LEVELS) as usize;
-            counts[depth - 1] += 1;
-            counts[depth..].iter_mut().for_each(|count| *count = 0);
-            // A level the outline skipped counts as the first of it, as Word numbers headings.
-            counts[..depth].iter().map(|count| (*count).max(1).to_string()).collect::<Vec<_>>().join(".")
-        })
-        .collect()
+    contents(sections).into_iter().filter(|entry| entry.head.is_none()).map(|entry| entry.number).collect()
+}
+
+/// A heading written in a section's text (`heads`): the outline lists it under the section, and a click on it
+/// goes to its line.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Head {
+    /// Its line, in bytes of the section's text.
+    pub line: Range<usize>,
+    /// How many levels under its section it stands (`heading_down`).
+    pub down: u8,
+    /// Its words, without the Markdown.
+    pub name: String,
+}
+
+/// How many levels under its section a heading written in the section's text stands: the section's own name is
+/// the `#`, so `##` is one under it and `###` two. A `#` is one under too: nothing in a section's text is the
+/// section itself. The outline, 预览, the exports and a Markdown file taken in all read the marks this way.
+pub fn heading_down(marks: u8) -> u8 {
+    marks.saturating_sub(1).max(1)
+}
+
+/// The headings written in a section's text, in order: lines of `#` to `######` with words, as the editor reads
+/// them (`markdown::lines`), and none in a quote or in fenced code.
+pub fn heads(body: &str) -> Vec<Head> {
+    let mut out = vec![];
+    // The fence that is open: its character and length.
+    let mut fenced: Option<(char, usize)> = None;
+    let mut start = 0;
+    for raw in body.split('\n') {
+        let line = start..start + raw.len();
+        start = line.end + 1;
+        let lead = raw.trim_start_matches([' ', '\t']);
+        if let Some((mark, n)) = fenced {
+            if markdown::fence(raw).is_some_and(|(closing, length, rest)| closing == mark && length >= n && rest.is_empty()) { fenced = None }
+            continue;
+        }
+        if let Some((mark, n, _)) = markdown::fence(raw) {
+            fenced = Some((mark, n));
+            continue;
+        }
+        let marks = lead.bytes().take_while(|&b| b == b'#').count();
+        if !(1..=6).contains(&marks) || !lead[marks..].starts_with([' ', '\t']) { continue }
+        let name = markdown::plain(raw).trim().to_string();
+        if !name.is_empty() { out.push(Head { line, down: heading_down(marks as u8), name }) }
+    }
+    out
+}
+
+/// A row of the outline as the person reads it: a section, or a heading written in its text.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Entry {
+    /// The section's place among the manuscript's sections.
+    pub at: usize,
+    /// The heading of the section's text it is; none for the section itself.
+    pub head: Option<Head>,
+    /// How deep in the outline: a section's level, a heading `Head::down` under its section's.
+    pub level: u8,
+    /// 3, 3.1, 3.1.1, …
+    pub number: String,
+}
+
+/// The outline as it is read, a table of contents: each section, then the headings of its text, numbered through as Word numbers
+/// headings. Its text comes before its subsections, so `## Plant material` in 方法 is 3.1 and the subsection
+/// after it 3.2. A heading may go deeper than a section can (`MOST_LEVELS`): `###` in 3.1 is 3.1.1.1.
+pub fn contents(sections: &[Section]) -> Vec<Entry> {
+    let mut entries = vec![];
+    for (at, section) in sections.iter().enumerate() {
+        let level = section.level.clamp(1, MOST_LEVELS);
+        entries.push(Entry { at, head: None, level, number: String::new() });
+        entries.extend(heads(&section.body).into_iter().map(|head| Entry { at, level: level + head.down, head: Some(head), number: String::new() }));
+    }
+    let mut counts: Vec<usize> = vec![];
+    for entry in &mut entries {
+        let depth = entry.level as usize;
+        // What is deeper starts again; a level the outline skipped counts as the first of it, as Word numbers headings.
+        counts.resize(depth, 0);
+        counts[depth - 1] += 1;
+        entry.number = counts.iter().map(|count| (*count).max(1).to_string()).collect::<Vec<_>>().join(".");
+    }
+    entries
+}
+
+/// A section's text with each heading written in it `by` levels deeper (`heads`, at most `######`): what it
+/// becomes in the text of a section that many levels above its own.
+pub fn deeper(body: &str, by: u8) -> String {
+    if by == 0 { return body.to_string() }
+    let mut out = body.to_string();
+    for head in heads(body).into_iter().rev() {
+        let line = &body[head.line.clone()];
+        let lead = line.len() - line.trim_start_matches([' ', '\t']).len();
+        let words = line[lead..].trim_start_matches('#');
+        out.replace_range(head.line.clone(), &format!("{}{}{words}", &line[..lead], "#".repeat((head.down + by + 1).min(6) as usize)));
+    }
+    out
+}
+
+/// What `Store::merge_section` did.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Merged {
+    /// The section merged into, as it is now.
+    pub section: Section,
+    /// What went in went in as headings, with the subsections under it (a subsection into its section).
+    pub headings: bool,
+    pub back: Unmerge,
+}
+
+/// What `Store::unmerge` puts back: the section merged into as it was, the sections that went into it and their
+/// places, whose the comments and passages were, and every section's level.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Unmerge {
+    pub into: Section,
+    pub gone: Vec<(Section, i64)>,
+    pub comments: Vec<(String, String)>,
+    pub passages: Vec<(String, String)>,
+    pub levels: Vec<(String, u8)>,
 }
 
 /// An earlier version of a section's text.
@@ -264,43 +371,6 @@ pub enum Cut {
     Heading,
     /// It names a subsection of the one cut.
     Subheading,
-    /// It names a new section at this level of the outline (1 a section, 2 a subsection, 3 a part of that), no deeper
-    /// than a subsection of the one cut: a heading typed with as many `#` (`finished_headings`).
-    Level(u8),
-}
-
-/// What `Store::unsplit` puts back after headings typed in a section were made sections: the section cut as it
-/// was and where the caret was in its text, the sections made, and the level every section of the manuscript had
-/// (a heading less deep than the one cut takes the subsections after it under itself).
-#[derive(Clone, Debug, PartialEq)]
-pub struct Unsplit {
-    pub was: Section,
-    pub caret: usize,
-    pub made: Vec<String>,
-    pub levels: Vec<(String, u8)>,
-}
-
-/// Headings typed in a section made sections (`Store::split_at_headings`): the section the caret goes on in and
-/// its byte in that section's text, and what takes it back.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Typed {
-    pub section: Section,
-    pub caret: usize,
-    pub back: Unsplit,
-}
-
-/// The headings a change to a section's text finished: lines of one to `MOST_LEVELS` `#` and a name whose line
-/// break came with what the change put in (`put`, its bytes in `text`), as Enter after `## Methods` does or a
-/// paste with such lines. A heading still being typed, one written earlier, one in a quote or in code and one
-/// too long to name a section stay lines of the text. Each line's bytes and its level, in order.
-pub fn finished_headings(text: &str, put: Range<usize>) -> Vec<(Range<usize>, u8)> {
-    markdown::lines(text)
-        .into_iter()
-        .filter(|line| (1..=MOST_LEVELS).contains(&line.heading) && line.quote == 0 && !line.code)
-        .filter(|line| put.contains(&line.range.end) && text[line.range.end..].starts_with('\n'))
-        .filter(|line| heading_name(&text[line.range.clone()]).is_ok())
-        .map(|line| (line.range, line.heading))
-        .collect()
 }
 
 /// The name a paragraph set as a heading gives a section: its words, not its Markdown (`**Methods**` or
@@ -481,7 +551,8 @@ pub(crate) fn table_rows(lines: &[markdown::Line], written: &[&str], at: usize) 
 /// A section's text as Markdown to stand under a heading of level
 /// `under`: each line a paragraph of its own, as the editor has them, the
 /// items of a list, the lines of fenced code and the rows of a table kept
-/// together, and a heading written in the section set that many levels deeper.
+/// together, and a heading written in the section as many levels deeper as
+/// it is under the section (`heading_down`: `##` one).
 pub fn section_markdown(body: &str, under: u8) -> String {
     let mut blocks: Vec<String> = vec![];
     // What the block being made is: a list, code, or neither.
@@ -533,7 +604,7 @@ pub fn section_markdown(body: &str, under: u8) -> String {
         list = false;
         let text = text.trim();
         if line.heading > 0 && line.quote == 0 {
-            let level = (line.heading + under).min(6) as usize;
+            let level = (heading_down(line.heading) + under).min(6) as usize;
             blocks.push(format!("{} {}", "#".repeat(level), text.trim_start_matches('#').trim_start()));
         } else {
             blocks.push(text.to_string());
@@ -569,7 +640,7 @@ pub fn plain_text(manuscript: &Manuscript) -> String {
 
 /// A line of a section as a paragraph of a Word file: a heading written in
 /// the section as a heading as many levels under the section's (of `level`)
-/// as it has marks, the words with their bold, italic, strike-through and
+/// as `heading_down` reads in its marks, the words with their bold, italic, strike-through and
 /// code. Empty for a line that says nothing (blank, a fence, a rule).
 fn word_paragraph(body: &str, line: &markdown::Line, level: u8) -> String {
     let mut runs = String::new();
@@ -591,7 +662,7 @@ fn word_paragraph(body: &str, line: &markdown::Line, level: u8) -> String {
     }
     if runs.trim().is_empty() || body[line.range.clone()].trim().is_empty() { return String::new() }
     let style = match (line.heading, line.quote, line.code) {
-        (1.., 0, _) => format!("Heading{}", (line.heading + level).min(6)),
+        (1.., 0, _) => format!("Heading{}", (heading_down(line.heading) + level).min(6)),
         (_, 1.., _) => "Quote".into(),
         (_, _, true) => "Code".into(),
         _ => String::new(),
@@ -888,7 +959,7 @@ fn title_of(lines: &[Line]) -> Option<usize> {
 /// sections, the headings one and two levels under them subsections
 /// (`MOST_LEVELS`), each of the kind its name says or else of the section
 /// it is under; a heading deeper still stays in the text, a Markdown one
-/// with as many marks as it is levels under its section. With `by_name`,
+/// with a mark more than it is levels under its section (`heading_down`). With `by_name`,
 /// a file without headings is cut at the names every paper has.
 fn outline(mut lines: Vec<Line>, file_name: &str, by_name: bool) -> (Draft, Vec<Option<usize>>) {
     // A file without heading styles: the headings every paper has are told by their names.
@@ -931,9 +1002,9 @@ fn outline(mut lines: Vec<Line>, file_name: &str, by_name: bool) -> (Draft, Vec<
                 draft.sections.push(DraftSection { name: name.to_string(), kind: "other".to_string(), bare: true, ..Default::default() });
             }
             if let Some(section) = draft.sections.last_mut() {
-                // A heading of a Markdown file deeper than the outline goes: its marks say how far under the section it is.
+                // A heading of a Markdown file deeper than the outline goes: its marks say how far under the section it is, the section's own name being the `#` (`heading_down`).
                 let kept = match (line.level, top) {
-                    (Some(level), Some(top)) if line.kept.starts_with('#') => format!("{} {}", "#".repeat(level.saturating_sub(top + section.level - 1).max(1) as usize), line.text),
+                    (Some(level), Some(top)) if line.kept.starts_with('#') => format!("{} {}", "#".repeat((level.saturating_sub(top + section.level - 1).max(1) + 1).min(6) as usize), line.text),
                     _ => line.kept.clone(),
                 };
                 section.paragraphs.push(kept);
@@ -1821,14 +1892,12 @@ impl Store {
     /// heading style is: written back to a Word file it stays the paragraph
     /// it was. Otherwise the paragraph opens the new section, whose name is
     /// the manuscript's own (`bare`) and goes into no file. The new section is
-    /// as deep as the one cut, a level deeper for a subheading, as deep as a
-    /// `Cut::Level` says but no deeper than a subsection of the one cut; it
-    /// comes before the subsections of the one cut, which are then under it
-    /// when it is not less deep than they are, as the text after the cut is.
-    /// The comments on what moved go with it. The section's text is kept as a
-    /// snapshot first. The new section; the heading of a `bare` section's
-    /// first paragraph names that section instead when it is as deep, which
-    /// leaves none empty behind.
+    /// as deep as the one cut, a level deeper for a subheading; it comes
+    /// before the subsections of the one cut, which are then under it when
+    /// they are deeper, as the text after the cut is. The comments on what
+    /// moved go with it. The section's text is kept as a snapshot first. The
+    /// new section; the heading of a `bare` section's first paragraph names
+    /// that section instead, which leaves none empty behind.
     pub fn split_section(&mut self, id: &str, at: Range<usize>, cut: Cut) -> Result<Section> {
         let heading = cut != Cut::Paragraph;
         let (manuscript, section) = self.section_row(id)?;
@@ -1847,12 +1916,8 @@ impl Store {
             (if short.len() < first.len() { format!("{short}…") } else { short }, after)
         };
         let kind = if heading { structure::canonical(&name).filter(|kind| is_kind(kind)).unwrap_or(&section.kind).to_string() } else { section.kind.clone() };
-        let level = match cut {
-            Cut::Subheading => (section.level + 1).min(MOST_LEVELS),
-            Cut::Level(level) => level.clamp(1, (section.level + 1).min(MOST_LEVELS)),
-            Cut::Heading | Cut::Paragraph => section.level,
-        };
-        if heading && cut != Cut::Subheading && level == section.level && section.bare && before.is_empty() {
+        let level = if cut == Cut::Subheading { (section.level + 1).min(MOST_LEVELS) } else { section.level };
+        if cut == Cut::Heading && section.bare && before.is_empty() {
             self.take_snapshot(id, "split")?;
             self.db.execute("UPDATE manuscript_sections SET name = ?2, kind = ?3, body = ?4, bare = 0, updated_at = ?5 WHERE id = ?1", params![id, name, kind, after, now_iso()])?;
             self.touch_manuscript(&manuscript)?;
@@ -1890,68 +1955,72 @@ impl Store {
         Ok(self.section_row(&new)?.1)
     }
 
-    /// Put a section back into the one before it, its name a paragraph
-    /// again (the name of a `bare` section was never one, and goes), with
-    /// its comments; the undoing of `split_section`. The section before,
-    /// whose text is kept as a snapshot first.
-    pub fn merge_section(&mut self, id: &str) -> Result<Section> {
+    /// Put a section into the one before it, with its comments and the
+    /// passages its citations rest on; the undoing of `split_section`. Into
+    /// the section it is under (a subsection into its section), it and its
+    /// own subsections go in as headings of that text, as deep as they were
+    /// (`deeper`), so the outline reads as before: 3.2 with its 3.2.1 is
+    /// `## 3.2` and `### 3.2.1` in 3's text. Into one beside it, its name is
+    /// a paragraph again. The name of a `bare` section was never one, and
+    /// goes. The section merged into, whose text is kept as a snapshot
+    /// first, and what takes it back (`unmerge`).
+    pub fn merge_section(&mut self, id: &str) -> Result<Merged> {
         let (manuscript, section) = self.section_row(id)?;
         let order = self.sections_of(&manuscript)?;
         let Some(at) = order.iter().position(|other| other.id == id) else { bail!("没有这一节：{id}") };
-        let Some(previous) = at.checked_sub(1).map(|n| &order[n]) else { bail!("这是第一节，前面没有可以并入的一节。") };
-        let name = (!section.bare).then_some(section.name.trim());
-        let body = [previous.body.trim(), name.unwrap_or(""), section.body.trim()].into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join("\n\n");
-        let previous = previous.id.clone();
-        self.take_snapshot(&previous, "merge")?;
+        let Some(previous) = at.checked_sub(1).map(|n| order[n].clone()) else { bail!("这是第一节，前面没有可以并入的一节。") };
+        let headings = section.level > previous.level;
+        let gone: Vec<Section> = if headings { order[under(&order, at)].to_vec() } else { vec![section] };
+        let mut parts = vec![previous.body.trim().to_string()];
+        for one in &gone {
+            // How far under the section merged into it stands, and the headings of its text with it.
+            let down = one.level.saturating_sub(previous.level);
+            if !one.bare && !one.name.trim().is_empty() { parts.push(if headings { format!("{} {}", "#".repeat((down + 1).min(6) as usize), one.name.trim()) } else { one.name.trim().to_string() }) }
+            parts.push(if headings { deeper(one.body.trim(), down) } else { one.body.trim().to_string() });
+        }
+        let body = parts.into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join("\n\n");
+        let (mut places, mut comments, mut passages) = (vec![], vec![], vec![]);
+        for one in &gone {
+            places.push(self.db.query_row("SELECT position FROM manuscript_sections WHERE id = ?1", [&one.id], |r| r.get::<_, i64>(0))?);
+            let mut stmt = self.db.prepare("SELECT id FROM manuscript_comments WHERE section_id = ?1")?;
+            comments.extend(stmt.query_map([&one.id], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().map(|comment| (comment, one.id.clone())));
+            let mut stmt = self.db.prepare("SELECT id FROM cite_passages WHERE section_id = ?1")?;
+            passages.extend(stmt.query_map([&one.id], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<Vec<_>>>()?.into_iter().map(|passage| (passage, one.id.clone())));
+        }
+        let levels = order.iter().map(|one| (one.id.clone(), one.level)).collect();
+        self.take_snapshot(&previous.id, "merge")?;
         let tx = self.db.transaction()?;
-        tx.execute("UPDATE manuscript_sections SET body = ?2, updated_at = ?3 WHERE id = ?1", params![previous, body, now_iso()])?;
-        tx.execute("UPDATE manuscript_comments SET section_id = ?2 WHERE section_id = ?1", params![id, previous])?;
-        tx.execute("UPDATE cite_passages SET section_id = ?2 WHERE section_id = ?1", params![id, previous])?;
-        tx.execute("DELETE FROM manuscript_sections WHERE id = ?1", [id])?;
+        tx.execute("UPDATE manuscript_sections SET body = ?2, updated_at = ?3 WHERE id = ?1", params![previous.id, body, now_iso()])?;
+        for one in &gone {
+            tx.execute("UPDATE manuscript_comments SET section_id = ?2 WHERE section_id = ?1", params![one.id, previous.id])?;
+            tx.execute("UPDATE cite_passages SET section_id = ?2 WHERE section_id = ?1", params![one.id, previous.id])?;
+            tx.execute("DELETE FROM manuscript_sections WHERE id = ?1", [&one.id])?;
+        }
         fit_outline(&tx, &manuscript)?;
         tx.commit()?;
         self.touch_manuscript(&manuscript)?;
-        Ok(self.section_row(&previous)?.1)
+        let back = Unmerge { into: previous.clone(), gone: gone.into_iter().zip(places).collect(), comments, passages, levels };
+        Ok(Merged { section: self.section_row(&previous.id)?.1, headings, back })
     }
 
-    /// The section cut where a change to its text, already kept, finished headings (`finished_headings` of its
-    /// text and of what the change put in, `put`): each a section at its level with the text after it, one after
-    /// the other, as `split_section` makes them. `None` when the change finished none.
-    pub fn split_at_headings(&mut self, id: &str, put: Range<usize>) -> Result<Option<Typed>> {
-        let (manuscript, was) = self.section_row(id)?;
-        if finished_headings(&was.body, put.clone()).is_empty() { return Ok(None) }
-        let levels = self.sections_of(&manuscript)?.into_iter().map(|section| (section.id, section.level)).collect();
-        let (mut section, caret, mut put, mut made) = (was.clone(), put.end, put, vec![]);
-        while let Some((line, level)) = finished_headings(&section.body, put.clone()).into_iter().next() {
-            let next = self.split_section(&section.id, line, Cut::Level(level))?;
-            // What follows a heading is the end of the text cut: a place in it is as far from the end as it was.
-            let gone = section.body.len() - next.body.len();
-            put = put.start.saturating_sub(gone)..put.end.saturating_sub(gone);
-            if next.id != section.id { made.push(next.id.clone()) }
-            section = next;
-        }
-        Ok(Some(Typed { section, caret: put.end, back: Unsplit { was, caret, made, levels } }))
-    }
-
-    /// Take back headings typed in a section (`split_at_headings`): the sections made go, their comments and the
-    /// passages of their citations back to the section cut, which has its text, name and kind again, and every
-    /// section the level it had. The section cut's text is kept as a snapshot first.
-    pub fn unsplit(&mut self, back: &Unsplit) -> Result<Section> {
-        let (manuscript, _) = self.section_row(&back.was.id)?;
-        self.take_snapshot(&back.was.id, "merge")?;
+    /// Take back a merge (`merge_section`): the sections that went in are there again with their texts, places,
+    /// comments and passages, the section merged into has its text again, and every section its level. That
+    /// section's text as it was merged is kept as a snapshot first.
+    pub fn unmerge(&mut self, back: &Unmerge) -> Result<Section> {
+        let (manuscript, _) = self.section_row(&back.into.id)?;
+        self.take_snapshot(&back.into.id, "merge")?;
         let tx = self.db.transaction()?;
-        for made in &back.made {
-            tx.execute("UPDATE manuscript_comments SET section_id = ?2 WHERE section_id = ?1", params![made, back.was.id])?;
-            tx.execute("UPDATE cite_passages SET section_id = ?2 WHERE section_id = ?1", params![made, back.was.id])?;
-            tx.execute("DELETE FROM manuscript_sections WHERE id = ?1", [made])?;
+        tx.execute("UPDATE manuscript_sections SET body = ?2, updated_at = ?3 WHERE id = ?1", params![back.into.id, back.into.body, now_iso()])?;
+        for (one, position) in &back.gone {
+            tx.execute("INSERT INTO manuscript_sections(id, manuscript_id, position, name, kind, body, updated_at, bare, level) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)", params![one.id, manuscript, position, one.name, one.kind, one.body, one.updated_at, one.bare, one.level])?;
         }
-        let was = &back.was;
-        tx.execute("UPDATE manuscript_sections SET name = ?2, kind = ?3, body = ?4, bare = ?5, updated_at = ?6 WHERE id = ?1", params![was.id, was.name, was.kind, was.body, was.bare, now_iso()])?;
+        for (comment, section) in &back.comments { tx.execute("UPDATE manuscript_comments SET section_id = ?2 WHERE id = ?1", params![comment, section])?; }
+        for (passage, section) in &back.passages { tx.execute("UPDATE cite_passages SET section_id = ?2 WHERE id = ?1", params![passage, section])?; }
         for (id, level) in &back.levels { tx.execute("UPDATE manuscript_sections SET level = ?2 WHERE id = ?1", params![id, level])?; }
         fit_outline(&tx, &manuscript)?;
         tx.commit()?;
         self.touch_manuscript(&manuscript)?;
-        Ok(self.section_row(&was.id)?.1)
+        Ok(self.section_row(&back.into.id)?.1)
     }
 
     /// Keep what is typed in a section.
@@ -2187,6 +2256,82 @@ mod tests {
     }
 
     #[test]
+    fn headings_written_in_a_section_are_read_into_the_outline() {
+        // The section's own name is the `#`: `##` is one under it, `###` two, and a `#` one too. A heading in a quote
+        // or in code, one without words and `#tag` are not.
+        let body = "Seedlings grew.\n## Plant **material**\nSown.\n### Soil\n# Growth\n> ## Quoted\n```\n## Code\n```\n## \n#tag\n  ###### Deep";
+        let found = heads(body);
+        let read: Vec<(&str, u8, &str)> = found.iter().map(|head| (&body[head.line.clone()], head.down, head.name.as_str())).collect();
+        assert_eq!(read, [("## Plant **material**", 1, "Plant material"), ("### Soil", 2, "Soil"), ("# Growth", 1, "Growth"), ("  ###### Deep", 5, "Deep")]);
+        // The editor reads the same lines as headings.
+        let lines = markdown::lines(body);
+        let editor: Vec<Range<usize>> = lines.iter().filter(|line| line.heading > 0 && line.quote == 0 && !line.code && !markdown::plain(&body[line.range.clone()]).trim().is_empty()).map(|line| line.range.clone()).collect();
+        assert_eq!(editor, heads(body).into_iter().map(|head| head.line).collect::<Vec<_>>());
+
+        // Numbered through with the sections, a section's text before its subsections: 方法's `##` is 2.1, and the
+        // method after it 2.2; a heading in that method is a level under it, deeper than a section can go.
+        let section = |name: &str, level: u8, body: &str| Section { name: name.into(), body: body.into(), level, ..Default::default() };
+        let sections = [section("Introduction", 1, "Why.\n## Gap"), section("Methods", 1, "## Plants\n### Soil\n## Light"), section("Imaging", 2, "## Lenses"), section("Results", 1, "")];
+        let entries = contents(&sections);
+        let read: Vec<(usize, Option<&str>, u8, &str)> = entries.iter().map(|entry| (entry.at, entry.head.as_ref().map(|head| head.name.as_str()), entry.level, entry.number.as_str())).collect();
+        assert_eq!(read, [(0, None, 1, "1"), (0, Some("Gap"), 2, "1.1"), (1, None, 1, "2"), (1, Some("Plants"), 2, "2.1"), (1, Some("Soil"), 3, "2.1.1"), (1, Some("Light"), 2, "2.2"), (2, None, 2, "2.3"), (2, Some("Lenses"), 3, "2.3.1"), (3, None, 1, "3")]);
+        assert_eq!(numbers(&sections), ["1", "2", "2.3", "3"]);
+
+        // 预览, the Markdown and the Word file put them where the outline does: `#` and `##` one under the section.
+        assert_eq!(section_markdown("# A\n## B\n### C", 1), "## A\n\n## B\n\n### C");
+        let manuscript = Manuscript { title: "T".into(), sections: vec![section("Methods", 1, "## Plants\n\nSown.\n\n### Soil\n\nLoam.")], ..Default::default() };
+        assert_eq!(markdown(&manuscript), "# T\n\n## Methods\n\n### Plants\n\nSown.\n\n#### Soil\n\nLoam.\n");
+        let xml = String::from_utf8_lossy(&docx(&manuscript)).to_string();
+        for (style, text) in [("Heading1", "Methods"), ("Heading2", "Plants"), ("Heading3", "Soil")] {
+            assert!(xml.contains(&format!("<w:pStyle w:val=\"{style}\"/></w:pPr><w:r><w:t xml:space=\"preserve\">{text}<")), "{style} {text}");
+        }
+    }
+
+    #[test]
+    fn a_subsection_merged_into_its_section_is_its_headings_and_comes_back() {
+        let mut store = store();
+        let made = store.create_manuscript("", "en").unwrap();
+        let id = |store: &Store, name: &str| store.manuscript(&made.id).unwrap().unwrap().sections.iter().find(|s| s.name == name).unwrap().id.clone();
+        let shape = |store: &Store| store.manuscript(&made.id).unwrap().unwrap().sections.iter().map(|s| format!("{}{}", "-".repeat(s.level as usize - 1), s.name)).collect::<Vec<_>>().join(" ");
+        let outline = |store: &Store| contents(&store.manuscript(&made.id).unwrap().unwrap().sections).into_iter().map(|entry| entry.number).collect::<Vec<_>>().join(" ");
+        let methods = id(&store, "Methods");
+        store.save_section_body(&methods, "Overview.").unwrap();
+        let plants = store.add_subsection(&methods, "Plants", "methods").unwrap();
+        store.save_section_body(&plants.id, "Sown.").unwrap();
+        let design = store.add_subsection(&methods, "Design", "methods").unwrap();
+        store.save_section_body(&design.id, "Pooled.\n## Controls\nMock.").unwrap();
+        let libraries = store.add_subsection(&design.id, "Libraries", "methods").unwrap();
+        store.save_section_body(&libraries.id, "10x.").unwrap();
+        store.add_comment(&made.id, &libraries.id, "10x", "Which kit?", "Xu", comment::PERSON).unwrap();
+        let before = outline(&store);
+        assert_eq!(before, "1 2 3 3.1 3.2 3.2.1 3.2.2 4 5");
+
+        // 3.1 into 方法: a heading of its text.
+        store.merge_section(&plants.id).unwrap();
+        assert_eq!(store.section_row(&methods).unwrap().1.body, "Overview.\n\n## Plants\n\nSown.");
+        // 3.2 with what is under it: each a heading as deep as it was, the headings of its text with it, the comment
+        // with its words; the outline is numbered as before.
+        let merged = store.merge_section(&design.id).unwrap();
+        assert_eq!(merged.section.body, "Overview.\n\n## Plants\n\nSown.\n\n## Design\n\nPooled.\n### Controls\nMock.\n\n### Libraries\n\n10x.");
+        assert_eq!((shape(&store), outline(&store)), ("Abstract Introduction Methods Results Discussion".to_string(), before.clone()));
+        assert_eq!(store.comments(&made.id).unwrap()[0].section_id, methods);
+
+        // 撤销: the sections, their texts, places, levels and comments again.
+        assert_eq!(store.unmerge(&merged.back).unwrap().body, "Overview.\n\n## Plants\n\nSown.");
+        assert_eq!(shape(&store), "Abstract Introduction Methods -Design --Libraries Results Discussion");
+        assert_eq!(store.section_row(&design.id).unwrap().1.body, "Pooled.\n## Controls\nMock.");
+        assert_eq!(store.comments(&made.id).unwrap()[0].section_id, libraries.id);
+
+        // Into a section beside it, the name is a paragraph again, as before there were headings.
+        let results = id(&store, "Results");
+        store.save_section_body(&results, "Roots grew.").unwrap();
+        let merged = store.merge_section(&results).unwrap();
+        assert!(!merged.headings && merged.section.body.ends_with("10x.\n\nResults\n\nRoots grew."));
+        // A heading moved deeper keeps its words (`#` reads as `##`) and what is not a heading stays as it was.
+        assert_eq!(deeper("# A\n  ## B **b**\n> ## quoted\n##### E\ntext", 2), "#### A\n  #### B **b**\n> ## quoted\n###### E\ntext");
+    }
+
+    #[test]
     fn subsections_move_rise_and_sink_with_what_is_under_them() {
         let mut store = store();
         let made = store.create_manuscript("", "en").unwrap();
@@ -2231,81 +2376,15 @@ mod tests {
         let length = store.split_section(&results, start..start + "Root length".len(), Cut::Subheading).unwrap();
         assert_eq!((length.name.as_str(), length.level, length.body.as_str()), ("Root length", 2, "Roots grew."));
         assert_eq!(shape(&store), "Abstract Introduction Confocal Cell culture Results -Root length -Result 1 Discussion");
-        // Merged back, the result after it is under 结果 still.
-        store.merge_section(&length.id).unwrap();
+        // Merged back, it is a heading of 结果's text, and the result after it is under 结果 still.
+        let merged = store.merge_section(&length.id).unwrap();
+        assert_eq!((merged.headings, merged.section.body.as_str()), (true, "Overview.\n\n## Root length\n\nRoots grew."));
         assert_eq!(shape(&store), "Abstract Introduction Confocal Cell culture Results -Result 1 Discussion");
         // A manuscript somebody gave subsections is no longer the blank one 写作 starts with.
         let blank = store.create_manuscript("", "en").unwrap();
         assert!(store.manuscript_blank(&blank.id).unwrap());
         store.indent_section(&blank.sections[1].id, true).unwrap();
         assert!(!store.manuscript_blank(&blank.id).unwrap());
-    }
-
-    #[test]
-    fn headings_typed_in_a_section_are_sections_of_their_level() {
-        // Enter after a heading finishes it; one still being typed, one written earlier, one in a quote or in code,
-        // `####` (deeper than an outline goes) and `#tag` stay lines of the text.
-        let text = "Seedlings grew.\n## Plant material\n";
-        assert_eq!(finished_headings(text, text.len() - 1..text.len()), [("Seedlings grew.\n".len()..text.len() - 1, 2)]);
-        assert!(finished_headings("## Plant mat", 11..12).is_empty());
-        let earlier = "## Plant material\n\nSeedlings grew.\n";
-        assert!(finished_headings(earlier, earlier.len() - 1..earlier.len()).is_empty());
-        for line in ["> ## Quoted\n", "```\n## Code\n", "#### Detail\n", "#tag\n", "## \n"] { assert!(finished_headings(line, line.len() - 1..line.len()).is_empty(), "{line}") }
-        // A paste: each heading in it, in order.
-        let pasted = "Opening.\n## Limits\nSmall sample.\n### Power\nToo few plants.";
-        assert_eq!(finished_headings(pasted, 0..pasted.len()).into_iter().map(|(_, level)| level).collect::<Vec<_>>(), [2, 3]);
-
-        let mut store = store();
-        let made = store.create_manuscript("", "en").unwrap();
-        let id = |store: &Store, name: &str| store.manuscript(&made.id).unwrap().unwrap().sections.iter().find(|s| s.name == name).unwrap().id.clone();
-        let shape = |store: &Store| store.manuscript(&made.id).unwrap().unwrap().sections.iter().map(|s| format!("{}{}", "-".repeat(s.level as usize - 1), s.name)).collect::<Vec<_>>().join(" ");
-        let methods = id(&store, "Methods");
-        let cells = store.add_subsection(&methods, "Cell culture", "methods").unwrap();
-        // `## Plant material` and Enter in 方法's text: a subsection with the text after it, before the other subsections,
-        // the caret at its start; a comment goes with its words.
-        let text = "Seedlings grew.\n## Plant material\nSeeds were sown.";
-        store.save_section_body(&methods, text).unwrap();
-        store.add_comment(&made.id, &methods, "sown", "When?", "Xu", comment::PERSON).unwrap();
-        let enter = "Seedlings grew.\n## Plant material".len();
-        assert!(store.split_at_headings(&methods, 0..enter).unwrap().is_none());
-        let typed = store.split_at_headings(&methods, enter..enter + 1).unwrap().unwrap();
-        assert_eq!((typed.section.name.as_str(), typed.section.level, typed.section.kind.as_str(), typed.section.body.as_str(), typed.caret), ("Plant material", 2, "methods", "Seeds were sown.", 0));
-        assert_eq!(shape(&store), "Abstract Introduction Methods -Plant material -Cell culture Results Discussion");
-        assert_eq!(store.comments(&made.id).unwrap()[0].section_id, typed.section.id);
-        // Taken back: the text as it was typed, the comment where it was.
-        assert_eq!(store.unsplit(&typed.back).unwrap().body, text);
-        assert_eq!(shape(&store), "Abstract Introduction Methods -Cell culture Results Discussion");
-        assert_eq!(store.comments(&made.id).unwrap()[0].section_id, methods);
-
-        // `#` in a subsection: a section of the first level, which takes what follows under itself; taken back, the
-        // part of a method after it is that method's again.
-        let imaging = store.add_subsection(&methods, "Imaging", "methods").unwrap();
-        store.add_subsection(&imaging.id, "Confocal", "methods").unwrap();
-        let text = "Roots were imaged.\n# Growth\n";
-        store.save_section_body(&imaging.id, text).unwrap();
-        let typed = store.split_at_headings(&imaging.id, text.len() - 1..text.len()).unwrap().unwrap();
-        assert_eq!(shape(&store), "Abstract Introduction Methods -Cell culture -Imaging Growth -Confocal Results Discussion");
-        store.unsplit(&typed.back).unwrap();
-        assert_eq!(shape(&store), "Abstract Introduction Methods -Cell culture -Imaging --Confocal Results Discussion");
-        assert_eq!(store.section_row(&cells.id).unwrap().1.level, 2);
-
-        // `###` with no subsection before it is no deeper than a subsection of the section it is typed in.
-        let introduction = id(&store, "Introduction");
-        let text = "Why.\n### Gap\n";
-        store.save_section_body(&introduction, text).unwrap();
-        let typed = store.split_at_headings(&introduction, text.len() - 1..text.len()).unwrap().unwrap();
-        assert_eq!((typed.section.name.as_str(), typed.section.level), ("Gap", 2));
-        store.unsplit(&typed.back).unwrap();
-
-        // A paste with two headings: one section after the other, each with its text, the caret at the end of the paste.
-        let discussion = id(&store, "Discussion");
-        store.save_section_body(&discussion, pasted).unwrap();
-        let typed = store.split_at_headings(&discussion, 0..pasted.len()).unwrap().unwrap();
-        assert_eq!((typed.section.name.as_str(), typed.section.body.as_str(), typed.caret), ("Power", "Too few plants.", "Too few plants.".len()));
-        assert_eq!(shape(&store), "Abstract Introduction Methods -Cell culture -Imaging --Confocal Results Discussion -Limits --Power");
-        assert_eq!(store.section_row(&discussion).unwrap().1.body, "Opening.");
-        assert_eq!(store.unsplit(&typed.back).unwrap().body, pasted);
-        assert_eq!(shape(&store), "Abstract Introduction Methods -Cell culture -Imaging --Confocal Results Discussion");
     }
 
     #[test]
@@ -2420,13 +2499,15 @@ mod tests {
         }
         assert!(!xml.contains("Unwritten") && xml.contains("w:styleId=\"Heading6\""));
         // A file's headings one and two levels under its highest are subsections, of the part of the section they are
-        // under; a heading deeper still stays in the text, with as many marks as it is levels under its section.
+        // under; a heading deeper still stays in the text, with a mark more than it is levels under its section
+        // (the section's own name being the `#`), so that the outline reads it where it stood.
         let draft = from_markdown("# T\n\n## Methods\n\nIntro.\n\n### Cells\n\nGrew.\n\n#### Media\n\nDMEM.\n\n##### Brand\n\nGibco.\n\n## Results\n\n#### Roots\n\nLong.\n", "x.md");
         let shown: Vec<(&str, u8, &str, Vec<&str>)> = draft.sections.iter().map(|s| (s.name.as_str(), s.level, s.kind.as_str(), s.paragraphs.iter().map(String::as_str).collect())).collect();
-        assert_eq!(shown, [("Methods", 1, "methods", vec!["Intro."]), ("Cells", 2, "methods", vec!["Grew."]), ("Media", 3, "methods", vec!["DMEM.", "# Brand", "Gibco."]), ("Results", 1, "results", vec![]), ("Roots", 2, "results", vec!["Long."])]);
+        assert_eq!(shown, [("Methods", 1, "methods", vec!["Intro."]), ("Cells", 2, "methods", vec!["Grew."]), ("Media", 3, "methods", vec!["DMEM.", "## Brand", "Gibco."]), ("Results", 1, "results", vec![]), ("Roots", 2, "results", vec!["Long."])]);
         let mut store = store();
         let made = store.import_manuscript(&draft, "markdown", "x.md", None).unwrap();
         assert_eq!(numbers(&made.sections), ["1", "1.1", "1.1.1", "2", "2.1"]);
+        assert_eq!(contents(&made.sections).iter().map(|entry| entry.number.as_str()).collect::<Vec<_>>(), ["1", "1.1", "1.1.1", "1.1.1.1", "2", "2.1"]);
         // What was exported comes back as the same outline.
         let again = from_markdown(&written, "T.md");
         assert_eq!(again.sections.iter().map(|s| (s.name.as_str(), s.level)).collect::<Vec<_>>(), [("Methods", 1), ("Cell culture", 2), ("Media", 3), ("Imaging", 2), ("Confocal", 3)]);
@@ -2626,7 +2707,7 @@ mod tests {
         unchanged(&store);
 
         // Put back, and cut again without a heading: the new section's name goes into no file.
-        let merged = store.merge_section(&split.id).unwrap();
+        let merged = store.merge_section(&split.id).unwrap().section;
         assert_eq!(merged.body, section.body);
         assert!(store.comments(&made.id).unwrap().iter().all(|c| c.section_id == section.id));
         unchanged(&store);
