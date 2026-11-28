@@ -103,6 +103,11 @@ pub enum Do {
     /// One of those versions taken into the unit (or into the active sentence span).
     CompareTake(usize),
     CompareClose,
+    /// The version in this language on show, at the paragraph a version of 译成… was just put into, open for
+    /// editing with what was put selected, so Undo there takes it back.
+    Look(String),
+    /// A version of 译成… whose paragraph has since been translated: put into it now (`Translating::placing`).
+    Place,
 }
 
 /// A version as the window holds it: what it keeps, found against the primary's units.
@@ -167,7 +172,30 @@ pub struct Compared {
     pub span: Option<(Range<usize>, &'static str)>,
     /// A version a model (`versions::Ask::single`); else the three kinds of one model's answer.
     pub single: bool,
+    /// The versions of 译成… brought from the primary, for the person to place: 采用 puts one where the field's
+    /// selection is (`Placing`, when where it goes was not sure).
+    pub place: bool,
     pub comparison: crate::compare::Comparison,
+}
+
+/// A version of 译成… taken for a stretch of the primary, put into the version in its language (write_assist.rs):
+/// the block it is in, where in it, and what the card had.
+#[derive(Clone, Debug)]
+pub struct Placing {
+    pub manuscript: String,
+    pub language: String,
+    pub section: String,
+    pub block: usize,
+    /// What the block's unit says (`Unit::sent`): a placing for words that have since changed is not made.
+    pub sent: String,
+    /// The block's words as written, and the stretch of them selected.
+    pub source: String,
+    pub sel: Range<usize>,
+    /// The version taken, and every version the card had (what it is, its words), listed if it is placed by hand.
+    pub text: String,
+    pub choices: Vec<(String, String)>,
+    /// The selection ran on past its paragraph: it has no one place, and the paragraph is opened for the person to place it.
+    pub loose: bool,
 }
 
 /// A run of translations for one version: its first pass, and what follows by itself after.
@@ -203,6 +231,8 @@ pub struct Translating {
     pub all_tops: Rc<RefCell<BTreeMap<usize, f32>>>,
     /// Several versions of the unit (or sentence) edited, to take one.
     pub compare: Option<Compared>,
+    /// A version of 译成… waiting for its paragraph to be translated before it is put into it.
+    pub placing: Option<Placing>,
     /// Counts the comparisons asked for: an answer to an earlier one is dropped.
     generation: u64,
     pub(crate) loaded: bool,
@@ -233,6 +263,7 @@ impl Translating {
             tops: Rc::default(),
             all_tops: Rc::default(),
             compare: None,
+            placing: None,
             generation: 0,
             loaded: false,
         }
@@ -577,19 +608,33 @@ impl Workspace {
             if let Err(err) = lib.store.save_version_block(id, language, one) { failed = Some(err) }
         }
         if let Some(err) = failed { self.fail(tf!("译文没有保存：{err:#}", "Translation not saved: {err:#}"), cx) }
+        // A version of 译成… was waiting for this paragraph.
+        let waiting = self.lib.as_ref().and_then(|lib| lib.writing.translate.placing.as_ref()).is_some_and(|p| p.manuscript == id && p.language == language && p.sent.trim() == sent.trim());
+        if waiting && let Some(placing) = self.lib.as_mut().and_then(|lib| lib.writing.translate.placing.take()) { self.translate_place(placing, true, cx) }
     }
 
     /// The unit `at` of the version on show, while it still says what it said when the click was drawn.
     fn translate_unit(&self, at: usize) -> Option<(String, String, Unit, Option<Kept>)> {
         let (id, language) = self.translate_shown()?;
-        let version = self.lib.as_ref()?.writing.translate.kept.get(&(id.clone(), language.clone()))?;
+        self.translate_unit_in(&id, &language, at)
+    }
+
+    /// The unit `at` of the version of manuscript `id` in `language`, whether or not it is on show.
+    fn translate_unit_in(&self, id: &str, language: &str, at: usize) -> Option<(String, String, Unit, Option<Kept>)> {
+        let version = self.lib.as_ref()?.writing.translate.kept.get(&(id.to_string(), language.to_string()))?;
         let unit = version.units.get(at)?.clone();
-        Some((id, language, unit, version.kept_at(at).cloned()))
+        Some((id.to_string(), language.to_string(), unit, version.kept_at(at).cloned()))
     }
 
     /// A kept translation changed by the window: written into the version on show and saved.
     fn translate_keep(&mut self, at: usize, change: impl FnOnce(&Unit, &mut Kept), cx: &mut Context<Self>) {
-        let Some((id, language, unit, kept)) = self.translate_unit(at) else { return };
+        let Some((id, language)) = self.translate_shown() else { return };
+        self.translate_keep_in(&id, &language, at, change, cx)
+    }
+
+    /// The same for the version of manuscript `id` in `language`, on show or not (a version of 译成… put into it).
+    fn translate_keep_in(&mut self, id: &str, language: &str, at: usize, change: impl FnOnce(&Unit, &mut Kept), cx: &mut Context<Self>) {
+        let Some((id, language, unit, kept)) = self.translate_unit_in(id, language, at) else { return };
         let Some(lib) = self.lib.as_mut() else { return };
         let Some(version) = lib.writing.translate.kept.get_mut(&(id.clone(), language.clone())) else { return };
         let mut one = kept.unwrap_or_else(|| Kept { position: at, edited: true, ..follow::made(&unit, "") });
@@ -606,13 +651,14 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Typing in a block: what is written is kept as it is typed, the person's from now on.
+    /// Typing in a block: what is written is kept as it is typed, the person's from now on. The block is the
+    /// editing's own, on show or not: a version of 译成… is put into it through the field while the plain editor is on show.
     pub(crate) fn translate_typed(&mut self, text: String, cx: &mut Context<Self>) {
         let Some(editing) = self.lib.as_ref().and_then(|lib| lib.writing.translate.editing.clone()) else { return };
-        let Some((_, _, unit, kept)) = self.translate_unit(editing.unit).filter(|(id, language, unit, _)| *id == editing.manuscript && *language == editing.language && unit.sent == editing.sent) else { return };
+        let Some((_, _, unit, kept)) = self.translate_unit_in(&editing.manuscript, &editing.language, editing.unit).filter(|(_, _, unit, _)| unit.sent == editing.sent) else { return };
         let written = follow::placeheld(&text, &unit.cites);
         if kept.as_ref().is_some_and(|kept| kept.text == written) { return }
-        self.translate_keep(editing.unit, |unit, one| {
+        self.translate_keep_in(&editing.manuscript, &editing.language, editing.unit, |unit, one| {
             one.text = written;
             one.source = unit.sent.clone();
             one.edited = true;
@@ -840,6 +886,10 @@ impl Workspace {
             Do::Compare(at) => self.translate_compare(at, cx),
             Do::CompareTake(n) => self.translate_compare_take(n, window, cx),
             Do::CompareClose => if let Some(lib) = self.lib.as_mut() { lib.writing.translate.compare = None },
+            Do::Look(language) => self.translate_look(language, cx),
+            Do::Place => {
+                if let Some(placing) = self.lib.as_mut().and_then(|lib| lib.writing.translate.placing.take()) { self.translate_place(placing, false, cx) }
+            }
             Do::Export(lang, out) => self.translate_ask_export(lang, out, cx),
             Do::ExportNow(lang, out) => {
                 self.modal = None;
@@ -855,6 +905,25 @@ impl Workspace {
             }
         }
         cx.notify();
+    }
+
+    /// A version kept in `code` for the manuscript being written and its first pass begun, without putting it on show
+    /// (保留成…译稿 from the card of 译成…). `false` when it could not be made.
+    pub(crate) fn translate_add_version(&mut self, code: &str, cx: &mut Context<Self>) -> bool {
+        if !self.lib.as_ref().is_some_and(|lib| lib.writing.translate.loaded) { self.translate_versions() }
+        let Some(lib) = self.lib.as_mut() else { return false };
+        let Some(id) = lib.writing.current().filter(|m| m.language != code).map(|m| m.id.clone()) else { return false };
+        if !lib.writing.translate.versions.get(&id).is_some_and(|list| list.iter().any(|known| known == code)) {
+            if let Err(err) = lib.store.add_version(&id, code) {
+                self.fail(format!("{err:#}"), cx);
+                return false;
+            }
+            lib.writing.translate.paused = false;
+            self.translate_versions();
+        }
+        self.translate_settled(&id, code, cx);
+        self.translate_follow(&id, code, cx);
+        true
     }
 
     /// The language to work on: its version, or one made now and its first pass begun.
@@ -986,7 +1055,7 @@ impl Workspace {
         let translate = &mut lib.writing.translate;
         translate.generation += 1;
         let generation = translate.generation;
-        translate.compare = Some(Compared { unit: at, sent: unit.sent.clone(), span: Some((target_span, title)), single, comparison: crate::compare::Comparison::new(&profiles, generation) });
+        translate.compare = Some(Compared { unit: at, sent: unit.sent.clone(), span: Some((target_span, title)), single, place: false, comparison: crate::compare::Comparison::new(&profiles, generation) });
         let library = lib.info.id.clone();
         self.compare_ask(library, generation, requests, |this| this.lib.as_mut()?.writing.translate.compare.as_mut().map(|compared| &mut compared.comparison), |_| {}, cx);
     }
@@ -1011,7 +1080,7 @@ impl Workspace {
         let translate = &mut lib.writing.translate;
         translate.generation += 1;
         let generation = translate.generation;
-        translate.compare = Some(Compared { unit: at, sent: unit.sent.clone(), span: None, single, comparison: crate::compare::Comparison::new(&profiles, generation) });
+        translate.compare = Some(Compared { unit: at, sent: unit.sent.clone(), span: None, single, place: false, comparison: crate::compare::Comparison::new(&profiles, generation) });
         let library = lib.info.id.clone();
         self.compare_ask(library, generation, requests, |this| this.lib.as_mut()?.writing.translate.compare.as_mut().map(|compared| &mut compared.comparison), |_| {}, cx);
     }
@@ -1041,6 +1110,18 @@ impl Workspace {
         };
         let chosen = text.trim().trim_matches('"').trim().to_string();
         let at = compared.unit;
+        // Brought from the primary to be placed (`Placing`): it goes where the person put the field's selection, the caret's place when nothing is selected.
+        if compared.place {
+            let Some(lib) = self.lib.as_ref() else { return };
+            let Some(editing) = lib.writing.translate.editing.as_ref().filter(|e| e.unit == at && e.sent == compared.sent) else { return };
+            let spaced = !matches!(editing.language.as_str(), "zh" | "ja");
+            let editor = lib.writing.translate.editor.clone();
+            let (sel, before) = { let input = editor.read(cx); (input.selection(), input.text()[..input.selection().start].chars().last()) };
+            let put = if sel.is_empty() && spaced && before.is_some_and(|c| !c.is_whitespace()) { format!(" {chosen}") } else { chosen };
+            editor.update(cx, |input, cx| input.replace_range(sel, &put, cx));
+            editor.read(cx).focus(window);
+            return;
+        }
         if let Some((span, _)) = compared.span
             && let Some(lib) = self.lib.as_ref()
             && lib.writing.translate.editing.as_ref().is_some_and(|e| e.unit == at && e.sent == compared.sent)
@@ -1064,6 +1145,134 @@ impl Workspace {
             let editor = lib.writing.translate.editor.clone();
             editor.update(cx, |input, cx| input.set_text(&chosen, cx));
             editor.read(cx).focus(window);
+        }
+    }
+
+    // ---- a version of 译成… put into a version (write_assist.rs)
+
+    /// Put a version of 译成… into the version in its language, where the stretch of the primary it is for pairs
+    /// with whole sentences there (`follow::sentences_in`). It goes through the field of that paragraph, so it is the
+    /// person's change, saved as typing is, and Undo in that field (查看) takes it back; the primary is not touched.
+    /// Where the place is not sure, the paragraph is opened for editing with the versions under it, for the person to
+    /// place; a paragraph not translated yet is translated first, and the version put in once it is. `later`: that
+    /// translation has just come, and nothing is opened by itself.
+    pub(crate) fn translate_place(&mut self, placing: Placing, later: bool, cx: &mut Context<Self>) {
+        let (id, language) = (placing.manuscript.clone(), placing.language.clone());
+        let name = label(&LANGUAGES, &language).to_string();
+        self.translate_settled(&id, &language, cx);
+        let found = self.lib.as_ref().and_then(|lib| {
+            let version = lib.writing.translate.kept.get(&(id.clone(), language.clone()))?;
+            let u = version.units.iter().position(|unit| unit.part == Part::Text && unit.section == placing.section && unit.block == placing.block && unit.sent == placing.sent)?;
+            let unit = version.units[u].clone();
+            let written = version.kept_at(u).map(|kept| follow::as_written(&kept.text, &unit.cites)).unwrap_or_default();
+            Some((u, unit, written))
+        });
+        let Some((u, unit, written)) = found else { return self.fail(t("原来那段已经改动，找不到了：可以复制结果，自己放进去。"), cx) };
+        // The version on show with another paragraph being edited: what came later is not put into it under the person's hands.
+        let shown = self.translate_shown().is_some_and(|(on, code)| on == id && code == language);
+        let busy = shown && self.lib.as_ref().and_then(|lib| lib.writing.translate.editing.as_ref()).is_some_and(|e| e.unit != u || e.manuscript != id || e.language != language);
+        let sure = if placing.loose { None } else { follow::sentences_in(&placing.source, &written, placing.sel.clone()) };
+        match sure {
+            Some(range) if !(later && busy) => {
+                let Some(lib) = self.lib.as_mut() else { return };
+                let translate = &mut lib.writing.translate;
+                (translate.compare, translate.hovered) = (None, None);
+                translate.editing = Some(Editing { manuscript: id, language: language.clone(), unit: u, sent: unit.sent.clone() });
+                translate.focus_editor = shown;
+                let editor = translate.editor.clone();
+                let text = placing.text.trim().to_string();
+                editor.update(cx, |input, cx| {
+                    input.set_text(&written, cx);
+                    input.replace_range(range, &text, cx);
+                });
+                if shown { self.say(tf!("已放进{name}译稿", "Put into the {name} version"), cx) } else { self.say_with(tf!("已放进{name}译稿", "Put into the {name} version"), t("查看"), Cmd::Translate(Do::Look(language)), cx) }
+            }
+            None if !later && !placing.loose && written.trim().is_empty() => {
+                // Not translated yet: it is first, and the version is put in when it comes (`translate_put`).
+                if let Some(lib) = self.lib.as_mut() { lib.writing.translate.placing = Some(placing.clone()) }
+                if !self.translate_soon(&id, &language, &unit.sent, cx) {
+                    if let Some(lib) = self.lib.as_mut() { lib.writing.translate.placing = None }
+                    return self.translate_open_placing(placing, u, &unit, &written, cx);
+                }
+                // A translation kept already has come at once and been put in.
+                if self.lib.as_ref().is_some_and(|lib| lib.writing.translate.placing.is_some()) {
+                    self.say(tf!("{name}译稿还没译到这一段：先译它，译好就把这一句放进去", "The {name} version has not reached this paragraph: it is translated first, and this sentence put in once it is"), cx)
+                }
+            }
+            _ if later => {
+                if let Some(lib) = self.lib.as_mut() { lib.writing.translate.placing = Some(placing) }
+                self.say_with(tf!("{name}译稿译好了这一段，这一句放在哪要你来定", "The {name} version has this paragraph now; where this sentence goes is yours to choose"), t("去放"), Cmd::Translate(Do::Place), cx)
+            }
+            _ => self.translate_open_placing(placing, u, &unit, &written, cx),
+        }
+    }
+
+    /// Where a version of 译成… goes is not sure: the version in its language on show, the paragraph open for editing
+    /// with the versions under it, its likeliest place selected, so 采用 puts one there or where the person selects.
+    fn translate_open_placing(&mut self, placing: Placing, u: usize, unit: &Unit, written: &str, cx: &mut Context<Self>) {
+        self.translate_language(placing.language.clone(), cx);
+        let Some(lib) = self.lib.as_mut() else { return };
+        let translate = &mut lib.writing.translate;
+        translate.generation += 1;
+        let rows = placing.choices.iter().map(|(said, text)| crate::compare::Row { model: said.clone(), result: text.clone(), busy: false, error: String::new(), note: String::new() }).collect();
+        translate.compare = Some(Compared { unit: u, sent: unit.sent.clone(), span: None, single: true, place: true, comparison: crate::compare::Comparison { rows, generation: translate.generation } });
+        translate.editing = Some(Editing { manuscript: placing.manuscript.clone(), language: placing.language.clone(), unit: u, sent: unit.sent.clone() });
+        translate.focus_editor = true;
+        let guess = (!written.trim().is_empty()).then(|| follow::sentence_pair(written, &placing.source, placing.sel.clone()).map(|link| link.source)).flatten().unwrap_or(written.len()..written.len());
+        let editor = translate.editor.clone();
+        editor.update(cx, |input, cx| {
+            input.set_text(written, cx);
+            input.select_range(guess, cx);
+        });
+        self.write_facing_keep(&unit.section, unit.block);
+        cx.notify();
+    }
+
+    /// The paragraph saying `sent` of a version translated before what else waits: put first in the run going, or
+    /// asked for alone. `false` when another version's run is going.
+    fn translate_soon(&mut self, id: &str, language: &str, sent: &str, cx: &mut Context<Self>) -> bool {
+        let rules = self.translate_rules(id, language);
+        let key = Self::translate_key(language, sent, &rules);
+        let Some(lib) = self.lib.as_mut() else { return false };
+        // A translation that failed is asked for again, as 重试 does.
+        if matches!(lib.translations.get(&key), Some(Translated::Failed(_))) { lib.translations.remove(&key); }
+        lib.writing.translate.paused = false;
+        match lib.writing.translate.run.as_mut().filter(|run| run.run.batch.running()) {
+            Some(run) if run.manuscript == id && run.language == language => {
+                if run.run.batch.working.iter().any(|job| job.key == key) { return true }
+                let job = match run.run.batch.jobs.iter().position(|job| job.key == key) {
+                    Some(at) => run.run.batch.jobs.remove(at).unwrap(),
+                    None => {
+                        run.prompts.insert(key.clone(), Self::translate_prompt(language, sent, &rules));
+                        run.run.batch.total += 1;
+                        Job { key, text: sent.trim().to_string(), papers: 1 }
+                    }
+                };
+                run.run.batch.jobs.push_front(job);
+                true
+            }
+            Some(_) => false,
+            None => {
+                self.translate_start(id, language, vec![sent.to_string()], cx);
+                true
+            }
+        }
+    }
+
+    /// 查看 after a version of 译成… was put into the version in `language`: that version on show, the paragraph in
+    /// view and open for editing with what was put selected, Undo there taking it back.
+    fn translate_look(&mut self, language: String, cx: &mut Context<Self>) {
+        let current = self.lib.as_ref().and_then(|lib| lib.writing.current()).map(|m| m.id.clone());
+        let editing = self.lib.as_ref().and_then(|lib| lib.writing.translate.editing.clone()).filter(|e| e.language == language && Some(&e.manuscript) == current.as_ref());
+        self.translate_language(language, cx);
+        let Some(editing) = editing else { return };
+        let Some(unit) = self.translate_unit_in(&editing.manuscript, &editing.language, editing.unit).map(|(_, _, unit, _)| unit).filter(|unit| unit.sent == editing.sent) else { return };
+        // A paragraph of a section that is not on the page is not opened.
+        if !self.lib.as_ref().is_some_and(|lib| lib.writing.facing_holds(&unit.section)) { return }
+        self.write_facing_keep(&unit.section, unit.block);
+        if let Some(lib) = self.lib.as_mut() {
+            lib.writing.translate.editing = Some(editing);
+            lib.writing.translate.focus_editor = true;
         }
     }
 
@@ -1756,10 +1965,10 @@ impl Workspace {
     /// The versions asked of several models (or three kinds from one model) for the unit or sentence edited.
     fn render_translate_compared(&self, compared: &Compared, key: &str, half: f32, cx: &mut Context<Self>) -> AnyElement {
         let rows = Self::translate_compared(compared);
-        let heading = match compared.span {
+        let heading = if compared.place { t("从主稿译来 · 在上面选中它要换掉的地方，再点采用").to_string() } else { match compared.span {
             Some((_, label)) => format!("{} · {}", t(label), t(if compared.single { "多模型对照" } else { "三种改法" })),
             None => t(if compared.single { "几个模型各译一版" } else { "三种译法" }).to_string(),
-        };
+        } };
         let mut card = div().flex().flex_col().gap(px(8.)).w(px(half)).ml(px(-9.)).px(px(10.)).py(px(8.)).rounded(px(6.)).border_1().border_color(Theme::line()).bg(Theme::bg_sunken());
         card = card.child(div().flex().items_center().child(div().flex_1().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(heading)).child(ui::icon_action(SharedString::from(format!("{key}-compare-close")), "x", Theme::text_tertiary(), t("收起")).on_click(self.on(Cmd::Translate(Do::CompareClose), cx))));
         for (n, (said, text, busy, error)) in rows.into_iter().enumerate() {
@@ -1914,6 +2123,13 @@ impl Workspace {
             "remove" => Do::Remove,
             "alone" => Do::Alone(true),
             "together" => Do::Alone(false),
+            "look" => Do::Look(rest.to_string()),
+            "place" => Do::Place,
+            // Undo in the field of the block edited, as ⌘Z there does.
+            "undo" => {
+                if let Some(lib) = self.lib.as_ref() { lib.writing.translate.editor.update(cx, |input, cx| input.undo_last(cx)) }
+                return;
+            }
             "type" => {
                 let text = rest.replace('¶', "\n");
                 let Some(editor) = self.lib.as_ref().map(|lib| lib.writing.translate.editor.clone()) else { return };

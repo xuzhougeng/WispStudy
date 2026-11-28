@@ -202,6 +202,8 @@ impl Workspace {
                     n => crate::comments::Do::Heading(n.parse().unwrap_or(0)),
                 })),
                 "reading" => Some(Cmd::WriteReading(true)),
+                // `wlanguage:<code>` sets the language the manuscript is written in (a code of `manuscript::LANGUAGES`).
+                "wlanguage" => Some(Cmd::WriteLanguage(arg.to_string())),
                 // 译文对照: `wfacing` reads the manuscript beside its translation, `wfacing:off` without, `wfacing:retry` asks again
                 // for what failed, `wfacing:interleave` / `wfacing:beside` puts each translation under its paragraph / beside it,
                 // `wfacing:<code>` chooses the language (a code of `manuscript::LANGUAGES`).
@@ -676,11 +678,12 @@ impl Workspace {
                         _ => return,
                     }))
                 }
-                // `assisted:take;<n>` takes the n-th version (from 0), `assisted:copy;<n>` copies it.
+                // `assisted:take;<n>` takes the n-th version (from 0) where versions of its language go, `assisted:copy;<n>`
+                // copies it, `assisted:replace;<n>` puts it in the text's place whatever its language, `assisted:keep` keeps a version in the card's language.
                 "assisted" => {
                     use crate::write_assist::Use;
                     let (what, n) = arg.split_once(';').map_or((arg, None), |(what, n)| (what, n.parse::<usize>().ok()));
-                    Some(Cmd::WriteAssistUse(match (what, n) { ("take", Some(n)) => Use::Take(n), ("copy", Some(n)) => Use::CopyOne(n), ("replace", _) => Use::Replace, ("below", _) => Use::Below, ("copy", _) => Use::Copy, _ => Use::Drop }))
+                    Some(Cmd::WriteAssistUse(match (what, n) { ("take", Some(n)) => Use::Take(n), ("copy", Some(n)) => Use::CopyOne(n), ("replace", Some(n)) => Use::ReplaceOne(n), ("replace", _) => Use::Replace, ("below", _) => Use::Below, ("copy", _) => Use::Copy, ("keep", _) => Use::Keep, _ => Use::Drop }))
                 }
                 "undo" => {
                     if let Some(lib) = self.lib.as_ref() { lib.writing.editor.update(cx, |input, cx| input.undo_last(cx)) }
@@ -690,6 +693,14 @@ impl Workspace {
                     let (from, to) = arg.split_once(';').unwrap_or((arg, arg));
                     let (from, to) = (from.parse().unwrap_or(0), to.parse().unwrap_or(0));
                     if let Some(lib) = self.lib.as_ref() { lib.writing.editor.update(cx, |input, cx| input.select_range(from..to, cx)) }
+                    return;
+                }
+                // `pickwords:<words>` selects the first place the section being written says them.
+                "pickwords" => {
+                    if let Some(lib) = self.lib.as_ref() {
+                        let at = lib.writing.editor.read(cx).text().find(arg);
+                        if let Some(at) = at { lib.writing.editor.update(cx, |input, cx| input.select_range(at..at + arg.len(), cx)) }
+                    }
                     return;
                 }
                 "read" => Some(Cmd::WriteRun(true)),
