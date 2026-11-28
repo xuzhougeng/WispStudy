@@ -21,6 +21,7 @@ use crate::theme::{self, Theme, text_px};
 use crate::translate::{Translated, TranslationRun};
 use crate::ui;
 use crate::write_facing::{GUTTER, PAD};
+use crate::write_seek::Holder;
 use gpui::{prelude::FluentBuilder, *};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -114,7 +115,7 @@ pub struct Version {
 }
 
 impl Version {
-    fn kept_at(&self, u: usize) -> Option<&Kept> {
+    pub(crate) fn kept_at(&self, u: usize) -> Option<&Kept> {
         self.pairs.get(u).copied().flatten().map(|k| &self.kept[k])
     }
 
@@ -1248,19 +1249,17 @@ impl Workspace {
 
     // ---- menus
 
-    /// 译文对照's languages, each marked when the manuscript keeps a version in it, then where the translation stands.
+    /// 译文对照's languages, each marked when the manuscript keeps a version in it.
     pub(crate) fn translate_facing_menu(&self) -> (Vec<MenuItem>, Vec<usize>) {
         let mut items = self.facing_language_menu();
         let versions = self.lib.as_ref().and_then(|lib| lib.writing.current().and_then(|m| lib.writing.translate.versions.get(&m.id))).cloned().unwrap_or_default();
         for item in &mut items {
             if let Cmd::WriteFacingLanguage(code) = &item.cmd && versions.contains(code) { item.note = Some(t("译稿").into()) }
         }
-        let breaks = vec![items.len()];
-        items.extend(self.facing_arrangement(false));
-        (items, breaks)
+        (items, vec![])
     }
 
-    /// The versions of the manuscript to work on, the languages to make one in, and where the version stands.
+    /// The versions of the manuscript to work on, and the languages to make one in.
     pub(crate) fn translate_language_menu(&self) -> (Vec<MenuItem>, Vec<usize>) {
         let Some(lib) = self.lib.as_ref() else { return (vec![], vec![]) };
         let Some(manuscript) = lib.writing.current() else { return (vec![], vec![]) };
@@ -1271,9 +1270,6 @@ impl Workspace {
         for (code, name) in LANGUAGES.iter().filter(|(code, _)| *code != manuscript.language && !versions.iter().any(|v| v == code)) {
             items.push(MenuItem { label: tf!("新建{}译稿", "New {} version", t(name)).into(), checked: false, note: None, cmd: Cmd::Translate(Do::Language(code.to_string())) });
         }
-        let mut breaks = breaks;
-        breaks.push(items.len());
-        items.extend(self.facing_arrangement(lib.writing.translate.alone));
         (items, breaks)
     }
 
@@ -1442,6 +1438,7 @@ impl Workspace {
         let translate = &lib.writing.translate;
         let Some(version) = translate.kept.get(&(id.clone(), code.clone())) else { return div().into_any_element() };
         let rules = self.translate_rules(&id, &code);
+        let query = self.seek_query(cx);
         let alone = translate.alone;
         let (side, half, whole) = crate::write_facing::measures(width, !alone && !self.settings.write_facing_interleaved);
         let editing = translate.editing.as_ref().filter(|editing| editing.manuscript == id && editing.language == code).map(|editing| editing.unit);
@@ -1513,6 +1510,7 @@ impl Workspace {
                     .child(bar)
                     .children(compared)
                     .child(track_all)
+                    .child(self.seek_holder(Holder::Unit(u)))
                     .into_any_element();
             }
             let wants = matches!(state, State::Untranslated) || (state == State::Changed && kept.is_some_and(|k| k.edited)) || kept.is_some_and(|k| !follow::cites_kept(&unit.sent, &k.text));
@@ -1520,7 +1518,7 @@ impl Workspace {
             let asked = busy(&unit.sent);
             let spinner = |id: String| div().flex().items_center().h(theme::body_line(24.)).child(ui::spinner(SharedString::from(id), 13., Theme::text_tertiary())).into_any_element();
             let group_id = SharedString::from(format!("{key}-grp"));
-            let mut column = div().relative().group(group_id.clone()).flex().flex_col().gap(px(6.)).child(track_all);
+            let mut column = div().relative().group(group_id.clone()).flex().flex_col().gap(px(6.)).child(track_all).child(self.seek_holder(Holder::Unit(u)));
             let body = div()
                 .id(SharedString::from(key.clone()))
                 .cursor_text()
@@ -1664,7 +1662,8 @@ impl Workspace {
                         let shown = manuscript::PictureLine { caption: caption.unwrap_or_else(|| picture.caption.clone()), ..picture.clone() };
                         let drawn = |text: &str| div().w_full().text_size(text_px(13.)).text_color(Theme::text_secondary()).child(crate::markdown::render(&format!("{id}-t"), &restored(text), None, None)).into_any_element();
                         let beside = match unit { Some(u) => right(u, Some((13., 20.)), &drawn, cx), None => div().into_any_element() };
-                        rows.push(self.facing_revealed(&section.id, b, pair(Some(self.render_manuscript_picture(format!("{id}-p"), &shown, half, window)), beside, true, unit.is_some() && editing == unit)));
+                        let drawn = self.seek_hold(Holder::Words(section.id.clone(), picture.line.clone()), self.render_manuscript_picture(format!("{id}-p"), &shown, half, window));
+                        rows.push(self.facing_revealed(&section.id, b, pair((!alone).then_some(drawn), beside, true, unit.is_some() && editing == unit)));
                     }
                     Kind::Kept => {
                         let same = page(format!("{id}-t"), &section.body[block.range.clone()]);
@@ -1678,14 +1677,15 @@ impl Workspace {
                             let u_ref = &version.units[u];
                             let shown_md = manuscript::section_markdown(&restored(text), 1);
                             let mut marks = Vec::new();
-                            if let Some((hu, tr_range)) = translate.hovered.as_ref().filter(|(hu, _)| *hu == u) {
-                                let _ = hu;
+                            let hovered = translate.hovered.as_ref().filter(|(hu, _)| *hu == u).map(|(_, range)| range.clone());
+                            if hovered.is_some() || !query.is_empty() {
                                 let cite_labels: Vec<Option<String>> = block.cites.iter().map(|r| labels.iter().find(|(lr, _)| lr == r).map(|(_, l)| l.clone())).collect();
                                 let (written, tr_labels) = written_with_labels(text, &u_ref.cites, &cite_labels);
-                                let reading = Reading::new(&written, &tr_labels, 0..written.len(), &shown_md);
-                                if let Some((from, to)) = reading.drawn(tr_range.clone()) {
+                                if let Some(tr_range) = hovered && let Some((from, to)) = Reading::new(&written, &tr_labels, 0..written.len(), &shown_md).drawn(tr_range) {
                                     marks.push((from, to, Theme::accent().opacity(0.11)));
                                 }
+                                // What the search over the manuscript found in the version (write_seek.rs), last.
+                                marks.extend(self.seek_read_marks(&query, &section.id, Some(u), &written, &tr_labels, 0..written.len(), &shown_md).0);
                             }
                             let (hover_me, click_me) = (me.clone(), me.clone());
                             crate::markdown::render_page_interactive(

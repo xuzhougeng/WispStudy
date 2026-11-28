@@ -1222,6 +1222,8 @@ impl Workspace {
                     // Primary + target language configuration popover, paired with the 1-click 译稿 toggle.
                     .child(language_button)
                     .child(facing_button)
+                    // Where the translation stands, beside the switch that shows it, while it is on (design rule 21).
+                    .when(facing, |d| d.child(self.render_facing_arrangement(cx)))
                     .children(if self.settings.agent_writing && !self.in_draft() { self.render_version_stepper(cx) } else { None })
                     .child(tool("write-history", "history", None).on_click(self.on(Cmd::WriteHistory, cx)))
                     .child(tool("write-export", "export", Some(t("导出").into())).on_click(self.on_menu(MenuKind::ManuscriptExport, cx)))
@@ -1468,7 +1470,10 @@ impl Workspace {
                     pieces.push(self.render_read_piece(section, n, words, within, &shown, false, window, cx));
                     words += 1;
                 }
-                crate::write_read::Part::Picture(picture) => pieces.push(self.render_manuscript_picture(format!("write-read-picture-{n}-{at}"), &picture, f32::from(theme::manuscript_width()), window)),
+                crate::write_read::Part::Picture(picture) => {
+                    let drawn = self.render_manuscript_picture(format!("write-read-picture-{n}-{at}"), &picture, f32::from(theme::manuscript_width()), window);
+                    pieces.push(if open { drawn } else { self.seek_hold(crate::write_seek::Holder::Words(section.id.clone(), picture.line.clone()), drawn) });
+                }
             }
         }
         // A section of its subsections alone says nothing of itself: they are what it holds.

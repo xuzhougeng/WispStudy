@@ -259,7 +259,7 @@ impl Workspace {
     }
 
     /// Where the words selected are written: their section, and its bytes.
-    fn read_written(&self) -> Option<(String, Range<usize>)> {
+    pub(crate) fn read_written(&self) -> Option<(String, Range<usize>)> {
         let lib = self.lib.as_ref()?;
         let pick = lib.writing.read.pick.as_ref().filter(|pick| pick.anchor != pick.head)?;
         let (n, within, shown) = self.read_piece(&pick.section, pick.piece, pick.facing)?;
@@ -342,25 +342,31 @@ impl Workspace {
         let mut draw_marks: Vec<(Place, Place, Hsla)> = marks.iter().map(|(from, to, tint, _)| (*from, *to, *tint)).collect();
         if facing && let Some(linked) = self.translate_linked_source(&section.id, piece, within.clone(), cx) {
             let labels = lib.citing.read.whole.get(n).map(Vec::as_slice).unwrap_or(&[]);
-            if let Some((from, to)) = Reading::new(&section.body, labels, within, shown).drawn(linked) {
+            if let Some((from, to)) = Reading::new(&section.body, labels, within.clone(), shown).drawn(linked) {
                 draw_marks.push((from, to, Theme::accent().opacity(0.14)));
             }
         }
+        // What the search over the manuscript found here, last, as the editor has them (write_seek.rs).
+        let labels = lib.citing.read.whole.get(n).map(Vec::as_slice).unwrap_or(&[]);
+        let (found, gone) = self.seek_read_marks(&self.seek_query(cx), &section.id, None, &section.body, labels, within.clone(), shown);
+        draw_marks.extend(found);
         let read = &lib.writing.read;
         let pick = read.pick.as_ref().filter(|pick| pick.is(&section.id, piece, facing));
         let selected = pick.filter(|pick| !matches!(pick.beside, Beside::Comment(_))).map(Pick::range).filter(|(from, to)| from != to);
         let card = pick.and_then(|pick| match &pick.beside { Beside::Comment(id) => marks.iter().find(|mark| mark.3 == *id).map(|mark| (mark.0, mark.1)), _ => None });
+        // The place the search went to says where it is drawn, unless what is selected here, or a comment's card, is told instead.
+        let gone = gone.filter(|_| selected.is_none() && card.is_none());
         let me = cx.entity().downgrade();
         let (told, said) = (me.clone(), section.id.clone());
         let scroll = lib.citing.read_scroll.clone();
         let selecting = Selecting {
             selected,
             marks: draw_marks,
-            spot: card,
+            spot: card.or(gone),
             pointer: Rc::new(move |pointer, place, window, cx| {
                 told.update(cx, |this, cx| this.run(Cmd::Read(Do::Pointer(said.clone(), piece, facing, pointer, place)), window, cx)).ok();
             }),
-            drawn: {
+            drawn: if gone.is_some() { self.seek_found_drawn() } else {
                 let measured = me.clone();
                 Rc::new(move |drawn, window, cx| {
                     // In terms scrolling leaves alone: from the piece, and the piece in the scrolled page.
@@ -380,7 +386,9 @@ impl Workspace {
             },
         };
         let key = if facing { format!("write-face-{n}-{piece}-o") } else { format!("write-read-{n}-{piece}") };
-        let page = crate::markdown::render_page_selecting(&key, shown, READ_SIZE, Some(selecting)).on_mouse_down(MouseButton::Right, self.on_context(MenuKind::ReadPiece(section.id.clone(), piece, facing), cx));
+        let page = crate::markdown::render_page_selecting(&key, shown, READ_SIZE, Some(selecting))
+            .on_mouse_down(MouseButton::Right, self.on_context(MenuKind::ReadPiece(section.id.clone(), piece, facing), cx))
+            .child(self.seek_holder(crate::write_seek::Holder::Words(section.id.clone(), within.clone())));
         // What stands beside the stretch, once it is let go and drawn; not under a menu or a dialog.
         let covered = self.menu.is_some() || self.modal.is_some() || self.palette.is_some();
         let Some(pick) = pick.filter(|pick| !pick.held && !covered && (selected.is_some() || card.is_some())) else { return page.into_any_element() };
