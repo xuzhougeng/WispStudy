@@ -241,6 +241,7 @@ impl Workspace {
                 if report { self.run(Cmd::ShowFetch, window, cx) }
             }
             Spot::Run { kind: Kind::Translate, .. } => self.run(Cmd::SetPage(Page::Papers), window, cx),
+            Spot::Run { kind: Kind::Search, .. } => self.run(Cmd::SetPage(Page::Sources), window, cx),
             Spot::Run { kind: Kind::Facing, paper } => {
                 let shown = lib.facing;
                 if !known(&paper) { return }

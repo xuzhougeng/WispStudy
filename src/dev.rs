@@ -707,6 +707,12 @@ impl Workspace {
                 }
                 // `try:0` runs the first saved search as a trial.
                 "try" => self.lib.as_ref().and_then(|l| l.searches.get(arg.parse::<usize>().unwrap_or(0)).map(|s| Cmd::TrySearch(s.id.clone()))),
+                // `runsearch:0` is 运行并导入 of the first saved search, `takeall:0` its 取回全部, `editsearch:0` its dialog.
+                "runsearch" | "takeall" | "editsearch" => self.lib.as_ref().and_then(|l| l.searches.get(arg.parse::<usize>().unwrap_or(0))).map(|s| match name {
+                    "runsearch" => Cmd::RunSearch(s.id.clone()),
+                    "takeall" => Cmd::TakeAllHits(s.id.clone()),
+                    _ => Cmd::EditSearch(s.id.clone()),
+                }),
                 "wide" => Some(Cmd::ToggleWide),
                 "cut" => Some(Cmd::PdfCut),
                 // `readaloud` reads the PDF on show aloud from the page in view (again stops it); `readaloud:selection` reads what is selected on it.

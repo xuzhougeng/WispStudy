@@ -12,19 +12,48 @@ use serde_json::Value;
 /// The databases: (stored key, name shown).
 pub const KINDS: [(&str, &str); 4] = [("pubmed", "PubMed"), ("europepmc", "Europe PMC"), ("crossref", "Crossref"), ("arxiv", "arXiv")];
 
-/// The most records one search may bring back.
-pub const MAX_RESULTS: usize = 2000;
+/// The most records one search may bring back, from a database that sorts by date (`ceiling`). A search set to
+/// take all its hits stores its database's ceiling, which an older build, whose most was 2000, reads as its own most.
+pub const MAX_RESULTS: usize = 50_000;
+
+/// Crossref's most: it ranks loose matches by relevance, so "all of them" is nothing a person means.
+pub const RANKED_MAX: usize = 2000;
+
+/// arXiv's most: it answers no page that reaches past its 10,000th record (an entry named Error instead).
+pub const ARXIV_MAX: usize = 10_000;
+
+/// How many ids one PubMed `esearch` gives: the first 9,999 of a query, whatever more is asked for and without
+/// saying so. A search that wants more asks again for slices of the query by date (`pubmed_ids`).
+pub const PUBMED_IDS: usize = 9_999;
+
+/// The most records a search taken as it stands asks for in one run (`broad_limit`).
+pub const BROAD: usize = 2000;
 
 /// The most records asked for in one request. A search that wants more
 /// asks again for the next page, until it has them or the database has no more.
 pub const PAGE: usize = 200;
 
 /// How many records a search taken as it stands, without the person setting
-/// a number, should ask for: all that a database sorted by date will give,
-/// and one page of Crossref, which ranks loose matches by relevance and has
-/// hundreds of thousands of them for any few words.
+/// a number, should ask for: `BROAD` of a database sorted by date, and one
+/// page of Crossref, which ranks loose matches by relevance and has hundreds
+/// of thousands of them for any few words.
 pub fn broad_limit(kind: &str) -> usize {
-    if kind == "crossref" { PAGE } else { MAX_RESULTS }
+    if kind == "crossref" { PAGE } else { BROAD }
+}
+
+/// The most records one run of a search of `kind` may bring back.
+pub fn ceiling(kind: &str) -> usize {
+    match kind {
+        "crossref" => RANKED_MAX,
+        "arxiv" => ARXIV_MAX,
+        _ => MAX_RESULTS,
+    }
+}
+
+/// Whether a search of `kind` that takes `max_results` a run is set to take all its hits: its database's
+/// ceiling, for a database sorted by date. Never Crossref's.
+pub fn takes_all(kind: &str, max_results: usize) -> bool {
+    kind != "crossref" && max_results >= ceiling(kind)
 }
 
 /// GET a URL and return the body.
@@ -81,6 +110,30 @@ pub fn out_of_time(reasons: &mut Vec<String>) -> bool {
     up
 }
 
+thread_local! {
+    /// Who hears how far the search on this thread is (`reporting`); nobody most of the time.
+    static REPORT: std::cell::RefCell<Option<Box<dyn Fn(usize, usize)>>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Run `work` with `report` told, after each request of a search on this thread, how many of the records it
+/// is to bring it has (those the library held included) and of how many: the window's line under a search
+/// that is running. A tool runs on one thread, so this reaches through `tools::call` without a parameter.
+pub fn reporting<T>(report: impl Fn(usize, usize) + 'static, work: impl FnOnce() -> T) -> T {
+    struct Restore(Option<Box<dyn Fn(usize, usize)>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            let earlier = self.0.take();
+            REPORT.with(|report| *report.borrow_mut() = earlier)
+        }
+    }
+    let _restore = Restore(REPORT.with(|slot| slot.borrow_mut().replace(Box::new(report))));
+    work()
+}
+
+fn report(done: usize, of: usize) {
+    REPORT.with(|report| if let Some(report) = report.borrow().as_ref() { report(done, of.max(done)) })
+}
+
 /// What a search found: how many records the database holds for the query
 /// (when it says), and the newest of them.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -114,6 +167,8 @@ struct Walk {
     ids: Option<Vec<String>>,
     /// PubMed: how many ids the library held.
     passed: usize,
+    /// PubMed: why fewer ids came than the query has hits and the search asked for, when so.
+    short: Option<String>,
     /// Europe PMC: the mark its last page gave for the next one.
     cursor: Option<String>,
     /// The database has no more.
@@ -224,7 +279,7 @@ pub fn search(kind: &str, query: &str, limit: usize, fetch: Fetch) -> Result<Fou
 pub fn search_new(kind: &str, query: &str, limit: usize, fetch: Fetch, known: Option<&Known>) -> Result<Found, String> {
     let query = query.trim();
     if query.is_empty() { return Err("请填写检索式。".into()) }
-    let limit = limit.clamp(1, MAX_RESULTS);
+    let limit = limit.clamp(1, ceiling(kind));
     let mut found = Found::default();
     let mut walk = Walk::default();
     let mut fresh = 0;
@@ -234,6 +289,8 @@ pub fn search_new(kind: &str, query: &str, limit: usize, fetch: Fetch, known: Op
                 let new = known.map_or(papers.len(), |known| papers.iter().filter(|paper| !(known.holds)(paper)).count());
                 fresh += new as u64;
                 found.papers.extend(papers);
+                let of = match &walk.ids { Some(ids) => ids.len() + walk.passed, None => walk.total.map_or(limit, |total| limit.min(total as usize)) };
+                report(walk.sent + walk.passed, of);
                 let grown = |since: u64| walk.total.unwrap_or(0).saturating_sub(since);
                 if new == 0 && kind != "pubmed" && known.and_then(|known| known.since).is_some_and(|since| fresh >= grown(since)) { break }
             }
@@ -245,6 +302,7 @@ pub fn search_new(kind: &str, query: &str, limit: usize, fetch: Fetch, known: Op
         }
     }
     (found.total, found.passed) = (walk.total, walk.passed);
+    if found.stopped.is_none() { found.stopped = walk.short }
     let name = KINDS.iter().find(|(key, _)| *key == kind).map_or(kind, |(_, name)| name);
     for paper in &mut found.papers {
         paper.source = name.to_string();
@@ -261,12 +319,7 @@ fn next_page(kind: &str, query: &str, limit: usize, walk: &mut Walk, fetch: Fetc
         "pubmed" => {
             let base = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils";
             if walk.ids.is_none() {
-                let hits = json(&format!("{base}/esearch.fcgi?db=pubmed&retmode=json&sort=pub+date&retmax={limit}&term={}", encode(query)))?;
-                let result = &hits["esearchresult"];
-                // PubMed answers a query it cannot read with an error inside a normal reply.
-                if let Some(error) = result["ERROR"].as_str() { return Err(format!("PubMed 没有接受这个检索式：{error}")) }
-                walk.total = result["count"].as_str().and_then(|n| n.parse().ok());
-                let ids: Vec<String> = result["idlist"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+                let ids = pubmed_ids(query, limit, walk, fetch)?;
                 let wanted: Vec<String> = ids.iter().filter(|id| !known.is_some_and(|known| (known.holds)(&Paper { pmid: id.to_string(), ..Default::default() }))).cloned().collect();
                 walk.passed = ids.len() - wanted.len();
                 walk.ids = Some(wanted);
@@ -296,6 +349,8 @@ fn next_page(kind: &str, query: &str, limit: usize, walk: &mut Walk, fetch: Fetc
         }
         "arxiv" => {
             let xml = fetch(&format!("https://export.arxiv.org/api/query?sortBy=submittedDate&sortOrder=descending&start={}&max_results={ask}&search_query={}", walk.sent, encode(query)))?;
+            // A page past what it gives is one entry named Error.
+            if let Some((_, error)) = elements(&xml, "entry").into_iter().find(|(_, entry)| text_of(entry, "id").contains("arxiv.org/api/errors")) { return Err(format!("arXiv 没有给出后面的记录：{}", text_of(error, "summary"))) }
             let found = arxiv_found(&xml);
             let sent = elements(&xml, "entry").len();
             walk.total = walk.total.or(found.total);
@@ -308,6 +363,63 @@ fn next_page(kind: &str, query: &str, limit: usize, walk: &mut Walk, fetch: Fetc
     walk.sent += sent;
     if sent < ask || walk.total.is_some_and(|total| (walk.sent + walk.passed) as u64 >= total) { walk.done = true }
     Ok(papers)
+}
+
+/// The PubMed ids of `query`, up to `limit` of them, with `walk.total` set to its count. One `esearch` names the
+/// newest 9,999 by publication date (`PUBMED_IDS`), as it always did. A query with more hits, of a search that
+/// wants more, is asked again in slices by the date its record was created (`[crdt]`: every record has one
+/// and only one, so the slices do not overlap and together hold every hit, which `[dp]`, matching a print and
+/// an electronic date, does not), the newest slice first, each halved until it is small enough to be named
+/// whole. The ids are merged without repeats. When fewer came than were to come, `walk.short` says why.
+fn pubmed_ids(query: &str, limit: usize, walk: &mut Walk, fetch: Fetch) -> Result<Vec<String>, String> {
+    use chrono::{Datelike, Days, NaiveDate};
+    let esearch = |term: &str, retmax: usize| -> Result<(usize, Vec<String>), String> {
+        let body = fetch(&format!("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&retmode=json&sort=pub+date&retmax={retmax}&term={}", encode(term)))?;
+        let hits: Value = serde_json::from_str(&body).map_err(|e| format!("无法解析返回内容：{e}"))?;
+        let result = &hits["esearchresult"];
+        // PubMed answers a query it cannot read with an error inside a normal reply.
+        if let Some(error) = result["ERROR"].as_str() { return Err(format!("PubMed 没有接受这个检索式：{error}")) }
+        let count = result["count"].as_str().and_then(|n| n.parse().ok()).unwrap_or(0);
+        Ok((count, result["idlist"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect()))
+    };
+    let (count, ids) = esearch(query, limit.min(PUBMED_IDS))?;
+    walk.total = Some(count as u64);
+    // A search that takes no more than one esearch names goes as it always went.
+    if limit <= PUBMED_IDS || ids.len() >= limit || count <= ids.len() { return Ok(ids) }
+    let wanted = limit.min(count);
+    report(0, wanted);
+    let mut seen: std::collections::HashSet<String> = ids.iter().cloned().collect();
+    let mut merged = ids;
+    let mut reasons = vec![];
+    // No record was created before 1800 nor after next year (checked against all[sb]).
+    let (first, last) = (NaiveDate::from_ymd_opt(1800, 1, 1).unwrap_or_default(), NaiveDate::from_ymd_opt(chrono::Local::now().year() + 1, 12, 31).unwrap_or_default());
+    let halves = |from: NaiveDate, to: NaiveDate| {
+        let middle = from + Days::new(((to - from).num_days() / 2) as u64);
+        [(from, middle), (middle + Days::new(1), to)]
+    };
+    // A stack with the newest slice on top; the whole range is known to hold too many.
+    let mut slices: Vec<(NaiveDate, NaiveDate)> = halves(first, last).to_vec();
+    while let Some((from, to)) = slices.pop() {
+        if merged.len() >= limit || out_of_time(&mut reasons) { break }
+        let term = format!("({query}) AND {}:{}[crdt]", from.format("%Y/%m/%d"), to.format("%Y/%m/%d"));
+        match esearch(&term, PUBMED_IDS) {
+            Ok((n, _)) if n > PUBMED_IDS && from < to => slices.extend(halves(from, to)),
+            Ok((n, part)) => {
+                if n > part.len() { reasons.push(format!("{} 这一天就有 {n} 篇，PubMed 只给出其中 {} 篇", from.format("%Y-%m-%d"), part.len())) }
+                merged.extend(part.into_iter().filter(|id| seen.insert(id.clone())));
+            }
+            Err(error) => {
+                reasons.push(error);
+                break;
+            }
+        }
+    }
+    merged.truncate(limit);
+    if merged.len() < wanted {
+        reasons.insert(0, format!("PubMed 命中 {count} 篇，只取得其中 {} 篇的编号", merged.len()));
+        walk.short = Some(self::reasons(&reasons));
+    }
+    Ok(merged)
 }
 
 // ---- XML, as far as PubMed and arXiv need it
@@ -659,6 +771,124 @@ mod tests {
         assert_eq!(run("europepmc", &["3"], Some(449)), (1, 400, 0, 2));
         // Grown by one that stands further down: looked for until it is found.
         assert_eq!(run("europepmc", &["300"], Some(449)), (1, 450, 0, 3));
+    }
+
+    fn decoded(text: &str) -> String {
+        let bytes = text.as_bytes();
+        let (mut out, mut at) = (vec![], 0);
+        while at < bytes.len() {
+            if bytes[at] == b'%' {
+                out.push(u8::from_str_radix(&text[at + 1..at + 3], 16).unwrap());
+                at += 3;
+            } else {
+                out.push(bytes[at]);
+                at += 1;
+            }
+        }
+        String::from_utf8(out).unwrap()
+    }
+
+    /// A PubMed that names at most 9,999 ids a query, as the real one does: `records` are (pmid, the day its record
+    /// was created), newest first; a term ending in `AND from:to[crdt]` holds those of those days.
+    fn pubmed_of<'a>(records: &'a [(String, chrono::NaiveDate)], asked: &'a RefCell<Vec<String>>) -> impl Fn(&str) -> Result<String, String> + 'a {
+        move |url: &str| {
+            asked.borrow_mut().push(url.to_string());
+            if url.contains("efetch") { return Ok(url.rsplit("id=").next().unwrap().split(',').map(|id| format!("<PubmedArticle><PMID>{id}</PMID><ArticleTitle>Paper {id}</ArticleTitle></PubmedArticle>")).collect()) }
+            let term = decoded(url.rsplit("term=").next().unwrap());
+            let range = term.strip_suffix("[crdt]").and_then(|rest| rest.rsplit_once(" AND ")).map(|(_, range)| {
+                let (from, to) = range.split_once(':').unwrap();
+                let day = |text: &str| chrono::NaiveDate::parse_from_str(text, "%Y/%m/%d").unwrap();
+                (day(from), day(to))
+            });
+            let held: Vec<&String> = records.iter().filter(|(_, day)| range.is_none_or(|(from, to)| (from..=to).contains(day))).map(|(id, _)| id).collect();
+            let named: Vec<String> = held.iter().take(asked_for(url, "retmax").min(PUBMED_IDS)).map(|id| format!("\"{id}\"")).collect();
+            Ok(format!(r#"{{"esearchresult":{{"count":"{}","idlist":[{}]}}}}"#, held.len(), named.join(",")))
+        }
+    }
+
+    #[test]
+    fn pubmed_past_its_limit_is_asked_in_slices() {
+        // 25,000 records, forty created a day, the newest on 2024-12-31.
+        let last = chrono::NaiveDate::from_ymd_opt(2024, 12, 31).unwrap();
+        let records: Vec<(String, chrono::NaiveDate)> = (0..25_000).map(|n| ((100_000 + n).to_string(), last - chrono::Days::new(n as u64 / 40))).collect();
+        let asked = RefCell::new(vec![]);
+        let fetch = pubmed_of(&records, &asked);
+        let found = search("pubmed", "root", MAX_RESULTS, &fetch).unwrap();
+        assert_eq!((found.total, found.papers.len(), found.stopped.as_deref()), (Some(25_000), 25_000, None));
+        // Every record once, the first esearch's newest first as before.
+        let ids: std::collections::HashSet<&str> = found.papers.iter().map(|paper| paper.pmid.as_str()).collect();
+        assert_eq!((ids.len(), found.papers[0].pmid.as_str()), (25_000, "100000"));
+        let searches: Vec<String> = asked.borrow().iter().filter(|url| url.contains("esearch")).cloned().collect();
+        assert!(searches[0].contains("retmax=9999&term=root"), "{}", searches[0]);
+        assert!(searches[1..].iter().all(|url| decoded(url).contains("(root) AND ") && url.contains("%5Bcrdt%5D")), "{searches:?}");
+        // No slice was named in part: each that held too many was halved, not taken.
+        assert!(searches.len() < 40, "{}", searches.len());
+
+        // A search that wants part of it: as many as it asked for, without repeats.
+        let found = search("pubmed", "root", 12_000, &fetch).unwrap();
+        let ids: std::collections::HashSet<&str> = found.papers.iter().map(|paper| paper.pmid.as_str()).collect();
+        assert_eq!((found.papers.len(), ids.len(), found.stopped), (12_000, 12_000, None));
+
+        // Run again, the library holding all but two: only those are fetched.
+        asked.borrow_mut().clear();
+        let holds = |paper: &Paper| !["100003", "124000"].contains(&paper.pmid.as_str());
+        let again = search_new("pubmed", "root", MAX_RESULTS, &fetch, Some(&Known { holds: &holds, since: None })).unwrap();
+        assert_eq!((again.papers.len(), again.passed, again.stopped), (2, 24_998, None));
+        let fetches: Vec<String> = asked.borrow().iter().filter(|url| url.contains("efetch")).cloned().collect();
+        assert_eq!(fetches.len(), 1);
+        assert!(fetches[0].ends_with("&id=100003,124000"), "{}", fetches[0]);
+
+        // Under the limit nothing changes: one esearch asking for what the search takes, then the records.
+        asked.borrow_mut().clear();
+        assert_eq!(search("pubmed", "root", 450, &fetch).unwrap().papers.len(), 450);
+        assert!(asked.borrow()[0].ends_with("&retmax=450&term=root"), "{}", asked.borrow()[0]);
+        assert_eq!(asked.borrow().iter().filter(|url| url.contains("esearch")).count(), 1);
+
+        // A slice that does not come: what came is fetched, and the run says it fell short.
+        let count = RefCell::new(0);
+        let breaks = |url: &str| -> Result<String, String> {
+            if url.contains("esearch") {
+                *count.borrow_mut() += 1;
+                if *count.borrow() == 4 { return Err("网络请求失败".into()) }
+            }
+            fetch(url)
+        };
+        let short = search("pubmed", "root", MAX_RESULTS, &breaks).unwrap();
+        let why = short.stopped.clone().unwrap();
+        assert!(short.papers.len() < 25_000 && short.papers.len() >= PUBMED_IDS, "{}", short.papers.len());
+        assert!(why.starts_with(&format!("PubMed 命中 25000 篇，只取得其中 {} 篇的编号", short.papers.len())) && why.contains("网络请求失败"), "{why}");
+
+        // One day that holds more than PubMed names cannot be cut further: said, not passed over.
+        let crowded: Vec<(String, chrono::NaiveDate)> = (0..12_000).map(|n| (n.to_string(), last)).collect();
+        let fetch = pubmed_of(&crowded, &asked);
+        let short = search("pubmed", "root", MAX_RESULTS, &fetch).unwrap();
+        assert_eq!(short.papers.len(), PUBMED_IDS);
+        assert!(short.stopped.as_deref().is_some_and(|why| why.contains("2024-12-31 这一天就有 12000 篇")), "{:?}", short.stopped);
+    }
+
+    #[test]
+    fn ceilings_are_the_databases() {
+        assert_eq!([ceiling("pubmed"), ceiling("europepmc"), ceiling("arxiv"), ceiling("crossref")], [MAX_RESULTS, MAX_RESULTS, ARXIV_MAX, RANKED_MAX]);
+        assert_eq!([broad_limit("pubmed"), broad_limit("arxiv"), broad_limit("crossref")], [BROAD, BROAD, PAGE]);
+        assert!(takes_all("pubmed", MAX_RESULTS) && takes_all("arxiv", ARXIV_MAX) && !takes_all("pubmed", 2000) && !takes_all("crossref", RANKED_MAX));
+        // How far a search is, told to whoever listens on its thread.
+        let heard = std::rc::Rc::new(RefCell::new(vec![]));
+        let ear = heard.clone();
+        let fetch = |url: &str| -> Result<String, String> {
+            Ok(if url.contains("esearch") { format!(r#"{{"esearchresult":{{"count":"450","idlist":[{}]}}}}"#, (0..450).map(|n| format!("\"{n}\"")).collect::<Vec<_>>().join(",")) } else { url.rsplit("id=").next().unwrap().split(',').map(|id| format!("<PubmedArticle><PMID>{id}</PMID><ArticleTitle>P</ArticleTitle></PubmedArticle>")).collect() })
+        };
+        reporting(move |done, of| ear.borrow_mut().push((done, of)), || search("pubmed", "root", 1000, &fetch)).unwrap();
+        assert_eq!(*heard.borrow(), vec![(200, 450), (400, 450), (450, 450)]);
+        // Nobody listens after.
+        search("pubmed", "root", 10, &fetch).unwrap();
+        assert_eq!(heard.borrow().len(), 3);
+    }
+
+    #[test]
+    fn arxiv_past_its_last_page_is_no_record() {
+        let error = r#"<feed><opensearch:totalResults>1</opensearch:totalResults><entry><id>https://arxiv.org/api/errors</id><title>Error</title><summary>The server encountered an internal error.</summary></entry></feed>"#;
+        let fetch = |_: &str| -> Result<String, String> { Ok(error.to_string()) };
+        assert!(search("arxiv", "all:root", 5, &fetch).unwrap_err().contains("internal error"));
     }
 
     #[test]

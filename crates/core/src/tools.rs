@@ -348,7 +348,7 @@ pub fn catalog() -> Vec<ToolDef> {
                 "source": {"type": "string", "enum": sources::KINDS.iter().map(|(key, _)| *key).collect::<Vec<_>>(), "description": "文献数据库。"},
                 "query": {"type": "string", "description": "按该来源的语法写的检索式。"},
                 "name": {"type": "string", "description": "给人看的名称；省略时用来源的名字。"},
-                "maxResults": {"type": "integer", "description": format!("每次运行取回多少条最新记录，默认 50，最大 {}。多于 {} 条时分几次向数据库要。", sources::MAX_RESULTS, sources::PAGE)},
+                "maxResults": {"type": "integer", "description": format!("每次运行取回多少条最新记录，默认 50，最大 {}（arXiv {}，Crossref {}）。多于 {} 条时分几次向数据库要。", sources::MAX_RESULTS, sources::ARXIV_MAX, sources::RANKED_MAX, sources::PAGE)},
                 "enabled": {"type": "boolean", "description": "是否参与「全部运行」和定时更新，默认是。"},
             }),
             &[],
@@ -2161,7 +2161,11 @@ pub fn preview_call(store: &Store, name: &str, args: &Value) -> Result<Vec<Strin
             let search = store.list_searches().map_err(|e| format!("{e:#}"))?.into_iter().find(|s| s.id == id).ok_or_else(|| format!("检索式不存在：{id}"))?;
             let source = sources::KINDS.iter().find(|(key, _)| *key == search.kind).map_or(search.kind.as_str(), |(_, name)| name);
             let title = if search.name.trim().is_empty() || search.name.trim() == source { source.to_string() } else { format!("{} · {source}", search.name.trim()) };
-            let detail = if name == "run_search" { format!("{}（最多取最新的 {} 条）", search.query, search.max_results) } else { search.query.clone() };
+            let detail = match name {
+                "run_search" if sources::takes_all(&search.kind, search.max_results) => format!("{}（取回全部命中的记录）", search.query),
+                "run_search" => format!("{}（最多取最新的 {} 条）", search.query, search.max_results),
+                _ => search.query.clone(),
+            };
             Ok(vec![format!("《{title}》：{detail}")])
         }
         "export_note" | "save_note_to_notion" => {
@@ -3079,10 +3083,16 @@ pub(crate) mod tests {
             Ok(format!(r#"{{"message":{{"total-results":900,"items":[{}]}}}}"#, items.join(",")))
         };
         let online = |name: &str, args: Value| super::call(&root, name, &args, &crossref, &no_download);
-        assert!(online("save_search", json!({"source": "crossref", "query": "root", "maxResults": sources::MAX_RESULTS + 1})).is_err());
+        // Each database has its own most: Crossref ranks by relevance, arXiv gives no page past its 10,000th record.
+        assert!(online("save_search", json!({"source": "crossref", "query": "root", "maxResults": sources::RANKED_MAX + 1})).unwrap_err().contains("Crossref 每次取回的篇数应在 1 到 2000 之间"));
+        assert!(online("save_search", json!({"source": "arxiv", "query": "all:root", "maxResults": sources::ARXIV_MAX + 1})).is_err());
+        assert!(online("save_search", json!({"source": "pubmed", "query": "root", "maxResults": sources::MAX_RESULTS + 1})).is_err());
+        let all = online("save_search", json!({"source": "pubmed", "query": "root", "maxResults": sources::MAX_RESULTS})).unwrap();
         let saved = online("save_search", json!({"source": "crossref", "query": "root", "maxResults": 600})).unwrap();
-        // The card that asks names the database and the query, not the id the model gave.
+        // The card that asks names the database and the query, not the id the model gave; a search set to take all says so.
         let info = find_library(&root, "").unwrap();
+        assert_eq!(preview_call(&Store::open(&info.dir).unwrap(), "run_search", &json!({"id": all["id"]})).unwrap(), vec!["《PubMed》：root（取回全部命中的记录）"]);
+        online("remove_search", json!({"id": all["id"]})).unwrap();
         let card = preview_call(&Store::open(&info.dir).unwrap(), "run_search", &json!({"id": saved["id"]})).unwrap();
         assert_eq!(card, vec!["《Crossref》：root（最多取最新的 600 条）"]);
         assert!(preview_call(&Store::open(&info.dir).unwrap(), "remove_search", &json!({"id": "S-none"})).unwrap_err().contains("检索式不存在"));

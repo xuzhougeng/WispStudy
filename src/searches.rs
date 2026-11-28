@@ -7,10 +7,43 @@ use crate::theme::{Theme, text_px};
 use crate::ui;
 use gpui::{prelude::FluentBuilder, *};
 use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use wisp_core::model::{SCREENINGS};
 use wisp_core::sources;
-use wisp_core::store::ImportBatch;
+use wisp_core::store::{ImportBatch, Store};
 use wisp_core::{libraries, time, tools};
+
+/// How far one run of a saved search is: written by the thread that runs it (`sources::reporting`, after each
+/// request), read by its card while it is drawn. Nothing is asked of the database for it.
+#[derive(Default)]
+pub struct SearchProgress {
+    /// The records it has, those the library held included.
+    pub done: AtomicUsize,
+    /// How many it is to bring; 0 until the database has said its count.
+    pub of: AtomicUsize,
+    /// The run is over; the window stops drawing the card again for it.
+    pub over: AtomicBool,
+}
+
+/// The saved searches of a library being run, and what the runs since the last time none was running came to:
+/// `works.rs` lists them as one run (运行检索 3200 / 12519), so leaving the library does not stop them.
+#[derive(Default)]
+pub struct SearchRuns {
+    pub going: HashMap<String, Arc<SearchProgress>>,
+    /// Of the runs over: the records they brought, how many they were to, and why one did not finish.
+    pub done: usize,
+    pub total: usize,
+    pub error: String,
+}
+
+impl SearchRuns {
+    /// As one run: all records had and to have, the runs over and those going.
+    pub fn counts(&self) -> (usize, usize) {
+        self.going.values().fold((self.done, self.total), |(done, total), run| (done + run.done.load(Ordering::Relaxed), total + run.of.load(Ordering::Relaxed)))
+    }
+}
 
 /// 「命中 90 篇，取回 5 篇，新增 5 篇，跳过 0 篇」, or why the run failed.
 fn run_summary(batch: &ImportBatch) -> (String, bool) {
@@ -45,14 +78,34 @@ impl Workspace {
         let mut cards: Vec<AnyElement> = vec![];
         for (i, search) in lib.searches.iter().enumerate() {
             let source = label(&sources::KINDS, &search.kind).to_string();
-            let running = lib.running.contains(&search.id);
-            let last = match &search.last_run {
-                Some(batch) => {
+            let progress = lib.searching.going.get(&search.id);
+            let running = progress.is_some();
+            let last = match (progress, &search.last_run) {
+                // How far the run is, in place of how the last one went.
+                (Some(progress), _) => {
+                    let (done, of) = (progress.done.load(Ordering::Relaxed), progress.of.load(Ordering::Relaxed));
+                    let said = if of == 0 { t("正在检索…").to_string() } else if done >= of { tf!("取回了 {done} 篇，正在导入…", "Retrieved {done}, importing…") } else { tf!("正在取回：{done} / {of} 篇", "Retrieving: {done} / {of}") };
+                    div().flex().items_center().gap(px(6.)).text_size(text_px(12.)).text_color(Theme::text_secondary()).child(ui::spinner(SharedString::from(format!("search-run-{}", search.id)), 11., Theme::accent())).child(said)
+                }
+                (None, Some(batch)) => {
                     let (summary, failed) = run_summary(batch);
                     div().text_size(text_px(12.)).text_color(if failed { Theme::danger() } else { Theme::text_tertiary() }).child(tf!("上次运行 {}：{summary}", "Last run {}: {summary}", time::short_time(&batch.started_at)))
                 }
-                None => div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(t("还没有运行过")),
+                (None, None) => div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(t("还没有运行过")),
             };
+            let all = sources::takes_all(&search.kind, search.max_results);
+            let most = sources::ceiling(&search.kind);
+            // More hits than the search takes, as its last run counted them.
+            let hits = search.last_run.as_ref().and_then(|batch| batch.remote_total).map(|n| n as usize).filter(|&n| n > search.max_results && search.kind != "crossref");
+            // A search set to take all whose hits are more than one search can bring takes the latest of them.
+            let takes = if all && hits.is_none() { t("每次取回全部命中的记录").to_string() } else { tf!("每次最多取回最新的 {} 篇", "Retrieve up to the latest {} papers each run", search.max_results) };
+            // A way to take them all. Past what one search can bring there is none: the way round it is said to
+            // whoever asked for all, not under every search that watches the newest of a broad query.
+            let more = hits.filter(|_| !running).and_then(|n| match (all, n > most) {
+                (true, _) => Some(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tf!("命中多于一条检索式能取回的 {most} 篇：缩小检索式，或按年份拆成几条", "More hits than one search can retrieve ({most}): narrow the query, or split it by year")).into_any_element()),
+                (false, false) => Some(ui::ghost_button(("take-all", i), None, Some(tf!("取回全部 {n} 篇", "Retrieve all {n}").into())).on_click(self.on(Cmd::TakeAllHits(search.id.clone()), cx)).into_any_element()),
+                (false, true) => None,
+            });
             let trial = lib.trial.as_ref().filter(|(id, _)| *id == search.id).map(|(_, found)| self.render_trial(found.as_ref(), cx));
             cards.push(
                 div()
@@ -80,7 +133,7 @@ impl Workspace {
                             .child(ui::ghost_button(("remove-search", i), Some("bin"), None).on_click(self.on(Cmd::AskRemoveSearch(search.id.clone()), cx))),
                     )
                     .child(div().px(px(10.)).py(px(8.)).rounded(px(6.)).bg(Theme::bg_sunken()).text_size(text_px(13.)).line_height(text_px(20.)).child(search.query.clone()))
-                    .child(div().flex().items_center().flex_wrap().gap(px(12.)).child(last).child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tf!("每次最多取回最新的 {} 篇", "Retrieve up to the latest {} papers each run", search.max_results))))
+                    .child(div().flex().items_center().flex_wrap().gap(px(12.)).child(last).child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(takes)).children(more))
                     .children(trial)
                     .into_any_element(),
             );
@@ -207,6 +260,82 @@ impl Workspace {
 }
 
 impl Workspace {
+    /// 运行并导入: run a saved search on a connection of its own, its card saying how far it is (`SearchProgress`).
+    /// It goes on when the library is left (`works.rs`): what it ends is handled through `in_library`, and said by
+    /// it when nobody is looking.
+    pub(crate) fn run_saved_search(&mut self, id: String, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        if lib.searching.going.contains_key(&id) { return }
+        // A first run after none was going starts the count again.
+        if lib.searching.going.is_empty() { (lib.searching.done, lib.searching.total, lib.searching.error) = (0, 0, String::new()) }
+        let progress = Arc::new(SearchProgress::default());
+        lib.searching.going.insert(id.clone(), progress.clone());
+        let (info, args) = (lib.info.clone(), serde_json::json!({"id": id}));
+        let library = info.id.clone();
+        let heard = progress.clone();
+        let work = cx.background_executor().spawn(async move {
+            let report = move |done: usize, of: usize| {
+                heard.done.store(done, Ordering::Relaxed);
+                heard.of.store(of, Ordering::Relaxed);
+            };
+            sources::reporting(report, || {
+                let mut store = Store::open(&info.dir).map_err(|e| format!("{e:#}"))?;
+                tools::call_in_with(&mut store, &info, "run_search", &args, &wisp_net::get_text, &wisp_net::download, wisp_net::reach())
+            })
+        });
+        // The card, and the run's entry elsewhere, drawn again while it goes on.
+        let ticking = progress.clone();
+        cx.spawn(async move |this, cx| {
+            while !ticking.over.load(Ordering::Relaxed) {
+                cx.background_executor().timer(std::time::Duration::from_millis(400)).await;
+                if this.update(cx, |_, cx| cx.notify()).is_err() { break }
+            }
+        })
+        .detach();
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            progress.over.store(true, Ordering::Relaxed);
+            this.update(cx, |this, cx| {
+                this.in_library(&library, cx, |this, cx| this.search_ran(&id, result, cx));
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// A run of a saved search is over: the library read again (it wrote through its own connection, a failed run
+    /// too), and what it brought said, unless the library is off screen, where `in_library` says how it ended.
+    fn search_ran(&mut self, id: &str, result: Result<Value, String>, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        if let Some(run) = lib.searching.going.remove(id) {
+            let (done, of) = (run.done.load(Ordering::Relaxed), run.of.load(Ordering::Relaxed));
+            let stopped = match &result {
+                Ok(run) => run["stopped"].as_str().map(str::to_string),
+                Err(err) => Some(err.clone()),
+            };
+            // One that failed before it had anything counts what it was to bring as not brought.
+            lib.searching.done += done;
+            lib.searching.total += if stopped.is_some() { of.max(done + 1) } else { of.max(done) };
+            if let Some(why) = stopped { lib.searching.error = why }
+        }
+        self.change(cx, |_| Ok(()));
+        if self.away { return }
+        match result {
+            Ok(run) if run["stopped"].is_string() => self.fail(tf!("{}：新增 {} 篇。{}", "{}: {} added. {}", run["search"].as_str().unwrap_or(t("检索")), run["added"], run["stopped"].as_str().unwrap_or_default()), cx),
+            Ok(run) => self.say(tf!("{}：新增 {} 篇，跳过已有的 {} 篇", "{}: {} added, {} existing skipped", run["search"].as_str().unwrap_or(t("检索")), run["added"], run["skipped"]), cx),
+            Err(err) => self.fail(err, cx),
+        }
+    }
+
+    /// 取回全部 on a card: the search set to take every hit its database gives, and run.
+    pub(crate) fn take_all_hits(&mut self, id: String, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some(mut search) = self.lib.as_ref().and_then(|lib| lib.searches.iter().find(|s| s.id == id).cloned()) else { return };
+        search.max_results = sources::ceiling(&search.kind);
+        if !self.change(cx, |lib| lib.store.save_search(&mut search)) { return }
+        self.run_saved_search(id, cx);
+    }
+
     /// While the app runs, look once a minute for saved searches whose turn
     /// has come, in every library that updates on its own, and run them.
     /// What was missed while the app was closed is due at the first look.

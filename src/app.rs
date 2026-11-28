@@ -39,6 +39,7 @@ pub use crate::menus::{Menu, MenuItem, MenuKind, menu_place};
 pub use crate::mention::Place;
 pub use crate::modal::Modal;
 pub use crate::screen_run::{Confirmed, Screen, ScreenMode};
+pub use crate::searches::SearchRuns;
 pub use crate::sorting::Sorting;
 pub use crate::translate::Translated;
 pub use crate::viewers::{Beside, LeftOpen, MAX_PINS, PaperWindow, Pinned};
@@ -423,8 +424,8 @@ pub struct Library {
     pub batches: Vec<ImportBatch>,
     /// The trial run on show: which search, and what it found once it is back.
     pub trial: Option<(String, Option<Result<Value, String>>)>,
-    /// Searches being run right now.
-    pub running: HashSet<String>,
+    /// Searches being run right now, and how the last of them ended (`searches.rs`).
+    pub searching: SearchRuns,
     /// The PDFs being read in, or what came of the last lot until it is put away.
     pub import: Option<ImportRun>,
     pub zotero: Option<ZoteroRun>,
@@ -1234,7 +1235,7 @@ impl Workspace {
             searches: vec![],
             batches: vec![],
             trial: None,
-            running: HashSet::new(),
+            searching: SearchRuns::default(),
             import: None,
             zotero: None,
             fetching: None,

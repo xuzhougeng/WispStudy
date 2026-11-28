@@ -1,7 +1,7 @@
 //! What a library goes on with while another is on show (#275). A run of the assistant through a library's
-//! papers (筛选, 提取, 查找全文, a batch of translations, a paper's whole translation) does not stop when the
-//! library is left: like a conversation that is answering, the library is kept off screen
-//! (`Workspace::parked`) and its answers are handled through `Workspace::in_library` as if it were on show.
+//! papers (筛选, 提取, 查找全文, a batch of translations, a paper's whole translation), and the runs of its saved
+//! searches, do not stop when the library is left: like a conversation that is answering, the library is kept
+//! off screen (`Workspace::parked`) and its answers are handled through `Workspace::in_library` as if it were on show.
 //!
 //! `Library::works` is the one place that says which runs there are and how far each is; `Library::at_work`
 //! is what keeps a library when it is left. A kind of run belongs here only once every callback of it goes
@@ -28,11 +28,13 @@ pub(crate) enum Kind {
     Translate,
     /// A paper's full text, beside its pages.
     Facing,
+    /// Saved searches run and imported (检索与导入), counted in records.
+    Search,
 }
 
 impl Kind {
     #[cfg(test)]
-    pub(crate) const ALL: [Kind; 5] = [Kind::Screen, Kind::Extract, Kind::Fetch, Kind::Translate, Kind::Facing];
+    pub(crate) const ALL: [Kind; 6] = [Kind::Screen, Kind::Extract, Kind::Fetch, Kind::Translate, Kind::Facing, Kind::Search];
 
     /// The run's name, a key of `locales/en.json`.
     pub(crate) fn label(self) -> &'static str {
@@ -42,13 +44,14 @@ impl Kind {
             Kind::Fetch => "查找全文",
             Kind::Translate => "翻译",
             Kind::Facing => "翻译全文",
+            Kind::Search => "运行检索",
         }
     }
 
     /// What it counts, in Chinese: papers, the texts of a list, the paragraphs of a paper.
     fn unit(self) -> &'static str {
         match self {
-            Kind::Screen | Kind::Extract | Kind::Fetch => "篇",
+            Kind::Screen | Kind::Extract | Kind::Fetch | Kind::Search => "篇",
             Kind::Translate => "条",
             Kind::Facing => "段",
         }
@@ -109,6 +112,12 @@ impl Library {
         if let Some(run) = &self.fetching { works.push(Work { kind: Kind::Fetch, done: run.rows.len(), total: run.total, failed: run.count("failed"), running: run.running(), error: String::new() }) }
         for (kind, run) in [(Kind::Translate, &self.translation_run), (Kind::Facing, &self.facing_run)] {
             if let Some(run) = run { works.push(Work { kind, done: run.batch.done(), total: run.batch.total, failed: run.batch.failed, running: run.batch.running(), error: run.batch.error.clone() }) }
+        }
+        // The searches going and those over since none was: one run.
+        let searching = &self.searching;
+        if !searching.going.is_empty() || searching.total > 0 {
+            let (done, total) = searching.counts();
+            works.push(Work { kind: Kind::Search, done, total, failed: 0, running: !searching.going.is_empty(), error: searching.error.clone() });
         }
         works
     }
