@@ -334,7 +334,7 @@ fn link_ok(url: &str) -> bool {
 pub fn inline(s: &str) -> Rich {
     let mut out = Rich::default();
     let mut pieces = vec![];
-    pieces_of(s, 0, &Marks::default(), &mut pieces);
+    pieces_of(s, 0, &Marks::default(), &mut pieces, &mut vec![]);
     for piece in pieces.into_iter().filter(|piece| piece.part != Part::Syntax) {
         out.push(&s[piece.range], piece.marks);
     }
@@ -385,6 +385,37 @@ pub struct Line {
 /// written and draws it formatted reads it. Each line stands alone but for
 /// fenced code, which runs to its closing fence (or the end).
 pub fn lines(text: &str) -> Vec<Line> {
+    lines_in(text, &mut Read::default())
+}
+
+/// What `lines` reads beside the lines, for changing the text (`emphasize`): the spans of emphasis, and
+/// where each line's inline text is (`None` for code or a fence; a rule's is the whole of it).
+#[derive(Default)]
+struct Read {
+    spans: Vec<Span>,
+    inline: Vec<Option<Range<usize>>>,
+}
+
+/// A span of emphasis as the reader closed it: its opening and closing marks, in bytes of the text.
+/// One mark is italic, two bold, three both.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Span {
+    open: Range<usize>,
+    close: Range<usize>,
+}
+
+impl Span {
+    /// Whether it is bold (`k` 2) or italic (`k` 1).
+    fn has(&self, k: usize) -> bool {
+        self.open.len() == k || self.open.len() == 3
+    }
+
+    fn inner(&self) -> Range<usize> {
+        self.open.end..self.close.start
+    }
+}
+
+fn lines_in(text: &str, read: &mut Read) -> Vec<Line> {
     let mut out = vec![];
     // The fence that is open: its character and length.
     let mut fenced: Option<(char, usize)> = None;
@@ -403,6 +434,7 @@ pub fn lines(text: &str) -> Vec<Line> {
                 line.pieces.push(Piece { marks: Marks { code: true, ..Marks::default() }, ..piece(range, Part::Text) });
             }
             out.push(line);
+            read.inline.push(None);
             continue;
         }
         if let Some((mark, n, _)) = fence(raw) {
@@ -410,6 +442,7 @@ pub fn lines(text: &str) -> Vec<Line> {
             line.code = true;
             line.pieces.push(piece(range, Part::Syntax));
             out.push(line);
+            read.inline.push(None);
             continue;
         }
         let mut at = 0;
@@ -421,9 +454,10 @@ pub fn lines(text: &str) -> Vec<Line> {
             line.picture = Some(range.start + address.start..range.start + address.end);
             // Two pieces of syntax even around no caption: between them is where one is written.
             syntax(&mut line, 0, caption.start, Part::Syntax);
-            pieces_of(&raw[caption.clone()], range.start + caption.start, &Marks::default(), &mut line.pieces);
+            pieces_of(&raw[caption.clone()], range.start + caption.start, &Marks::default(), &mut line.pieces, &mut read.spans);
             syntax(&mut line, caption.end, raw.len(), Part::Syntax);
             out.push(line);
+            read.inline.push(Some(range.start + caption.start..range.start + caption.end));
             continue;
         }
         // Indentation stays as written: it is how far a list is nested.
@@ -438,6 +472,7 @@ pub fn lines(text: &str) -> Vec<Line> {
             line.quote += 1;
             at = to;
         }
+        let lead = at;
         let rest = &raw[at..];
         let hashes = rest.bytes().take_while(|&b| b == b'#').count();
         if (1..=6).contains(&hashes) && rest[hashes..].starts_with([' ', '\t']) {
@@ -466,7 +501,14 @@ pub fn lines(text: &str) -> Vec<Line> {
             });
             at += mark;
         }
-        pieces_of(&raw[at..], range.start + at, &Marks::default(), &mut line.pieces);
+        pieces_of(&raw[at..], range.start + at, &Marks::default(), &mut line.pieces, &mut read.spans);
+        // A task's box is not among its words. A rule has none, but the caret may be in it: `****` is also an empty pair of bold.
+        let words = match line.item {
+            Some(Marker::Todo(_)) => raw.len() - todo(&raw[at..]).map_or(raw.len() - at, |(_, after)| after.len()),
+            _ if line.rule => lead,
+            _ => at,
+        };
+        read.inline.push(Some(range.start + words..range.end));
         out.push(line);
     }
     out
@@ -514,6 +556,161 @@ pub fn picture_line(line: &str) -> Option<(Range<usize>, Range<usize>)> {
     Some((lead + 2..lead + mid, start..start + address.len()))
 }
 
+/// A change an editor makes to its text: `text` in place of `range`, then `select` (bytes of the changed text)
+/// selected. With `range` empty and no `text`, only the caret moves.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Edit {
+    pub range: Range<usize>,
+    pub text: String,
+    pub select: Range<usize>,
+}
+
+/// Bold (`strong`) or italic for `sel` of `text`, as ⌘B and ⌘I do in an editor that keeps the Markdown as written.
+/// Words that all have it lose it: the span around them is taken away, or cut where only part of it was selected;
+/// otherwise the words get it, a span partly selected taken in whole and the spans of the kind inside folded into it.
+/// The marks go around the words, never around the spaces at the ends, and each line of a selection gets its own.
+/// With nothing selected the caret, before a span's closing mark, steps out of it, so what is typed next is plain;
+/// right after a span or before its opening mark it steps in; inside one the span loses it; anywhere else an empty
+/// pair is put in with the caret between, and taken away again by the next press. `None`: nothing to do (code).
+pub fn emphasize(text: &str, sel: Range<usize>, strong: bool) -> Option<Edit> {
+    let k = if strong { 2 } else { 1 };
+    let mut read = Read::default();
+    let lines = lines_in(text, &mut read);
+    // The spans of the kind that no span of the kind holds.
+    let kind: Vec<&Span> = read.spans.iter().filter(|span| span.has(k)).collect();
+    let outer: Vec<&Span> = kind.iter().copied().filter(|span| !kind.iter().any(|o| o != span && o.open.start <= span.open.start && span.close.end <= o.close.end)).collect();
+    let mark = |n: usize| "*".repeat(n);
+    let moved = |at: usize| Some(Edit { range: at..at, text: String::new(), select: at..at });
+    if sel.is_empty() {
+        let at = sel.start;
+        let (_, region) = lines.iter().zip(&read.inline).find(|(line, _)| line.range.start <= at && at <= line.range.end)?;
+        let region = region.clone().filter(|region| region.start <= at && at <= region.end)?;
+        let bytes = text.as_bytes();
+        let stars = |range: Range<usize>| bytes[range].iter().all(|b| matches!(b, b'*' | b'_'));
+        // An empty pair of the kind, as a press put in (`**|**`, or `***|***`, bold and italic): taken away. A span's
+        // marks are never one.
+        let before = text[region.start..at].bytes().rev().take_while(|b| *b == b'*').count();
+        let after = text[at..region.end].bytes().take_while(|b| *b == b'*').count();
+        let marking = read.spans.iter().any(|span| (span.open.start < at + after && at - before < span.open.end) || (span.close.start < at + after && at - before < span.close.end));
+        if before == after && (before == k || before == 3) && !marking { return Some(Edit { range: at - k..at + k, text: String::new(), select: at - k..at - k }) }
+        // Before the closing mark of a span of the kind, or of spans that close in the same run: out past its own.
+        if let Some(span) = kind.iter().find(|span| span.inner().start < at && at <= span.close.start && stars(at..span.close.start)) {
+            return moved(span.close.end - span.open.len() + k);
+        }
+        // Right after one, or before its opening mark: in, past the marks of the kind.
+        if let Some(span) = kind.iter().find(|span| span.close.end == at) { return moved(span.close.end - k) }
+        if let Some(span) = kind.iter().find(|span| span.open.start == at) { return moved(span.open.start + k) }
+        // Inside one: it loses the mark.
+        if let Some(span) = outer.iter().find(|span| span.open.end <= at && at <= span.close.start) {
+            let edits = vec![(span.open.start..span.open.start + k, String::new()), (span.close.end - k..span.close.end, String::new())];
+            return applied(text, edits, at..at);
+        }
+        return Some(Edit { range: at..at, text: mark(2 * k), select: at + k..at + k });
+    }
+    // The selection on each line it reaches: never cutting a mark, a citation or code, and without the spaces at its ends.
+    let mut parts = vec![];
+    for (line, region) in lines.iter().zip(&read.inline) {
+        let Some(region) = region.as_ref().filter(|_| !line.rule) else { continue };
+        let (mut s, mut e) = (sel.start.max(region.start), sel.end.min(region.end));
+        if s >= e { continue }
+        let whole = |p: &Piece| p.part == Part::Syntax || p.cite || p.marks.code;
+        for (n, p) in line.pieces.iter().enumerate() {
+            if whole(p) && p.range.start < s && s < p.range.end { s = p.range.start }
+            if whole(p) && p.range.start < e && e < p.range.end { e = p.range.end }
+            // Code is taken with its backticks.
+            if p.marks.code && p.range.start == s && n > 0 && line.pieces[n - 1].part == Part::Syntax && line.pieces[n - 1].range.end == s { s = line.pieces[n - 1].range.start }
+            if p.marks.code && p.range.end == e && line.pieces.get(n + 1).is_some_and(|next| next.part == Part::Syntax && next.range.start == e) { e = line.pieces[n + 1].range.end }
+        }
+        s += text[s..e].len() - text[s..e].trim_start().len();
+        e -= text[s..e].len() - text[s..e].trim_end().len();
+        if s < e { parts.push((line, s, e)) }
+    }
+    let (first, last) = (parts.first()?.1, parts.last()?.2);
+    let has = |p: &Piece| if strong { p.marks.bold } else { p.marks.italic };
+    let all = parts.iter().all(|(line, s, e)| line.pieces.iter().filter(|p| p.part == Part::Text && p.range.start < *e && p.range.end > *s).all(|p| has(p) || text[p.range.start.max(*s)..p.range.end.min(*e)].trim().is_empty()));
+    let mut edits = vec![];
+    if all {
+        for &(_, s, e) in &parts {
+            for span in outer.iter().filter(|span| span.inner().start < e && span.inner().end > s) {
+                let ch = &text[span.open.start..span.open.start + 1];
+                let (n, inner) = (span.open.len(), span.inner());
+                let (full, rest) = (ch.repeat(n), ch.repeat(n - k));
+                let (a, b) = (s.max(inner.start), e.min(inner.end));
+                // What stays of the span on each side keeps all its marks; the words taken out keep the other kind's.
+                let left = inner.start + text[inner.start..a].trim_end().len();
+                let right = b + (text[b..inner.end].len() - text[b..inner.end].trim_start().len());
+                if left > inner.start {
+                    edits.push((left..left, full.clone()));
+                    edits.push((a..a, rest.clone()));
+                } else {
+                    edits.push((span.open.clone(), rest.clone()));
+                }
+                if right < inner.end {
+                    edits.push((b..b, rest));
+                    edits.push((right..right, full));
+                } else {
+                    edits.push((span.close.clone(), rest));
+                }
+            }
+        }
+        return applied(text, edits, first..last);
+    }
+    let (mut from, mut to) = (first, last);
+    for &(_, s0, e0) in &parts {
+        let (mut s, mut e) = (s0, e0);
+        // A span of the kind partly selected is taken in whole.
+        loop {
+            let (s1, e1) = (s, e);
+            for span in &kind {
+                if span.open.start < s && s < span.close.end { s = span.open.start }
+                if span.open.start < e && e < span.close.end { e = span.close.end }
+            }
+            if (s, e) == (s1, e1) { break }
+        }
+        (from, to) = (from.min(s), to.max(e));
+        edits.push((s..s, mark(k)));
+        for span in kind.iter().filter(|span| s <= span.open.start && span.close.end <= e) {
+            edits.push((span.open.start..span.open.start + k, String::new()));
+            edits.push((span.close.end - k..span.close.end, String::new()));
+        }
+        edits.push((e..e, mark(k)));
+    }
+    applied(text, edits, from..to)
+}
+
+/// `edits` (in bytes of `text`, none overlapping another) made as one change; `select` is where the selection
+/// was, its start kept after what is put in where it stands and its end before.
+fn applied(text: &str, mut edits: Vec<(Range<usize>, String)>, select: Range<usize>) -> Option<Edit> {
+    edits.retain(|(range, put)| !(range.is_empty() && put.is_empty()));
+    edits.sort_by_key(|(range, _)| range.start);
+    let from = edits.iter().map(|(range, _)| range.start).min()?;
+    let to = edits.iter().map(|(range, _)| range.end).max()?;
+    let mut out = String::new();
+    let mut at = from;
+    for (range, put) in &edits {
+        if range.start < at { return None }
+        out.push_str(&text[at..range.start]);
+        out.push_str(put);
+        at = range.end;
+    }
+    out.push_str(&text[at..to]);
+    let shift = |x: usize, after: bool| {
+        let mut delta = 0isize;
+        for (range, put) in &edits {
+            if range.end < x || (range.end == x && range.start < x) {
+                delta += put.len() as isize - range.len() as isize;
+            } else if range.is_empty() && range.start == x {
+                if after { delta += put.len() as isize }
+            } else if range.start < x && x < range.end {
+                return (range.start as isize + delta) as usize + if after { put.len() } else { 0 };
+            }
+        }
+        (x as isize + delta) as usize
+    };
+    let (start, end) = (shift(select.start, true), shift(select.end, false));
+    Some(Edit { range: from..to, text: out, select: start..end.max(start) })
+}
+
 /// What Enter goes on with in a line of a list or a quote.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Continued {
@@ -553,7 +750,7 @@ pub fn continued(line: &str) -> Option<Continued> {
 
 /// The pieces of inline Markdown `s`, which starts at byte `base` of the
 /// whole text, with `marks` on all of them; pushed onto `out`.
-fn pieces_of(s: &str, base: usize, marks: &Marks, out: &mut Vec<Piece>) {
+fn pieces_of(s: &str, base: usize, marks: &Marks, out: &mut Vec<Piece>, spans: &mut Vec<Span>) {
     let push = |out: &mut Vec<Piece>, range: Range<usize>, marks: Marks, part: Part, cite: bool| {
         if range.is_empty() { return }
         let range = base + range.start..base + range.end;
@@ -611,7 +808,7 @@ fn pieces_of(s: &str, base: usize, marks: &Marks, out: &mut Vec<Piece>) {
                 syntax(out, i + from + url.len()..i + used);
             } else {
                 syntax(out, i..i + 1);
-                pieces_of(label, base + i + 1, &linked, out);
+                pieces_of(label, base + i + 1, &linked, out, spans);
                 syntax(out, i + 1 + label.len()..i + used);
             }
             i += used;
@@ -634,34 +831,44 @@ fn pieces_of(s: &str, base: usize, marks: &Marks, out: &mut Vec<Piece>) {
             }
         }
         if matches!(c, '*' | '_' | '~') {
-            let n = rest.bytes().take_while(|&b| b == c as u8).count();
-            let set: Option<fn(&mut Marks)> = match (c, n) {
-                ('*' | '_', 3) => Some(|m| (m.bold, m.italic) = (true, true)),
-                ('*' | '_', 2) => Some(|m| m.bold = true),
-                ('*' | '_', 1) => Some(|m| m.italic = true),
-                ('~', 2) => Some(|m| m.strike = true),
-                _ => None,
-            };
+            let run = rest.bytes().take_while(|&b| b == c as u8).count();
+            // Three that no three close open two spans, one inside the other: `***a* b**` is bold around an
+            // italic, `***a** b*` italic around a bold.
+            let tries: &[usize] = if run == 3 && c != '~' { &[3, 2, 1] } else { &[run] };
             // `snake_case` is not emphasis: `_` counts only at the edge of a word.
             let bounded = c == '_';
-            if let Some(set) = set
-                && (!bounded || is_boundary(prev))
-                && let Some(end) = find_close(&rest[n..], c, n)
-            {
-                let inner = &rest[n..n + end];
-                let after = rest[n + end + n..].chars().next();
-                if !inner.starts_with(char::is_whitespace) && !inner.ends_with(char::is_whitespace) && (!bounded || is_boundary(after)) {
-                    let mut inside = marks.clone();
-                    set(&mut inside);
-                    syntax(out, i..i + n);
-                    pieces_of(inner, base + i + n, &inside, out);
-                    syntax(out, i + n + end..i + n + end + n);
-                    i += n + end + n;
-                    continue;
+            let mut done = false;
+            for &n in tries {
+                let set: Option<fn(&mut Marks)> = match (c, n) {
+                    ('*' | '_', 3) => Some(|m| (m.bold, m.italic) = (true, true)),
+                    ('*' | '_', 2) => Some(|m| m.bold = true),
+                    ('*' | '_', 1) => Some(|m| m.italic = true),
+                    ('~', 2) => Some(|m| m.strike = true),
+                    _ => None,
+                };
+                if let Some(set) = set
+                    && (!bounded || is_boundary(prev))
+                    && let Some(end) = find_close(&rest[n..], c, n)
+                {
+                    let inner = &rest[n..n + end];
+                    let after = rest[n + end + n..].chars().next();
+                    if !inner.starts_with(char::is_whitespace) && !inner.ends_with(char::is_whitespace) && (!bounded || is_boundary(after)) {
+                        let mut inside = marks.clone();
+                        set(&mut inside);
+                        syntax(out, i..i + n);
+                        pieces_of(inner, base + i + n, &inside, out, spans);
+                        syntax(out, i + n + end..i + n + end + n);
+                        if c != '~' { spans.push(Span { open: base + i..base + i + n, close: base + i + n + end..base + i + n + end + n }) }
+                        i += n + end + n;
+                        done = true;
+                        break;
+                    }
                 }
             }
-            text(out, i..i + n);
-            i += n;
+            if !done {
+                text(out, i..i + run);
+                i += run;
+            }
             continue;
         }
         text(out, i..i + c.len_utf8());
@@ -705,6 +912,9 @@ fn find_close(s: &str, mark: char, n: usize) -> Option<usize> {
                 pos += inner;
             }
             if open.is_empty() && left == n { return Some(pos) }
+            // A longer run closes with as many as opened, the rest opening anew (`*a***b**`), as CommonMark reads it:
+            // not where the run could open as well and the two runs come to a multiple of three (`*a**b**c*`).
+            if open.is_empty() && left > n && (!can_open || !(n + left).is_multiple_of(3)) { return Some(pos) }
         }
         if left > 0 && can_open { open.push(left) }
     }
@@ -894,5 +1104,105 @@ mod tests {
         for line in &read[1..3] {
             assert_eq!(line.pieces.iter().map(|piece| &text[piece.range.clone()]).collect::<String>(), &text[line.range.clone()]);
         }
+    }
+
+    /// `before` with its selection between ⟨ and ⟩ (a caret is ‸), after ⌘B (`strong`) or ⌘I: the text and the
+    /// selection marked the same way; unchanged when there is nothing to do.
+    fn pressed(before: &str, strong: bool) -> String {
+        let caret = before.find('‸');
+        let text = before.replace(['⟨', '⟩', '‸'], "");
+        let sel = match caret {
+            Some(at) => at..at,
+            None => before.find('⟨').unwrap()..before.find('⟩').unwrap() - '⟨'.len_utf8(),
+        };
+        let Some(edit) = emphasize(&text, sel, strong) else { return before.to_string() };
+        let mut out = text.clone();
+        out.replace_range(edit.range, &edit.text);
+        let (a, b) = (edit.select.start, edit.select.end);
+        if a == b { format!("{}‸{}", &out[..a], &out[a..]) } else { format!("{}⟨{}⟩{}", &out[..a], &out[a..b], &out[b..]) }
+    }
+
+    #[test]
+    fn emphasis_of_a_selection() {
+        let bold = |before: &str| pressed(before, true);
+        let italic = |before: &str| pressed(before, false);
+        // Around the words, not the spaces at the ends; and back again, the marks selected or not.
+        assert_eq!(bold("a⟨ word ⟩b"), "a **⟨word⟩** b");
+        assert_eq!(bold("a **⟨word⟩** b"), "a ⟨word⟩ b");
+        assert_eq!(bold("a ⟨**word**⟩ b"), "a ⟨word⟩ b");
+        assert_eq!(italic("⟨拟南芥⟩的根"), "*⟨拟南芥⟩*的根");
+        // Part of a span loses it where it was selected, the rest keeps it.
+        assert_eq!(bold("**foo ⟨bar⟩ baz**"), "**foo** ⟨bar⟩ **baz**");
+        assert_eq!(bold("**⟨foo⟩ bar**"), "⟨foo⟩ **bar**");
+        assert_eq!(bold("**甲⟨乙⟩**"), "**甲**⟨乙⟩");
+        assert_eq!(italic("***foo ⟨bar⟩***"), "***foo*** **⟨bar⟩**");
+        // A span partly selected is taken in whole, and spans inside are folded into the new one.
+        assert_eq!(bold("⟨a **b⟩ c**"), "**⟨a b c⟩**");
+        assert_eq!(bold("⟨a **b** c⟩"), "**⟨a b c⟩**");
+        assert_eq!(bold("⟨a ***b*** c⟩"), "**⟨a *b* c⟩**");
+        // Beside the other kind's marks, which the reader then reads as one inside the other.
+        assert_eq!(bold("⟨*a* b⟩"), "**⟨*a* b⟩**");
+        assert_eq!(bold("*拟南芥*⟨的根⟩"), "*拟南芥***⟨的根⟩**");
+        assert_eq!(italic("**⟨word⟩**"), "***⟨word⟩***");
+        // Never cutting a citation or code; never into a heading's marks, a list's or a task's box; each line its own.
+        assert_eq!(bold("see [@Zh⟨ang2024] now⟩"), "see **⟨[@Zhang2024] now⟩**");
+        assert_eq!(bold("a `c⟨o⟩de` b"), "a **⟨`code`⟩** b");
+        assert_eq!(bold("⟨# Title⟩"), "# **⟨Title⟩**");
+        assert_eq!(bold("⟨one\n\n- two\n- [ ] three⟩"), "**⟨one**\n\n- **two**\n- [ ] **three⟩**");
+        assert_eq!(bold("⟨one\n\n- **two**⟩"), "**⟨one**\n\n- **two⟩**");
+        assert_eq!(bold("⟨**one**\n\n- **two**⟩"), "⟨one\n\n- two⟩");
+        // Code is left as it is.
+        assert_eq!(bold("```\n⟨code⟩\n```"), "```\n⟨code⟩\n```");
+        // What each change reads as.
+        for (text, words) in [("**foo** bar **baz**", "foo bar baz"), ("*拟南芥***的根**", "拟南芥的根"), ("***foo*** **bar**", "foo bar")] {
+            assert_eq!(inline(text).text, words, "{text}");
+        }
+    }
+
+    #[test]
+    fn emphasis_at_the_caret() {
+        let bold = |before: &str| pressed(before, true);
+        let italic = |before: &str| pressed(before, false);
+        // An empty pair to type in, taken away by the next press; bold and italic together.
+        assert_eq!(bold("a ‸ b"), "a **‸** b");
+        assert_eq!(bold("a **‸** b"), "a ‸ b");
+        assert_eq!(italic("**‸**"), "***‸***");
+        assert_eq!(italic("***‸***"), "**‸**");
+        // On a line of its own, where `****` reads as a rule, too; a rule selected is left alone.
+        assert_eq!(bold("‸"), "**‸**");
+        assert_eq!(bold("**‸**"), "‸");
+        assert_eq!(bold("a\n⟨---⟩\nb"), "a\n⟨---⟩\nb");
+        // Before the closing mark the caret steps out, so the next words are plain; and back in.
+        assert_eq!(bold("**ab‸**"), "**ab**‸");
+        assert_eq!(bold("**ab**‸"), "**ab‸**");
+        assert_eq!(bold("‸**ab**"), "**‸ab**");
+        assert_eq!(bold("**a *b‸***"), "**a *b***‸");
+        assert_eq!(italic("***x‸***"), "***x*‸**");
+        assert_eq!(bold("***x‸***"), "***x**‸*");
+        // The closing mark of one span and the opening of the next are no empty pair.
+        assert_eq!(bold("**a** ‸**b**"), "**a** **‸b**");
+        assert_eq!(bold("*a*‸*b*"), "*a***‸***b*");
+        // Inside a span it loses the mark.
+        assert_eq!(bold("x **a‸b** y"), "x a‸b y");
+        assert_eq!(italic("***a‸b***"), "**a‸b**");
+        // Code has none.
+        assert_eq!(bold("```\nco‸de\n```"), "```\nco‸de\n```");
+        // What is typed after stepping out of italic inside bold is still bold.
+        let runs = inline("***x*y**").runs;
+        assert_eq!(runs, vec![(1, Marks { bold: true, italic: true, ..Marks::default() }), (1, Marks { bold: true, ..Marks::default() })]);
+        let runs = inline("***x**y*").runs;
+        assert_eq!(runs, vec![(1, Marks { bold: true, italic: true, ..Marks::default() }), (1, Marks { italic: true, ..Marks::default() })]);
+    }
+
+    #[test]
+    fn emphasis_runs_read_as_commonmark() {
+        let marks = |text: &str| inline(text).spans().map(|(range, marks)| (inline(text).text[range].to_string(), marks.bold, marks.italic)).collect::<Vec<_>>();
+        let s = |t: &str| t.to_string();
+        assert_eq!(marks("***a* b**"), [(s("a"), true, true), (s(" b"), true, false)]);
+        assert_eq!(marks("***a** b*"), [(s("a"), true, true), (s(" b"), false, true)]);
+        assert_eq!(marks("*a***b**"), [(s("a"), false, true), (s("b"), true, false)]);
+        // A run that could open as well, two runs coming to three: inside, as before.
+        assert_eq!(marks("*甲**乙**丙*"), [(s("甲"), false, true), (s("乙"), true, true), (s("丙"), false, true)]);
+        assert_eq!(marks("*a**"), [(s("a"), false, true), (s("*"), false, false)]);
     }
 }

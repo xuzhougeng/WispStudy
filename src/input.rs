@@ -10,7 +10,7 @@ use std::sync::Arc;
 use wisp_core::selection::{self, Unit};
 use unicode_segmentation::UnicodeSegmentation;
 
-actions!(text_input, [Backspace, Delete, Left, Right, SelectLeft, SelectRight, Home, End, SelectHome, SelectEnd, SelectAll, Copy, Cut, Paste, Enter, ShiftEnter, Escape, Up, Down, Complete, Undo, Redo]);
+actions!(text_input, [Backspace, Delete, Left, Right, SelectLeft, SelectRight, Home, End, SelectHome, SelectEnd, SelectAll, Copy, Cut, Paste, Enter, ShiftEnter, Escape, Up, Down, Complete, Undo, Redo, Bold, Italic]);
 
 pub fn bind_keys(cx: &mut App) {
     let c = Some("TextInput");
@@ -434,6 +434,17 @@ impl TextInput {
         let moved = |at: usize| if at <= range.start { at } else if at >= range.end { at - range.len() + put } else { range.start + put };
         (self.sel, self.reversed) = (moved(sel.start)..moved(sel.end), reversed);
         cx.notify();
+    }
+
+    /// ⌘B (`strong`) or ⌘I in a field drawn as Markdown: the selection, or what is typed next at the caret, becomes
+    /// bold or italic, or stops being so (`markdown::emphasize`); one step of Undo. Elsewhere the key goes on.
+    fn emphasize(&mut self, strong: bool, cx: &mut Context<Self>) {
+        if !self.markdown || self.masked { return cx.propagate() }
+        // While a word is being composed (an input method) the key is the composition's.
+        if self.marked.is_some() { return }
+        let Some(edit) = wisp_core::markdown::emphasize(&self.text, self.sel.clone(), strong) else { return };
+        if !edit.range.is_empty() || !edit.text.is_empty() { self.replace_range(edit.range, &edit.text, cx) }
+        self.select_range(edit.select, cx);
     }
 
     /// What an empty field says; it changes with what the field is for at the moment.
@@ -966,7 +977,8 @@ impl Render for TextInput {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .id("text-input")
-            .key_context("TextInput")
+            // A field drawn as Markdown (the manuscript) is also `Markdown`: bold and italic have their keys there (shortcuts.rs).
+            .key_context(if self.markdown { "TextInput Markdown" } else { "TextInput" })
             .track_focus(&self.focus)
             .cursor(CursorStyle::IBeam)
             .flex_1()
@@ -993,6 +1005,8 @@ impl Render for TextInput {
             .on_action(cx.listener(Self::tab))
             .on_action(cx.listener(Self::undo))
             .on_action(cx.listener(Self::redo))
+            .on_action(cx.listener(|this, _: &Bold, _, cx| this.emphasize(true, cx)))
+            .on_action(cx.listener(|this, _: &Italic, _, cx| this.emphasize(false, cx)))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_down))
             .on_mouse_move(cx.listener(Self::on_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_up))

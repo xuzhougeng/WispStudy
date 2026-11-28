@@ -6,7 +6,7 @@ use crate::i18n::t;
 use gpui::*;
 use std::collections::BTreeMap;
 
-actions!(workspace, [ShowPalette, FocusSearch, AddPaper, ImportPdf, AskLibrary, ToggleDetail, ToggleSidebar, ToggleReading, ShowSettings, ShowHome, NewLibrary, ZoomIn, ZoomOut, ZoomFit, CopyPicked, FindCandidates, MoveUp, MoveDown, MoveLeft, MoveRight, MovePageUp, MovePageDown, MoveFirst, MoveLast, OpenSelected, TrashSelected, MarkUp, MarkDown, MarkAll, DecideIncluded, DecideRelated, DecideUncertain, DecideIrrelevant, DecidePending, TakeSuggestion, StarScreened, TranslateScreened, UndoDecision, UndoScreening, AskAssistant, TickSuggestion, PaperBack, PaperForward]);
+actions!(workspace, [ShowPalette, FocusSearch, AddPaper, ImportPdf, AskLibrary, ToggleDetail, ToggleSidebar, ToggleReading, ShowSettings, ShowHome, NewLibrary, ZoomIn, ZoomOut, ZoomFit, CopyPicked, FindCandidates, MoveUp, MoveDown, MoveLeft, MoveRight, MovePageUp, MovePageDown, MoveFirst, MoveLast, OpenSelected, TrashSelected, MarkUp, MarkDown, MarkAll, DecideIncluded, DecideRelated, DecideUncertain, DecideIrrelevant, DecidePending, TakeSuggestion, StarScreened, TranslateScreened, UndoDecision, UndoScreening, AskAssistant, TickSuggestion, PaperBack, PaperForward, OpenWriteFigures]);
 
 /// Esc: puts away what is open, one thing a press (`Workspace::dismiss`; a PDF, a mind map and a text field hear it
 /// first). `leave` says the press, with nothing left to put away in a library, goes back to 所有文献库: Esc carries it
@@ -36,10 +36,11 @@ pub struct Shortcut {
     default: &'static str,
 }
 
-pub const GROUPS: [&str; 2] = ["应用", "文献库"];
+pub const GROUPS: [&str; 3] = ["应用", "文献库", "写作"];
 
-/// What each one does is in `Workspace::shortcut` (commands.rs).
-pub const SHORTCUTS: [Shortcut; 18] = [
+/// What each one does is in `Workspace::shortcut` (commands.rs), but for bold and italic, which the manuscript's
+/// text field does itself (`TextInput::emphasize`).
+pub const SHORTCUTS: [Shortcut; 21] = [
     Shortcut { id: "palette", label: "命令面板", group: 0, default: "secondary-k" },
     Shortcut { id: "settings", label: "打开设置", group: 0, default: "secondary-," },
     Shortcut { id: "home", label: "回到所有文献库", group: 0, default: "secondary-shift-h" },
@@ -55,10 +56,19 @@ pub const SHORTCUTS: [Shortcut; 18] = [
     Shortcut { id: "zoom-in", label: "放大 PDF；没有 PDF 在眼前时放大界面文字", group: 1, default: "secondary-=" },
     Shortcut { id: "zoom-out", label: "缩小 PDF；没有 PDF 在眼前时缩小界面文字", group: 1, default: "secondary--" },
     Shortcut { id: "zoom-fit", label: "PDF 适应宽度；没有 PDF 在眼前时恢复默认文字大小", group: 1, default: "secondary-0" },
-    Shortcut { id: "write-find", label: "写作：查找候选句", group: 1, default: "secondary-enter" },
     Shortcut { id: "back", label: "后退：上一篇读过的文献", group: 1, default: "secondary-[" },
     Shortcut { id: "forward", label: "前进：后退之前的那篇文献", group: 1, default: "secondary-]" },
+    Shortcut { id: "bold", label: "加粗", group: 2, default: "secondary-b" },
+    Shortcut { id: "italic", label: "斜体", group: 2, default: "secondary-i" },
+    Shortcut { id: "write-figures", label: "打开资料库，插入图片", group: 2, default: "secondary-shift-i" },
+    Shortcut { id: "write-find", label: "查找候选句", group: 2, default: "secondary-enter" },
 ];
+
+/// The shortcuts heard only while the manuscript's text has the keyboard. There they come before a shortcut of the
+/// window on the same key (⌘B is the sidebar's elsewhere), so the two may share one.
+fn in_manuscript(id: &str) -> bool {
+    matches!(id, "bold" | "italic")
+}
 
 /// The text field's own keys (input.rs): a shortcut on one of them would
 /// never fire while typing, and would surprise when it did.
@@ -98,7 +108,7 @@ pub fn refusal(id: &str, key: &str, custom: &BTreeMap<String, String>) -> Option
     }
     if EDITING.iter().any(|e| same(e, key)) { return Some(tf!("{} 用于文本编辑（全选、复制、剪切、粘贴、撤销、重做），不能改作他用。", "{} is reserved for text editing (select all, copy, cut, paste, undo and redo).", pretty(key))) }
     if same(TRASH, key) { return Some(tf!("{} 用于把选中的文献移到回收站，不能改作他用。", "{} is reserved for moving selected papers to trash.", pretty(key))) }
-    SHORTCUTS.iter().find(|s| s.id != id && same(&key_of(s.id, custom), key)).map(|other| tf!("{} 已用于「{}」。先修改或移除那个快捷键。", "{} is already used for “{}”. Change or remove that shortcut first.", pretty(key), t(other.label)))
+    SHORTCUTS.iter().find(|s| s.id != id && in_manuscript(s.id) == in_manuscript(id) && same(&key_of(s.id, custom), key)).map(|other| tf!("{} 已用于「{}」。先修改或移除那个快捷键。", "{} is already used for “{}”. Change or remove that shortcut first.", pretty(key), t(other.label)))
 }
 
 /// The keys in force, for a view that is drawn while the workspace cannot be read (a paper's own window).
@@ -180,6 +190,10 @@ pub fn rebuild(custom: &BTreeMap<String, String>, cx: &mut App) {
             "zoom-out" => KeyBinding::new(&key, ZoomOut, context),
             "zoom-fit" => KeyBinding::new(&key, ZoomFit, context),
             "write-find" => KeyBinding::new(&key, FindCandidates, context),
+            "write-figures" => KeyBinding::new(&key, OpenWriteFigures, context),
+            // Heard in the manuscript's field, deeper than the workspace: before a window shortcut on the same key.
+            "bold" => KeyBinding::new(&key, crate::input::Bold, Some("Markdown")),
+            "italic" => KeyBinding::new(&key, crate::input::Italic, Some("Markdown")),
             "back" => KeyBinding::new(&key, PaperBack, context),
             "forward" => KeyBinding::new(&key, PaperForward, context),
             _ => KeyBinding::new(&key, ToggleDetail, context),
@@ -263,6 +277,10 @@ mod tests {
         for s in &SHORTCUTS {
             assert_eq!(refusal(s.id, s.default, &BTreeMap::new()), None, "{}", s.id);
         }
+        // Bold and italic share keys with the window's shortcuts, not with each other.
+        assert_eq!(refusal("bold", "secondary-f", &custom), None);
+        assert!(refusal("bold", "secondary-i", &custom).unwrap().contains("斜体"));
+        assert!(refusal("search", "secondary-shift-i", &custom).unwrap().contains("资料库"));
         if !cfg!(target_os = "macos") {
             assert_eq!((pretty("ctrl-shift-h"), pretty("secondary-,"), pretty("f3")), ("Ctrl + Shift + H".to_string(), "Ctrl + ,".to_string(), "F3".to_string()));
         }
