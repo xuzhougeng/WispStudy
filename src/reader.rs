@@ -33,6 +33,12 @@ impl Reader {
         Reader { workspace, paper, title, view, focus }
     }
 
+    /// Another viewer of the paper: its file was put in another's place, or taken off and another PDF of it is read (`Workspace::reopen_viewers`).
+    pub(crate) fn show(&mut self, view: Entity<PdfView>, cx: &mut Context<Self>) {
+        self.view = view;
+        cx.notify();
+    }
+
     fn zoom(&mut self, to: ZoomTo, cx: &mut Context<Self>) {
         self.view.update(cx, |pdf, cx| pdf.zoom_to(to, cx));
         cx.notify();

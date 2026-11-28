@@ -297,6 +297,10 @@ impl Workspace {
             }
             MenuKind::File(id) => {
                 let Some(file) = lib.files.iter().find(|f| f.id == *id) else { return (items, breaks) };
+                // A wrong file put right where it is: another in its place, and what it is noted down (#359).
+                items.push(item(t("换成另一个文件…"), Cmd::SwapFile(id.clone())));
+                items.push(item(if file.note.is_empty() { t("添加备注…") } else { t("编辑备注…") }, Cmd::EditFileNote(id.clone())));
+                breaks.push(items.len());
                 items.push(item(t("用系统应用打开"), Cmd::OpenFile(id.clone())));
                 items.push(item(reveal_label(), Cmd::RevealFile(id.clone())));
                 items.push(item(t("复制文件名"), Cmd::CopyText(file.title.clone())));

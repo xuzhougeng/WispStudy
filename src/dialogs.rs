@@ -410,6 +410,19 @@ impl Workspace {
                     .child(footer(t("存入笔记"), false, self, cx))
             }
 
+            Modal::FileNote { file, text } => {
+                let name = self.lib.as_ref().and_then(|lib| lib.files.iter().find(|f| &f.id == file)).map(|f| f.title.clone()).unwrap_or_default();
+                ui::dialog(460.)
+                    .child(ui::dialog_title(t("文件备注")))
+                    .child(
+                        body()
+                            .child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_tertiary()).child(tf!("「{name}」是什么、从哪里来，写在这里，显示在文件名下面。留空就去掉备注。", "What “{name}” is and where it is from: shown under the file’s name. Leave it empty to remove the note.")))
+                            .child(ui::field(text, window, cx))
+                            .child(error),
+                    )
+                    .child(footer(t("保存"), false, self, cx))
+            }
+
             Modal::Rename { name, .. } => ui::dialog(420.)
                 .child(ui::dialog_title(t("重命名对话")))
                 .child(body().child(ui::field(name, window, cx)).child(error))

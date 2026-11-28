@@ -1,5 +1,6 @@
-//! What is done to a paper's files: an attachment picked, a PDF made smaller, saved with its marks written
-//! in, read again, and the full texts that gave no text read anew (`extract_missing`).
+//! What is done to a paper's files: an attachment picked, one taken off or put in another's place, its note,
+//! a PDF made smaller, saved with its marks written in, read again, and the full texts that gave no text read
+//! anew (`extract_missing`).
 
 use crate::app::Workspace;
 use crate::i18n::t;
@@ -33,8 +34,7 @@ impl Workspace {
                         Ok(())
                     });
                     if added > 0 {
-                        if let Some(lib) = this.lib.as_mut() { lib.close_pdf() }
-                        this.ensure_pdf(cx);
+                        this.reopen_viewers(cx);
                         this.extract_missing(cx);
                         this.say(tf!("已添加 {added} 个附件。", "Added {added} attachments."), cx);
                     }
@@ -43,6 +43,54 @@ impl Workspace {
             }
         })
         .detach();
+    }
+
+    /// 移除附件: the file leaves its paper, to `removed/`; another PDF of the paper, if it has one, takes the viewer.
+    pub(crate) fn remove_file(&mut self, id: String, cx: &mut Context<Self>) {
+        if self.change(cx, |lib| lib.store.remove_file(&id)) {
+            self.reopen_viewers(cx);
+            self.say(t("附件已移除（文件移到了 removed 文件夹）。"), cx);
+        }
+    }
+
+    /// 换成另一个文件… (#359): a file picked to take this one's place (`swap_file`).
+    pub(crate) fn pick_swap(&mut self, id: String, cx: &mut Context<Self>) {
+        let Some(library) = self.lib.as_ref().map(|lib| lib.info.id.clone()) else { return };
+        let picked = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: false, prompt: Some(t("替换").into()), extensions: None });
+        cx.spawn(async move |this, cx| {
+            let Ok(Ok(Some(paths))) = picked.await else { return };
+            let Some(path) = paths.into_iter().next() else { return };
+            this.update(cx, |this, cx| if this.lib.as_ref().is_some_and(|lib| lib.info.id == library) { this.swap_file(id, &path, cx) }).ok();
+        })
+        .detach();
+    }
+
+    /// The file at `path` takes the place of the file `id` (`Store::swap_file`), as the main text or as the same
+    /// attachment number, and is read anew; the one it replaces goes to `removed/`.
+    pub(crate) fn swap_file(&mut self, id: String, path: &std::path::Path, cx: &mut Context<Self>) {
+        let mut swapped = None;
+        if !self.change(cx, |lib| lib.store.swap_file(&id, path).map(|file| swapped = Some(file))) { return }
+        let Some(file) = swapped else { return };
+        // The file chosen to read in its paper is the one in its place now.
+        if let Some(lib) = self.lib.as_mut() && lib.read_file.get(&file.paper_id) == Some(&id) { lib.read_file.insert(file.paper_id.clone(), file.id.clone()); }
+        self.reopen_viewers(cx);
+        self.extract_missing(cx);
+        if file.id == id {
+            self.say(tf!("「{}」已放回原处。", "“{}” is back in place.", file.title), cx);
+        } else {
+            self.say(tf!("已换成「{}」。原来的文件移到了 removed 文件夹。", "Replaced with “{}”. The earlier file moved to the removed folder.", file.title), cx);
+        }
+    }
+
+    /// 添加备注… / 编辑备注… (#359): what the person notes about a file, shown under its name in the detail panel.
+    pub(crate) fn file_note_dialog(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(note) = self.lib.as_ref().and_then(|lib| lib.files.iter().find(|f| f.id == id)).map(|f| f.note.clone()) else { return };
+        self.modal_subscriptions.clear();
+        self.modal_error.clear();
+        let text = self.modal_input("例如：作者寄来的修订版；补充表 S3 是引物序列", &note, true, window, cx);
+        text.read(cx).focus(window);
+        self.modal = Some(crate::app::Modal::FileNote { file: id, text });
+        cx.notify();
     }
 
     /// Make a stored PDF smaller (`shrink`), out of the window's way, and keep the result when it is worth it.

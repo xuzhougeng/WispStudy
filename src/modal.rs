@@ -119,6 +119,8 @@ pub enum Modal {
     FetchReport,
     /// An answer about a paper, to be looked over before it joins that paper's notes.
     Note { paper_id: String, text: Entity<TextInput> },
+    /// What the person notes about a file of a paper (备注, #359): the file's id and the note.
+    FileNote { file: String, text: Entity<TextInput> },
     /// 写作: a section's name and kind (`editing` its id, `None` for a new one).
     Section { editing: Option<String>, name: Entity<TextInput>, kind: String },
     /// 写作: a section's earlier versions, newest first.
@@ -617,6 +619,10 @@ impl Workspace {
                     return;
                 }
                 self.tag_papers(ids, vec![], chosen, window, cx);
+            }
+            Modal::FileNote { file, text: input } => {
+                let (file, note) = (file.clone(), text(input, cx));
+                if self.change(cx, |lib| lib.store.set_file_note(&file, &note)) { self.run(Cmd::CloseModal, window, cx) }
             }
             Modal::Note { paper_id, text: input } => {
                 let (paper_id, note) = (paper_id.clone(), text(input, cx));

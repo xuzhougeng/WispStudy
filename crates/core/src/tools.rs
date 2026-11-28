@@ -1379,7 +1379,10 @@ fn get_paper(store: &mut Store, args: &Value) -> Result<Value> {
             Some(Ok(pages)) => json!(pages.len()),
             _ => Value::Null,
         };
-        files.push(json!({"id": file.id, "kind": file.kind, "title": file.title, "format": file.format, "sizeBytes": file.size_bytes, "path": store.file_path(&file).display().to_string(), "textPages": pages}));
+        let mut row = json!({"id": file.id, "kind": file.kind, "title": file.title, "format": file.format, "sizeBytes": file.size_bytes, "path": store.file_path(&file).display().to_string(), "textPages": pages});
+        // What the person noted about the file (备注), only where there is a note: a file without one reads as before.
+        if !file.note.is_empty() { row["note"] = json!(file.note) }
+        files.push(row);
     }
     out["files"] = json!(files);
     out["pdfAnnotationCount"] = json!(store.pdf_annotations(&paper.id, "")?.len());

@@ -460,12 +460,16 @@ impl Workspace {
                                     .flex_1()
                                     .min_w_0()
                                     .child(div().truncate().child(file.title.clone()))
-                                    .child(div().truncate().text_size(text_px(12.)).text_color(if failure.is_some() { Theme::warning() } else { Theme::text_tertiary() }).child(format!("{} · {}{}", match attachments.iter().position(|a| a == &file.id) { Some(n) => format!("S{}", n + 1), None if file.kind == "fulltext" => t("正文").to_string(), None => t("附件").to_string() }, file_size(file.size_bytes), if note.is_empty() { String::new() } else { format!(" · {note}") }))),
+                                    .child(div().truncate().text_size(text_px(12.)).text_color(if failure.is_some() { Theme::warning() } else { Theme::text_tertiary() }).child(format!("{} · {}{}", match attachments.iter().position(|a| a == &file.id) { Some(n) => format!("S{}", n + 1), None if file.kind == "fulltext" => t("正文").to_string(), None => t("附件").to_string() }, file_size(file.size_bytes), if note.is_empty() { String::new() } else { format!(" · {note}") })))
+                                    // What the person noted about the file (#359); a click writes it again.
+                                    .when(!file.note.is_empty(), |d| d.child(div().id(("file-note", i)).mt(px(2.)).text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_secondary()).cursor_pointer().hover(|s| s.text_color(Theme::text())).child(file.note.clone()).tooltip(ui::tip(t("编辑备注"))).on_click(self.on(Cmd::EditFileNote(file.id.clone()), cx)))),
                             )
                             // A PDF is read in the viewer here, an attachment as well as the main text.
                             .when(heavy && !shrinking, |d| d.child(small(("file-compress", i), t("压缩")).tooltip(ui::tip(t("把过大的图片缩小，文字、页面和标注不变。原文件移到 removed 文件夹。"))).on_click(self.on(Cmd::CompressFile(file.id.clone()), cx))))
                             .when(file.format == "pdf", |d| d.child(small(("file-read", i), crate::i18n::tc("阅读·打开文件", "阅读")).on_click(self.on(Cmd::ReadFile(file.id.clone()), cx))))
                             .child(ui::ghost_button(("file-open", i), Some("link"), None).tooltip(ui::tip(t("用系统应用打开"))).on_click(self.on(Cmd::OpenFile(file.id.clone()), cx)))
+                            // The file's menu, as its right click opens it: 换成另一个文件…, 备注 and the rest (#359).
+                            .child(ui::ghost_button(("file-more", i), Some("ellipsis"), None).tooltip(ui::tip(t("更多操作"))).on_click(self.on_menu(MenuKind::File(file.id.clone()), cx)))
                             .child(ui::ghost_button(("file-remove", i), Some("x"), None).tooltip(ui::tip(t("移除附件"))).on_click(self.on(Cmd::RemoveFile(file.id.clone()), cx))),
                     )
                     // A file without text: why, what it means for questions, and the two things to try.

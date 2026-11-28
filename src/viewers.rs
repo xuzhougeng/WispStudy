@@ -187,6 +187,43 @@ impl Workspace {
         self.load_facing(cx);
     }
 
+    /// A paper's files changed: one added or taken off, or another put in a file's place (#359). The panel's viewer
+    /// is opened anew where it was read, with the paper's files as they are now (another PDF of the paper takes it
+    /// when its own went), and so is a pane or a paper's window whose file is no longer there; one whose paper has no
+    /// PDF left closes.
+    pub(crate) fn reopen_viewers(&mut self, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        lib.keep_places(cx);
+        lib.close_pdf();
+        self.ensure_pdf(cx);
+        let Some(lib) = self.lib.as_ref() else { return };
+        let gone = |view: &Entity<PdfView>| { let id = view.read(cx).resource_id(); !lib.files.iter().any(|f| f.id == id) };
+        let panes: Vec<String> = lib.pins.iter().filter(|pin| gone(&pin.view)).map(|pin| pin.paper.clone()).collect();
+        let windows: Vec<String> = lib.windows.iter().filter(|open| gone(&open.view)).map(|open| open.paper.clone()).collect();
+        for paper in panes {
+            let file = self.lib.as_ref().and_then(|lib| lib.pdf_file(&paper)).cloned();
+            match file.and_then(|file| self.pdf_view(&file, cx)) {
+                Some((view, events)) => if let Some(pin) = self.lib.as_mut().and_then(|lib| lib.pins.iter_mut().find(|pin| pin.paper == paper)) { (pin.view, pin._events) = (view, events) },
+                None => self.unpin(&paper, cx),
+            }
+        }
+        for paper in windows {
+            let file = self.lib.as_ref().and_then(|lib| lib.pdf_file(&paper)).cloned();
+            let made = file.and_then(|file| self.pdf_view(&file, cx));
+            let Some(lib) = self.lib.as_mut() else { return };
+            let Some(at) = lib.windows.iter().position(|open| open.paper == paper) else { continue };
+            match made {
+                Some((view, events)) => {
+                    let open = &mut lib.windows[at];
+                    (open.view, open._events) = (view.clone(), events);
+                    open.window.update(cx, |reader, _, cx| reader.show(view, cx)).ok();
+                }
+                None => { let closed = lib.windows.remove(at); closed.window.update(cx, |_, window, _| window.remove_window()).ok(); }
+            }
+        }
+        cx.notify();
+    }
+
     fn open_pdf(&mut self, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
         if !lib.pdf_on_show() || lib.pdf.is_some() { return }
@@ -721,6 +758,8 @@ impl Workspace {
             PdfEvent::RecolorAnnotation { resource, id, color } => self.change_pdf_annotation(resource, |store| store.recolor_pdf_annotation(resource, id, color), cx),
             PdfEvent::RemoveAnnotation { resource, id } => self.change_pdf_annotation(resource, |store| store.remove_pdf_annotation(resource, id), cx),
             PdfEvent::ExportMarked => { let id = view.read(cx).resource_id().to_string(); self.export_marked_pdf(id, None, cx) }
+            PdfEvent::SwapFile => { let id = view.read(cx).resource_id().to_string(); self.pick_swap(id, cx) }
+            PdfEvent::RemoveFile => { let id = view.read(cx).resource_id().to_string(); self.remove_file(id, cx) }
             PdfEvent::AddShape { paper, resource, page, kind, rect, note } => self.change_pdf_annotation(resource, |store| store.add_pdf_shape(paper, resource, *page, *kind, *rect, note).map(|_| ()), cx),
             PdfEvent::MoveShape { resource, id, rect } => self.change_pdf_annotation(resource, |store| store.move_pdf_shape(resource, id, *rect), cx),
             PdfEvent::AddText { paper, resource, page, rect, text, style } => self.change_pdf_annotation(resource, |store| store.add_pdf_text(paper, resource, *page, *rect, text, style).map(|_| ()), cx),
