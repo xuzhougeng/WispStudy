@@ -14,7 +14,7 @@ use wisp_core::lookup::{self, Identifier};
 use wisp_core::model::*;
 use wisp_core::store::SavedSearch;
 use wisp_core::manuscript::Snapshot;
-use wisp_core::{complete, pdftext, zotero};
+use wisp_core::{complete, pdftext, sources, zotero};
 
 /// 按题目补全: what is asked, the records found, and the one being
 /// looked at with the fields to take from it. Nothing is written before
@@ -92,7 +92,8 @@ pub enum Modal {
     Paper(Box<PaperForm>),
     Complete(Box<CompleteForm>),
     Fields { editing: Option<String>, name: Entity<TextInput>, options: Entity<TextInput>, hint: Entity<TextInput>, kind: FieldKind, in_table: bool },
-    Search { editing: Option<String>, kind: String, name: Entity<TextInput>, query: Entity<TextInput>, max: Entity<TextInput> },
+    /// `all`: the search takes every hit (its database's `sources::ceiling`), and `max` is put aside meanwhile.
+    Search { editing: Option<String>, kind: String, name: Entity<TextInput>, query: Entity<TextInput>, max: Entity<TextInput>, all: bool },
     Confirm { title: String, message: String, action: String, cmd: Cmd },
     /// Another name for a tag, on every paper that has it.
     Tag { tag: String, name: Entity<TextInput> },
@@ -389,8 +390,11 @@ impl Workspace {
         let search = editing.as_ref().and_then(|id| self.lib.as_ref()?.searches.iter().find(|s| &s.id == id).cloned()).unwrap_or(SavedSearch { kind: "pubmed".into(), max_results: 50, enabled: true, ..Default::default() });
         let name = self.modal_input("名称，例如：根尖单细胞（可以留空）", &search.name, false, window, cx);
         let query = self.modal_input("检索式", &search.query, true, window, cx);
-        let max = self.modal_input("50", &search.max_results.to_string(), false, window, cx);
-        self.modal = Some(Modal::Search { editing, kind: search.kind, name, query, max });
+        // A search that takes all keeps a number to go back to.
+        let all = sources::takes_all(&search.kind, search.max_results);
+        let number = if all { sources::BROAD } else { search.max_results };
+        let max = self.modal_input("50", &number.to_string(), false, window, cx);
+        self.modal = Some(Modal::Search { editing, kind: search.kind, name, query, max, all });
     }
 
     /// One identifier of 通过 DOI / PMID 添加 looked up: its paper joins the library unless it is held already. With
@@ -732,10 +736,15 @@ impl Workspace {
                     Err(err) => self.modal_error = format!("{err:#}"),
                 }
             }
-            Modal::Search { editing, kind, name, query, max } => {
-                let Ok(max_results) = text(max, cx).parse::<usize>() else {
-                    self.modal_error = t("每次取回的篇数应为数字，例如 50。").into();
-                    return;
+            Modal::Search { editing, kind, name, query, max, all } => {
+                let max_results = if *all && kind != "crossref" {
+                    sources::ceiling(kind)
+                } else {
+                    let Ok(number) = text(max, cx).parse::<usize>() else {
+                        self.modal_error = t("每次取回的篇数应为数字，例如 50。").into();
+                        return;
+                    };
+                    number
                 };
                 let Some(lib) = self.lib.as_mut() else { return };
                 // An edited search keeps whether it is enabled.

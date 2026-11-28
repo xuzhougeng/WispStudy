@@ -319,9 +319,15 @@ impl<'a> Index<'a> {
         // The rest in the order they came into the library: a later paper never takes a key from an earlier one.
         let mut rest: Vec<&Paper> = all.values().map(|(paper, _)| *paper).filter(|paper| !key_of.contains_key(paper.id.as_str())).collect();
         rest.sort_by(|a, b| (a.added_at.as_str(), a.id.as_str()).cmp(&(b.added_at.as_str(), b.id.as_str())));
+        // Where to go on looking for a base's first free suffix: keys are only ever taken here, so it never moves back,
+        // and many papers of one first author and year cost no more than one each.
+        let mut from: HashMap<String, usize> = HashMap::new();
         for paper in rest {
             let base = base_key(paper);
-            let key = (1..).map(|n| suffixed(&base, n)).find(|key| !by_key.contains_key(&key.to_lowercase())).unwrap();
+            let start = from.get(&base).copied().unwrap_or(1);
+            let n = (start..).find(|n| !by_key.contains_key(&suffixed(&base, *n).to_lowercase())).unwrap();
+            from.insert(base.clone(), n + 1);
+            let key = suffixed(&base, n);
             by_key.insert(key.to_lowercase(), paper.id.clone());
             key_of.insert(paper.id.as_str(), key);
         }

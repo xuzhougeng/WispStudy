@@ -145,6 +145,8 @@ CREATE TABLE IF NOT EXISTS batch_papers (
     paper_id TEXT NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
     PRIMARY KEY (batch_id, paper_id)
 );
+-- A paper leaving looks here for its rows: without it, each looked through every batch's papers.
+CREATE INDEX IF NOT EXISTS idx_batch_papers_paper ON batch_papers(paper_id);
 
 -- What an assistant thinks the screening decision should be. A suggestion
 -- only: the decision in `papers` is made by the person. One per paper; a new
@@ -1209,7 +1211,8 @@ impl Store {
         if search.query.is_empty() { bail!("请填写检索式。") }
         if search.query.chars().count() > 4000 { bail!("检索式不能超过 4000 个字符。") }
         if search.name.chars().count() > 60 { bail!("名称不能超过 60 个字符。") }
-        if !(1..=crate::sources::MAX_RESULTS).contains(&search.max_results) { bail!("每次取回的篇数应在 1 到 {} 之间。", crate::sources::MAX_RESULTS) }
+        let most = crate::sources::ceiling(&search.kind);
+        if !(1..=most).contains(&search.max_results) { bail!("{kind_name} 每次取回的篇数应在 1 到 {most} 之间。") }
         if search.name.is_empty() { search.name = kind_name.to_string() }
         if search.id.is_empty() {
             search.id = new_id("S");
@@ -1278,14 +1281,12 @@ impl Store {
             Some(at) if !at.is_empty() => bail!("这个批次已经撤销过了。"),
             _ => {}
         }
-        let ids: Vec<String> = {
-            let mut stmt = self.db.prepare("SELECT paper_id FROM batch_papers WHERE batch_id = ?1")?;
-            stmt.query_map([id], |r| r.get(0))?.collect::<rusqlite::Result<Vec<_>>>()?
-        };
+        // Read in one go: `get_paper` a paper at a time looks through every paper's identifiers each time.
+        let papers = self.read_papers(&format!("WHERE id IN (SELECT paper_id FROM batch_papers WHERE batch_id = '{}') ORDER BY rowid", id.replace('\'', "''")))?;
         let mut undone = Undone::default();
         let mut leaving: Vec<Paper> = vec![];
-        for paper_id in ids {
-            let paper = self.get_paper(&paper_id)?;
+        for paper in papers {
+            let paper_id = paper.id.clone();
             let held = |sql: &str| -> Result<bool> { Ok(self.db.query_row(sql, [&paper_id], |_| Ok(())).optional()?.is_some()) };
             let trashed = held("SELECT 1 FROM trashed_papers WHERE paper_id = ?1")?;
             let used = held("SELECT 1 FROM conversations WHERE paper_id = ?1")? || held("SELECT 1 FROM cite_keys WHERE paper_id = ?1")?;
@@ -1298,10 +1299,14 @@ impl Store {
             let dir = self.root.join("removed");
             std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(dir.join(format!("undone-import-{id}.bib")), crate::export::bibtex(&leaving.iter().collect::<Vec<_>>()))).with_context(|| format!("无法把要移出的记录另存到 {relative}"))?;
             undone.set_aside = relative;
-            for paper in &leaving {
-                self.delete_paper(&paper.id)?;
-                undone.removed += 1;
-            }
+            // As `delete_paper` does, in one transaction: a search's batch can be tens of thousands.
+            let mut paths = vec![];
+            for paper in &leaving { paths.extend(self.paper_paths(&paper.id)?) }
+            let tx = self.db.transaction()?;
+            for paper in &leaving { delete_rows(&tx, &paper.id)? }
+            tx.commit()?;
+            for path in &paths { self.set_aside(path) }
+            undone.removed = leaving.len();
         }
         self.db.execute("UPDATE import_batches SET undone_at = ?2 WHERE id = ?1", params![id, now_iso()])?;
         // What was removed is missing anywhere in the list: the search's next run looks at all of it again.
@@ -2057,8 +2062,15 @@ mod tests {
         let mut search = SavedSearch { kind: "pubmed".into(), query: "  root[Title] ".into(), max_results: 50, enabled: true, ..Default::default() };
         store.save_search(&mut search).unwrap();
         assert_eq!((search.name.as_str(), search.query.as_str()), ("PubMed", "root[Title]"));
-        for bad in [SavedSearch { kind: "scholar".into(), query: "x".into(), max_results: 5, ..Default::default() }, SavedSearch { kind: "pubmed".into(), max_results: 5, ..Default::default() }, SavedSearch { kind: "pubmed".into(), query: "x".into(), max_results: 0, ..Default::default() }] {
+        let most = |kind: &str, max_results: usize| SavedSearch { kind: kind.into(), query: "x".into(), max_results, ..Default::default() };
+        for bad in [SavedSearch { kind: "scholar".into(), query: "x".into(), max_results: 5, ..Default::default() }, SavedSearch { kind: "pubmed".into(), max_results: 5, ..Default::default() }, most("pubmed", 0), most("pubmed", 50_001), most("europepmc", 50_001), most("arxiv", 10_001), most("crossref", 2001)] {
             assert!(store.save_search(&mut bad.clone()).is_err(), "{bad:?}");
+        }
+        // Each database's own most is allowed: all the hits, for those sorted by date.
+        for good in [most("pubmed", 50_000), most("europepmc", 50_000), most("arxiv", 10_000), most("crossref", 2000)] {
+            let mut good = good;
+            store.save_search(&mut good).unwrap();
+            store.remove_search(&good.id).unwrap();
         }
         search.name = "根".into();
         search.enabled = false;

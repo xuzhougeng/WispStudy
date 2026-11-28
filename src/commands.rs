@@ -569,10 +569,14 @@ pub enum Cmd {
     TrySearch(String),
     CloseTrial,
     RunSearch(String),
+    /// Set a saved search to take every hit (its database's `sources::ceiling`) and run it: 取回全部 on its card.
+    TakeAllHits(String),
     RunAllSearches,
     AskUndoImport(String),
     UndoImport(String),
     PickSource(String),
+    /// The search dialog's 每次取回: every hit, or the latest so many.
+    SearchTakesAll(bool),
     // The guide
     /// Show the guide; true starts at the choice a new library gets.
     OpenGuide(bool),
@@ -2252,20 +2256,7 @@ impl Workspace {
             Cmd::CloseTrial => {
                 if let Some(lib) = self.lib.as_mut() { lib.trial = None }
             }
-            Cmd::RunSearch(id) => {
-                let Some(lib) = self.lib.as_mut() else { return };
-                if !lib.running.insert(id.clone()) { return }
-                self.library_tool("run_search", serde_json::json!({"id": id}), cx, move |this, result, cx| {
-                    if let Some(lib) = this.lib.as_mut() { lib.running.remove(&id); }
-                    // The run wrote through its own connection, failed runs included.
-                    this.change(cx, |_| Ok(()));
-                    match result {
-                        Ok(run) if run["stopped"].is_string() => this.fail(tf!("{}：新增 {} 篇。{}", "{}: {} added. {}", run["search"].as_str().unwrap_or(t("检索")), run["added"], run["stopped"].as_str().unwrap_or_default()), cx),
-                        Ok(run) => this.say(tf!("{}：新增 {} 篇，跳过已有的 {} 篇", "{}: {} added, {} existing skipped", run["search"].as_str().unwrap_or(t("检索")), run["added"], run["skipped"]), cx),
-                        Err(err) => this.fail(err, cx),
-                    }
-                });
-            }
+            Cmd::RunSearch(id) => self.run_saved_search(id, cx),
             Cmd::RunAllSearches => {
                 let ids: Vec<String> = self.lib.as_ref().map(|l| l.searches.iter().filter(|s| s.enabled).map(|s| s.id.clone()).collect()).unwrap_or_default();
                 for id in ids {
@@ -2293,8 +2284,16 @@ impl Workspace {
                 self.run(Cmd::CloseModal, window, cx);
             }
             Cmd::PickSource(value) => {
-                if let Some(Modal::Search { kind, .. }) = self.modal.as_mut() { *kind = value }
+                // Crossref takes no "all": its hits are ranked by relevance.
+                if let Some(Modal::Search { kind, all, .. }) = self.modal.as_mut() {
+                    if value == "crossref" { *all = false }
+                    *kind = value;
+                }
             }
+            Cmd::SearchTakesAll(value) => {
+                if let Some(Modal::Search { all, .. }) = self.modal.as_mut() { *all = value }
+            }
+            Cmd::TakeAllHits(id) => self.take_all_hits(id, window, cx),
 
             Cmd::SetAutoSync(hours) => {
                 let Some(lib) = self.lib.as_mut() else { return };

@@ -88,6 +88,7 @@ const PHRASES: &[(&str, &str)] = &[
     ("{n} 句", "{0} {0|sentence|sentences}"),
     // What a call would change, for the card that asks (`tools::preview_call`).
     ("{}（最多取最新的 {n} 条）", "{0} (the latest {1} at most)"),
+    ("{}（取回全部命中的记录）", "{0} (every one of its hits)"),
     ("《{}》的「{}」：整节 {n} 字换成新写的 {n} 字", "“{1}” of “{0}”: the whole section, {2} {2|character|characters}, replaced by {3} newly written"),
     ("《{}》的「{}」：整节 {n} 词换成新写的 {n} 词", "“{1}” of “{0}”: the whole section, {2} {2|word|words}, replaced by {3} newly written"),
     ("《{}》的「{}」：整节写成新的 {n} 字", "“{1}” of “{0}”: the whole section written anew, {2} {2|character|characters}"),
@@ -153,7 +154,11 @@ const PHRASES: &[(&str, &str)] = &[
     ("作者里没有 {}", "Authors do not include {0}"),
     // Saving a search (`Store::save_search`, `sources`).
     ("不支持的来源：{}", "Unsupported source: {0}"),
-    ("每次取回的篇数应在 1 到 {n} 之间。", "The number of papers per run must be between 1 and {0}."),
+    ("{} 每次取回的篇数应在 1 到 {n} 之间。", "{0}: the number of papers per run must be between 1 and {1}."),
+    // Why a search brought fewer than it had hits (`sources::pubmed_ids`, the arXiv page past its last).
+    ("PubMed 命中 {n} 篇，只取得其中 {n} 篇的编号", "PubMed has {0} results; ids came for only {1} of them"),
+    ("{} 这一天就有 {n} 篇，PubMed 只给出其中 {n} 篇", "{0} alone has {1} records, of which PubMed names only {2}"),
+    ("arXiv 没有给出后面的记录：{}", "arXiv gave no further records: {0}"),
     ("检索式不存在：{}", "No such saved search: {0}"),
     // Why a Zotero attachment was not taken in (`zotero::attachment_path`).
     ("找不到 PDF，请先在 Zotero 中下载或修复路径：{}", "PDF not found; download it in Zotero or fix its path first: {0}"),

@@ -2319,5 +2319,9 @@
   "识别中…": "Transcribing…",
   "另一处正在录音": "Recording elsewhere",
   "说话时间太短，没有识别到内容。": "Recording was too short to recognize any speech.",
-  "没有识别到说话内容。": "No speech was recognized."
+  "没有识别到说话内容。": "No speech was recognized.",
+  "运行检索": "Search run",
+  "每次取回全部命中的记录": "Retrieves every hit each run",
+  "全部命中": "All hits",
+  "最新的": "Latest"
 }

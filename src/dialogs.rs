@@ -682,7 +682,7 @@ impl Workspace {
                     .child(footer(t("保存"), false, self, cx))
             }
 
-            Modal::Search { editing, kind, name, query, max } => ui::dialog(560.)
+            Modal::Search { editing, kind, name, query, max, all } => ui::dialog(560.)
                 .child(ui::dialog_title(if editing.is_some() { t("修改检索式") } else { t("新建检索式") }))
                 .child(
                     body()
@@ -691,7 +691,18 @@ impl Workspace {
                         // Each database reads a query its own way.
                         .child(div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(Theme::text_tertiary()).child(t(sources::syntax(kind))))
                         .child(ui::form_row(t("名称"), ui::field(name, window, cx)))
-                        .child(ui::form_row(t("每次取回"), div().flex().items_center().gap(px(8.)).child(ui::field(max, window, cx).w(px(90.))).child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(tf!("篇最新的记录（最多 {}）", "latest records (maximum {})", sources::MAX_RESULTS)))))
+                        // Every hit, or the latest so many; Crossref, ranked by relevance, has only the number.
+                        .child(ui::form_row(t("每次取回"), {
+                            let (most, ranked, all) = (sources::ceiling(kind), kind == "crossref", *all && kind != "crossref");
+                            let hint = |text: String| div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(text);
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(8.))
+                                .when(!ranked, |d| d.child(option_chip("search-take-all", t("全部命中"), all).on_click(self.on(Cmd::SearchTakesAll(true), cx))).child(option_chip("search-take-latest", t("最新的"), !all).on_click(self.on(Cmd::SearchTakesAll(false), cx))))
+                                .when(!all, |d| d.child(ui::field(max, window, cx).w(px(90.))).child(hint(tf!("篇（最多 {most}）", "records (at most {most})"))))
+                                .when(all, |d| d.child(hint(tf!("{} 最多 {most} 篇", "{} gives at most {most}", crate::i18n::label(&sources::KINDS, kind)))))
+                        }))
                         .child(div().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(t("保存后先「试检索」看看命中的是不是想要的文献，再「运行」导入。检索式会发送给所选的数据库。")))
                         .child(error),
                 )
