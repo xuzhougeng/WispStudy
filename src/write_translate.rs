@@ -506,15 +506,28 @@ impl Workspace {
     }
 
     /// The units of a version a model translates by itself (`follow::wanted`), asked for unless a run for it is
-    /// going, the person stopped it, or they failed and wait for 重试.
+    /// going, the person stopped it, or they failed and wait for 重试. With them, the model's translations that
+    /// leave out a term of the glossary (`follow::lacking`: made before the term was in the table or changed),
+    /// each asked once under the instructions that carry the term; what the model then gives is kept, the mark
+    /// saying what it still lacks.
     fn translate_follow(&mut self, id: &str, language: &str, cx: &mut Context<Self>) {
         let rules = self.translate_rules(id, language);
         let Some(lib) = self.lib.as_ref() else { return };
         let translate = &lib.writing.translate;
         if translate.paused || translate.run.as_ref().is_some_and(|run| run.run.batch.running()) { return }
         let Some(version) = translate.kept.get(&(id.to_string(), language.to_string())) else { return };
-        let failed = |sent: &str| matches!(lib.translations.get(&Self::translate_key(language, sent, &rules)), Some(Translated::Failed(_)));
-        let texts: Vec<String> = follow::wanted(&version.kept, &version.pairs).into_iter().map(|u| version.units[u].sent.clone()).filter(|sent| !failed(sent)).collect();
+        let asked = |sent: &str| lib.translations.get(&Self::translate_key(language, sent, &rules));
+        let mut texts: Vec<String> = follow::wanted(&version.kept, &version.pairs).into_iter().map(|u| version.units[u].sent.clone()).filter(|sent| !matches!(asked(sent), Some(Translated::Failed(_)))).collect();
+        for u in follow::lacking(&version.units, &version.kept, &version.pairs, &rules.0) {
+            let (sent, kept) = (&version.units[u].sent, version.pairs[u].map(|k| version.kept[k].text.trim()));
+            // Not asked yet under these instructions, or answered with what the unit does not hold yet.
+            let again = match asked(sent) {
+                None => true,
+                Some(Translated::Done(text)) => Some(text.trim()) != kept,
+                Some(_) => false,
+            };
+            if again && !texts.contains(sent) { texts.push(sent.clone()) }
+        }
         if texts.is_empty() { return }
         self.translate_start(id, language, texts, cx);
     }
@@ -583,9 +596,11 @@ impl Workspace {
         cx.notify();
     }
 
-    /// A model's translation of `sent` written into every unit of the version that says it and follows by itself.
+    /// A model's translation of `sent` written into every unit of the version that says it and follows by itself:
+    /// one not yet translated, one whose source changed, one whose translation leaves out a term of the glossary.
     fn translate_put(&mut self, id: &str, language: &str, sent: &str, translated: &str, cx: &mut Context<Self>) {
         self.translate_settled(id, language, cx);
+        let terms = self.translate_rules(id, language).0;
         let Some(lib) = self.lib.as_mut() else { return };
         let Some(version) = lib.writing.translate.kept.get_mut(&(id.to_string(), language.to_string())) else { return };
         let mut failed = None;
@@ -593,7 +608,8 @@ impl Workspace {
             if version.units[u].sent.trim() != sent.trim() { continue }
             let made = follow::made(&version.units[u], translated);
             let one = match version.pairs[u] {
-                Some(k) if version.kept[k].edited || version.kept[k].source == version.kept[k].anchor => continue,
+                Some(k) if version.kept[k].edited => continue,
+                Some(k) if version.kept[k].source == version.kept[k].anchor && (version.kept[k].text == made.text || !glossary::lacks_term(&version.units[u].sent, &version.kept[k].text, &terms)) => continue,
                 Some(k) => {
                     let old = &mut version.kept[k];
                     (old.text, old.source, old.cites) = (made.text, made.source, made.cites);
@@ -1736,7 +1752,8 @@ impl Workspace {
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_click(self.on(Cmd::Translate(Do::Edit(u)), cx));
             column = match (shown, state, &asked) {
-                (shown, State::Untranslated | State::Changed, Some(Translated::Busy)) if !kept.is_some_and(|k| k.edited) => {
+                // 已译 and asked: made again for a term of the glossary it left out (`follow::lacking`).
+                (shown, State::Untranslated | State::Changed | State::Translated, Some(Translated::Busy)) if !kept.is_some_and(|k| k.edited) => {
                     column.children(shown.map(|shown| div().opacity(0.5).child(shown).into_any_element())).child(spinner(format!("{key}-busy")))
                 }
                 (None, State::Untranslated, Some(Translated::Failed(error))) => {

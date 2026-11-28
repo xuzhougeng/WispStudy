@@ -12,8 +12,9 @@
 //! close one near where it stood, then the one left in its place), and `settle` writes that down: a
 //! translation whose unit is gone is dropped when a model made it (it is in the library's translations still),
 //! and set aside (`gone`) when the person had changed it, never dropped. A unit then has one of four `State`s:
-//! 未译, 已译, 手改过, 原文已改. One that a model made follows by itself (`wanted`); one changed by hand waits for
-//! the person: 重译, 只带改动 (`carry_prompt`, shown as a comparison to take or leave), or 已核对.
+//! 未译, 已译, 手改过, 原文已改. One that a model made follows by itself (`wanted`), and is made again when it
+//! leaves out a term of the glossary its source holds (`lacking`); one changed by hand waits for the person: 重译,
+//! 只带改动 (`carry_prompt`, shown as a comparison to take or leave), or 已核对.
 //!
 //! A version is read, copied and exported as a manuscript of its own (`rendered`), and can be made the primary
 //! (`swap`): the pairing stays and its direction turns round.
@@ -427,6 +428,17 @@ pub fn settle(kept: Vec<Kept>, units: &[Unit], pairs: &[Option<usize>], now: &st
 /// and whose source has changed. Each unit's place in `units`.
 pub fn wanted(kept: &[Kept], pairs: &[Option<usize>]) -> Vec<usize> {
     pairs.iter().enumerate().filter(|(_, k)| match k { None => true, Some(k) => !kept[*k].edited && kept[*k].source != kept[*k].anchor }).map(|(u, _)| u).collect()
+}
+
+/// The units whose translation a model made from the source as it stands and which leave out a term of the
+/// glossary the source holds (`terms`: `glossary::pairs` into the version's language, `glossary::lacks_term`):
+/// made before the term was in the table or before its counterpart was changed, they are the model's to make again
+/// under instructions that carry it. Never one the person wrote or checked (`edited`): their words stay, with the
+/// mark that says what they lack. Each unit's place in `units`.
+pub fn lacking(units: &[Unit], kept: &[Kept], pairs: &[Option<usize>], terms: &[(String, String)]) -> Vec<usize> {
+    if terms.is_empty() { return vec![] }
+    let made = |k: &Kept, unit: &Unit| !k.edited && k.source == k.anchor && crate::glossary::lacks_term(&unit.sent, &k.text, terms);
+    pairs.iter().zip(units).enumerate().filter(|(_, (k, unit))| k.is_some_and(|k| made(&kept[k], unit))).map(|(u, _)| u).collect()
 }
 
 /// A translation made of the unit as it stands: kept, a model's, from the source as it is.
@@ -1031,6 +1043,25 @@ mod tests {
         assert_eq!(state(Some(one)), State::Changed);
         // Made by a model: it follows by itself.
         assert_eq!(wanted(&settled.kept, &settled.pairs), vec![3]);
+    }
+
+    #[test]
+    fn a_translation_without_a_term_of_the_glossary_is_the_models_again() {
+        let unit = |sent: &str| Unit { section: "S1".into(), part: Part::Text, block: 0, sent: sent.into(), cites: vec![] };
+        let source = "我们整理出一份底层基因列表 [@1]。";
+        let units = vec![unit(source), unit(source), unit(source), unit("其余的基因不稳定。"), unit("我们整理出一份底层基因清单 [@1]。")];
+        let underlying = "We compiled an underlying gene list [@1].";
+        let mut kept = vec![made(&units[0], underlying), made(&units[1], "We compiled a list of foundational genes [@1]."), made(&units[2], underlying), made(&units[3], "The other genes are unstable."), made(&units[0], underlying)];
+        // The person's words, and one whose source has changed since (that one is `wanted`'s).
+        kept[2].edited = true;
+        kept[4].anchor = units[4].sent.clone();
+        let pairs: Vec<Option<usize>> = (0..kept.len()).map(Some).collect();
+        let terms = vec![("底层基因".to_string(), "foundational gene".to_string())];
+        assert_eq!(lacking(&units, &kept, &pairs, &terms), vec![0]);
+        assert_eq!(wanted(&kept, &pairs), vec![4]);
+        // No table, or a unit with nothing kept: nothing lacks a term.
+        assert_eq!(lacking(&units, &kept, &pairs, &[]), Vec::<usize>::new());
+        assert_eq!(lacking(&units[..1], &kept, &[None], &terms), Vec::<usize>::new());
     }
 
     #[test]
