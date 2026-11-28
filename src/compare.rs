@@ -16,8 +16,7 @@ use wisp_core::versions;
 
 /// One model's version.
 pub struct Row {
-    /// The model's id (`Profile::id`) and its name as a card says it (`write_assist::model_name`).
-    pub profile: String,
+    /// The model's name as a card says it (`write_assist::model_name`).
     pub model: String,
     pub result: String,
     pub busy: bool,
@@ -35,7 +34,7 @@ pub struct Comparison {
 impl Comparison {
     /// One row a model, each waiting for its answer.
     pub fn new(profiles: &[Profile], generation: u64) -> Comparison {
-        Comparison { rows: profiles.iter().map(|profile| Row { profile: profile.id.clone(), model: crate::write_assist::model_name(profile), result: String::new(), busy: true, error: String::new(), note: String::new() }).collect(), generation }
+        Comparison { rows: profiles.iter().map(|profile| Row { model: crate::write_assist::model_name(profile), result: String::new(), busy: true, error: String::new(), note: String::new() }).collect(), generation }
     }
 
     /// Whether some model is still answering.
