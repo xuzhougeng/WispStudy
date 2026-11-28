@@ -19,6 +19,8 @@ use crate::manuscripts::READ_SIZE;
 use crate::theme::{self, Theme, text_px};
 use crate::translate::{Translated, TranslationRun};
 use crate::ui;
+// The page's measures are 译文对照's: the room between the halves, the page's sides (`write_facing::measures`).
+use crate::write_facing::{GUTTER, PAD};
 use gpui::{prelude::FluentBuilder, *};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -34,11 +36,6 @@ use wisp_core::structure::SECTIONS;
 use wisp_core::glossary;
 use wisp_core::versions;
 use wisp_core::translation::{Batch, Job};
-
-/// The page's measures, as 译文对照 has them: the room between the halves, the narrowest half, the page's sides.
-const GUTTER: f32 = 48.;
-const HALF_MIN: f32 = 300.;
-const PAD: f32 = 28.;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Do {
@@ -726,17 +723,20 @@ impl Workspace {
 
     // ---- menus
 
-    /// 译文对照's languages, each marked when the manuscript keeps a version in it (保留成译稿 is a button in its head).
+    /// 译文对照's languages, each marked when the manuscript keeps a version in it (保留成译稿 is a button in its head),
+    /// then where the translation stands.
     pub(crate) fn translate_facing_menu(&self) -> (Vec<MenuItem>, Vec<usize>) {
         let mut items = self.facing_language_menu();
         let versions = self.lib.as_ref().and_then(|lib| lib.writing.current().and_then(|m| lib.writing.translate.versions.get(&m.id))).cloned().unwrap_or_default();
         for item in &mut items {
             if let Cmd::WriteFacingLanguage(code) = &item.cmd && versions.contains(code) { item.note = Some(t("译稿").into()) }
         }
-        (items, vec![])
+        let breaks = vec![items.len()];
+        items.extend(self.facing_arrangement(false));
+        (items, breaks)
     }
 
-    /// The versions of the manuscript to work on, and the languages to make one in.
+    /// The versions of the manuscript to work on, the languages to make one in, and where the version stands.
     pub(crate) fn translate_language_menu(&self) -> (Vec<MenuItem>, Vec<usize>) {
         let Some(lib) = self.lib.as_ref() else { return (vec![], vec![]) };
         let Some(manuscript) = lib.writing.current() else { return (vec![], vec![]) };
@@ -747,6 +747,9 @@ impl Workspace {
         for (code, name) in LANGUAGES.iter().filter(|(code, _)| *code != manuscript.language && !versions.iter().any(|v| v == code)) {
             items.push(MenuItem { label: tf!("新建{}译稿", "New {} version", t(name)).into(), checked: false, note: None, cmd: Cmd::Translate(Do::Language(code.to_string())) });
         }
+        let mut breaks = breaks;
+        breaks.push(items.len());
+        items.extend(self.facing_arrangement(lib.writing.translate.alone));
         (items, breaks)
     }
 
@@ -799,7 +802,8 @@ impl Workspace {
     }
 
     /// The manuscript at the left as the preview draws it, the version at the right, block beside block at the
-    /// same height, each block edited in place; under it in a column too narrow for two halves. `width` is the room.
+    /// same height, each block edited in place; under it in a column too narrow for two halves, or where the person
+    /// has it so (逐段交替). `width` is the room.
     pub(crate) fn render_translating(&self, width: f32, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let lib = self.lib.as_ref().unwrap();
         let Some((id, code)) = self.translate_shown() else { return div().into_any_element() };
@@ -808,11 +812,7 @@ impl Workspace {
         let Some(version) = translate.kept.get(&(id.clone(), code.clone())) else { return div().into_any_element() };
         let rules = self.translate_rules(&id, &code);
         let alone = translate.alone;
-        let (measure, room) = (f32::from(theme::manuscript_width()), (width - 2. * PAD).max(1.));
-        let both = room.min(2. * measure + GUTTER);
-        let side = !alone && both >= 2. * HALF_MIN + GUTTER;
-        let half = if side { (both - GUTTER) / 2. } else { room.min(measure) };
-        let whole = if side { both } else { half };
+        let (side, half, whole) = crate::write_facing::measures(width, !alone && !self.settings.write_facing_interleaved);
         let editing = translate.editing.as_ref().filter(|editing| editing.manuscript == id && editing.language == code).map(|editing| editing.unit);
         translate.tops.borrow_mut().clear();
         let at: HashMap<(&str, Part, usize), usize> = version.units.iter().enumerate().map(|(u, unit)| ((unit.section.as_str(), unit.part, unit.block), u)).collect();
@@ -838,7 +838,8 @@ impl Workspace {
             let state = follow::state(kept);
             let key = format!("wt-{}-{}", u, hashed(&unit.sent));
             if editing == Some(u) {
-                let field = div().relative().w(px(half)).ml(px(-9.)).px(px(8.)).py(px(2.)).rounded(px(6.)).border_1().border_color(Theme::accent().opacity(0.55)).bg(Theme::bg_body()).text_size(text_px(size.map_or(READ_SIZE, |s| s.0))).line_height(size.map_or(theme::body_line(26.), |s| text_px(s.1))).child(translate.editor.clone())
+                // In the colour of text even under its paragraph, where what is read beside is quieter: it is being written.
+                let field = div().relative().w(px(half)).ml(px(-9.)).px(px(8.)).py(px(2.)).rounded(px(6.)).border_1().border_color(Theme::accent().opacity(0.55)).bg(Theme::bg_body()).text_color(Theme::text()).text_size(text_px(size.map_or(READ_SIZE, |s| s.0))).line_height(size.map_or(theme::body_line(26.), |s| text_px(s.1))).child(translate.editor.clone())
                     // A field a model can fill: a bare sparkle at its side asks the models compared for their versions.
                     .child(div().absolute().top(px(4.)).right(px(-26.)).child(ui::icon_action(SharedString::from(format!("{key}-compare")), "sparkle", Theme::text_tertiary(), t("让对照的几个模型各译一版，挑一版用（设置 › AI 里选对照的模型；只有一个时，给三种译法）")).on_click(self.on(Cmd::Translate(Do::Compare(u)), cx))));
                 let compared = translate.compare.as_ref().filter(|compared| compared.unit == u && compared.sent == unit.sent).map(|compared| self.render_translate_compared(compared, &key, half, cx));

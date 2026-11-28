@@ -1876,6 +1876,8 @@
   "译文替换原文：原地替换": "Translation replaces the original, in place",
   "译文在右边：左右对照": "Translation at the right, side by side",
   "译文在下面：上下对照": "Translation below, one over the other",
+  "译文在每段下面：逐段交替": "Translation under each paragraph, interleaved",
+  "这里放不下": "No room here",
   "就这几篇文献提问": "Ask about these papers",
   "回答依据这几篇的记录和全文，逐篇标出出处；在哪一栏读都是同一段对话。需要时助手会自己检索和翻阅文献库里的其他文献。": "Answers rest on the records and full texts of these papers, with the source marked paper by paper; it is one conversation whichever pane you read in. The assistant searches and reads the library's other papers when it needs to.",
   "这几篇的研究问题和方法有什么不同？": "How do the research questions and methods of these papers differ?",

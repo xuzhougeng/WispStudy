@@ -3,8 +3,9 @@
 //! Chinese, and the other way round. It is the languages icon right of 预览's
 //! eye in the manuscript's bar (`Cmd::WriteFacing`, `Writing::facing`): on, the
 //! page is two halves, the manuscript at the left as the preview draws it and
-//! its translation at the right, block by block at the same height; a column
-//! too narrow for two halves has each translation under its paragraph.
+//! its translation at the right, block by block at the same height (左右对照);
+//! or, as the person has it (逐段交替, `Settings::write_facing_interleaved`),
+//! and in a column too narrow for two halves, each translation under its paragraph.
 //!
 //! What is translated and how it is asked is `wisp_core::bilingual`: a block of
 //! a section at a time, its citations as placeholders. Each block is kept in
@@ -28,11 +29,29 @@ use wisp_core::store::translation_key;
 use wisp_core::structure::SECTIONS;
 
 /// Room between the two halves; the line between them runs down its middle.
-const GUTTER: f32 = 48.;
+pub(crate) const GUTTER: f32 = 48.;
 /// The narrowest a half is read at: in less, a translation stands under its paragraph instead of beside it.
 const HALF_MIN: f32 = 300.;
 /// Room at each side of the page, as the preview has it.
-const PAD: f32 = 28.;
+pub(crate) const PAD: f32 = 28.;
+
+/// Whether a page `width` wide has room for two halves of `HALF_MIN` side by side.
+pub(crate) fn halves_fit(width: f32) -> bool {
+    let room = (width - 2. * PAD).max(1.).min(2. * f32::from(theme::manuscript_width()) + GUTTER);
+    room >= 2. * HALF_MIN + GUTTER
+}
+
+/// How the page of a manuscript and its translation is laid out in `width` (翻译's too): whether the halves stand
+/// side by side (only where `beside` wants it and there is room), how wide a half is, and the whole page. Not side
+/// by side, the page is one column at the reading width, each translation under its paragraph.
+pub(crate) fn measures(width: f32, beside: bool) -> (bool, f32, f32) {
+    // The widths are given in pixels: wrapped text under widths that are shares is measured at the wrong one.
+    let (measure, room) = (f32::from(theme::manuscript_width()), (width - 2. * PAD).max(1.));
+    let both = room.min(2. * measure + GUTTER);
+    let side = beside && halves_fit(width);
+    let half = if side { (both - GUTTER) / 2. } else { room.min(measure) };
+    (side, half, if side { both } else { half })
+}
 
 /// How the translation of one block stands.
 enum Beside {
@@ -106,6 +125,12 @@ impl Workspace {
                 self.settings.write_facing_language = code;
                 self.save_settings(cx);
             }
+            Cmd::WriteFacingInterleave(on) => {
+                self.settings.write_facing_interleaved = on;
+                self.save_settings(cx);
+                // Chosen while 翻译's version is read alone, the primary comes back to stand where it was chosen to.
+                if let Some(lib) = self.lib.as_mut() { lib.writing.translate.alone = false }
+            }
             Cmd::WriteFacingRetry => {
                 let failed: Vec<String> = self.facing_wanted().into_iter().map(|(_, _, key)| key).collect();
                 if let Some(lib) = self.lib.as_mut() { lib.translations.retain(|key, state| !(matches!(state, Translated::Failed(_)) && failed.contains(key))) }
@@ -132,6 +157,24 @@ impl Workspace {
         let written = self.lib.as_ref().map_or(manuscript::DEFAULT_LANGUAGE, |lib| lib.writing.language());
         let on = self.write_facing_language();
         LANGUAGES.iter().filter(|(code, _)| *code != written).map(|(code, name)| MenuItem { label: format!("{} ({code})", t(name)).into(), checked: *code == on, note: None, cmd: Cmd::WriteFacingLanguage(code.to_string()) }).collect()
+    }
+
+    /// Whether the manuscript on show is read beside its translation in two halves (左右对照), as the sheet under the
+    /// manuscript's bar is made for: not while each translation is under its paragraph, nor 翻译's version alone.
+    pub(crate) fn write_facing_halves(&self) -> bool {
+        self.write_facing_shown() && !self.settings.write_facing_interleaved && !(self.translate_shown().is_some() && self.lib.as_ref().is_some_and(|lib| lib.writing.translate.alone))
+    }
+
+    /// Where the translation stands, the end of the language menu of its half (design rule 21: a habit, kept): beside
+    /// each paragraph, or under it. In a column too narrow for two halves it is under its paragraph whichever is
+    /// chosen, and 左右对照 says so. `alone`: 翻译's version is read alone, so neither is in force.
+    pub(crate) fn facing_arrangement(&self, alone: bool) -> Vec<MenuItem> {
+        let room = self.lib.as_ref().is_none_or(|lib| lib.writing.facing_room.get());
+        let under = self.settings.write_facing_interleaved || !room;
+        vec![
+            MenuItem { label: t("译文在右边：左右对照").into(), checked: !alone && !under, note: (!room).then(|| t("这里放不下").into()), cmd: Cmd::WriteFacingInterleave(false) },
+            MenuItem { label: t("译文在每段下面：逐段交替").into(), checked: !alone && under, note: None, cmd: Cmd::WriteFacingInterleave(true) },
+        ]
     }
 
     /// The glossary's pairs from the manuscript's language into the translation's, and the manuscript's requirement:
@@ -183,18 +226,13 @@ impl Workspace {
     }
 
     /// The whole manuscript read through, each block with its translation: beside it where the column has room
-    /// for two halves, under it where not. `width` is the room the column has for it.
+    /// for two halves, under it where not or where the person has it so. `width` is the room the column has for it.
     pub(crate) fn render_manuscript_facing(&self, width: f32, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let lib = self.lib.as_ref().unwrap();
         let Some(manuscript) = lib.writing.current() else { return div().into_any_element() };
         let code = self.write_facing_language();
         let (pairs, requirement) = self.facing_rules();
-        // The widths are given in pixels: wrapped text under widths that are shares is measured at the wrong one.
-        let (measure, room) = (f32::from(theme::manuscript_width()), (width - 2. * PAD).max(1.));
-        let both = room.min(2. * measure + GUTTER);
-        let side = both >= 2. * HALF_MIN + GUTTER;
-        let half = if side { (both - GUTTER) / 2. } else { room.min(measure) };
-        let whole = if side { both } else { half };
+        let (side, half, whole) = measures(width, !self.settings.write_facing_interleaved);
         let mut tally = Tally::default();
         let mut look = |sent: &str| -> Beside {
             if sent.trim().is_empty() { return Beside::Nothing }
