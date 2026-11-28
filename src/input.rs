@@ -187,6 +187,9 @@ pub struct TextInput {
     redo: Vec<(String, Range<usize>)>,
     /// The last change was a character typed: the next one joins its step.
     typing: bool,
+    /// What the last change put in, in bytes of the text as it is now (`put`): none after Undo, Redo, `set_text`, a
+    /// composition not yet ended or a change made by someone else (`replace_apart`).
+    put: Option<Range<usize>>,
     /// Stretches of the text drawn on a tint (bytes, and the tint): the words a comment is about.
     marks: Vec<(Range<usize>, Hsla)>,
     /// How far below the top of the text each mark begins, as last drawn.
@@ -260,6 +263,7 @@ impl TextInput {
             undo: vec![],
             redo: vec![],
             typing: false,
+            put: None,
             marks: vec![],
             mark_tops: vec![],
             links: vec![],
@@ -315,7 +319,7 @@ impl TextInput {
         self.folds.clear();
         self.revision += 1;
         // Another text altogether (a draft of another part): its changes are not this one's.
-        (self.undo, self.redo, self.typing) = (vec![], vec![], false);
+        (self.undo, self.redo, self.typing, self.put) = (vec![], vec![], false, None);
         cx.notify();
     }
 
@@ -402,6 +406,12 @@ impl TextInput {
         self.sel.clone()
     }
 
+    /// What the last change put in (typed, pasted, or put by the owner for the person), in bytes of the text; none
+    /// when it went back (Undo, Redo), came whole (`set_text`) or was made by someone else (`replace_apart`).
+    pub fn put(&self) -> Option<Range<usize>> {
+        self.put.clone()
+    }
+
     /// Select `range` (bytes, kept within the text).
     pub fn select_range(&mut self, range: Range<usize>, cx: &mut Context<Self>) {
         self.selection_toolbar_dismissed = false;
@@ -428,7 +438,7 @@ impl TextInput {
         let (sel, reversed) = (self.sel.clone(), self.reversed);
         self.typing = false;
         self.replace(range.clone(), text, cx);
-        self.typing = false;
+        (self.typing, self.put) = (false, None);
         // `replace` left the caret after what it put in: that is how long it is as kept.
         let put = self.sel.end - range.start;
         let moved = |at: usize| if at <= range.start { at } else if at >= range.end { at - range.len() + put } else { range.start + put };
@@ -540,6 +550,7 @@ impl TextInput {
         self.text.replace_range(range.clone(), &s);
         self.revision += 1;
         let o = range.start + s.len();
+        self.put = Some(range.start..o);
         self.sel = o..o;
         self.reversed = false;
         cx.emit(InputEvent::Changed);
@@ -579,7 +590,7 @@ impl TextInput {
         self.revision += 1;
         let end = self.text.len();
         self.sel = sel.start.min(end)..sel.end.min(end);
-        (self.reversed, self.marked, self.typing) = (false, None, false);
+        (self.reversed, self.marked, self.typing, self.put) = (false, None, false, None);
         cx.emit(InputEvent::Changed);
         cx.notify();
     }
@@ -946,6 +957,7 @@ impl EntityInputHandler for TextInput {
         }
         self.text.replace_range(r.clone(), s);
         self.revision += 1;
+        self.put = None;
         self.marked = (!s.is_empty()).then(|| r.start..r.start + s.len());
         self.sel = new_sel
             .map(|ns| {

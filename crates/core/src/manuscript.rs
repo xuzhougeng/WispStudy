@@ -264,6 +264,53 @@ pub enum Cut {
     Heading,
     /// It names a subsection of the one cut.
     Subheading,
+    /// It names a new section at this level of the outline (1 a section, 2 a subsection, 3 a part of that), no deeper
+    /// than a subsection of the one cut: a heading typed with as many `#` (`finished_headings`).
+    Level(u8),
+}
+
+/// What `Store::unsplit` puts back after headings typed in a section were made sections: the section cut as it
+/// was and where the caret was in its text, the sections made, and the level every section of the manuscript had
+/// (a heading less deep than the one cut takes the subsections after it under itself).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Unsplit {
+    pub was: Section,
+    pub caret: usize,
+    pub made: Vec<String>,
+    pub levels: Vec<(String, u8)>,
+}
+
+/// Headings typed in a section made sections (`Store::split_at_headings`): the section the caret goes on in and
+/// its byte in that section's text, and what takes it back.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Typed {
+    pub section: Section,
+    pub caret: usize,
+    pub back: Unsplit,
+}
+
+/// The headings a change to a section's text finished: lines of one to `MOST_LEVELS` `#` and a name whose line
+/// break came with what the change put in (`put`, its bytes in `text`), as Enter after `## Methods` does or a
+/// paste with such lines. A heading still being typed, one written earlier, one in a quote or in code and one
+/// too long to name a section stay lines of the text. Each line's bytes and its level, in order.
+pub fn finished_headings(text: &str, put: Range<usize>) -> Vec<(Range<usize>, u8)> {
+    markdown::lines(text)
+        .into_iter()
+        .filter(|line| (1..=MOST_LEVELS).contains(&line.heading) && line.quote == 0 && !line.code)
+        .filter(|line| put.contains(&line.range.end) && text[line.range.end..].starts_with('\n'))
+        .filter(|line| heading_name(&text[line.range.clone()]).is_ok())
+        .map(|line| (line.range, line.heading))
+        .collect()
+}
+
+/// The name a paragraph set as a heading gives a section: its words, not its Markdown (`**Methods**` or
+/// `## Methods` names it Methods), and short enough for a heading.
+fn heading_name(paragraph: &str) -> Result<String> {
+    // Read before it is trimmed: `## ` alone is an empty heading, not the words `##`.
+    let name = markdown::plain(paragraph.trim_start()).trim().to_string();
+    if name.is_empty() { bail!("光标所在的段落是空的。") }
+    if structure::width(&name) > headings::LONGEST * 2 { bail!("这一段太长，不能作为标题。") }
+    Ok(name)
 }
 
 impl Manuscript {
@@ -1753,12 +1800,14 @@ impl Store {
     /// heading style is: written back to a Word file it stays the paragraph
     /// it was. Otherwise the paragraph opens the new section, whose name is
     /// the manuscript's own (`bare`) and goes into no file. The new section is
-    /// as deep as the one cut, a level deeper for a subheading; it comes
-    /// before the subsections of the one cut, which are then under it, as the
-    /// text after the cut is. The comments on what moved go with it. The
-    /// section's text is kept as a snapshot first. The new section; the
-    /// heading of a `bare` section's first paragraph names that section
-    /// instead, which leaves none empty behind.
+    /// as deep as the one cut, a level deeper for a subheading, as deep as a
+    /// `Cut::Level` says but no deeper than a subsection of the one cut; it
+    /// comes before the subsections of the one cut, which are then under it
+    /// when it is not less deep than they are, as the text after the cut is.
+    /// The comments on what moved go with it. The section's text is kept as a
+    /// snapshot first. The new section; the heading of a `bare` section's
+    /// first paragraph names that section instead when it is as deep, which
+    /// leaves none empty behind.
     pub fn split_section(&mut self, id: &str, at: Range<usize>, cut: Cut) -> Result<Section> {
         let heading = cut != Cut::Paragraph;
         let (manuscript, section) = self.section_row(id)?;
@@ -1766,11 +1815,7 @@ impl Store {
         if at.start > at.end || at.end > body.len() || !body.is_char_boundary(at.start) || !body.is_char_boundary(at.end) { bail!("这一段已经不在这一节里了。") }
         let before = body[..at.start].trim_end();
         let (name, after) = if heading {
-            // The paragraph's words, not its Markdown: `**Methods**` or `## Methods` names the section Methods.
-            let name = markdown::plain(body[at.clone()].trim()).trim().to_string();
-            if name.is_empty() { bail!("光标所在的段落是空的。") }
-            if structure::width(&name) > headings::LONGEST * 2 { bail!("这一段太长，不能作为标题。") }
-            (name, body[at.end..].trim_start())
+            (heading_name(&body[at.clone()])?, body[at.end..].trim_start())
         } else {
             let after = body[at.start..].trim_start();
             if after.is_empty() { bail!("这里之后没有文字可以拆成新的一节。") }
@@ -1781,8 +1826,12 @@ impl Store {
             (if short.len() < first.len() { format!("{short}…") } else { short }, after)
         };
         let kind = if heading { structure::canonical(&name).filter(|kind| is_kind(kind)).unwrap_or(&section.kind).to_string() } else { section.kind.clone() };
-        let level = if cut == Cut::Subheading { (section.level + 1).min(MOST_LEVELS) } else { section.level };
-        if heading && section.bare && before.is_empty() && cut == Cut::Heading {
+        let level = match cut {
+            Cut::Subheading => (section.level + 1).min(MOST_LEVELS),
+            Cut::Level(level) => level.clamp(1, (section.level + 1).min(MOST_LEVELS)),
+            Cut::Heading | Cut::Paragraph => section.level,
+        };
+        if heading && cut != Cut::Subheading && level == section.level && section.bare && before.is_empty() {
             self.take_snapshot(id, "split")?;
             self.db.execute("UPDATE manuscript_sections SET name = ?2, kind = ?3, body = ?4, bare = 0, updated_at = ?5 WHERE id = ?1", params![id, name, kind, after, now_iso()])?;
             self.touch_manuscript(&manuscript)?;
@@ -1842,6 +1891,46 @@ impl Store {
         tx.commit()?;
         self.touch_manuscript(&manuscript)?;
         Ok(self.section_row(&previous)?.1)
+    }
+
+    /// The section cut where a change to its text, already kept, finished headings (`finished_headings` of its
+    /// text and of what the change put in, `put`): each a section at its level with the text after it, one after
+    /// the other, as `split_section` makes them. `None` when the change finished none.
+    pub fn split_at_headings(&mut self, id: &str, put: Range<usize>) -> Result<Option<Typed>> {
+        let (manuscript, was) = self.section_row(id)?;
+        if finished_headings(&was.body, put.clone()).is_empty() { return Ok(None) }
+        let levels = self.sections_of(&manuscript)?.into_iter().map(|section| (section.id, section.level)).collect();
+        let (mut section, caret, mut put, mut made) = (was.clone(), put.end, put, vec![]);
+        while let Some((line, level)) = finished_headings(&section.body, put.clone()).into_iter().next() {
+            let next = self.split_section(&section.id, line, Cut::Level(level))?;
+            // What follows a heading is the end of the text cut: a place in it is as far from the end as it was.
+            let gone = section.body.len() - next.body.len();
+            put = put.start.saturating_sub(gone)..put.end.saturating_sub(gone);
+            if next.id != section.id { made.push(next.id.clone()) }
+            section = next;
+        }
+        Ok(Some(Typed { section, caret: put.end, back: Unsplit { was, caret, made, levels } }))
+    }
+
+    /// Take back headings typed in a section (`split_at_headings`): the sections made go, their comments and the
+    /// passages of their citations back to the section cut, which has its text, name and kind again, and every
+    /// section the level it had. The section cut's text is kept as a snapshot first.
+    pub fn unsplit(&mut self, back: &Unsplit) -> Result<Section> {
+        let (manuscript, _) = self.section_row(&back.was.id)?;
+        self.take_snapshot(&back.was.id, "merge")?;
+        let tx = self.db.transaction()?;
+        for made in &back.made {
+            tx.execute("UPDATE manuscript_comments SET section_id = ?2 WHERE section_id = ?1", params![made, back.was.id])?;
+            tx.execute("UPDATE cite_passages SET section_id = ?2 WHERE section_id = ?1", params![made, back.was.id])?;
+            tx.execute("DELETE FROM manuscript_sections WHERE id = ?1", [made])?;
+        }
+        let was = &back.was;
+        tx.execute("UPDATE manuscript_sections SET name = ?2, kind = ?3, body = ?4, bare = ?5, updated_at = ?6 WHERE id = ?1", params![was.id, was.name, was.kind, was.body, was.bare, now_iso()])?;
+        for (id, level) in &back.levels { tx.execute("UPDATE manuscript_sections SET level = ?2 WHERE id = ?1", params![id, level])?; }
+        fit_outline(&tx, &manuscript)?;
+        tx.commit()?;
+        self.touch_manuscript(&manuscript)?;
+        Ok(self.section_row(&was.id)?.1)
     }
 
     /// Keep what is typed in a section.
@@ -2121,6 +2210,73 @@ mod tests {
         assert!(store.manuscript_blank(&blank.id).unwrap());
         store.indent_section(&blank.sections[1].id, true).unwrap();
         assert!(!store.manuscript_blank(&blank.id).unwrap());
+    }
+
+    #[test]
+    fn headings_typed_in_a_section_are_sections_of_their_level() {
+        // Enter after a heading finishes it; one still being typed, one written earlier, one in a quote or in code,
+        // `####` (deeper than an outline goes) and `#tag` stay lines of the text.
+        let text = "Seedlings grew.\n## Plant material\n";
+        assert_eq!(finished_headings(text, text.len() - 1..text.len()), [("Seedlings grew.\n".len()..text.len() - 1, 2)]);
+        assert!(finished_headings("## Plant mat", 11..12).is_empty());
+        let earlier = "## Plant material\n\nSeedlings grew.\n";
+        assert!(finished_headings(earlier, earlier.len() - 1..earlier.len()).is_empty());
+        for line in ["> ## Quoted\n", "```\n## Code\n", "#### Detail\n", "#tag\n", "## \n"] { assert!(finished_headings(line, line.len() - 1..line.len()).is_empty(), "{line}") }
+        // A paste: each heading in it, in order.
+        let pasted = "Opening.\n## Limits\nSmall sample.\n### Power\nToo few plants.";
+        assert_eq!(finished_headings(pasted, 0..pasted.len()).into_iter().map(|(_, level)| level).collect::<Vec<_>>(), [2, 3]);
+
+        let mut store = store();
+        let made = store.create_manuscript("", "en").unwrap();
+        let id = |store: &Store, name: &str| store.manuscript(&made.id).unwrap().unwrap().sections.iter().find(|s| s.name == name).unwrap().id.clone();
+        let shape = |store: &Store| store.manuscript(&made.id).unwrap().unwrap().sections.iter().map(|s| format!("{}{}", "-".repeat(s.level as usize - 1), s.name)).collect::<Vec<_>>().join(" ");
+        let methods = id(&store, "Methods");
+        let cells = store.add_subsection(&methods, "Cell culture", "methods").unwrap();
+        // `## Plant material` and Enter in 方法's text: a subsection with the text after it, before the other subsections,
+        // the caret at its start; a comment goes with its words.
+        let text = "Seedlings grew.\n## Plant material\nSeeds were sown.";
+        store.save_section_body(&methods, text).unwrap();
+        store.add_comment(&made.id, &methods, "sown", "When?", "Xu", comment::PERSON).unwrap();
+        let enter = "Seedlings grew.\n## Plant material".len();
+        assert!(store.split_at_headings(&methods, 0..enter).unwrap().is_none());
+        let typed = store.split_at_headings(&methods, enter..enter + 1).unwrap().unwrap();
+        assert_eq!((typed.section.name.as_str(), typed.section.level, typed.section.kind.as_str(), typed.section.body.as_str(), typed.caret), ("Plant material", 2, "methods", "Seeds were sown.", 0));
+        assert_eq!(shape(&store), "Abstract Introduction Methods -Plant material -Cell culture Results Discussion");
+        assert_eq!(store.comments(&made.id).unwrap()[0].section_id, typed.section.id);
+        // Taken back: the text as it was typed, the comment where it was.
+        assert_eq!(store.unsplit(&typed.back).unwrap().body, text);
+        assert_eq!(shape(&store), "Abstract Introduction Methods -Cell culture Results Discussion");
+        assert_eq!(store.comments(&made.id).unwrap()[0].section_id, methods);
+
+        // `#` in a subsection: a section of the first level, which takes what follows under itself; taken back, the
+        // part of a method after it is that method's again.
+        let imaging = store.add_subsection(&methods, "Imaging", "methods").unwrap();
+        store.add_subsection(&imaging.id, "Confocal", "methods").unwrap();
+        let text = "Roots were imaged.\n# Growth\n";
+        store.save_section_body(&imaging.id, text).unwrap();
+        let typed = store.split_at_headings(&imaging.id, text.len() - 1..text.len()).unwrap().unwrap();
+        assert_eq!(shape(&store), "Abstract Introduction Methods -Cell culture -Imaging Growth -Confocal Results Discussion");
+        store.unsplit(&typed.back).unwrap();
+        assert_eq!(shape(&store), "Abstract Introduction Methods -Cell culture -Imaging --Confocal Results Discussion");
+        assert_eq!(store.section_row(&cells.id).unwrap().1.level, 2);
+
+        // `###` with no subsection before it is no deeper than a subsection of the section it is typed in.
+        let introduction = id(&store, "Introduction");
+        let text = "Why.\n### Gap\n";
+        store.save_section_body(&introduction, text).unwrap();
+        let typed = store.split_at_headings(&introduction, text.len() - 1..text.len()).unwrap().unwrap();
+        assert_eq!((typed.section.name.as_str(), typed.section.level), ("Gap", 2));
+        store.unsplit(&typed.back).unwrap();
+
+        // A paste with two headings: one section after the other, each with its text, the caret at the end of the paste.
+        let discussion = id(&store, "Discussion");
+        store.save_section_body(&discussion, pasted).unwrap();
+        let typed = store.split_at_headings(&discussion, 0..pasted.len()).unwrap().unwrap();
+        assert_eq!((typed.section.name.as_str(), typed.section.body.as_str(), typed.caret), ("Power", "Too few plants.", "Too few plants.".len()));
+        assert_eq!(shape(&store), "Abstract Introduction Methods -Cell culture -Imaging --Confocal Results Discussion -Limits --Power");
+        assert_eq!(store.section_row(&discussion).unwrap().1.body, "Opening.");
+        assert_eq!(store.unsplit(&typed.back).unwrap().body, pasted);
+        assert_eq!(shape(&store), "Abstract Introduction Methods -Cell culture -Imaging --Confocal Results Discussion");
     }
 
     #[test]
