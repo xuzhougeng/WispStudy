@@ -338,6 +338,17 @@ impl Workspace {
                 if self.picked.as_ref().is_some_and(|picked| picked.text.as_ref() == text.as_str() && !picked.chosen().is_empty()) { items.push(MenuItem { label: t("复制").into(), checked: false, note: Some(crate::shortcuts::pretty("secondary-c").into()), cmd: Cmd::CopySelected }) }
                 items.push(item(t("复制全部"), Cmd::CopyText(text.clone())));
             }
+            MenuKind::ReadPiece(section, piece, facing) => {
+                // What is selected there: the same actions by the same names as beside it.
+                if lib.writing.read.pick.as_ref().is_some_and(|pick| pick.section == *section && pick.piece == *piece && pick.facing == *facing && pick.selects()) {
+                    items.push(item(t("批注"), Cmd::Read(crate::write_read::Do::Comment)));
+                    items.push(MenuItem { label: t("复制").into(), checked: false, note: Some(crate::shortcuts::pretty("secondary-c").into()), cmd: Cmd::Read(crate::write_read::Do::Copy) });
+                    items.push(item(t("编辑这里"), Cmd::Read(crate::write_read::Do::Edit)));
+                    breaks.push(items.len());
+                }
+                items.push(item(t("编辑这一节"), Cmd::WriteSection(section.clone())));
+                items.push(item(t("复制全文"), Cmd::ExportManuscript(crate::manuscripts::ManuscriptExport::Copy)));
+            }
             MenuKind::Answer(paper, text) => {
                 if lib.chat(*paper).picked_text().is_some_and(|picked| !picked.is_empty()) {
                     items.push(item(t("引用追问"), Cmd::QuotePicked(*paper)));

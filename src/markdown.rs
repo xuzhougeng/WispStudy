@@ -14,8 +14,9 @@ use wisp_core::mermaid;
 /// What a click on a citation does.
 pub type OnCite = Rc<dyn Fn(&Citation, &mut Window, &mut App)>;
 
-/// A place in an answer's text: which of its pieces (in the order `texts` gives them), and the byte in it.
-pub type Place = (usize, usize);
+/// A place in an answer's text: which of its pieces (in the order `texts` gives them), and the byte in it. The
+/// pieces are read in the engine (`wisp_core::markdown`), which ties a manuscript's preview to its text with them.
+pub use wisp_core::markdown::{Place, text_between, texts};
 
 /// What the pointer did over an answer's text.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -45,6 +46,10 @@ pub struct Drawn {
 #[derive(Clone)]
 pub struct Selecting {
     pub selected: Option<(Place, Place)>,
+    /// Stretches drawn on a tint of their own (the words a comment is about in a manuscript read through): from, to, tint.
+    pub marks: Vec<(Place, Place, Hsla)>,
+    /// The stretch whose place `drawn` is told, when it is not the one selected (the words of a comment whose card is open).
+    pub spot: Option<(Place, Place)>,
     pub pointer: Rc<dyn Fn(Pointer, Place, &mut Window, &mut App)>,
     pub drawn: Rc<dyn Fn(Drawn, &mut Window, &mut App)>,
 }
@@ -60,6 +65,7 @@ struct Draw<'a> {
     diagrams: usize,
     cite: Option<OnCite>,
     selected: Option<(Place, Place)>,
+    marks: Vec<(Place, Place, Hsla)>,
     layouts: Vec<Option<TextLayout>>,
     /// How much larger than an answer's the text around is set, in pixels: the headings are larger by as much, and stand further from what is over them.
     lift: f32,
@@ -76,11 +82,17 @@ pub fn render(id: &str, text: &str, cite: Option<OnCite>, selecting: Option<Sele
 /// `text` as a page to read through, its words set in `size`: a heading keeps its distance from the words, so
 /// the lowest one is never smaller than they are, and has more room over it than under it.
 pub fn render_page(id: &str, text: &str, size: f32) -> Div {
-    render_lifted(id, text, None, None, size - ANSWER_SIZE).text_size(text_px(size))
+    render_page_selecting(id, text, size, None)
+}
+
+/// `render_page` whose words can be selected, and some of them tinted (a manuscript read through).
+pub fn render_page_selecting(id: &str, text: &str, size: f32, selecting: Option<Selecting>) -> Div {
+    render_lifted(id, text, None, selecting, size - ANSWER_SIZE).text_size(text_px(size))
 }
 
 fn render_lifted(id: &str, text: &str, cite: Option<OnCite>, selecting: Option<Selecting>, lift: f32) -> Div {
-    let mut draw = Draw { id, links: 0, diagrams: 0, cite, selected: selecting.as_ref().and_then(|selecting| selecting.selected), layouts: vec![], lift };
+    let (selected, marks) = selecting.as_ref().map_or((None, vec![]), |selecting| (selecting.selected, selecting.marks.clone()));
+    let mut draw = Draw { id, links: 0, diagrams: 0, cite, selected, marks, layouts: vec![], lift };
     let drawn = div().flex().flex_col().gap(theme::paragraph_gap(10.)).children(blocks(&parse(text), &mut draw));
     let Some(selecting) = selecting else { return drawn };
     // Where the pointer is among the pieces: in the one it is over, else at the near end of the one nearest above or below.
@@ -110,7 +122,8 @@ fn render_lifted(id: &str, text: &str, cite: Option<OnCite>, selecting: Option<S
     // overshoots the text's left or top edge: while this answer holds the selection, the pointer is
     // also heard outside it, so the selection still follows and the release still ends it (#142).
     let (place_out, pointer_out) = (place.clone(), selecting.pointer.clone());
-    let measure = selecting.selected.map(|(from, to)| {
+    let holding = selecting.selected.is_some();
+    let measure = selecting.spot.or(selecting.selected).map(|(from, to)| {
         let (layouts, told) = (drawn_layouts, selecting.drawn.clone());
         canvas(
             move |bounds, window, cx| {
@@ -121,6 +134,8 @@ fn render_lifted(id: &str, text: &str, cite: Option<OnCite>, selecting: Option<S
                 if let (Some((start, _)), Some((end, line))) = (at(from), at(to)) { told(Drawn { start, end, line, origin: bounds.origin }, window, cx) }
             },
             move |bounds, _, window, _| {
+                // Only while there is a selection to follow the pointer.
+                if !holding { return }
                 let (place_moved, pointer_moved) = (place_out.clone(), pointer_out.clone());
                 window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
                     if phase == DispatchPhase::Bubble && event.pressed_button == Some(MouseButton::Left) && !bounds.contains(&event.position) && let Some(place) = place_moved(event.position) { pointer_moved(Pointer::Drag, place, window, cx) }
@@ -156,52 +171,27 @@ fn render_lifted(id: &str, text: &str, cite: Option<OnCite>, selecting: Option<S
         })
 }
 
-/// The pieces of an answer's text as they are drawn, in order: what a
-/// `Place` counts. One for a paragraph, a heading, an item's own line, a
-/// table cell, a block of code.
-pub fn texts(text: &str) -> Vec<String> {
-    fn walk(blocks: &[Block], out: &mut Vec<String>) {
-        for block in blocks {
-            match block {
-                Block::Paragraph(text) | Block::Heading(_, text) => out.push(text.text.clone()),
-                Block::Item { text, children, .. } => {
-                    out.push(text.text.clone());
-                    walk(children, out);
-                }
-                Block::Code { text, .. } => out.push(text.clone()),
-                Block::Quote(inner) => walk(inner, out),
-                Block::Rule => {}
-                Block::Table { rows, .. } => out.extend(rows.iter().flatten().map(|cell| cell.text.clone())),
-            }
-        }
-    }
-    let mut out = vec![];
-    walk(&parse(text), &mut out);
-    out
-}
-
-/// The text between two places of an answer: the pieces a line apart.
-pub fn text_between(text: &str, from: Place, to: Place) -> String {
-    let pieces = texts(text);
-    let mut out = vec![];
-    for (at, piece) in pieces.iter().enumerate().take(to.0 + 1).skip(from.0) {
-        let cut = |byte: usize| (0..=byte.min(piece.len())).rev().find(|byte| piece.is_char_boundary(*byte)).unwrap_or(0);
-        let (start, end) = (if at == from.0 { cut(from.1) } else { 0 }, if at == to.0 { cut(to.1) } else { piece.len() });
-        if start < end { out.push(piece[start..end].to_string()) }
-    }
-    out.join("\n")
-}
-
 /// The part of the piece now being drawn that is selected. The ends are
 /// moved back to the start of a character: an answer still being written
 /// may have changed under a selection made a moment ago.
 fn selected_in(draw: &Draw, piece: &str) -> Option<std::ops::Range<usize>> {
-    let (from, to) = draw.selected?;
-    let at = draw.layouts.len();
+    stretch_in(draw.selected?, draw.layouts.len(), piece)
+}
+
+/// The part of the piece `at` that lies in the stretch from, to.
+fn stretch_in((from, to): (Place, Place), at: usize, piece: &str) -> Option<std::ops::Range<usize>> {
     if at < from.0 || at > to.0 { return None }
     let whole = |byte: usize| (0..=byte.min(piece.len())).rev().find(|byte| piece.is_char_boundary(*byte)).unwrap_or(0);
     let (start, end) = (if at == from.0 { whole(from.1) } else { 0 }, if at == to.0 { whole(to.1) } else { piece.len() });
     (start < end).then_some(start..end)
+}
+
+/// The tinted stretches of the piece now being drawn, laid over its marks: under the selection, which is laid over all.
+fn with_tints(mut marks: Vec<(std::ops::Range<usize>, HighlightStyle)>, draw: &Draw, piece: &str) -> Vec<(std::ops::Range<usize>, HighlightStyle)> {
+    for &(from, to, tint) in &draw.marks {
+        if let Some(range) = stretch_in((from, to), draw.layouts.len(), piece) { marks = laid_over(marks, range, |style| style.background_color = Some(tint)) }
+    }
+    marks
 }
 
 /// Marks that do not overlap, with the selection laid over them: every
@@ -293,7 +283,7 @@ fn block(block: &Block, links: &mut Draw) -> AnyElement {
                 links.layouts.push(None);
                 return crate::diagram::picture(id, text, drawn);
             }
-            let code = StyledText::new(text.clone()).with_highlights(with_selection(vec![], selected_in(links, text)));
+            let code = StyledText::new(text.clone()).with_highlights(with_selection(with_tints(vec![], links, text), selected_in(links, text)));
             links.layouts.push(Some(code.layout().clone()));
             let code = div().px(px(12.)).py(px(10.)).rounded(px(6.)).border_1().border_color(Theme::line()).bg(Theme::bg_sunken()).font_family(theme::MONO_FONT).text_size(text_px(12.5)).line_height(theme::body_line(19.)).child(code).into_any_element();
             match diagram {
@@ -377,6 +367,7 @@ fn rich(rich: &Rich, draw: &mut Draw) -> AnyElement {
         }
     }
     highlights.sort_by_key(|(range, _)| range.start);
+    let highlights = with_tints(highlights, draw, &rich.text);
     let text = StyledText::new(rich.text.clone()).with_highlights(with_selection(highlights, selected_in(draw, &rich.text)));
     draw.layouts.push(Some(text.layout().clone()));
     if targets.is_empty() { return text.into_any_element() }

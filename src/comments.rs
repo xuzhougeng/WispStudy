@@ -94,6 +94,12 @@ impl Commenting {
         let subscriptions = vec![
             cx.subscribe(&wish, |this, _, event: &InputEvent, cx| if *event == InputEvent::Submit { this.comment_review(cx) }),
             cx.subscribe(&draft, |this, _, event: &InputEvent, cx| match event {
+                // Beside the manuscript read through the comment is written on the page: Enter and Esc keep what it says,
+                // as a press elsewhere does (write_read.rs).
+                InputEvent::Submit | InputEvent::Cancel if this.read_writing() => {
+                    this.read_letgo(cx);
+                    cx.notify();
+                }
                 InputEvent::Submit => this.comment_save(cx),
                 InputEvent::Cancel => this.comment_cancel(cx),
                 _ => {}
@@ -299,6 +305,7 @@ impl Workspace {
                 let Some(lib) = self.lib.as_mut() else { return };
                 if let Err(err) = lib.store.remove_comment(&id) { return self.fail(format!("{err:#}"), cx) }
                 lib.writing.comments.list.retain(|comment| comment.id != id);
+                self.read_forget(&id);
             }
             Do::Done(id, done) => {
                 let Some(lib) = self.lib.as_mut() else { return };
@@ -307,6 +314,7 @@ impl Workspace {
                 found.state = if done { comment::DONE.into() } else if found.replaced.is_empty() { comment::OPEN.into() } else { comment::APPLIED.into() };
                 let kept = found.clone();
                 if let Err(err) = lib.store.save_comment(&kept) { self.fail(format!("{err:#}"), cx) }
+                if done { self.read_forget(&id) }
             }
             Do::Show(id) => self.comment_show(&id, window, cx),
             Do::ShowDone(show) => {
@@ -324,13 +332,13 @@ impl Workspace {
         cx.notify();
     }
 
-    fn comment_cancel(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn comment_cancel(&mut self, cx: &mut Context<Self>) {
         if let Some(lib) = self.lib.as_mut() { lib.writing.comments.drafting = None }
         cx.notify();
     }
 
     /// Keep the comment the person wrote on the words picked.
-    fn comment_save(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn comment_save(&mut self, cx: &mut Context<Self>) {
         let author = self.settings.author_name();
         let Some(lib) = self.lib.as_mut() else { return };
         let writing = &mut lib.writing;
@@ -387,13 +395,23 @@ impl Workspace {
         let Some(lib) = self.lib.as_mut() else { return };
         let writing = &mut lib.writing;
         let Some(found) = writing.comments.list.iter().find(|comment| comment.id == id) else { return };
+        // From the card beside the manuscript read through (write_read.rs), its section is the one being written:
+        // the words are gone to where they are written, and come into view once the editor has drawn them.
+        let reading = std::mem::take(&mut writing.reading);
+        if reading {
+            writing.facing = false;
+            writing.read = Default::default();
+        }
         let text = writing.editor.read(cx).text().to_string();
         let Some(range) = comment::locate(&text, &found.quote, None) else { return };
-        let top = writing.editor.read(cx).top_of(range.start);
-        writing.editor.update(cx, |input, cx| input.select_range(range, cx));
+        let top = writing.editor.read(cx).top_of(range.start).filter(|_| !reading);
+        writing.editor.update(cx, |input, cx| input.select_range(range.clone(), cx));
         writing.editor.read(cx).focus(window);
         // A few lines above it stay in view, so it is read in its place.
-        if let Some(top) = top { writing.editor_scroll.set_offset(point(px(0.), -(top - px(70.)).max(px(0.)))) }
+        match top {
+            Some(top) => writing.editor_scroll.set_offset(point(px(0.), -(top - px(70.)).max(px(0.)))),
+            None => writing.seek.reveal_at(range.start),
+        }
     }
 
     /// A change the model made to a paragraph of a manuscript that came from a Word file is said where it was made, as in Word's review:
@@ -903,7 +921,7 @@ impl Workspace {
     }
 
     /// One comment: who said it, the words it is about, what it says, and what can be done about it.
-    fn render_comment(&self, comment: &Comment, anchored: bool, width: f32, cx: &mut Context<Self>) -> AnyElement {
+    pub(crate) fn render_comment(&self, comment: &Comment, anchored: bool, width: f32, cx: &mut Context<Self>) -> AnyElement {
         let id = |part: &str| SharedString::from(format!("comment-{part}-{}", comment.id));
         let small = |part: &str, name: &'static str| ui::ghost_button(id(part), None, Some(name.into())).h(text_px(24.)).px(px(7.)).text_size(text_px(12.));
         let who = author(comment);

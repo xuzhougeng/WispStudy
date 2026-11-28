@@ -31,17 +31,17 @@ const PINNED_SHOWN: usize = 8;
 /// from it with the scroll offset of the moment it is drawn.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Spot {
-    start: Point<Pixels>,
-    end: Point<Pixels>,
-    line: Pixels,
-    answer: Point<Pixels>,
-    view: Size<Pixels>,
+    pub(crate) start: Point<Pixels>,
+    pub(crate) end: Point<Pixels>,
+    pub(crate) line: Pixels,
+    pub(crate) answer: Point<Pixels>,
+    pub(crate) view: Size<Pixels>,
 }
 
 impl Spot {
     /// Where the bar goes from the answer's top left, scrolled by `offset`;
     /// none while none of the selection is in view.
-    fn bar_at(&self, offset: Point<Pixels>, bar: Size<Pixels>) -> Option<Point<Pixels>> {
+    pub(crate) fn bar_at(&self, offset: Point<Pixels>, bar: Size<Pixels>) -> Option<Point<Pixels>> {
         let shift = self.answer + offset;
         let (start, end) = (self.start + shift, self.end + shift);
         let (x, y) = beside_selection((self.view.width.into(), self.view.height.into()), (start.x.into(), start.y.into()), (end.x.into(), end.y.into()), self.line.into(), (bar.width.into(), bar.height.into()))?;
@@ -1352,6 +1352,8 @@ impl Workspace {
             let pick = picker.clone();
             let selecting = crate::markdown::Selecting {
                 selected: picked,
+                marks: vec![],
+                spot: None,
                 pointer: std::rc::Rc::new(move |pointer, place, window, cx| {
                     pick.update(cx, |this, cx| {
                         this.run(Cmd::PickText(talk, i, pointer, place), window, cx);

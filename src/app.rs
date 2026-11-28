@@ -238,6 +238,8 @@ pub struct Writing {
     pub agent: crate::write_agent::Agent,
     /// Looking for words in the manuscript (`write_seek.rs`).
     pub seek: crate::write_seek::Seek,
+    /// The manuscript read through: what is selected or pointed at there (`write_read.rs`).
+    pub read: crate::write_read::Read,
     /// Beside a draft's conversation the manuscript was closed: the conversation has the page until one is shown again (`write_show`).
     pub away: bool,
 }
@@ -552,10 +554,10 @@ impl Library {
         chat_of!(self, talk)
     }
 
-    /// Ends the selection made in an answer, in whichever conversation it is; says whether there was one.
-    /// One the pointer still holds is being made, and stays.
+    /// Ends the selection made in an answer, in whichever conversation it is, or in the manuscript read through;
+    /// says whether there was one. One the pointer still holds is being made, and stays.
     pub(crate) fn unpick(&mut self) -> bool {
-        let mut ended = false;
+        let mut ended = self.writing.read.unpick();
         for talk in [Talk::Library, Talk::Paper, Talk::Write] {
             let chat = self.chat_mut(talk);
             if chat.picked.is_some_and(|(.., held)| !held) {
@@ -1138,7 +1140,7 @@ impl Workspace {
         let (comments, heard) = crate::comments::Commenting::new(store.comments(&manuscript).unwrap_or_default(), store.manuscript_source(&manuscript).ok().flatten(), cx);
         subscriptions.extend(heard);
         let seek = crate::write_seek::Seek::new(&mut subscriptions, cx);
-        let writing = Writing { manuscripts, manuscript, section_id, reading: false, facing: false, title, typed: 0, editor, find, search: Default::default(), structures: BTreeMap::new(), sorting: Sorting::default(), scroll: ScrollHandle::new(), assist: Default::default(), revise: Default::default(), comments, editor_scroll: ScrollHandle::new(), side: Side::default(), side_open: false, agent: Default::default(), seek, away: false };
+        let writing = Writing { manuscripts, manuscript, section_id, reading: false, facing: false, title, typed: 0, editor, find, search: Default::default(), structures: BTreeMap::new(), sorting: Sorting::default(), scroll: ScrollHandle::new(), assist: Default::default(), revise: Default::default(), comments, editor_scroll: ScrollHandle::new(), side: Side::default(), side_open: false, agent: Default::default(), seek, read: Default::default(), away: false };
         let citing = crate::cite::Citing::new(&store, &writing.manuscript, &mut subscriptions, cx);
         let gallery = crate::figures::Gallery::new(&mut subscriptions, cx);
         let excerpts = crate::excerpts::Excerpts::new(&mut subscriptions, cx);

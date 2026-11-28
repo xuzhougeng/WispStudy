@@ -81,6 +81,8 @@ pub enum MenuKind {
     Conversation(Talk, String),
     Text(String),
     Answer(Talk, String),
+    /// A piece of the manuscript read through: its section, the piece, whether beside the translation (`write_read.rs`).
+    ReadPiece(String, usize, bool),
     /// A figure of the figure library.
     Figure(String),
     /// A method of 方法库 or an introduction of 导言库.
@@ -287,7 +289,7 @@ impl Workspace {
         };
         let filter = matches!(kind, MenuKind::Filter(_));
         match kind {
-            MenuKind::Paper(_) | MenuKind::PaperMore(_) | MenuKind::Papers(_) | MenuKind::Trashed(_) | MenuKind::TrashedMany(_) | MenuKind::File(_) | MenuKind::Tag(_) | MenuKind::Conversation(..) | MenuKind::Text(_) | MenuKind::Answer(..) => (items, breaks) = self.context_menu(&kind),
+            MenuKind::Paper(_) | MenuKind::PaperMore(_) | MenuKind::Papers(_) | MenuKind::Trashed(_) | MenuKind::TrashedMany(_) | MenuKind::File(_) | MenuKind::Tag(_) | MenuKind::Conversation(..) | MenuKind::Text(_) | MenuKind::Answer(..) | MenuKind::ReadPiece(..) => (items, breaks) = self.context_menu(&kind),
             MenuKind::Figure(id) => (items, breaks) = self.figure_menu(&id),
             MenuKind::Excerpt(id) => (items, breaks) = self.excerpt_menu(&id),
             MenuKind::Add => {

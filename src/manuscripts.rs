@@ -476,6 +476,8 @@ impl Workspace {
                 }
             }
             Cmd::WriteReading(reading) => {
+                // What stands beside the words read goes with the preview; a comment written there is kept first.
+                self.read_letgo(cx);
                 if let Some(lib) = self.lib.as_mut() {
                     lib.writing.reading = reading;
                     // The eye is the manuscript alone: beside its translation is the button next to it.
@@ -1031,7 +1033,8 @@ impl Workspace {
             .when(!outlined, |d| d.child(div().flex().items_center().flex_wrap().gap(px(6.)).px(px(16.)).pt(px(12.)).children(pills).child(add)))
     }
 
-    /// The whole manuscript, to be read through; a heading opens its section.
+    /// The whole manuscript, to be read through; a heading opens its section. Its words can be selected, copied and
+    /// commented on, and a comment's words are tinted (write_read.rs).
     pub(crate) fn render_manuscript_reading(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let lib = self.lib.as_ref().unwrap();
         let Some(manuscript) = lib.writing.current() else { return div().into_any_element() };
@@ -1061,21 +1064,21 @@ impl Workspace {
         let Some(section) = manuscript.sections.get(n) else { return div().into_any_element() };
         let depth = section.level.saturating_sub(top) + 1;
         let written = manuscript::section_markdown(&section.body, depth);
-        let pictures = manuscript::picture_lines(&section.body);
         let labels = lib.citing.read.whole.get(n).map(Vec::as_slice).unwrap_or(&[]);
-        let read = |within: std::ops::Range<usize>| wisp_core::cite::read_as(&section.body, labels, within);
+        // The text between two pictures is a piece; read through, its words can be selected, copied and commented on
+        // (write_read.rs). Under the section being written a click anywhere opens it, so there it is only drawn.
         let mut pieces: Vec<AnyElement> = vec![];
-        let mut from = 0;
-        for (at, picture) in pictures.iter().enumerate() {
-            let before = manuscript::section_markdown(&read(from..picture.line.start), depth);
-            if !before.is_empty() { pieces.push(crate::markdown::render_page(&format!("write-read-{n}-{at}"), &before, READ_SIZE).into_any_element()) }
-            let caption = section.body[picture.line.clone()].find(picture.caption.as_str()).filter(|_| !picture.caption.is_empty()).map(|start| read(picture.line.start + start..picture.line.start + start + picture.caption.len()));
-            let picture = manuscript::PictureLine { caption: caption.unwrap_or_else(|| picture.caption.clone()), ..picture.clone() };
-            pieces.push(self.render_manuscript_picture(format!("write-read-picture-{n}-{at}"), &picture, f32::from(theme::manuscript_width()), window));
-            from = picture.line.end;
+        let mut words = 0;
+        for (at, part) in crate::write_read::parts(&section.body, labels, depth).into_iter().enumerate() {
+            match part {
+                crate::write_read::Part::Words(_, shown) if open => pieces.push(crate::markdown::render_page(&format!("write-read-{n}-{at}"), &shown, READ_SIZE).into_any_element()),
+                crate::write_read::Part::Words(within, shown) => {
+                    pieces.push(self.render_read_piece(section, n, words, within, &shown, false, window, cx));
+                    words += 1;
+                }
+                crate::write_read::Part::Picture(picture) => pieces.push(self.render_manuscript_picture(format!("write-read-picture-{n}-{at}"), &picture, f32::from(theme::manuscript_width()), window)),
+            }
         }
-        let rest = manuscript::section_markdown(&read(from..section.body.len()), depth);
-        if !rest.is_empty() { pieces.push(crate::markdown::render_page(&format!("write-read-{n}"), &rest, READ_SIZE).into_any_element()) }
         // A section of its subsections alone says nothing of itself: they are what it holds.
         let alone = manuscript::under(&manuscript.sections, n).len() == 1;
         let size = match depth {

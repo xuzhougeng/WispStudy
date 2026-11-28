@@ -735,6 +735,8 @@ pub enum Cmd {
     WriteFigures(crate::write_figures::Do),
     /// Looking for words in the manuscript (`write_seek.rs`).
     Seek(crate::write_seek::Do),
+    /// The manuscript read through: selecting its words, copying them, commenting on them, writing them (`write_read.rs`).
+    Read(crate::write_read::Do),
     /// Looking for words through the whole library: full texts, marks, notes (`library_find.rs`).
     LibraryFind(crate::library_find::Do),
     // The figure library (`src/figures.rs`)
@@ -1301,6 +1303,7 @@ impl Workspace {
                 if let Some(unfolded) = self.lib.as_mut().map(|lib| &mut lib.writing.search.unfolded) && !unfolded.remove(&card) { unfolded.insert(card); }
             }
             Cmd::Comment(what) => self.run_comment(what, window, cx),
+            Cmd::Read(what) => self.run_read(what, window, cx),
             Cmd::WriteAssist(assist) => self.assist_start(assist, cx),
             Cmd::WriteAssistStop => self.assist_stop(cx),
             Cmd::WriteAssistUse(how) => self.assist_use(how, window, cx),
@@ -2488,7 +2491,7 @@ impl Workspace {
             // 历史's search: what is typed goes first, then the list.
             let typed = self.lib.as_ref().is_some_and(|lib| !lib.chat(talk).history_find.read(cx).text().is_empty());
             self.run(if typed { Cmd::ClearHistoryFind(talk) } else { Cmd::ToggleHistory(talk) }, window, cx);
-        } else if self.picked.take().is_some() || self.lib.as_mut().is_some_and(Library::unpick) {
+        } else if self.picked.take().is_some() || self.read_letgo(cx) || self.lib.as_mut().is_some_and(Library::unpick) {
         } else if self.lib.as_ref().is_some_and(|l| l.write_figures_shown()) {
             // The panel floating over the conversation is put away first; what it searched for stays.
             if let Some(lib) = self.lib.as_mut() {
@@ -2607,6 +2610,7 @@ impl Workspace {
             "write-figures" if self.lib.as_ref().is_some_and(|l| l.page == Page::Write) => Cmd::WriteFigures(crate::write_figures::Do::Open),
             // What is selected in an answer: the paper's conversation first, when both have something.
             "copy-picked" if self.picked.is_some() => Cmd::CopySelected,
+            "copy-picked" if self.read_picked_text().is_some() => Cmd::Read(crate::write_read::Do::Copy),
             "copy-picked" => match self.lib.as_ref().and_then(|lib| [Talk::Paper, Talk::Library, Talk::Write].into_iter().find(|talk| lib.chat(*talk).picked.is_some())) {
                 Some(talk) => Cmd::CopyPicked(talk),
                 None => return,

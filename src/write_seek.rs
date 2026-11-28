@@ -35,6 +35,11 @@ pub enum Do {
 }
 
 impl Seek {
+    /// A byte of the section on show to bring into view once the editor has drawn it (a place gone to from elsewhere: 预览).
+    pub(crate) fn reveal_at(&mut self, at: usize) {
+        self.reveal = Some((at, REVEAL_FRAMES));
+    }
+
     pub fn new(subscriptions: &mut Vec<Subscription>, cx: &mut Context<Workspace>) -> Seek {
         let input = cx.new(|cx| TextInput::new("在稿件里查找", cx));
         // Esc goes on to the workspace, which puts the bar away (`Workspace::dismiss`).
