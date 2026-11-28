@@ -47,6 +47,14 @@ pub fn clock_time(value: &str) -> String {
     parse(value).map(|d| d.with_timezone(&Local).format("%H:%M").to_string()).unwrap_or_default()
 }
 
+/// `now`, or a millisecond after `last` when `now` is not later: a moment that comes after the one before
+/// though both fell in the same millisecond, so an order kept by time has no ties.
+pub fn later_than(now: &str, last: &str) -> String {
+    let before = millis(last);
+    if millis(now) > before { return now.to_string() }
+    DateTime::from_timestamp_millis(before + 1).map_or_else(|| now.to_string(), |d| d.to_rfc3339_opts(SecondsFormat::Millis, true))
+}
+
 /// Milliseconds since the epoch, 0 when unparsable.
 pub fn millis(value: &str) -> i64 {
     parse(value).map(|d| d.timestamp_millis()).unwrap_or(0)
@@ -95,6 +103,15 @@ pub fn ago_today(value: &str) -> Ago {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_moment_after_the_last_one() {
+        assert_eq!(later_than("2026-11-28T06:45:21.124Z", "2026-11-28T06:45:21.123Z"), "2026-11-28T06:45:21.124Z");
+        assert_eq!(later_than("2026-11-28T06:45:21.123Z", "2026-11-28T06:45:21.123Z"), "2026-11-28T06:45:21.124Z");
+        assert_eq!(later_than("2026-11-28T06:45:21.100Z", "2026-11-28T06:45:21.999Z"), "2026-11-28T06:45:22.000Z");
+        // Nothing before: the moment itself.
+        assert_eq!(later_than("2026-11-28T06:45:21.123Z", ""), "2026-11-28T06:45:21.123Z");
+    }
 
     #[test]
     fn days_ago_follow_the_local_calendar() {

@@ -1055,7 +1055,11 @@ impl Store {
             let _ = std::fs::remove_file(&target);
             return self.read_files("WHERE id = ?1", [same])?.pop().ok_or_else(|| anyhow!("附件记录丢失"));
         }
-        let file = PaperFile { id, paper_id: paper_id.to_string(), kind: kind.to_string(), title, format, local_path: relative, size_bytes: size, added_at: now_iso(), note: String::new() };
+        // The paper's files are in the order they came (`read_files`): one that comes in the same millisecond as the
+        // last still comes after it, so a file put in another's place (`swap_file`, which takes its `added_at`) keeps it.
+        let last: Option<String> = self.db.query_row("SELECT max(added_at) FROM resources WHERE paper_id = ?1", [paper_id], |r| r.get(0))?;
+        let added_at = crate::time::later_than(&now_iso(), last.as_deref().unwrap_or_default());
+        let file = PaperFile { id, paper_id: paper_id.to_string(), kind: kind.to_string(), title, format, local_path: relative, size_bytes: size, added_at, note: String::new() };
         let inserted = self.db.execute(
             "INSERT INTO resources(id, paper_id, resource_type, title, format, local_path, size_bytes, sha256, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![file.id, file.paper_id, file.kind, file.title, file.format, file.local_path, file.size_bytes as i64, sha, file.added_at],
