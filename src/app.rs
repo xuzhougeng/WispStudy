@@ -840,6 +840,10 @@ impl Workspace {
         this.apply_appearance(window);
         this.apply_typography(window, cx);
         cx.observe_window_appearance(window, |this, window, _| this.apply_appearance(window)).detach();
+        // What had the keyboard is no longer drawn (助手's box once another page is chosen, a closed dialog's field):
+        // keys would then be heard above the workspace, and none of its shortcuts would answer until something was
+        // clicked. The workspace takes the keyboard back.
+        cx.on_focus_lost(window, |this, window, _| window.focus(&this.focus)).detach();
         this.watch_updates(cx);
         this.watch_searches(cx);
         this.load_skills();
