@@ -167,6 +167,12 @@ impl Workspace {
                 "write" => Some(Cmd::WriteSection(arg.to_string())),
                 // `part:methods` chooses a section as its pill does: with 译文对照 on, it is read beside its translation there.
                 "part" => Some(Cmd::PickSection(arg.to_string())),
+                // `heading:2` goes to the third heading written in the section being written, as its row in the outline does.
+                "heading" => self.lib.as_ref().and_then(|lib| {
+                    let section = lib.writing.current()?.section(&lib.writing.section_id)?;
+                    let head = wisp_core::manuscript::heads(&section.body).into_iter().nth(arg.parse().unwrap_or(0))?;
+                    Some(Cmd::PickHeading(section.id.clone(), head.line.start))
+                }),
                 // `manuscript:new` makes another manuscript, `manuscript:<title>` gives the current one its title;
                 // `section` / `section:<id>` is the dialog for a new section / one's name and kind;
                 // `reading` shows the whole manuscript, `versions` the section's history.

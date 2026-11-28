@@ -169,6 +169,23 @@ impl Workspace {
         for page in SettingsPage::ALL { made(page.icon(), tf!("设置 › {}", "Settings › {}", page.title()), "设置 settings", if page == SettingsPage::General { "settings" } else { "" }, Cmd::OpenSettings(page)) }
         // The words looked for through the whole library: full texts, marks, notes (`library_find.rs`).
         if !query.trim().is_empty() && self.lib.as_ref().is_some_and(|lib| !lib.info.draft) { made("file-text", tf!("在全文和标注里找「{}」", "Find “{}” in full texts and marks", query.trim()), "全文 标注 查找 find full text marks", "", Cmd::LibraryFind(crate::library_find::Do::Query(query.trim().to_string()))) }
+        // Writing, the outline comes first: a section or a heading of the manuscript by its words or its number
+        // (`3.2`), however long the outline is.
+        if !query.trim().is_empty() && let Some(lib) = self.lib.as_ref().filter(|lib| lib.page == Page::Write) && let Some(manuscript) = lib.writing.current() {
+            let sections = &manuscript.sections;
+            let outline = wisp_core::manuscript::contents(sections).into_iter().filter_map(|entry| {
+                let section = &sections[entry.at];
+                let name = entry.head.as_ref().map_or(section.name.as_str(), |head| head.name.as_str());
+                let label = format!("{} {name}", entry.number);
+                if !holds(&format!("{label} 跳到 大纲 go to outline"), query) { return None }
+                let (note, cmd) = match entry.head {
+                    Some(head) => (section.name.clone(), Cmd::PickHeading(section.id.clone(), head.line.start)),
+                    None => (String::new(), Cmd::PickSection(section.id.clone())),
+                };
+                Some(Row { icon: "list", label: label.into(), note: note.into(), cmd })
+            });
+            rows.splice(0..0, outline.collect::<Vec<_>>());
+        }
         let commands = rows.len();
         if !query.trim().is_empty() && let Some(lib) = self.lib.as_ref() {
             // The words are looked for where the list's search box looks: title, authors, tags, abstract, notes.

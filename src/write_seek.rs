@@ -25,6 +25,8 @@ pub struct Seek {
     at: Option<(String, Range<usize>)>,
     /// A byte of the section on show to bring into view once the editor has drawn it, and the frames left to wait.
     reveal: Option<(usize, u8)>,
+    /// The byte is a heading's: its line goes to the top of the view, as a table of contents takes one there.
+    top: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -37,7 +39,12 @@ pub enum Do {
 impl Seek {
     /// A byte of the section on show to bring into view once the editor has drawn it (a place gone to from elsewhere: 预览).
     pub(crate) fn reveal_at(&mut self, at: usize) {
-        self.reveal = Some((at, REVEAL_FRAMES));
+        (self.reveal, self.top) = (Some((at, REVEAL_FRAMES)), false);
+    }
+
+    /// A heading's line to the top of the view once the editor has drawn it (one gone to from the outline).
+    pub(crate) fn reveal_heading(&mut self, at: usize) {
+        (self.reveal, self.top) = (Some((at, REVEAL_FRAMES)), true);
     }
 
     pub fn new(subscriptions: &mut Vec<Subscription>, cx: &mut Context<Workspace>) -> Seek {
@@ -48,7 +55,7 @@ impl Seek {
             InputEvent::Changed => this.seek_typed(cx),
             _ => {}
         }));
-        Seek { open: false, input, at: None, reveal: None }
+        Seek { open: false, input, at: None, reveal: None, top: false }
     }
 }
 
@@ -116,7 +123,7 @@ impl Workspace {
         let here = hits.into_iter().find(|(section, range)| *section == writing.section_id && range.start >= from);
         if let Some((section, range)) = here.filter(|_| !writing.reading) {
             writing.editor.update(cx, |input, cx| input.select_range(range.clone(), cx));
-            writing.seek.reveal = Some((range.start, REVEAL_FRAMES));
+            writing.seek.reveal_at(range.start);
             writing.seek.at = Some((section, range));
         }
         cx.notify();
@@ -154,7 +161,7 @@ impl Workspace {
         let Some(lib) = self.lib.as_mut() else { return };
         let writing = &mut lib.writing;
         writing.editor.update(cx, |input, cx| input.select_range(range.clone(), cx));
-        writing.seek.reveal = Some((range.start, REVEAL_FRAMES));
+        writing.seek.reveal_at(range.start);
         writing.seek.at = Some((section, range));
         cx.notify();
     }
@@ -169,6 +176,8 @@ impl Workspace {
             return window.request_animation_frame();
         };
         writing.seek.reveal = None;
+        // A heading at the top, under the sheet's margin.
+        if std::mem::take(&mut writing.seek.top) { return writing.editor_scroll.set_offset(point(px(0.), -(top - px(8.)).max(px(0.)))) }
         let (seen, height) = (-writing.editor_scroll.offset().y, writing.editor_scroll.bounds().size.height);
         // A few lines above it stay in view, so it is read in its place.
         if top < seen + px(20.) || top + px(60.) > seen + height { writing.editor_scroll.set_offset(point(px(0.), -(top - px(90.)).max(px(0.)))) }

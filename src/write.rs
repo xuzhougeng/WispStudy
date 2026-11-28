@@ -63,11 +63,12 @@ impl Workspace {
         // that scrolled both would take the wheel from the manuscript at its end.
         let stacked = width < STACK_UNDER;
         let panel = if stacked { width } else if width > 1500. { 480. } else if width > 980. { 420. } else { 340. };
-        // Read through, the manuscript has the page: the panel is for the section being written.
-        let reading = self.lib.as_ref().is_some_and(|lib| lib.writing.reading);
-        let editor = self.render_manuscript_column(if stacked || reading { width } else { width - panel }, false, stacked, window, cx);
+        // Read through, the manuscript has the page: the panel is for the section being written, and under 译稿 it
+        // stays as it was when 译稿 was turned on (`Writing::panel_shown`), open or put away.
+        let beside = self.lib.as_ref().is_none_or(|lib| lib.writing.panel_shown());
+        let editor = self.render_manuscript_column(if stacked || !beside { width } else { width - panel }, false, stacked, window, cx);
         div().id("write-page").flex().size_full().when(stacked, |d| d.flex_col()).child(editor)
-            .when(!reading, |d| d.child(self.render_candidates(panel, stacked, window, cx)))
+            .when(beside, |d| d.child(self.render_candidates(panel, stacked, window, cx)))
             .into_any_element()
     }
 

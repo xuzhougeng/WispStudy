@@ -12,7 +12,6 @@ use crate::ui;
 use gpui::{prelude::FluentBuilder, *};
 use wisp_core::manuscript::{self, LANGUAGES, Manuscript, Section};
 use wisp_core::structure::SECTIONS;
-use std::ops::Range;
 
 /// What a manuscript is exported as.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -47,10 +46,17 @@ impl Writing {
         self.reading && !self.facing_section()
     }
 
-    /// 译文对照 turned on over what is on show: the section being written, or the whole manuscript read through.
+    /// 译文对照 turned on over what is on show: the section being written, or the whole manuscript read through. The
+    /// panel beside it stays as it was (`facing_panel`).
     pub fn face(&mut self) {
-        if !(self.reading && self.facing) { self.facing_whole = self.reading }
+        if !(self.reading && self.facing) { (self.facing_whole, self.facing_panel) = (self.reading, !self.reading) }
         (self.reading, self.facing) = (true, true);
+    }
+
+    /// The panel beside the manuscript is on show: while a section is written, and under 译稿 when it was on show as
+    /// 译稿 was turned on. 预览 has none.
+    pub fn panel_shown(&self) -> bool {
+        !self.reading || (self.facing && self.facing_panel)
     }
 
     /// The sections read beside their translation, by their places: every one, or over a section the one on show
@@ -354,18 +360,50 @@ impl Workspace {
         self.write_show(id, section, cx);
     }
 
-    /// Typing in a section: keep the text now, and a snapshot once typing pauses. A heading finished as it is typed
-    /// is a section from there (`write_headings`).
+    /// A heading of a section's text chosen in the outline or the palette (its line starts at byte `at`): the section
+    /// written, the caret at the end of the heading's line and the line at the top of the view. The section already
+    /// being written is not shown anew, which would take its Undo. While 译文对照 is on, the section is read beside
+    /// its translation, from its top.
+    fn pick_heading(&mut self, section: String, at: usize, window: &mut Window, cx: &mut Context<Self>) {
+        let here = self.lib.as_ref().is_some_and(|lib| lib.writing.section_id == section && !lib.writing.reading);
+        if !here { self.pick_section(section.clone(), window, cx) }
+        let Some(lib) = self.lib.as_mut().filter(|lib| lib.writing.section_id == section && !lib.writing.reading) else { return };
+        let writing = &mut lib.writing;
+        let Some(head) = manuscript::heads(writing.editor.read(cx).text()).into_iter().find(|head| head.line.start == at) else { return };
+        writing.editor.update(cx, |input, cx| input.select_range(head.line.end..head.line.end, cx));
+        writing.editor.read(cx).focus(window);
+        writing.seek.reveal_heading(head.line.start);
+        cx.notify();
+    }
+
+    /// A section merged into the one before it (`Store::merge_section`), that one now shown: where what went in
+    /// begins is in view with the caret at it, and the toast says what it became, with 撤销 (design rule 40).
+    fn write_merged(&mut self, merged: manuscript::Merged, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        let was = merged.back.into.body.trim();
+        let at = if was.is_empty() { 0 } else { was.len() + 2 }.min(merged.section.body.len());
+        let writing = &mut lib.writing;
+        writing.editor.update(cx, |input, cx| input.select_range(at..at, cx));
+        writing.editor.read(cx).focus(window);
+        if merged.headings { writing.seek.reveal_heading(at) } else { writing.seek.reveal_at(at) }
+        let (into, name) = (merged.section.name.clone(), merged.back.gone.first().map(|(section, _)| section.name.clone()).unwrap_or_default());
+        let more = merged.back.gone.len().saturating_sub(1);
+        let said = match (merged.headings, more) {
+            (true, 0) => tf!("「{name}」成了「{into}」正文里的标题", "“{name}” is a heading in the text of “{into}” now"),
+            (true, _) => tf!("「{name}」和它下面的 {more} 个小节成了「{into}」正文里的标题", "“{name}” and the {more} subsections under it are headings in the text of “{into}” now"),
+            (false, _) => tf!("「{name}」并入了「{into}」", "“{name}” is part of “{into}” now"),
+        };
+        self.say_undoable(said, Cmd::Unmerge(merged.back), cx);
+    }
+
+    /// Typing in a section: keep the text now, and a snapshot once typing pauses.
     pub(crate) fn write_typed(&mut self, text: String, cx: &mut Context<Self>) {
-        // Writing on, the person keeps the sections the headings made: 撤销 would put back the text before what is typed now.
-        if matches!(self.toast.as_ref().and_then(|toast| toast.action.as_ref()), Some((_, Cmd::Unsplit(_)))) { self.toast = None }
+        // Writing on, the person keeps the merge: 撤销 would put back the text before what is typed now.
+        if matches!(self.toast.as_ref().and_then(|toast| toast.action.as_ref()), Some((_, Cmd::Unmerge(_)))) { self.toast = None }
         let Some(lib) = self.lib.as_mut() else { return };
         let section = lib.writing.section_id.clone();
         if section.is_empty() { return }
         if let Err(err) = lib.store.save_section_body(&section, &text) { return self.fail(tf!("草稿没有保存：{err:#}", "Draft not saved: {err:#}"), cx) }
-        // A line break put in after `## …`, by Enter or a paste.
-        let put = lib.writing.editor.read(cx).put().filter(|put| text.get(put.clone()).is_some_and(|put| put.contains('\n')));
-        if let Some(put) = put.filter(|put| !manuscript::finished_headings(&text, put.clone()).is_empty()) { return self.write_headings(&section, put, cx) }
         if let Some(kept) = lib.writing.section_mut() { kept.body = text }
         lib.writing.typed += 1;
         let (typed, library) = (lib.writing.typed, lib.info.id.clone());
@@ -378,30 +416,6 @@ impl Workspace {
             .ok();
         })
         .detach();
-    }
-
-    /// Headings finished in the section being written, its text already kept (`Store::split_at_headings`): `#` is a
-    /// section, `##` a subsection, `###` a part of one, each with the text after it. The caret goes on where it was,
-    /// now in the last section made, and the toast says what became of the heading with the way back (design rule 40).
-    fn write_headings(&mut self, section: &str, put: Range<usize>, cx: &mut Context<Self>) {
-        let Some(lib) = self.lib.as_mut() else { return };
-        let typed = match lib.store.split_at_headings(section, put) {
-            Ok(Some(typed)) => typed,
-            Ok(None) => return,
-            Err(err) => return self.fail(format!("{err:#}"), cx),
-        };
-        lib.writing.search.asked = None;
-        self.write_reload(Some(typed.section.id.clone()), cx);
-        let Some(lib) = self.lib.as_ref() else { return };
-        lib.writing.editor.update(cx, |editor, cx| editor.select_range(typed.caret..typed.caret, cx));
-        let number = lib.writing.current().and_then(|m| m.sections.iter().position(|s| s.id == typed.section.id).map(|at| manuscript::numbers(&m.sections)[at].clone())).unwrap_or_default();
-        let (made, name) = (typed.back.made.len(), typed.section.name.clone());
-        let said = match made {
-            0 => tf!("这一节的名称成了「{name}」", "This section is named “{name}” now"),
-            1 => tf!("「{name}」成了第 {number} 节", "“{name}” is section {number} now"),
-            _ => tf!("{made} 个标题成了新的节，写到了第 {number} 节「{name}」", "{made} headings are sections now; writing on in {number} “{name}”"),
-        };
-        self.say_undoable(said, Cmd::Unsplit(typed.back), cx);
     }
 
     pub(crate) fn write_title_typed(&mut self, title: String, cx: &mut Context<Self>) {
@@ -420,6 +434,7 @@ impl Workspace {
         match cmd {
             Cmd::WriteSection(section) => self.write_section(section, window, cx),
             Cmd::PickSection(section) => self.pick_section(section, window, cx),
+            Cmd::PickHeading(section, at) => self.pick_heading(section, at, window, cx),
             Cmd::WriteManuscript(id) => {
                 let section = self.lib.as_ref().and_then(|l| l.writing.manuscripts.iter().find(|m| m.id == id)).map(|m| Writing::latest(std::slice::from_ref(m)).1).unwrap_or_default();
                 if let Some(lib) = self.lib.as_mut() { lib.writing.reading = false }
@@ -548,24 +563,25 @@ impl Workspace {
                     Err(err) => self.fail(format!("{err:#}"), cx),
                 }
             }
-            Cmd::Unsplit(back) => {
-                let Some(lib) = self.lib.as_mut() else { return };
-                match lib.store.unsplit(&back) {
-                    Ok(was) => {
-                        lib.writing.search.asked = None;
-                        self.write_reload(Some(was.id), cx);
-                        if let Some(lib) = self.lib.as_ref() { lib.writing.editor.update(cx, |editor, cx| editor.select_range(back.caret..back.caret, cx)) }
-                    }
-                    Err(err) => self.fail(format!("{err:#}"), cx),
-                }
-            }
             Cmd::MergeSection(id) => {
                 self.write_snapshot("leave");
                 let Some(lib) = self.lib.as_mut() else { return };
                 match lib.store.merge_section(&id) {
                     Ok(merged) => {
                         lib.writing.search.asked = None;
-                        self.write_reload(Some(merged.id), cx);
+                        self.write_reload(Some(merged.section.id.clone()), cx);
+                        self.write_merged(merged, window, cx);
+                    }
+                    Err(err) => self.fail(format!("{err:#}"), cx),
+                }
+            }
+            Cmd::Unmerge(back) => {
+                let Some(lib) = self.lib.as_mut() else { return };
+                match lib.store.unmerge(&back) {
+                    Ok(_) => {
+                        lib.writing.search.asked = None;
+                        // Back in the section that was merged, as before.
+                        self.write_reload(back.gone.first().map(|(section, _)| section.id.clone()), cx);
                     }
                     Err(err) => self.fail(format!("{err:#}"), cx),
                 }
@@ -852,11 +868,44 @@ impl Workspace {
         if waiting > 0 { about.push(tf!("{waiting} 条批注待处理", "{waiting} open comments")) }
         let row = |id: ElementId, on: bool| div().id(id).flex().items_center().gap(px(8.)).px(px(8.)).rounded(px(6.)).cursor_pointer().when(on, |d| d.bg(Theme::accent_soft())).when(!on, |d| d.hover(|s| s.bg(Theme::hover())));
         let sections = &manuscript.sections;
-        let numbers = manuscript::numbers(sections);
-        let rows: Vec<AnyElement> = sections
+        // The outline as it is read: the sections, and the headings written in their text (`##` is 3.1 in 方法).
+        let entries = manuscript::contents(sections);
+        // The headings of the section being written are listed; another section's fold into how many it has, so the
+        // outline is as long as the manuscript has sections, however many headings it has.
+        let shows = |at: usize| sections[at].id == writing.section_id;
+        // The heading the caret is under is lit: where the person writes.
+        let caret = writing.editor.read(cx).selection().start;
+        let lit = entries.iter().rposition(|entry| shows(entry.at) && entry.head.as_ref().is_some_and(|head| head.line.start <= caret)).filter(|_| !writing.reading_whole());
+        let rows: Vec<AnyElement> = entries
             .iter()
             .enumerate()
-            .map(|(n, section)| {
+            .filter_map(|(e, entry)| {
+                let (n, section) = (entry.at, &sections[entry.at]);
+                if let Some(head) = entry.head.as_ref() {
+                    if !shows(n) { return None }
+                    // A heading's part runs to the next heading as deep or less deep, or the end of the section's text.
+                    let end = entries[e + 1..].iter().take_while(|next| next.at == n).filter_map(|next| next.head.as_ref()).find(|next| next.down <= head.down).map_or(section.body.len(), |next| next.line.start);
+                    let part = section.body.get(head.line.end..end).unwrap_or("");
+                    let on = lit == Some(e);
+                    return Some(
+                        row(("outline-head", e).into(), false)
+                            .py(px(4.))
+                            .pl(px(8. + 14. * f32::from(entry.level.saturating_sub(1))))
+                            .on_click(self.on(Cmd::PickHeading(section.id.clone(), head.line.start), cx))
+                            .child(div().flex_none().min_w(px(16.)).text_size(text_px(11.)).text_color(if on { Theme::accent() } else { Theme::text_tertiary() }).child(entry.number.clone()))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .items_baseline()
+                                    .gap(px(6.))
+                                    .child(div().flex_1().min_w_0().truncate().text_size(text_px(13.)).when(on, |d| d.text_color(Theme::accent()).font_weight(FontWeight::MEDIUM)).when(!on, |d| d.text_color(Theme::text_secondary())).child(head.name.clone()))
+                                    .when(!part.trim().is_empty(), |d| d.child(div().flex_none().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(crate::write::length_label(part)))),
+                            )
+                            .into_any_element(),
+                    );
+                }
                 let on = section.id == writing.section_id && !writing.reading_whole();
                 // A section with subsections is all that is under it: 结果 is its results, as long as they are together.
                 let block = &sections[manuscript::under(sections, n)];
@@ -869,33 +918,38 @@ impl Workspace {
                 let over = manuscript::parent(sections, n).map(|p| sections[p].kind.as_str());
                 if section.kind != "other" && label(&SECTIONS, &section.kind) != section.name && over != Some(section.kind.as_str()) { said.push(label(&SECTIONS, &section.kind).to_string()) }
                 if children > 0 { said.push(tf!("{children} 个小节", "{children} subsections")) }
+                // Its headings folded: how many there are, opened with the section.
+                let folded = if shows(n) { 0 } else { entries[e + 1..].iter().take_while(|next| next.at == n).count() };
+                if folded > 0 { said.push(tf!("{folded} 个标题", "{folded} headings")) }
                 said.push(if empty { t("未写").to_string() } else { crate::write::length_label(&whole) });
                 let sub = section.level > 1;
-                row(("outline-section", n).into(), on)
-                    .py(px(if sub { 5. } else { 6. }))
-                    // Each level a step in: the numbers stand under the name of the section they are of.
-                    .pl(px(8. + 14. * f32::from(section.level.saturating_sub(1))))
-                    .on_click(self.on(Cmd::PickSection(section.id.clone()), cx))
-                    .when(on, |d| d.on_mouse_down(MouseButton::Right, self.on_context(MenuKind::Section(section.id.clone()), cx)))
-                    .child(div().flex_none().min_w(px(16.)).text_size(text_px(11.)).text_color(if on { Theme::accent() } else { Theme::text_tertiary() }).child(numbers[n].clone()))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_w_0()
-                            .gap(px(1.))
-                            // A subsection is one line, its length at the end: the outline of a paper with many methods stays short.
-                            .when(sub, |d| d.flex_row().items_baseline().gap(px(6.)))
-                            .child(div().truncate().when(sub, |d| d.flex_1().min_w_0()).text_size(text_px(13.)).when(on, |d| d.text_color(Theme::accent()).font_weight(FontWeight::MEDIUM)).when(!on, |d| d.text_color(if empty { Theme::text_tertiary() } else { Theme::text() })).child(section.name.clone()))
-                            .child(div().truncate().when(sub, |d| d.flex_none()).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(said.join(" · "))),
-                    )
-                    // The assistant changed it in answer to the last question.
-                    .when(writing.agent.changed.get(&section.id).is_some_and(|before| *before != section.body), |d| d.child(div().id(("outline-changed", n)).flex_none().size(px(6.)).rounded(px(3.)).bg(Theme::accent()).tooltip(|_, cx| cx.new(|_| crate::write_assist::Tip(t("助手刚改过这一节").to_string())).into())))
-                    // How many comments wait in the section.
-                    .when(noted > 0, |d| d.child(div().flex().flex_none().items_center().justify_center().min_w(px(18.)).h(text_px(18.)).px(px(5.)).rounded(px(9.)).bg(Theme::note_strong()).text_size(text_px(10.)).text_color(Theme::text()).child(noted.to_string())))
-                    .when(on, |d| d.child(div().id("outline-section-menu").flex().flex_none().items_center().justify_center().size(px(20.)).rounded(px(10.)).hover(|s| s.bg(Theme::accent().opacity(0.12))).on_click(self.on_menu(MenuKind::Section(section.id.clone()), cx)).child(ui::icon("chevron-down", 12., Theme::accent()))))
-                    .into_any_element()
+                Some(
+                    row(("outline-section", n).into(), on)
+                        .py(px(if sub { 5. } else { 6. }))
+                        // Each level a step in: the numbers stand under the name of the section they are of.
+                        .pl(px(8. + 14. * f32::from(section.level.saturating_sub(1))))
+                        .on_click(self.on(Cmd::PickSection(section.id.clone()), cx))
+                        .when(on, |d| d.on_mouse_down(MouseButton::Right, self.on_context(MenuKind::Section(section.id.clone()), cx)))
+                        .child(div().flex_none().min_w(px(16.)).text_size(text_px(11.)).text_color(if on { Theme::accent() } else { Theme::text_tertiary() }).child(entry.number.clone()))
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .flex_1()
+                                .min_w_0()
+                                .gap(px(1.))
+                                // A subsection is one line, its length at the end: the outline of a paper with many methods stays short.
+                                .when(sub, |d| d.flex_row().items_baseline().gap(px(6.)))
+                                .child(div().truncate().when(sub, |d| d.flex_1().min_w_0()).text_size(text_px(13.)).when(on, |d| d.text_color(Theme::accent()).font_weight(FontWeight::MEDIUM)).when(!on, |d| d.text_color(if empty { Theme::text_tertiary() } else { Theme::text() })).child(section.name.clone()))
+                                .child(div().truncate().when(sub, |d| d.flex_none()).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(said.join(" · "))),
+                        )
+                        // The assistant changed it in answer to the last question.
+                        .when(writing.agent.changed.get(&section.id).is_some_and(|before| *before != section.body), |d| d.child(div().id(("outline-changed", n)).flex_none().size(px(6.)).rounded(px(3.)).bg(Theme::accent()).tooltip(|_, cx| cx.new(|_| crate::write_assist::Tip(t("助手刚改过这一节").to_string())).into())))
+                        // How many comments wait in the section.
+                        .when(noted > 0, |d| d.child(div().flex().flex_none().items_center().justify_center().min_w(px(18.)).h(text_px(18.)).px(px(5.)).rounded(px(9.)).bg(Theme::note_strong()).text_size(text_px(10.)).text_color(Theme::text()).child(noted.to_string())))
+                        .when(on, |d| d.child(div().id("outline-section-menu").flex().flex_none().items_center().justify_center().size(px(20.)).rounded(px(10.)).hover(|s| s.bg(Theme::accent().opacity(0.12))).on_click(self.on_menu(MenuKind::Section(section.id.clone()), cx)).child(ui::icon("chevron-down", 12., Theme::accent()))))
+                        .into_any_element(),
+                )
             })
             .collect();
         let (cited, unresolved, references_on) = self.references_row();
