@@ -430,6 +430,13 @@ pub fn wanted(kept: &[Kept], pairs: &[Option<usize>]) -> Vec<usize> {
     pairs.iter().enumerate().filter(|(_, k)| match k { None => true, Some(k) => !kept[*k].edited && kept[*k].source != kept[*k].anchor }).map(|(u, _)| u).collect()
 }
 
+/// The units that are the model's to translate: those with nothing kept and those whose kept translation it made,
+/// whether or not their source has changed since; not one the person wrote or checked (`edited`). What 全部重译 asks
+/// for again. Each unit's place in `units`.
+pub fn models(kept: &[Kept], pairs: &[Option<usize>]) -> Vec<usize> {
+    pairs.iter().enumerate().filter(|(_, k)| k.is_none_or(|k| !kept[k].edited)).map(|(u, _)| u).collect()
+}
+
 /// The units whose translation a model made from the source as it stands and which leave out a term of the
 /// glossary the source holds (`terms`: `glossary::pairs` into the version's language, `glossary::lacks_term`):
 /// made before the term was in the table or before its counterpart was changed, they are the model's to make again
@@ -1059,6 +1066,9 @@ mod tests {
         let terms = vec![("底层基因".to_string(), "foundational gene".to_string())];
         assert_eq!(lacking(&units, &kept, &pairs, &terms), vec![0]);
         assert_eq!(wanted(&kept, &pairs), vec![4]);
+        // 全部重译: every unit but the person's, and one with nothing kept.
+        assert_eq!(models(&kept, &pairs), vec![0, 1, 3, 4]);
+        assert_eq!(models(&kept, &[Some(2), None]), vec![1]);
         // No table, or a unit with nothing kept: nothing lacks a term.
         assert_eq!(lacking(&units, &kept, &pairs, &[]), Vec::<usize>::new());
         assert_eq!(lacking(&units[..1], &kept, &[None], &terms), Vec::<usize>::new());
