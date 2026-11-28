@@ -388,10 +388,18 @@ impl Workspace {
                 let input = cx.new(|cx| TextInput::new("例如 Root hairs、研究现状", cx).with_text(&name));
                 input.read(cx).focus(window);
                 self.modal_error.clear();
-                self.modal = Some(Modal::Section { editing, name: input, kind });
+                self.modal = Some(Modal::Section { editing, under: None, name: input, kind });
+            }
+            Cmd::AddSubsection(parent) => {
+                // A subsection is of the part its section is: a method's candidates come from the papers' methods.
+                let Some(kind) = self.lib.as_ref().and_then(|lib| lib.writing.current()?.section(&parent)).map(|s| s.kind.clone()) else { return };
+                let input = cx.new(|cx| TextInput::new("例如 Cell culture、根长的变化", cx));
+                input.read(cx).focus(window);
+                self.modal_error.clear();
+                self.modal = Some(Modal::Section { editing: None, under: Some(parent), name: input, kind });
             }
             Cmd::PickSectionKind(key) => {
-                if let Some(Modal::Section { kind, name, editing }) = self.modal.as_mut() {
+                if let Some(Modal::Section { kind, name, editing, under: None }) = self.modal.as_mut() {
                     // A new section's name follows its kind until the person types one.
                     let language = self.lib.as_ref().map_or("en", |l| l.writing.language()).to_string();
                     let typed = name.read(cx).text().trim().to_string();
@@ -400,6 +408,8 @@ impl Workspace {
                         name.update(cx, |input, cx| input.set_text(&named, cx));
                     }
                     *kind = key;
+                } else if let Some(Modal::Section { kind, .. }) = self.modal.as_mut() {
+                    *kind = key;
                 }
             }
             Cmd::MoveSection(id, by) => {
@@ -407,12 +417,21 @@ impl Workspace {
                 if let Err(err) = lib.store.move_section(&id, by) { return self.fail(format!("{err:#}"), cx) }
                 self.write_reload(None, cx);
             }
+            Cmd::IndentSection(id, deeper) => {
+                let Some(lib) = self.lib.as_mut() else { return };
+                if let Err(err) = lib.store.indent_section(&id, deeper) { return self.fail(format!("{err:#}"), cx) }
+                self.write_reload(None, cx);
+            }
             Cmd::AskRemoveSection(id) => {
                 let Some(section) = self.lib.as_ref().and_then(|l| l.writing.current()?.section(&id)).cloned() else { return };
                 if self.lib.as_ref().and_then(|l| l.writing.current()).is_some_and(|m| m.sections.len() <= 1) { return self.fail(t("稿件至少要留一节。"), cx) }
                 if section.body.trim().is_empty() { return self.run_manuscript(Cmd::RemoveSection(id), window, cx) }
                 let words = section.body.split_whitespace().count();
-                self.modal = Some(Modal::Confirm { title: tf!("删除「{}」这一节？", "Delete section “{}”?", section.name), message: tf!("这一节写了 {words} 词，连同它的历史版本会一起删除，不能恢复。要留着文字，先用「导出」或「复制全文」。", "This section contains {words} words. Its text and history will be deleted permanently. Export or copy the manuscript first to keep them."), action: t("删除").into(), cmd: Cmd::RemoveSection(id) });
+                // Its subsections are not removed with it: they stay where they are, a level up.
+                let subsections = self.lib.as_ref().and_then(|l| l.writing.current()).and_then(|m| m.sections.iter().position(|s| s.id == id).map(|at| manuscript::under(&m.sections, at).len() - 1)).unwrap_or(0);
+                let mut message = tf!("这一节写了 {words} 词，连同它的历史版本会一起删除，不能恢复。要留着文字，先用「导出」或「复制全文」。", "This section contains {words} words. Its text and history will be deleted permanently. Export or copy the manuscript first to keep them.");
+                if subsections > 0 { message.push_str(&tf!("它下面的 {subsections} 个小节不删，升一级留在原处。", " Its {subsections} subsections stay where they are, one level up.")) }
+                self.modal = Some(Modal::Confirm { title: tf!("删除「{}」这一节？", "Delete section “{}”?", section.name), message, action: t("删除").into(), cmd: Cmd::RemoveSection(id) });
             }
             Cmd::RemoveSection(id) => {
                 self.modal = None;
@@ -424,7 +443,7 @@ impl Workspace {
                 if let Err(err) = lib.store.remove_section(&id) { return self.fail(format!("{err:#}"), cx) }
                 self.write_reload(staying, cx);
             }
-            Cmd::SplitSection(heading) => {
+            Cmd::SplitSection(cut) => {
                 let Some(lib) = self.lib.as_mut() else { return };
                 let writing = &lib.writing;
                 let (text, caret) = {
@@ -435,12 +454,12 @@ impl Workspace {
                 let section = writing.section_id.clone();
                 // What is typed is saved as it is typed; this is the text the store cuts.
                 if let Err(err) = lib.store.save_section_body(&section, &text) { return self.fail(format!("{err:#}"), cx) }
-                match lib.store.split_section(&section, at, heading) {
+                match lib.store.split_section(&section, at, cut) {
                     Ok(made) => {
                         lib.writing.search.asked = None;
                         self.write_reload(Some(made.id.clone()), cx);
                         // A section cut off without a heading is given its name by the person.
-                        if heading { if let Some(lib) = self.lib.as_ref() { lib.writing.editor.read(cx).focus(window) } } else { return self.run_manuscript(Cmd::EditSection(Some(made.id)), window, cx) }
+                        if cut != manuscript::Cut::Paragraph { if let Some(lib) = self.lib.as_ref() { lib.writing.editor.read(cx).focus(window) } } else { return self.run_manuscript(Cmd::EditSection(Some(made.id)), window, cx) }
                     }
                     Err(err) => self.fail(format!("{err:#}"), cx),
                 }
@@ -495,13 +514,14 @@ impl Workspace {
     /// The section dialog's or the history's button.
     pub(crate) fn submit_manuscript_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         match self.modal.as_ref() {
-            Some(Modal::Section { editing, name, kind }) => {
-                let (editing, name, kind) = (editing.clone(), name.read(cx).text().trim().to_string(), kind.clone());
+            Some(Modal::Section { editing, under, name, kind }) => {
+                let (editing, under, name, kind) = (editing.clone(), under.clone(), name.read(cx).text().trim().to_string(), kind.clone());
                 let Some(lib) = self.lib.as_mut() else { return };
                 let manuscript = lib.writing.manuscript.clone();
-                let result = match &editing {
-                    Some(id) => lib.store.edit_section(id, &name, &kind).map(|_| id.clone()),
-                    None => lib.store.add_section(&manuscript, &name, &kind).map(|s| s.id),
+                let result = match (&editing, &under) {
+                    (Some(id), _) => lib.store.edit_section(id, &name, &kind).map(|_| id.clone()),
+                    (None, Some(parent)) => lib.store.add_subsection(parent, &name, &kind).map(|s| s.id),
+                    (None, None) => lib.store.add_section(&manuscript, &name, &kind).map(|s| s.id),
                 };
                 match result {
                     Ok(id) => {
@@ -655,16 +675,27 @@ impl Workspace {
             MenuKind::Section(id) => {
                 let Some(m) = writing.current() else { return (items, breaks) };
                 let at = m.sections.iter().position(|s| s.id == *id).unwrap_or(0);
+                if at >= m.sections.len() { return (items, breaks) }
+                let level = m.sections[at].level;
+                let deepest = m.sections[manuscript::under(&m.sections, at)].iter().map(|s| s.level).max().unwrap_or(level);
                 items.push(item(t("名称与类型…").into(), false, Cmd::EditSection(Some(id.clone()))));
-                if at > 0 { items.push(item(t("前移").into(), false, Cmd::MoveSection(id.clone(), -1))) }
-                if at + 1 < m.sections.len() { items.push(item(t("后移").into(), false, Cmd::MoveSection(id.clone(), 1))) }
+                if level < manuscript::MOST_LEVELS { items.push(item(t("添加小节…").into(), false, Cmd::AddSubsection(id.clone()))) }
+                // A section moves among those beside it, with its subsections; up and down a level, the order stays.
+                let (before, after) = (manuscript::sibling(&m.sections, at, false), manuscript::sibling(&m.sections, at, true));
+                if before.is_some() || after.is_some() || level > 1 { breaks.push(items.len()) }
+                if before.is_some() { items.push(item(t("前移").into(), false, Cmd::MoveSection(id.clone(), -1))) }
+                if after.is_some() { items.push(item(t("后移").into(), false, Cmd::MoveSection(id.clone(), 1))) }
+                if before.is_some() && deepest < manuscript::MOST_LEVELS { items.push(item(t("降为上一节的小节").into(), false, Cmd::IndentSection(id.clone(), true))) }
+                if level > 1 { items.push(item(t("升一级").into(), false, Cmd::IndentSection(id.clone(), false))) }
+                breaks.push(items.len());
                 items.push(item(t("历史版本…").into(), false, Cmd::WriteHistory));
                 // The cuts of a section are made where the caret is: in the section being written, while it is the text on show.
                 let cuts = *id == writing.section_id && !writing.reading && !writing.editor.read(cx).text().trim().is_empty();
                 if cuts || at > 0 { breaks.push(items.len()) }
                 if cuts {
-                    items.push(item(t("把光标所在的一段设为标题").into(), false, Cmd::SplitSection(true)));
-                    items.push(item(t("从光标所在的一段拆成新节").into(), false, Cmd::SplitSection(false)));
+                    items.push(item(t("把光标所在的一段设为标题").into(), false, Cmd::SplitSection(manuscript::Cut::Heading)));
+                    if level < manuscript::MOST_LEVELS { items.push(item(t("把光标所在的一段设为小节标题").into(), false, Cmd::SplitSection(manuscript::Cut::Subheading))) }
+                    items.push(item(t("从光标所在的一段拆成新节").into(), false, Cmd::SplitSection(manuscript::Cut::Paragraph)));
                 }
                 if at > 0 { items.push(item(t("并入上一节").into(), false, Cmd::MergeSection(id.clone()))) }
                 if m.sections.len() > 1 { breaks.push(items.len()) }
@@ -712,22 +743,33 @@ impl Workspace {
         let mut about = vec![crate::write::length_label(&whole)];
         if waiting > 0 { about.push(tf!("{waiting} 条批注待处理", "{waiting} open comments")) }
         let row = |id: ElementId, on: bool| div().id(id).flex().items_center().gap(px(8.)).px(px(8.)).rounded(px(6.)).cursor_pointer().when(on, |d| d.bg(Theme::accent_soft())).when(!on, |d| d.hover(|s| s.bg(Theme::hover())));
-        let rows: Vec<AnyElement> = manuscript
-            .sections
+        let sections = &manuscript.sections;
+        let numbers = manuscript::numbers(sections);
+        let rows: Vec<AnyElement> = sections
             .iter()
             .enumerate()
             .map(|(n, section)| {
                 let on = section.id == writing.section_id && !writing.reading;
-                let empty = section.body.trim().is_empty();
+                // A section with subsections is all that is under it: 结果 is its results, as long as they are together.
+                let block = &sections[manuscript::under(sections, n)];
+                let children = block.iter().filter(|s| s.level == section.level + 1).count();
+                let whole = block.iter().map(|s| s.body.as_str()).collect::<Vec<_>>().join("\n");
+                let empty = whole.trim().is_empty();
                 let noted = writing.comments.open_in(&section.id);
                 let mut said = vec![];
-                if section.kind != "other" && label(&SECTIONS, &section.kind) != section.name { said.push(label(&SECTIONS, &section.kind).to_string()) }
-                said.push(if empty { t("未写").to_string() } else { crate::write::length_label(&section.body) });
+                // A subsection says its part only where it is not that of the section it is under.
+                let over = manuscript::parent(sections, n).map(|p| sections[p].kind.as_str());
+                if section.kind != "other" && label(&SECTIONS, &section.kind) != section.name && over != Some(section.kind.as_str()) { said.push(label(&SECTIONS, &section.kind).to_string()) }
+                if children > 0 { said.push(tf!("{children} 个小节", "{children} subsections")) }
+                said.push(if empty { t("未写").to_string() } else { crate::write::length_label(&whole) });
+                let sub = section.level > 1;
                 row(("outline-section", n).into(), on)
-                    .py(px(6.))
+                    .py(px(if sub { 5. } else { 6. }))
+                    // Each level a step in: the numbers stand under the name of the section they are of.
+                    .pl(px(8. + 14. * f32::from(section.level.saturating_sub(1))))
                     .on_click(self.on(Cmd::WriteSection(section.id.clone()), cx))
                     .when(on, |d| d.on_mouse_down(MouseButton::Right, self.on_context(MenuKind::Section(section.id.clone()), cx)))
-                    .child(div().flex_none().w(px(16.)).text_size(text_px(11.)).text_color(if on { Theme::accent() } else { Theme::text_tertiary() }).child((n + 1).to_string()))
+                    .child(div().flex_none().min_w(px(16.)).text_size(text_px(11.)).text_color(if on { Theme::accent() } else { Theme::text_tertiary() }).child(numbers[n].clone()))
                     .child(
                         div()
                             .flex()
@@ -735,8 +777,10 @@ impl Workspace {
                             .flex_1()
                             .min_w_0()
                             .gap(px(1.))
-                            .child(div().truncate().text_size(text_px(13.)).when(on, |d| d.text_color(Theme::accent()).font_weight(FontWeight::MEDIUM)).when(!on, |d| d.text_color(if empty { Theme::text_tertiary() } else { Theme::text() })).child(section.name.clone()))
-                            .child(div().truncate().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(said.join(" · "))),
+                            // A subsection is one line, its length at the end: the outline of a paper with many methods stays short.
+                            .when(sub, |d| d.flex_row().items_baseline().gap(px(6.)))
+                            .child(div().truncate().when(sub, |d| d.flex_1().min_w_0()).text_size(text_px(13.)).when(on, |d| d.text_color(Theme::accent()).font_weight(FontWeight::MEDIUM)).when(!on, |d| d.text_color(if empty { Theme::text_tertiary() } else { Theme::text() })).child(section.name.clone()))
+                            .child(div().truncate().when(sub, |d| d.flex_none()).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(said.join(" · "))),
                     )
                     // The assistant changed it in answer to the last question.
                     .when(writing.agent.changed.get(&section.id).is_some_and(|before| *before != section.body), |d| d.child(div().id(("outline-changed", n)).flex_none().size(px(6.)).rounded(px(3.)).bg(Theme::accent()).tooltip(|_, cx| cx.new(|_| crate::write_assist::Tip(t("助手刚改过这一节").to_string())).into())))
@@ -833,13 +877,16 @@ impl Workspace {
             ui::ghost_button(id, Some(icon), text.filter(|_| roomy)).h(text_px(26.)).px(px(7.)).text_size(text_px(12.))
                 .when_some(tip.filter(|_| !roomy), |d, tip| d.tooltip(move |_, cx| cx.new(|_| crate::write_assist::Tip(tip.to_string())).into()))
         };
+        let numbers = manuscript::numbers(&manuscript.sections);
         let pills: Vec<AnyElement> = manuscript
             .sections
             .iter()
             .enumerate()
             .map(|(n, section)| {
                 let on = section.id == writing.section_id && !writing.reading;
-                let empty = section.body.trim().is_empty();
+                let empty = !manuscript::written_under(&manuscript.sections, n);
+                // A subsection is a smaller pill that says its number: 3.1 is the first under the third.
+                let sub = section.level > 1;
                 let noted = writing.comments.open_in(&section.id);
                 div()
                     .id(("write-part", n))
@@ -855,7 +902,9 @@ impl Workspace {
                     .border_1()
                     .when(on, |d| d.bg(Theme::accent_soft()).text_color(Theme::accent()).border_color(Theme::accent().opacity(0.35)).font_weight(FontWeight::MEDIUM))
                     .when(!on, |d| d.border_color(Theme::line()).text_color(if empty { Theme::text_tertiary() } else { Theme::text_secondary() }).hover(|s| s.bg(Theme::hover())))
+                    .when(sub, |d| d.h(text_px(24.)).px(px(9.)).text_size(text_px(12.)))
                     .on_click(self.on(Cmd::WriteSection(section.id.clone()), cx))
+                    .when(sub, |d| d.child(div().text_color(Theme::text_tertiary()).child(numbers[n].clone())))
                     .child(section.name.clone())
                     // How many comments wait in the section.
                     .when(noted > 0, |d| d.child(div().flex().flex_none().items_center().justify_center().min_w(px(16.)).h(px(16.)).px(px(4.)).rounded(px(8.)).bg(Theme::note_strong()).text_size(text_px(10.)).text_color(Theme::text()).child(noted.to_string())))
@@ -986,51 +1035,7 @@ impl Workspace {
     pub(crate) fn render_manuscript_reading(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let lib = self.lib.as_ref().unwrap();
         let Some(manuscript) = lib.writing.current() else { return div().into_any_element() };
-        let sections: Vec<AnyElement> = manuscript
-            .sections
-            .iter()
-            .enumerate()
-            .map(|(n, section)| {
-                // The section's Markdown drawn as it says, a heading in it under the section's name. A picture's line
-                // is the picture over its caption (write_figures.rs): the text is drawn in the pieces between them.
-                // Its citations read as the exported file has them (design rule 32), a caption's too. The section's
-                // name is the page's first level of heading, so a heading written in the section is one level under it.
-                let written = manuscript::section_markdown(&section.body, 1);
-                let pictures = manuscript::picture_lines(&section.body);
-                let labels = lib.citing.read.whole.get(n).map(Vec::as_slice).unwrap_or(&[]);
-                let read = |within: std::ops::Range<usize>| wisp_core::cite::read_as(&section.body, labels, within);
-                let mut pieces: Vec<AnyElement> = vec![];
-                let mut from = 0;
-                for (at, picture) in pictures.iter().enumerate() {
-                    let before = manuscript::section_markdown(&read(from..picture.line.start), 1);
-                    if !before.is_empty() { pieces.push(crate::markdown::render_page(&format!("write-read-{n}-{at}"), &before, READ_SIZE).into_any_element()) }
-                    let caption = section.body[picture.line.clone()].find(picture.caption.as_str()).filter(|_| !picture.caption.is_empty()).map(|start| read(picture.line.start + start..picture.line.start + start + picture.caption.len()));
-                    let picture = manuscript::PictureLine { caption: caption.unwrap_or_else(|| picture.caption.clone()), ..picture.clone() };
-                    pieces.push(self.render_manuscript_picture(format!("write-read-picture-{n}-{at}"), &picture, f32::from(theme::manuscript_width()), window));
-                    from = picture.line.end;
-                }
-                let rest = manuscript::section_markdown(&read(from..section.body.len()), 1);
-                if !rest.is_empty() { pieces.push(crate::markdown::render_page(&format!("write-read-{n}"), &rest, READ_SIZE).into_any_element()) }
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(10.))
-                    .child(
-                        div()
-                            .id(("write-read-heading", n))
-                            .flex()
-                            .items_baseline()
-                            .gap(px(8.))
-                            .cursor_pointer()
-                            .on_click(self.on(Cmd::WriteSection(section.id.clone()), cx))
-                            .child(div().text_size(text_px(20.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text()).hover(|s| s.text_color(Theme::accent())).child(section.name.clone()))
-                            .when(section.kind != "other", |d| d.child(div().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(label(&SECTIONS, &section.kind).to_string()))),
-                    )
-                    .when(written.is_empty(), |d| d.child(div().text_size(text_px(13.)).text_color(Theme::text_tertiary()).child(t("这一节还没有写。"))))
-                    .when(!written.is_empty(), |d| d.child(div().flex().flex_col().gap(theme::paragraph_gap(10.)).text_size(text_px(READ_SIZE)).text_color(Theme::text()).children(pieces)))
-                    .into_any_element()
-            })
-            .collect();
+        let sections: Vec<AnyElement> = (0..manuscript.sections.len()).map(|n| self.render_section_read(n, 1, false, window, cx)).collect();
         div()
             .id("write-reading-view")
             .flex_1()
@@ -1040,13 +1045,102 @@ impl Workspace {
             // No frame, like the section being written: one line under it, where the text scrolls away.
             .border_b_1()
             .border_color(Theme::line())
-            .child(div().flex().justify_center().px(px(28.)).py(px(24.)).child(div().flex().flex_col().gap(px(30.)).w_full().max_w(theme::manuscript_width()).child(div().text_size(text_px(24.)).font_weight(FontWeight::SEMIBOLD).line_height(text_px(32.)).child(crate::i18n::manuscript_title(manuscript).to_string())).children(sections).children(self.render_references_read(cx))))
+            .child(div().flex().justify_center().px(px(28.)).py(px(24.)).child(div().flex().flex_col().gap(px(22.)).w_full().max_w(theme::manuscript_width()).child(div().text_size(text_px(24.)).font_weight(FontWeight::SEMIBOLD).line_height(text_px(32.)).child(crate::i18n::manuscript_title(manuscript).to_string())).children(sections).children(self.render_references_read(cx))))
             .into_any_element()
+    }
+
+    /// The section at `n` as it reads, as the exported file has it: its name over its Markdown drawn as it says, a heading in it
+    /// a level under its name, a picture's line the picture over its caption (write_figures.rs), its citations as
+    /// the exported file has them (design rule 32), a caption's too. A click on its name opens it to write, and
+    /// with `open` a click anywhere on it: where it stands under the section being written. `top` is the level
+    /// drawn as the page's first: the whole manuscript's sections start at 1, what is under a section at one
+    /// below it, and a heading is smaller for each level under that.
+    pub(crate) fn render_section_read(&self, n: usize, top: u8, open: bool, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        let lib = self.lib.as_ref().unwrap();
+        let Some(manuscript) = lib.writing.current() else { return div().into_any_element() };
+        let Some(section) = manuscript.sections.get(n) else { return div().into_any_element() };
+        let depth = section.level.saturating_sub(top) + 1;
+        let written = manuscript::section_markdown(&section.body, depth);
+        let pictures = manuscript::picture_lines(&section.body);
+        let labels = lib.citing.read.whole.get(n).map(Vec::as_slice).unwrap_or(&[]);
+        let read = |within: std::ops::Range<usize>| wisp_core::cite::read_as(&section.body, labels, within);
+        let mut pieces: Vec<AnyElement> = vec![];
+        let mut from = 0;
+        for (at, picture) in pictures.iter().enumerate() {
+            let before = manuscript::section_markdown(&read(from..picture.line.start), depth);
+            if !before.is_empty() { pieces.push(crate::markdown::render_page(&format!("write-read-{n}-{at}"), &before, READ_SIZE).into_any_element()) }
+            let caption = section.body[picture.line.clone()].find(picture.caption.as_str()).filter(|_| !picture.caption.is_empty()).map(|start| read(picture.line.start + start..picture.line.start + start + picture.caption.len()));
+            let picture = manuscript::PictureLine { caption: caption.unwrap_or_else(|| picture.caption.clone()), ..picture.clone() };
+            pieces.push(self.render_manuscript_picture(format!("write-read-picture-{n}-{at}"), &picture, f32::from(theme::manuscript_width()), window));
+            from = picture.line.end;
+        }
+        let rest = manuscript::section_markdown(&read(from..section.body.len()), depth);
+        if !rest.is_empty() { pieces.push(crate::markdown::render_page(&format!("write-read-{n}"), &rest, READ_SIZE).into_any_element()) }
+        // A section of its subsections alone says nothing of itself: they are what it holds.
+        let alone = manuscript::under(&manuscript.sections, n).len() == 1;
+        let size = match depth {
+            1 => 20.,
+            2 => 17.,
+            _ => 15.5,
+        };
+        let over = manuscript::parent(&manuscript.sections, n).map(|p| manuscript.sections[p].kind.as_str());
+        div()
+            .id(("write-read-section", n))
+            .flex()
+            .flex_col()
+            .gap(px(10.))
+            // A new section stands apart from the one before more than a subsection from its section.
+            .when(section.level == 1 && n > 0, |d| d.mt(px(10.)))
+            .when(open, |d| d.cursor_pointer().rounded(px(6.)).px(px(10.)).py(px(6.)).mx(px(-10.)).hover(|s| s.bg(Theme::hover())).on_click(self.on(Cmd::WriteSection(section.id.clone()), cx)))
+            .child(
+                div()
+                    .id(("write-read-heading", n))
+                    .flex()
+                    .items_baseline()
+                    .gap(px(8.))
+                    .cursor_pointer()
+                    .on_click(self.on(Cmd::WriteSection(section.id.clone()), cx))
+                    .child(div().text_size(text_px(size)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text()).hover(|s| s.text_color(Theme::accent())).child(section.name.clone()))
+                    .when(section.kind != "other" && over != Some(section.kind.as_str()), |d| d.child(div().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(label(&SECTIONS, &section.kind).to_string()))),
+            )
+            .when(written.is_empty() && alone, |d| d.child(div().text_size(text_px(13.)).text_color(Theme::text_tertiary()).child(t("这一节还没有写。"))))
+            .when(!written.is_empty(), |d| d.child(div().flex().flex_col().gap(theme::paragraph_gap(10.)).text_size(text_px(READ_SIZE)).text_color(Theme::text()).children(pieces)))
+            .into_any_element()
+    }
+
+    /// Under the section being written, what is under it, as it reads: 结果 is all its results, each opened with a
+    /// click to be written alone. None for a section without subsections.
+    pub(crate) fn render_under_section(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let writing = &self.lib.as_ref()?.writing;
+        let manuscript = writing.current()?;
+        let at = manuscript.sections.iter().position(|s| s.id == writing.section_id)?;
+        let block = manuscript::under(&manuscript.sections, at);
+        if block.len() < 2 { return None }
+        // The open section is the page's first level: its subsections are drawn a level under it.
+        let top = manuscript.sections[at].level;
+        Some(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(14.))
+                .w_full()
+                .max_w(theme::manuscript_width())
+                .mx_auto()
+                .px(px(18.))
+                .pt(px(14.))
+                .pb(px(24.))
+                .border_t_1()
+                .border_color(Theme::line())
+                .children((block.start + 1..block.end).map(|n| self.render_section_read(n, top, true, window, cx)))
+                .into_any_element(),
+        )
     }
 
     /// The dialog for a section's name and kind.
     pub(crate) fn render_section_dialog(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<Div> {
-        let Some(Modal::Section { editing, name, kind }) = self.modal.as_ref() else { return None };
+        let Some(Modal::Section { editing, under, name, kind }) = self.modal.as_ref() else { return None };
+        // A subsection is said to be one, and whose.
+        let parent = under.as_ref().and_then(|id| self.lib.as_ref()?.writing.current()?.section(id)).map(|s| s.name.clone());
         let kinds: Vec<AnyElement> = SECTIONS
             .iter()
             .enumerate()
@@ -1058,7 +1152,11 @@ impl Workspace {
         let hint = if kind == "other" { t("候选句来自文献里不属于导言、方法、结果、讨论的段落。综述的各节、致谢、展望都可以选它。") } else { t("候选句来自文献库里的文献在这一部分的句子。") };
         Some(
             ui::dialog(480.)
-                .child(ui::dialog_title(if editing.is_some() { t("这一节的名称与类型") } else { t("添加一节") }))
+                .child(ui::dialog_title(match (editing.is_some(), &parent) {
+                    (true, _) => t("这一节的名称与类型").to_string(),
+                    (false, Some(parent)) => tf!("在「{parent}」下添加小节", "Add a subsection under “{parent}”"),
+                    (false, None) => t("添加一节").to_string(),
+                }))
                 .child(
                     div()
                         .flex()

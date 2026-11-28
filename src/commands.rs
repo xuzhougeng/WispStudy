@@ -644,12 +644,17 @@ pub enum Cmd {
     WriteLanguage(String),
     /// Add a section (`None`) or change one's name and kind: the dialog.
     EditSection(Option<String>),
+    /// Add a subsection under this section: the same dialog.
+    AddSubsection(String),
     PickSectionKind(String),
+    /// Move a section with its subsections among those beside it.
     MoveSection(String, i64),
+    /// A section one level deeper, a subsection of the one before it (true), or one less deep, with its subsections.
+    IndentSection(String, bool),
     AskRemoveSection(String),
     RemoveSection(String),
-    /// Cut the section being written at the caret's paragraph: that paragraph its heading (true), or the first of a new section.
-    SplitSection(bool),
+    /// Cut the section being written at the caret's paragraph: that paragraph the heading of a section or of a subsection, or the first of a new section.
+    SplitSection(wisp_core::manuscript::Cut),
     /// Put a section back into the one before it.
     MergeSection(String),
     /// The whole manuscript to read (true), or one section to write.
@@ -1233,7 +1238,7 @@ impl Workspace {
                 }
                 if page == Page::Screen { self.round_arrived(window, cx) }
             }
-            Cmd::WriteSection(_) | Cmd::WriteManuscript(_) | Cmd::NewManuscript | Cmd::AskRemoveManuscript(_) | Cmd::RemoveManuscript(_) | Cmd::WriteLanguage(_) | Cmd::EditSection(_) | Cmd::PickSectionKind(_) | Cmd::MoveSection(..) | Cmd::AskRemoveSection(_) | Cmd::RemoveSection(_) | Cmd::SplitSection(_) | Cmd::MergeSection(_) | Cmd::WriteReading(_) | Cmd::LeaveWrite | Cmd::ExportManuscript(_) | Cmd::WriteHistory | Cmd::HistoryPick(_) => self.run_manuscript(cmd, window, cx),
+            Cmd::WriteSection(_) | Cmd::WriteManuscript(_) | Cmd::NewManuscript | Cmd::AskRemoveManuscript(_) | Cmd::RemoveManuscript(_) | Cmd::WriteLanguage(_) | Cmd::EditSection(_) | Cmd::AddSubsection(_) | Cmd::PickSectionKind(_) | Cmd::MoveSection(..) | Cmd::IndentSection(..) | Cmd::AskRemoveSection(_) | Cmd::RemoveSection(_) | Cmd::SplitSection(_) | Cmd::MergeSection(_) | Cmd::WriteReading(_) | Cmd::LeaveWrite | Cmd::ExportManuscript(_) | Cmd::WriteHistory | Cmd::HistoryPick(_) => self.run_manuscript(cmd, window, cx),
             Cmd::FigureTag(_) | Cmd::OpenFigure(_) | Cmd::FigureSource(_) | Cmd::AskFigure(_) | Cmd::CopyFigure(_) | Cmd::SaveFigure(_) | Cmd::AskRemoveFigure(_) | Cmd::RemoveFigure(_) | Cmd::FigureAddTag(_) | Cmd::FigureInfer(_) | Cmd::DrawFigure | Cmd::FigureDraw | Cmd::FigureShape(_) => self.run_figures(cmd, window, cx),
             Cmd::WriteCiteFrom(id, from) => {
                 self.cite_paper(&id, Some(from), cx);

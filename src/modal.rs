@@ -122,7 +122,8 @@ pub enum Modal {
     /// What the person notes about a file of a paper (备注, #359): the file's id and the note.
     FileNote { file: String, text: Entity<TextInput> },
     /// 写作: a section's name and kind (`editing` its id, `None` for a new one).
-    Section { editing: Option<String>, name: Entity<TextInput>, kind: String },
+    /// A section's name and kind: of the one `editing`, or of a new one, a subsection of `under` when that is given.
+    Section { editing: Option<String>, under: Option<String>, name: Entity<TextInput>, kind: String },
     /// 写作: a section's earlier versions, newest first.
     History { section: String, snapshots: Vec<Snapshot>, chosen: usize },
     /// A claim of a review and the source it rests on.

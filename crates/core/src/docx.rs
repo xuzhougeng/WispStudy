@@ -1566,6 +1566,9 @@ pub struct Wanted {
     /// with no paragraph of the file, and it is written after the paragraph before it. Its pictures stand over and
     /// under it as they do by a paragraph.
     pub table: Option<Table>,
+    /// For a heading, how deep in the manuscript's outline it is (a section 1, a subsection 2); 0 when nobody
+    /// says. A heading the file has not got is set like the nearest of the file's that stands for one as deep.
+    pub depth: u8,
 }
 
 /// A table to put into a document.
@@ -1950,13 +1953,22 @@ pub fn rewrite(source: &[u8], wanted: &[Wanted], options: &Options) -> Result<Re
 
     // What each paragraph of the file is, a heading or text: by its style, and by what the manuscript takes it for. A new paragraph is set like the nearest of its kind.
     let mut heading: Vec<bool> = readable.iter().map(|&block| doc.para(block).outline().is_some() || styles.level(&doc.para(block).style()).is_some() || styles.named(&doc.para(block).style(), "title")).collect();
+    // How deep in the manuscript's outline the heading each paragraph of the file is taken for stands (0: none, or nobody says).
+    let mut depth: Vec<u8> = vec![0; heading.len()];
     for step in &steps {
-        if let Step::Same(o, w) | Step::Changed(o, w) = *step { heading[o] = wanted[w].role != Role::Body }
+        if let Step::Same(o, w) | Step::Changed(o, w) = *step {
+            heading[o] = wanted[w].role != Role::Body;
+            if heading[o] { depth[o] = wanted[w].depth }
+        }
     }
     let template = |w: usize, after: Option<usize>| -> (String, String) {
         let wants = wanted[w].role != Role::Body;
         let before = after.map_or(0, |o| o + 1);
-        match (0..before).rev().chain(before..heading.len()).find(|&o| heading[o] == wants) {
+        let nearest = |like: &dyn Fn(usize) -> bool| (0..before).rev().chain(before..heading.len()).find(|&o| like(o));
+        // A subsection's heading looks like the file's subsections' headings, not like the section's it is under.
+        let deep = wanted[w].depth;
+        let found = if wants && deep > 0 { nearest(&|o| heading[o] && depth[o] == deep).or_else(|| nearest(&|o| heading[o] == wants)) } else { nearest(&|o| heading[o] == wants) };
+        match found {
             Some(o) => doc.para(readable[o]).template(),
             None if wants => ("<w:pPr><w:keepNext/></w:pPr>".into(), "<w:rPr><w:b/></w:rPr>".into()),
             None => Default::default(),
