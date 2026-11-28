@@ -5,7 +5,7 @@ use crate::i18n::t;
 use crate::app::{Cmd, Edge, MenuKind, Workspace};
 use crate::context::Nav;
 use crate::settings::{SettingsPage, UpdateState};
-use crate::shortcuts::{AskAssistant, DecideIncluded, DecideIrrelevant, DecidePending, DecideRelated, DecideUncertain, StarScreened, TakeSuggestion, TickSuggestion, TranslateScreened, UndoDecision, MarkAll, MarkDown, MarkUp, MoveDown, MoveFirst, MoveLast, MoveLeft, MovePageDown, MovePageUp, MoveRight, MoveUp, OpenSelected, TrashSelected, AddPaper, AskLibrary, FocusSearch, ImportPdf, NewLibrary, ShowHome, ShowPalette, ShowSettings, CopyPicked, FindCandidates, ToggleDetail, ToggleReading, ToggleSidebar, ZoomFit, ZoomIn, ZoomOut, PaperBack, PaperForward};
+use crate::shortcuts::{AskAssistant, DecideIncluded, DecideIrrelevant, DecidePending, DecideRelated, DecideUncertain, StarScreened, TakeSuggestion, TickSuggestion, TranslateScreened, UndoDecision, UndoScreening, MarkAll, MarkDown, MarkUp, MoveDown, MoveFirst, MoveLast, MoveLeft, MovePageDown, MovePageUp, MoveRight, MoveUp, OpenSelected, TrashSelected, AddPaper, AskLibrary, FocusSearch, ImportPdf, NewLibrary, ShowHome, ShowPalette, ShowSettings, CopyPicked, FindCandidates, ToggleDetail, ToggleReading, ToggleSidebar, ZoomFit, ZoomIn, ZoomOut, PaperBack, PaperForward};
 use crate::theme::{self, Theme, text_px};
 use crate::ui;
 use gpui::{prelude::FluentBuilder, *};
@@ -98,6 +98,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &StarScreened, window, cx| this.screen_key("s", window, cx)))
             .on_action(cx.listener(|this, _: &TranslateScreened, window, cx| this.screen_key("t", window, cx)))
             .on_action(cx.listener(|this, _: &UndoDecision, window, cx| this.screen_key("z", window, cx)))
+            .on_action(cx.listener(|this, _: &UndoScreening, window, cx| this.undo_key(window, cx)))
             .on_action(cx.listener(|this, _: &AskAssistant, window, cx| this.screen_key("g", window, cx)))
             .on_action(cx.listener(|this, _: &TickSuggestion, window, cx| this.screen_key("space", window, cx)))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| this.drop_paths(paths.paths().to_vec(), window, cx)))

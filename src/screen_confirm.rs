@@ -2,8 +2,9 @@
 //! suggestions are looked over as one list and written together. Each row
 //! is a paper, what the assistant made of it and the status it will get;
 //! the person changes a status, leaves a paper out, and confirms what is
-//! on show. Nothing is written before that, and what was written can be
-//! taken back (`wisp_core::screening::Confirming`, `Store::set_screenings`).
+//! on show. Nothing is written before that, and what was written is kept in
+//! 筛选记录, which is how it is taken back (`wisp_core::screening::Confirming`,
+//! `screen_record.rs`).
 
 use crate::i18n::{label, t};
 use crate::app::{Cmd, Confirmed, Library, ScreenMode, Workspace};
@@ -14,6 +15,7 @@ use gpui::{prelude::FluentBuilder, *};
 use std::ops::Range;
 use wisp_core::model::{Paper, SCREENINGS};
 use wisp_core::screening::{self, Before, DECISIONS};
+use wisp_core::screening_record::Decision;
 use wisp_core::store::Suggestion;
 use wisp_core::time;
 
@@ -31,7 +33,7 @@ fn basis(suggestion: &Suggestion) -> String {
 }
 
 /// How many papers get each status, as words: 「已纳入 3 · 不相关 12」.
-fn breakdown(counts: &[usize; 5]) -> String {
+pub(crate) fn breakdown(counts: &[usize; 5]) -> String {
     SCREENINGS.iter().enumerate().filter(|(n, _)| counts[*n] > 0).map(|(n, (_, name))| format!("{} {}", t(name), counts[n])).collect::<Vec<_>>().join(" · ")
 }
 
@@ -81,9 +83,8 @@ impl Workspace {
             Cmd::ConfirmClose => lib.screen.confirm.put_away = true,
             Cmd::ConfirmApply => self.confirm_apply(window, cx),
             Cmd::ConfirmUndo => {
-                let Some(confirmed) = lib.screen.confirmed.take() else { return };
-                let lines: Vec<(String, String, String, String)> = confirmed.before.iter().map(|b| (b.paper_id.clone(), b.screening.clone(), b.reason.clone(), b.reviewed_at.clone())).collect();
-                if self.change(cx, |lib| lib.store.set_screenings(&lines)) { self.say(tf!("已撤销：{} 篇回到确认之前。", "Undone: {} papers returned to their previous state.", lines.len()), cx) }
+                let Some(write) = lib.screen.confirmed.as_ref().map(|confirmed| confirmed.write) else { return };
+                self.undo_screening(write, cx);
             }
             _ => {}
         }
@@ -99,20 +100,20 @@ impl Workspace {
     }
 
     /// Write the ticked rows on show: each paper gets its status, with the
-    /// assistant's reason where the person agreed. What they were is kept, to take it back.
+    /// assistant's reason where the person agreed. What they were is kept in 筛选记录, to take it back.
     fn confirm_apply(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_ref() else { return };
         if lib.screen.running() { return self.say(t("助手还在判断，等这一轮结束再确认。"), cx) }
         let plan = lib.screen.confirm.plan(&lib.confirm_rows());
         if plan.is_empty() { return }
-        let before: Vec<Before> = plan.iter().filter_map(|line| lib.paper(&line.paper_id)).map(Before::of).collect();
         let now = time::now_iso();
-        let lines: Vec<(String, String, String, String)> = plan.iter().map(|line| (line.paper_id.clone(), line.status.clone(), line.reason.clone(), now.clone())).collect();
-        if !self.change(cx, |lib| lib.store.set_screenings(&lines)) { return }
+        let decisions: Vec<Decision> = plan.iter().filter_map(|line| lib.paper(&line.paper_id).map(|paper| Decision { before: Before::of(paper), status: line.status.clone(), reason: line.reason.clone(), reviewed_at: now.clone() })).collect();
+        let papers = decisions.len();
+        let Some(write) = self.record_confirmation(decisions, cx) else { return };
         self.select(None, window, cx);
         let Some(lib) = self.lib.as_mut() else { return };
         let counts = screening::tally(plan.iter().map(|line| line.status.as_str()));
-        lib.screen.confirmed = Some(Confirmed { before, counts });
+        lib.screen.confirmed = Some(Confirmed { write, papers, counts });
         lib.screen.confirm.cursor = None;
         lib.screen.confirm_scroll = UniformListScrollHandle::new();
     }
@@ -197,7 +198,7 @@ impl Workspace {
                 .rounded(px(8.))
                 .bg(fill)
                 .child(ui::icon("check", 14., color))
-                .child(div().flex_1().min_w_0().text_color(color).child(tf!("已确认 {} 篇：{}。", "Confirmed {} papers: {}.", confirmed.before.len(), breakdown(&confirmed.counts))))
+                .child(div().flex_1().min_w_0().text_color(color).child(tf!("已确认 {} 篇：{}。", "Confirmed {} papers: {}.", confirmed.papers, breakdown(&confirmed.counts))))
                 .child(ui::ghost_button("confirm-undo", None, Some(t("撤销").into())).h(text_px(24.)).text_size(text_px(12.)).on_click(self.on(Cmd::ConfirmUndo, cx)))
         });
         if all.is_empty() {

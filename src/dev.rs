@@ -532,7 +532,8 @@ impl Workspace {
                 // `screen` starts the assistant on the pending papers, `screen:decided` on the decided ones, `screen:included` on the included ones;
                 // `screen:unincluded` asks to move the decided papers not included to the trash.
                 // `screen:single`, `screen:confirm` and `screen:batch` are the page's three faces; `screen:go;<n>` the n-th paper of a round;
-                // `screen:close` the × of 确认's row in full under the list.
+                // `screen:close` the × of 确认's row in full under the list; `screen:undo` takes the visit's last step back, as Z does.
+                // 筛选记录 is `menu:record`.
                 "screen" => Some(match arg {
                     "decided" => Cmd::ScreenRecheck(false),
                     "included" => Cmd::ScreenRecheck(true),
@@ -543,6 +544,7 @@ impl Workspace {
                     "apply" => Cmd::ConfirmApply,
                     "unconfirm" => Cmd::ConfirmUndo,
                     "close" => Cmd::ConfirmClose,
+                    "undo" => Cmd::ScreenUndo,
                     go if go.starts_with("go;") => Cmd::ScreenGo(go[3..].parse().unwrap_or(0)),
                     _ => Cmd::ScreenStart,
                 }),
@@ -932,7 +934,7 @@ impl Workspace {
                     return;
                 }
                 "menu" => {
-                    let kind = match arg { "sort" => MenuKind::Sort, "columns" => MenuKind::Columns, "year" => MenuKind::Filter(FilterKey::Year), "impact" => MenuKind::Filter(FilterKey::Impact), "zones" => MenuKind::Filter(FilterKey::Zone), "zoom" => MenuKind::PdfZoom, "pdfsplit" => MenuKind::PdfSplit, "pdfmore" => MenuKind::PdfMore, "panes" => MenuKind::Panes, "layout" => MenuKind::Layout, "pdffiles" => MenuKind::PdfFiles, "fulltext" => MenuKind::Filter(FilterKey::Fulltext), "source" => MenuKind::Filter(FilterKey::Source), "manuscripts" => MenuKind::Manuscripts, "export" => MenuKind::ManuscriptExport, "retry" => MenuKind::ExtractRetry, "podcasts" => MenuKind::Podcasts, "speed" => MenuKind::PlaySpeed, _ => MenuKind::Add };
+                    let kind = match arg { "sort" => MenuKind::Sort, "columns" => MenuKind::Columns, "year" => MenuKind::Filter(FilterKey::Year), "impact" => MenuKind::Filter(FilterKey::Impact), "zones" => MenuKind::Filter(FilterKey::Zone), "zoom" => MenuKind::PdfZoom, "pdfsplit" => MenuKind::PdfSplit, "pdfmore" => MenuKind::PdfMore, "panes" => MenuKind::Panes, "layout" => MenuKind::Layout, "pdffiles" => MenuKind::PdfFiles, "fulltext" => MenuKind::Filter(FilterKey::Fulltext), "source" => MenuKind::Filter(FilterKey::Source), "manuscripts" => MenuKind::Manuscripts, "export" => MenuKind::ManuscriptExport, "retry" => MenuKind::ExtractRetry, "record" => MenuKind::ScreenRecord, "podcasts" => MenuKind::Podcasts, "speed" => MenuKind::PlaySpeed, _ => MenuKind::Add };
                     self.open_menu(kind, point(px(if matches!(arg, "zoom" | "manuscripts" | "export" | "retry") { 900. } else { 20. }), px(120.)), cx);
                     return;
                 }

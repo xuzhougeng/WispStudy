@@ -32,6 +32,8 @@ pub enum MenuKind {
     TaskModel(Task),
     /// 提取: the model to read what the last run left with.
     ExtractRetry,
+    /// 筛选记录: the latest writes of 筛选, each to be taken back (`screen_record.rs`).
+    ScreenRecord,
     /// The services a provider can be added from (设置 › AI › 模型).
     AddProvider,
     /// How hard the n-th model of the provider on show thinks.
@@ -504,6 +506,7 @@ impl Workspace {
                 }
                 self.model_items(|m| task.takes(m), &chosen, |id| Cmd::SetTaskModel(task, id), &mut items, &mut breaks);
             }
+            MenuKind::ScreenRecord => items = self.screen_record_menu(),
             MenuKind::ExtractRetry => {
                 let Some(lib) = self.lib.as_ref() else { return };
                 // 提取 writes values out: a model that only judges cannot.

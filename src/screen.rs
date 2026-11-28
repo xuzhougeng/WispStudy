@@ -160,7 +160,7 @@ impl Workspace {
                             .gap(px(6.))
                             .child(div().flex().items_baseline().gap(px(8.)).child(div().flex_none().text_size(text_px(13.)).font_weight(FontWeight::MEDIUM).child(t("筛选目标"))).child(ui::hint("criteria-hint", t("随时可以换一个目标：已有的建议会标为「按旧目标」，再让助手按新目标判断一遍；已判断的文献也可以复核，你的判断不会被改动。"))).child(div().flex_1().min_w_0().truncate().text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(if lib.info.criteria.is_empty() && !lib.info.topic.trim().is_empty() { tf!("留空时按主题判断：{}", "Leave blank to use the topic: {}", lib.info.topic.trim()) } else { t("什么样的文献应当收进这个文献库").to_string() })))
                             .child(ui::field(&screen.criteria, window, cx))
-                            .children(self.render_funnel(cx)),
+                            .children(self.render_screen_history(cx)),
                     )
                     .child(
                         div()
@@ -209,7 +209,16 @@ impl Workspace {
             .into_any_element()
     }
 
-    /// The rounds of screening as one quiet line under the goal: 「第 3 轮 ·
+    /// What became of the screening so far, as one quiet line under the goal:
+    /// the funnel of its rounds, and 筛选记录 at the right, where each write
+    /// can be taken back. Nothing before the first round or decision.
+    fn render_screen_history(&self, cx: &mut Context<Self>) -> Option<Div> {
+        let (funnel, record) = (self.render_funnel(cx), self.render_record_button(cx));
+        if funnel.is_none() && record.is_none() { return None }
+        Some(div().flex().items_center().gap(px(8.)).min_h(px(22.)).child(div().flex_1().min_w_0().children(funnel)).children(record))
+    }
+
+    /// The rounds of screening as one quiet line: 「第 3 轮 ·
     /// 540 → 100 → 23 篇已纳入」, each round in full on hover. Nothing before the first round.
     fn render_funnel(&self, cx: &mut Context<Self>) -> Option<Stateful<Div>> {
         let lib = self.lib.as_ref()?;

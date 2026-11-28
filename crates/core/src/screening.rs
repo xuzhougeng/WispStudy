@@ -46,7 +46,7 @@ pub fn tally<'a>(statuses: impl Iterator<Item = &'a str>) -> [usize; 5] {
     counts
 }
 
-/// What a paper was before a decision, so the decision can be taken back.
+/// What a paper was before a decision, so the decision can be taken back (`screening_record`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Before {
     pub paper_id: String,
@@ -59,30 +59,24 @@ impl Before {
     pub fn of(paper: &Paper) -> Before {
         Before { paper_id: paper.id.clone(), screening: paper.screening.clone(), reason: paper.screening_reason.clone(), reviewed_at: paper.reviewed_at.clone() }
     }
-
-    /// Make the paper what it was.
-    pub fn restore(&self, paper: &mut Paper) {
-        (paper.screening, paper.screening_reason, paper.reviewed_at) = (self.screening.clone(), self.reason.clone(), self.reviewed_at.clone());
-    }
 }
 
 /// 逐篇: papers looked at one at a time. The list is fixed when the round
 /// starts, so a decision neither reorders it nor takes the paper away: the
-/// person can go back and decide otherwise.
+/// person can go back and decide otherwise. What was decided is kept in
+/// 筛选记录 (`screening_record`), which is also how a decision is taken back.
 #[derive(Clone, Debug, Default)]
 pub struct Round {
     pub ids: Vec<String>,
     /// The paper on show; `ids.len()` is the end, where the round is summed up.
     pub at: usize,
-    /// The decisions of this round, the last one last.
-    made: Vec<Before>,
 }
 
 impl Round {
     /// A round over `ids`, opening on `start` when it is among them.
     pub fn new(ids: Vec<String>, start: Option<&str>) -> Round {
         let at = start.and_then(|id| ids.iter().position(|other| other == id)).unwrap_or(0);
-        Round { ids, at, made: vec![] }
+        Round { ids, at }
     }
 
     pub fn current(&self) -> Option<&str> {
@@ -104,20 +98,13 @@ impl Round {
     }
 
     /// A decision was made on a paper of the round. Made on the one on show, the next comes up.
-    pub fn decided(&mut self, before: Before) {
-        if self.current() == Some(before.paper_id.as_str()) { self.go(self.at + 1) }
-        self.made.push(before);
+    pub fn decided(&mut self, paper_id: &str) {
+        if self.current() == Some(paper_id) { self.go(self.at + 1) }
     }
 
-    pub fn can_undo(&self) -> bool {
-        !self.made.is_empty()
-    }
-
-    /// Take the last decision back: what the paper was before it, with that paper on show again.
-    pub fn undo(&mut self) -> Option<Before> {
-        let before = self.made.pop()?;
-        if let Some(at) = self.ids.iter().position(|id| *id == before.paper_id) { self.at = at }
-        Some(before)
+    /// Show this paper, when it is one of the round's: a decision on it was taken back.
+    pub fn show(&mut self, paper_id: &str) {
+        if let Some(at) = self.ids.iter().position(|id| id == paper_id) { self.at = at }
     }
 
     /// Papers that left the library leave the round; the paper on show stays on show.
@@ -125,7 +112,6 @@ impl Round {
         if self.ids.iter().all(|id| held(id)) { return }
         let before = self.ids[..self.at.min(self.ids.len())].iter().filter(|id| held(id)).count();
         self.ids.retain(|id| held(id));
-        self.made.retain(|made| held(&made.paper_id));
         self.at = before;
     }
 
@@ -303,9 +289,9 @@ mod tests {
         let mut round = Round::new(ids(&["a", "b", "c"]), Some("b"));
         assert_eq!(round.current(), Some("b"));
         // A decision on the paper on show brings the next one up; on another paper the place holds.
-        round.decided(Before::of(&paper("b", "pending")));
+        round.decided("b");
         assert_eq!(round.current(), Some("c"));
-        round.decided(Before::of(&paper("a", "pending")));
+        round.decided("a");
         assert_eq!(round.current(), Some("c"));
         // On from the last paper is the end, and no further; back from the first stays there.
         round.step(true);
@@ -314,10 +300,13 @@ mod tests {
         round.go(0);
         round.step(false);
         assert_eq!(round.at, 0);
-        // Taking a decision back shows its paper again, the last decision first.
-        assert_eq!(round.undo().map(|before| (before.paper_id, round.at)), Some(("a".to_string(), 0)));
-        assert_eq!(round.undo().map(|before| before.screening), Some("pending".to_string()));
-        assert!(round.at == 1 && !round.can_undo() && round.undo().is_none());
+        // A decision taken back shows its paper again; one of another round moves nothing.
+        round.show("a");
+        assert_eq!(round.at, 0);
+        round.show("z");
+        assert_eq!(round.at, 0);
+        round.show("b");
+        assert_eq!(round.at, 1);
         // A paper that left the library leaves the round; the one on show stays on show.
         round.go(2);
         round.keep(|id| id != "a");
@@ -325,16 +314,6 @@ mod tests {
         round.keep(|id| id != "c");
         assert!(round.ended() && round.ids == ids(&["b"]));
         assert_eq!((round.first(|id| id == "b"), round.first(|id| id == "c"), Round::new(ids(&["a"]), Some("z")).at), (Some(0), None, 0));
-    }
-
-    #[test]
-    fn restoring() {
-        let mut p = paper("a", "pending");
-        let before = Before::of(&p);
-        p.decide("included", "good");
-        assert!(p.screening == "included" && !p.reviewed_at.is_empty());
-        before.restore(&mut p);
-        assert_eq!((p.screening.as_str(), p.screening_reason.as_str(), p.reviewed_at.as_str()), ("pending", "", ""));
     }
 
     #[test]

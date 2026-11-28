@@ -38,6 +38,7 @@ pub(crate) use crate::listening::{podcast_files, podcast_list};
 pub use crate::menus::{Menu, MenuItem, MenuKind, menu_place};
 pub use crate::mention::Place;
 pub use crate::modal::Modal;
+pub use crate::screen_record::Step;
 pub use crate::screen_run::{Confirmed, Screen, ScreenMode};
 pub use crate::searches::SearchRuns;
 pub use crate::sorting::Sorting;
@@ -269,6 +270,8 @@ pub struct Library {
     pub figure_cuts: HashMap<String, crate::mention::Cut>,
     /// 筛选's rounds, oldest first (`Store::begin_round`).
     pub rounds: Vec<wisp_core::store::ScreeningRound>,
+    /// Whether 筛选记录 holds anything (`Store::has_screening_record`): the page offers it then.
+    pub screen_record: bool,
     pub filters: Filters,
     /// Indices into `papers` of the rows shown, in order.
     pub shown: Vec<usize>,
@@ -761,6 +764,7 @@ impl Library {
         self.pins.retain(|pin| papers.iter().any(|p| p.id == pin.paper) && files.iter().any(|f| f.paper_id == pin.paper && f.format == "pdf"));
         self.order_panes(&order);
         self.rounds = self.store.screening_rounds()?;
+        self.screen_record = self.store.has_screening_record()?;
         self.searches = self.store.list_searches()?;
         self.suggestions = self.store.list_suggestions()?.into_iter().map(|s| (s.paper_id.clone(), s)).collect();
         self.batches = self.store.list_batches(30)?;
@@ -1154,6 +1158,7 @@ impl Workspace {
             figure_lists: HashMap::new(),
             figure_cuts: HashMap::new(),
             rounds: vec![],
+            screen_record: false,
             filters,
             shown: vec![],
             rows: vec![],

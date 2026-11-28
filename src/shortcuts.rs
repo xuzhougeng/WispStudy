@@ -6,7 +6,7 @@ use crate::i18n::t;
 use gpui::*;
 use std::collections::BTreeMap;
 
-actions!(workspace, [ShowPalette, FocusSearch, AddPaper, ImportPdf, AskLibrary, ToggleDetail, ToggleSidebar, ToggleReading, ShowSettings, ShowHome, NewLibrary, ZoomIn, ZoomOut, ZoomFit, CopyPicked, FindCandidates, MoveUp, MoveDown, MoveLeft, MoveRight, MovePageUp, MovePageDown, MoveFirst, MoveLast, OpenSelected, TrashSelected, MarkUp, MarkDown, MarkAll, DecideIncluded, DecideRelated, DecideUncertain, DecideIrrelevant, DecidePending, TakeSuggestion, StarScreened, TranslateScreened, UndoDecision, AskAssistant, TickSuggestion, PaperBack, PaperForward]);
+actions!(workspace, [ShowPalette, FocusSearch, AddPaper, ImportPdf, AskLibrary, ToggleDetail, ToggleSidebar, ToggleReading, ShowSettings, ShowHome, NewLibrary, ZoomIn, ZoomOut, ZoomFit, CopyPicked, FindCandidates, MoveUp, MoveDown, MoveLeft, MoveRight, MovePageUp, MovePageDown, MoveFirst, MoveLast, OpenSelected, TrashSelected, MarkUp, MarkDown, MarkAll, DecideIncluded, DecideRelated, DecideUncertain, DecideIrrelevant, DecidePending, TakeSuggestion, StarScreened, TranslateScreened, UndoDecision, UndoScreening, AskAssistant, TickSuggestion, PaperBack, PaperForward]);
 
 /// Esc: puts away what is open, one thing a press (`Workspace::dismiss`; a PDF, a mind map and a text field hear it
 /// first). `leave` says the press, with nothing left to put away in a library, goes back to 所有文献库: Esc carries it
@@ -20,9 +20,12 @@ pub struct Dismiss {
 /// The key of the shortcut `leave` by default, the one key a shortcut may have bare.
 const ESCAPE: &str = "escape";
 
+/// Z takes the last step on 筛选 back, and so does the platform's Undo, written as `pretty` writes it.
+const UNDO_KEYS: &str = if cfg!(target_os = "macos") { "Z / ⌘Z" } else { "Z / Ctrl + Z" };
+
 /// The keys of 筛选, fixed like the arrow keys: what each does is in `Workspace::screen_key`. Bare letters
 /// and digits, so they are heard only while no text field has the keyboard.
-pub const SCREEN_KEYS: [(&str, &str); 11] = [("Y / 1", "已纳入"), ("R / 2", "相关"), ("U / 3", "证据不足"), ("N / 4", "不相关"), ("P / 0", "留待判断"), ("A", "采纳助手的建议"), ("Z", "逐篇：撤销上一个判断"), ("G", "让助手判断这一篇"), ("S", "加星标 / 取消星标"), ("T", "显示译文 / 显示原文"), ("Space / X", "确认建议：勾选 / 不勾选")];
+pub const SCREEN_KEYS: [(&str, &str); 11] = [("Y / 1", "已纳入"), ("R / 2", "相关"), ("U / 3", "证据不足"), ("N / 4", "不相关"), ("P / 0", "留待判断"), ("A", "采纳助手的建议"), (UNDO_KEYS, "撤销上一个判断或确认"), ("G", "让助手判断这一篇"), ("S", "加星标 / 取消星标"), ("T", "显示译文 / 显示原文"), ("Space / X", "确认建议：勾选 / 不勾选")];
 
 pub struct Shortcut {
     pub id: &'static str,
@@ -152,6 +155,10 @@ pub fn rebuild(custom: &BTreeMap<String, String>, cx: &mut App) {
     for key in ["p", "0"] { bindings.push(KeyBinding::new(key, DecidePending, screening)) }
     for key in ["space", "x"] { bindings.push(KeyBinding::new(key, TickSuggestion, screening)) }
     bindings.extend([KeyBinding::new("a", TakeSuggestion, screening), KeyBinding::new("s", StarScreened, screening), KeyBinding::new("t", TranslateScreened, screening), KeyBinding::new("z", UndoDecision, screening), KeyBinding::new("g", AskAssistant, screening)]);
+    // ⌘Z / Ctrl+Z as well, everywhere else than where Undo means something already: a text field, a PDF's marks
+    // (deeper, so theirs anyway) and a mind map, which hears the key itself and would never get it after an action.
+    // Off the 筛选 page the workspace lets it go on (`Workspace::undo_key`).
+    bindings.push(KeyBinding::new("secondary-z", UndoScreening, Some("Workspace && !TextInput && !PdfView && !MindMap")));
     for shortcut in &SHORTCUTS {
         let key = key_of(shortcut.id, custom);
         // A key from a hand-edited settings.json may not parse; `KeyBinding::new` would panic on it.

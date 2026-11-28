@@ -646,6 +646,7 @@ impl Store {
         db.execute_batch(crate::annotation::SCHEMA)?;
         db.execute_batch(crate::extract::SCHEMA)?;
         db.execute_batch(crate::excerpt::SCHEMA)?;
+        db.execute_batch(crate::screening_record::SCHEMA)?;
         add_columns(&db)?;
         crate::manuscript::migrate_drafts(&mut db)?;
         db.pragma_update(None, "user_version", SCHEMA_VERSION)?;
@@ -804,20 +805,6 @@ impl Store {
             }
         }
         write_paper(&tx, paper)?;
-        tx.commit()?;
-        Ok(())
-    }
-
-    /// Record screening decisions for several papers in one transaction:
-    /// all of them or none. Each is a paper, its status, the reason kept
-    /// with it and when it was decided (empty for a paper that waits again).
-    pub fn set_screenings(&mut self, decisions: &[(String, String, String, String)]) -> Result<()> {
-        let tx = self.db.transaction()?;
-        for (id, status, reason, reviewed_at) in decisions {
-            if !one_of(&SCREENINGS, status) { bail!("不支持的收录状态：{status}") }
-            let changed = tx.execute("UPDATE papers SET screening_status = ?2, screening_reason = ?3, reviewed_at = ?4, updated_at = ?5 WHERE id = ?1", params![id, status, reason.trim(), reviewed_at, now_iso()])?;
-            if changed == 0 { bail!("没有找到这篇文献：{id}") }
-        }
         tx.commit()?;
         Ok(())
     }
@@ -1068,7 +1055,11 @@ impl Store {
             let _ = std::fs::remove_file(&target);
             return self.read_files("WHERE id = ?1", [same])?.pop().ok_or_else(|| anyhow!("附件记录丢失"));
         }
-        let file = PaperFile { id, paper_id: paper_id.to_string(), kind: kind.to_string(), title, format, local_path: relative, size_bytes: size, added_at: now_iso(), note: String::new() };
+        // The paper's files are in the order they came (`read_files`): one that comes in the same millisecond as the
+        // last still comes after it, so a file put in another's place (`swap_file`, which takes its `added_at`) keeps it.
+        let last: Option<String> = self.db.query_row("SELECT max(added_at) FROM resources WHERE paper_id = ?1", [paper_id], |r| r.get(0))?;
+        let added_at = crate::time::later_than(&now_iso(), last.as_deref().unwrap_or_default());
+        let file = PaperFile { id, paper_id: paper_id.to_string(), kind: kind.to_string(), title, format, local_path: relative, size_bytes: size, added_at, note: String::new() };
         let inserted = self.db.execute(
             "INSERT INTO resources(id, paper_id, resource_type, title, format, local_path, size_bytes, sha256, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![file.id, file.paper_id, file.kind, file.title, file.format, file.local_path, file.size_bytes as i64, sha, file.added_at],
@@ -2210,26 +2201,6 @@ mod tests {
         assert_eq!((new.volume.as_str(), new.issue.as_str(), new.pages.as_str()), ("12", "", "e1234"));
         assert_eq!(store.list_papers().unwrap().iter().filter(|p| !p.pages.is_empty()).count(), 2);
         std::fs::remove_dir_all(dir).ok();
-    }
-
-    #[test]
-    fn screenings_are_set_together() {
-        let dir = temp_dir("screenings");
-        let mut store = Store::in_memory(&dir).unwrap();
-        let a = store.add_paper(paper("First paper", "")).unwrap();
-        let b = store.add_paper(paper("Second paper", "")).unwrap();
-        let line = |id: &str, status: &str, reason: &str, at: &str| (id.to_string(), status.to_string(), reason.to_string(), at.to_string());
-        store.set_screenings(&[line(&a.id, "included", " on roots ", "2026-11-12T00:00:00Z"), line(&b.id, "irrelevant", "", "2026-11-12T00:00:00Z")]).unwrap();
-        let (first, second) = (store.get_paper(&a.id).unwrap(), store.get_paper(&b.id).unwrap());
-        assert_eq!((first.screening.as_str(), first.screening_reason.as_str(), first.reviewed_at.as_str(), second.screening.as_str()), ("included", "on roots", "2026-11-12T00:00:00Z", "irrelevant"));
-        // One line that cannot be written leaves the others unwritten too.
-        assert!(store.set_screenings(&[line(&a.id, "pending", "", ""), line("nobody", "included", "", "")]).is_err());
-        assert!(store.set_screenings(&[line(&a.id, "pending", "", ""), line(&b.id, "maybe", "", "")]).is_err());
-        assert_eq!(store.get_paper(&a.id).unwrap().screening, "included");
-        // Back to waiting: as it was before anybody decided.
-        store.set_screenings(&[line(&a.id, "pending", "", "")]).unwrap();
-        let again = store.get_paper(&a.id).unwrap();
-        assert!(again.screening == "pending" && again.reviewed_at.is_empty() && again.title == "First paper");
     }
 
     #[test]
