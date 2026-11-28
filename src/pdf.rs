@@ -64,6 +64,10 @@ pub enum PdfEvent {
     RemoveAnnotation { resource: String, id: String },
     /// Save a copy of the file with its marks written in, for other readers (标注's 导出带标注的 PDF…).
     ExportMarked,
+    /// The file could not be shown (gone from disk, or no PDF that reads): 换成另一个文件… asked of the owner for
+    /// the viewer's own file (#359), or 移除附件 (`RemoveFile`).
+    SwapFile,
+    RemoveFile,
     /// A box drawn on a page, or a sticky note placed there (`rect` its spot twice) with its text.
     AddShape { paper: String, resource: String, page: usize, kind: Kind, rect: [f32; 4], note: String },
     /// A text box written on a page: its edges (grown to what it says), its words and colours.
@@ -914,6 +918,8 @@ enum Reply {
     /// Page sizes in points, once, after the file parsed.
     Opened(Vec<(f32, f32)>),
     Failed(String),
+    /// No file at the path: removed or moved outside the app.
+    Gone(String),
     /// A rendered page: its index, the scale it was rendered at, its size in pixels and the pixels.
     Page(usize, f32, u32, u32, Vec<u8>),
     /// A page whose render was dropped for newer ones: ask again when it is in view.
@@ -985,6 +991,10 @@ fn worker(path: PathBuf, requests: mpsc::Receiver<Request>, replies: async_chann
     use hayro::{PixmapSettings, RenderCache, RenderSettings, render};
     let data = match std::fs::read(&path) {
         Ok(data) => data,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            let _ = replies.send_blocking(Reply::Gone(tf!("无法读取文件：{err}", "Cannot read file: {err}")));
+            return;
+        }
         Err(err) => {
             let _ = replies.send_blocking(Reply::Failed(tf!("无法读取文件：{err}", "Cannot read file: {err}")));
             return;
@@ -1210,6 +1220,8 @@ pub struct PdfView {
     requests: mpsc::Sender<Request>,
     citation: CitationFocus,
     error: Option<String>,
+    /// The file is not where the library keeps it (removed or moved outside the app): `error` says so in other words.
+    gone: bool,
     /// The viewer's size in logical pixels; the height is known once it has been laid out.
     width: f32,
     height: f32,
@@ -1401,6 +1413,7 @@ impl PdfView {
             held: 0,
             requests,
             error: None,
+            gone: false,
             width: 0.,
             height: 0.,
             zoom,
@@ -2580,6 +2593,7 @@ impl PdfView {
                 if let Some(place) = self.resume.take() { self.resume(place, cx) }
             }
             Reply::Failed(error) => self.error = Some(error),
+            Reply::Gone(error) => (self.error, self.gone) = (Some(error), true),
             Reply::Skipped(index) => {
                 self.pending.remove(&index);
             }
@@ -4539,7 +4553,11 @@ fn note_icon(left: f32, top: f32, lit: bool) -> Div {
 impl Render for PdfView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if let Some(error) = &self.error {
-            return ui::empty_state("image-broken", t("无法预览"), error).size_full().into_any_element();
+            // What is wrong, and the two things to do about it here (#359): the file is the library's, the viewer's owner changes it.
+            let (title, hint) = if self.gone { (t("找不到这份文件"), t("它已经不在文献库的文件夹里，也许在应用之外被删掉或移走了。换一个文件放在这里，或者移除这条附件。")) } else { (t("无法预览"), error.as_str()) };
+            let swap = ui::primary_button("pdf-swap", t("换成另一个文件…")).on_click(cx.listener(|_, _, _, cx| cx.emit(PdfEvent::SwapFile)));
+            let remove = ui::secondary_button("pdf-remove", t("移除附件")).on_click(cx.listener(|_, _, _, cx| cx.emit(PdfEvent::RemoveFile)));
+            return ui::empty_state("image-broken", title, hint).child(div().flex().flex_wrap().justify_center().gap(px(8.)).child(swap).child(remove)).size_full().into_any_element();
         }
         if self.sizes.is_empty() {
             return ui::empty_state("file-text", t("正在打开 PDF…"), "").size_full().into_any_element();

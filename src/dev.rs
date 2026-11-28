@@ -472,6 +472,19 @@ impl Workspace {
                     let Some(file) = self.lib.as_ref().and_then(|lib| lib.selected.as_deref().and_then(|id| lib.pdf_file(id)).map(|file| file.id.clone())) else { return };
                     Some(match name { "reread" => Cmd::RereadFile(file), "compress" => Cmd::CompressFile(file), _ => Cmd::ReadPages(file) })
                 }
+                // `swapfile:<path>` puts the file at the path in the place of the selected paper's file on show (换成另一个文件…, without the dialog).
+                "swapfile" => {
+                    let Some(file) = self.lib.as_ref().and_then(|lib| lib.selected.as_deref().and_then(|id| lib.pdf_file(id)).map(|file| file.id.clone())) else { return };
+                    return self.swap_file(file, std::path::Path::new(arg), cx);
+                }
+                // `filenote:<n>` opens the note of the selected paper's n-th file (in the detail panel's order), `filenote:<n>;<words>` with the words written in; `submit` keeps it.
+                "filenote" => {
+                    let (n, words) = arg.split_once(';').unwrap_or((arg, ""));
+                    let Some(file) = self.lib.as_ref().and_then(|lib| lib.selected.as_deref().and_then(|id| lib.paper_files(id).get(n.parse::<usize>().unwrap_or(0)).map(|f| f.id.clone()))) else { return };
+                    self.file_note_dialog(file, window, cx);
+                    if let Some(Modal::FileNote { text, .. }) = &self.modal && !words.is_empty() { text.update(cx, |input, cx| input.set_text(words, cx)) }
+                    return;
+                }
                 // The file on show with its marks, written to a path without the save dialog.
                 "exportpdf" => {
                     let Some(file) = self.lib.as_ref().and_then(|lib| lib.pdf.as_ref()).map(|view| view.read(cx).resource_id().to_string()) else { return };

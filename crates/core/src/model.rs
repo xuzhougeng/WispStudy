@@ -131,6 +131,9 @@ pub struct PaperFile {
     pub local_path: String,
     pub size_bytes: u64,
     pub added_at: String,
+    /// What the person wrote about the file (备注, #359): what it holds, where it is from. Empty for none.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub note: String,
 }
 
 pub fn file_size(bytes: u64) -> String {

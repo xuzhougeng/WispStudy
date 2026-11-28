@@ -180,6 +180,9 @@ const PHRASES: &[(&str, &str)] = &[
     ("「{}」在这个文献库的回收站里：先把它恢复，再移过来。", "“{0}” is in this library’s trash: restore it first, then move it."),
     ("「{}」在这个文献库的回收站里：先把它恢复，再复制过来。", "“{0}” is in this library’s trash: restore it first, then copy it."),
     ("无法复制文件「{}」：{}", "Could not copy file “{0}”: {1}"),
+    // A file put in another's place, and its note (`Store::swap_file`, `Store::set_file_note`).
+    ("这篇文献已经有这个文件：{}。", "This paper already has this file: {0}."),
+    ("备注不能超过 {} 个字。", "A note can be at most {0} characters."),
 ];
 
 /// The values `text` gives the holes of `pattern`, when it is that pattern filled in.

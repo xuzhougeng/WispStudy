@@ -317,6 +317,9 @@ CREATE TABLE IF NOT EXISTS filed_files (
 "#;
 
 /// The files known by the fingerprint `?1`: by the bytes they hold, or by those they held before they were made smaller.
+/// The longest note a file takes (`Store::set_file_note`), in characters.
+pub const NOTE_MAX: usize = 2000;
+
 const HOLDING: &str = "(sha256 = ?1 OR id IN (SELECT resource_id FROM former_files WHERE sha256 = ?1))";
 
 const PAPER_COLUMNS: &str = "id, title, abstract, authors_json, journal, year, publication_state, url, source, \
@@ -550,6 +553,8 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     // Where a figure without a paper is from, and the file it was (`figure::UPLOADED`).
     ("figures", "origin", "TEXT NOT NULL DEFAULT ''"),
     ("figures", "file_name", "TEXT NOT NULL DEFAULT ''"),
+    // What the person wrote about a file (备注, #359).
+    ("resources", "note", "TEXT NOT NULL DEFAULT ''"),
 ];
 
 /// Add the columns added to a table after it was first made: `CREATE TABLE IF NOT
@@ -1035,10 +1040,10 @@ impl Store {
     }
 
     fn read_files<P: rusqlite::Params>(&self, filter: &str, args: P) -> Result<Vec<PaperFile>> {
-        let mut stmt = self.db.prepare(&format!("SELECT id, paper_id, resource_type, title, format, local_path, size_bytes, added_at FROM resources {filter} ORDER BY resource_type, added_at"))?;
+        let mut stmt = self.db.prepare(&format!("SELECT id, paper_id, resource_type, title, format, local_path, size_bytes, added_at, note FROM resources {filter} ORDER BY resource_type, added_at"))?;
         let files = stmt
             .query_map(args, |r| {
-                Ok(PaperFile { id: r.get(0)?, paper_id: r.get(1)?, kind: r.get(2)?, title: r.get(3)?, format: r.get(4)?, local_path: r.get(5)?, size_bytes: r.get::<_, i64>(6)? as u64, added_at: r.get(7)? })
+                Ok(PaperFile { id: r.get(0)?, paper_id: r.get(1)?, kind: r.get(2)?, title: r.get(3)?, format: r.get(4)?, local_path: r.get(5)?, size_bytes: r.get::<_, i64>(6)? as u64, added_at: r.get(7)?, note: r.get(8)? })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(files)
@@ -1063,7 +1068,7 @@ impl Store {
             let _ = std::fs::remove_file(&target);
             return self.read_files("WHERE id = ?1", [same])?.pop().ok_or_else(|| anyhow!("附件记录丢失"));
         }
-        let file = PaperFile { id, paper_id: paper_id.to_string(), kind: kind.to_string(), title, format, local_path: relative, size_bytes: size, added_at: now_iso() };
+        let file = PaperFile { id, paper_id: paper_id.to_string(), kind: kind.to_string(), title, format, local_path: relative, size_bytes: size, added_at: now_iso(), note: String::new() };
         let inserted = self.db.execute(
             "INSERT INTO resources(id, paper_id, resource_type, title, format, local_path, size_bytes, sha256, added_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![file.id, file.paper_id, file.kind, file.title, file.format, file.local_path, file.size_bytes as i64, sha, file.added_at],
@@ -1178,6 +1183,42 @@ impl Store {
         if let Some(path) = path {
             self.set_aside(&path);
         }
+        Ok(())
+    }
+
+    /// Put another file in a stored file's place (替换, #359): a wrong PDF exchanged for the right one, or one gone
+    /// from disk given again. The file chosen is a file of its own, read anew, since the old one's text, structure and
+    /// marks were of other pages; it takes the old one's kind, its place among the paper's files (its `added_at`, so the
+    /// main text stays the main text and S2 stays S2) and its note. The old one goes as `remove_file` takes it, its
+    /// bytes to `removed/`. The very file chosen again is put back when it is gone from disk, keeping all that is its
+    /// own, and is nothing to do when it is there. Gives the file now in that place.
+    pub fn swap_file(&mut self, id: &str, source: &Path) -> Result<PaperFile> {
+        let old = self.read_files("WHERE id = ?1", [id])?.pop().ok_or_else(|| anyhow!("附件不存在：{id}"))?;
+        let sha = file_hash(source).with_context(|| format!("无法读取文件 {}", source.display()))?;
+        let held: Option<(String, String)> = self.db.query_row(&format!("SELECT id, title FROM resources WHERE paper_id = ?2 AND {HOLDING}"), params![sha, old.paper_id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+        match held {
+            Some((same, _)) if same == old.id => {
+                let path = self.file_path(&old);
+                if path.exists() { bail!("选的就是现在这个文件。") }
+                if let Some(parent) = path.parent() { std::fs::create_dir_all(parent)? }
+                let (size, sha) = copy_hashed(source, &path).with_context(|| format!("无法复制文件 {}", source.display()))?;
+                self.db.execute("UPDATE resources SET size_bytes = ?2, sha256 = ?3 WHERE id = ?1", params![old.id, size as i64, sha])?;
+                return Ok(PaperFile { size_bytes: size, ..old });
+            }
+            Some((_, title)) => bail!("这篇文献已经有这个文件：{title}。"),
+            None => {}
+        }
+        let new = self.import_file(&old.paper_id, source, &old.kind)?;
+        self.db.execute("UPDATE resources SET added_at = ?2, note = ?3 WHERE id = ?1", params![new.id, old.added_at, old.note])?;
+        self.remove_file(&old.id)?;
+        Ok(PaperFile { added_at: old.added_at, note: old.note, ..new })
+    }
+
+    /// Write what the person notes about a file (备注, #359); an empty note takes it away.
+    pub fn set_file_note(&mut self, id: &str, note: &str) -> Result<()> {
+        let note = note.trim();
+        if note.chars().count() > NOTE_MAX { bail!("备注不能超过 {NOTE_MAX} 个字。") }
+        if self.db.execute("UPDATE resources SET note = ?2 WHERE id = ?1", params![id, note])? == 0 { bail!("附件不存在：{id}") }
         Ok(())
     }
 
@@ -1730,12 +1771,12 @@ impl Store {
     /// its full texts first. `each` is handed a file and its pages, and stops the reading by answering `false`.
     pub fn each_text(&self, mut each: impl FnMut(PaperFile, Vec<String>) -> bool) -> Result<()> {
         let mut stmt = self.db.prepare(
-            "SELECT r.id, r.paper_id, r.resource_type, r.title, r.format, r.local_path, r.size_bytes, r.added_at, t.pages FROM resources r JOIN fulltext_text t ON t.resource_id = r.id \
+            "SELECT r.id, r.paper_id, r.resource_type, r.title, r.format, r.local_path, r.size_bytes, r.added_at, t.pages, r.note FROM resources r JOIN fulltext_text t ON t.resource_id = r.id \
              WHERE t.error = '' AND r.paper_id NOT IN (SELECT paper_id FROM trashed_papers) ORDER BY r.paper_id, r.resource_type, r.added_at",
         )?;
         let mut rows = stmt.query([])?;
         while let Some(r) = rows.next()? {
-            let file = PaperFile { id: r.get(0)?, paper_id: r.get(1)?, kind: r.get(2)?, title: r.get(3)?, format: r.get(4)?, local_path: r.get(5)?, size_bytes: r.get::<_, i64>(6)? as u64, added_at: r.get(7)? };
+            let file = PaperFile { id: r.get(0)?, paper_id: r.get(1)?, kind: r.get(2)?, title: r.get(3)?, format: r.get(4)?, local_path: r.get(5)?, size_bytes: r.get::<_, i64>(6)? as u64, added_at: r.get(7)?, note: r.get(9)? };
             if !each(file, json_strings(&r.get::<_, String>(8)?)) { break }
         }
         Ok(())
@@ -2475,6 +2516,63 @@ mod tests {
         store.remove_file(&s1.id).unwrap();
         store.restore_paper(&figures.id).unwrap();
         assert!(store.paper_files(&figures.id).unwrap().is_empty());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn a_wrong_file_is_swapped_for_another_in_its_place() {
+        let dir = temp_dir("swap-file");
+        let mut store = Store::open(&dir).unwrap();
+        let p = store.add_paper(paper("The right paper", "")).unwrap();
+        let file = |name: &str, bytes: &[u8]| { let path = dir.join(name); std::fs::write(&path, bytes).unwrap(); path };
+        let (wrong, s1, s2) = (file("wrong.pdf", b"%PDF-1.4 another paper"), file("s1.pdf", b"%PDF-1.4 figures"), file("s2.pdf", b"%PDF-1.4 tables"));
+        let main = store.import_file(&p.id, &wrong, "fulltext").unwrap();
+        let (first, second) = (store.import_file(&p.id, &s1, "supplement").unwrap(), store.import_file(&p.id, &s2, "supplement").unwrap());
+        store.save_fulltext_pages(&main.id, &Ok(vec!["Another paper's page".into()])).unwrap();
+        store.add_pdf_annotation(&p.id, &main.id, 1, crate::annotation::Kind::Highlight, "Another", &[[0., 0., 1., 1.]]).unwrap();
+        store.set_file_note(&main.id, "  the version sent by the author ").unwrap();
+        assert_eq!(store.paper_files(&p.id).unwrap()[0].note, "the version sent by the author");
+
+        // The main text taken for another file: still the main text, with its note; the wrong one's text and marks go with it.
+        let right = file("right.pdf", b"%PDF-1.4 the right paper");
+        let swapped = store.swap_file(&main.id, &right).unwrap();
+        let files = store.paper_files(&p.id).unwrap();
+        assert_eq!(files.iter().map(|f| (f.id.as_str(), f.kind.as_str())).collect::<Vec<_>>(), vec![(swapped.id.as_str(), "fulltext"), (first.id.as_str(), "supplement"), (second.id.as_str(), "supplement")]);
+        assert_eq!((files[0].title.as_str(), files[0].note.as_str(), files[0].added_at.as_str()), ("right.pdf", "the version sent by the author", main.added_at.as_str()));
+        assert_ne!(swapped.id, main.id);
+        assert_eq!(std::fs::read(store.file_path(&swapped)).unwrap(), b"%PDF-1.4 the right paper");
+        assert!(store.fulltext_pages(&swapped.id).unwrap().is_none() && store.pdf_annotations(&p.id, "").unwrap().is_empty());
+        // The wrong file is in `removed/` and no longer this paper's.
+        assert!(!store.file_path(&main).exists() && dir.join("removed").join(Path::new(&main.local_path).file_name().unwrap()).exists());
+        assert_eq!(store.paper_holding(&wrong).unwrap(), None);
+
+        // An attachment keeps its number: S1 swapped is S1.
+        let s1_again = file("s1-fixed.pdf", b"%PDF-1.4 figures, fixed");
+        let fixed = store.swap_file(&first.id, &s1_again).unwrap();
+        let files = store.paper_files(&p.id).unwrap();
+        assert_eq!(files.iter().map(|f| f.id.as_str()).collect::<Vec<_>>(), vec![swapped.id.as_str(), fixed.id.as_str(), second.id.as_str()]);
+
+        // A file the paper holds already, or this very one, is said so and nothing changes.
+        assert!(store.swap_file(&fixed.id, &s2).unwrap_err().to_string().contains("s2.pdf"));
+        assert!(store.swap_file(&fixed.id, &s1_again).unwrap_err().to_string().contains("就是现在这个文件"));
+        assert_eq!(store.paper_files(&p.id).unwrap().len(), 3);
+
+        // A file gone from disk: another takes its place all the same, and the very one given again is put back as it was.
+        std::fs::remove_file(store.file_path(&second)).unwrap();
+        store.save_fulltext_pages(&second.id, &Ok(vec!["Table S1".into()])).unwrap();
+        let back = store.swap_file(&second.id, &s2).unwrap();
+        assert_eq!(back.id, second.id);
+        assert_eq!(std::fs::read(store.file_path(&second)).unwrap(), b"%PDF-1.4 tables");
+        assert_eq!(store.fulltext_pages(&second.id).unwrap().unwrap().unwrap(), vec!["Table S1".to_string()]);
+        std::fs::remove_file(store.file_path(&fixed)).unwrap();
+        let other = file("s1-other.pdf", b"%PDF-1.4 figures, other");
+        assert_ne!(store.swap_file(&fixed.id, &other).unwrap().id, fixed.id);
+
+        // A note is taken away by an empty one, and one too long is refused.
+        store.set_file_note(&swapped.id, "").unwrap();
+        assert_eq!(store.paper_files(&p.id).unwrap()[0].note, "");
+        assert!(store.set_file_note(&swapped.id, &"字".repeat(NOTE_MAX + 1)).is_err());
+        assert!(store.set_file_note("R-nowhere", "x").is_err());
         std::fs::remove_dir_all(dir).ok();
     }
 

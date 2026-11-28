@@ -2323,5 +2323,15 @@
   "运行检索": "Search run",
   "每次取回全部命中的记录": "Retrieves every hit each run",
   "全部命中": "All hits",
-  "最新的": "Latest"
+  "最新的": "Latest",
+  "换成另一个文件…": "Replace with another file…",
+  "添加备注…": "Add a note…",
+  "编辑备注…": "Edit note…",
+  "编辑备注": "Edit note",
+  "替换": "Replace",
+  "找不到这份文件": "File not found",
+  "它已经不在文献库的文件夹里，也许在应用之外被删掉或移走了。换一个文件放在这里，或者移除这条附件。": "It is no longer in the library’s folder; it may have been deleted or moved outside the app. Put another file in its place, or remove this attachment.",
+  "文件备注": "File note",
+  "例如：作者寄来的修订版；补充表 S3 是引物序列": "For example: the revised version from the author; Table S3 lists the primers",
+  "选的就是现在这个文件。": "That is the file already in this place."
 }

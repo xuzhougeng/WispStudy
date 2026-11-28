@@ -342,6 +342,10 @@ pub enum Cmd {
     /// Show a stored file in the file manager.
     RevealFile(String),
     RemoveFile(String),
+    /// 换成另一个文件…: a file picked to take this one's place (#359, `Workspace::pick_swap`).
+    SwapFile(String),
+    /// 添加备注… / 编辑备注…: the dialog of what the person notes about a file (#359).
+    EditFileNote(String),
     /// Try once more to get the text of a stored file.
     RereadFile(String),
     /// Make a stored PDF smaller: its pictures written anew (#242).
@@ -1486,14 +1490,9 @@ impl Workspace {
                     cx.reveal_path(&lib.store.file_path(file));
                 }
             }
-            Cmd::RemoveFile(id) => {
-                if self.change(cx, |lib| lib.store.remove_file(&id)) {
-                    if let Some(lib) = self.lib.as_mut() { lib.close_pdf() }
-                    // Another PDF of the paper, if it has one, takes the viewer.
-                    self.ensure_pdf(cx);
-                    self.say(t("附件已移除（文件移到了 removed 文件夹）。"), cx);
-                }
-            }
+            Cmd::RemoveFile(id) => self.remove_file(id, cx),
+            Cmd::SwapFile(id) => self.pick_swap(id, cx),
+            Cmd::EditFileNote(id) => self.file_note_dialog(id, window, cx),
             Cmd::RereadFile(id) => self.reread_file(id, cx),
             Cmd::CompressFile(id) => self.compress_file(id, cx),
             Cmd::ExportMarkedPdf(id) => self.export_marked_pdf(id, None, cx),
