@@ -729,6 +729,8 @@ pub enum Cmd {
     WriteAssistTarget(String),
     /// Put the term a one-off requirement of the card names into the glossary.
     WriteAssistRecord,
+    /// Choose a model for comparisons of versions, or no longer (`Settings::compare_models`).
+    CompareModel(String),
     /// 术语: the glossary and the manuscript's requirement (`glossary.rs`).
     Glossary(crate::glossary::Do),
     /// 配引用's card: tick a paper, show more, write the ticked citations (write_cite.rs).
@@ -1315,6 +1317,7 @@ impl Workspace {
             Cmd::WriteAssistUse(how) => self.assist_use(how, window, cx),
             Cmd::WriteAssistTarget(code) => self.assist_retarget(code, cx),
             Cmd::WriteAssistRecord => self.assist_record(cx),
+            Cmd::CompareModel(id) => self.compare_toggle(id, cx),
             Cmd::Glossary(what) => self.run_glossary(what, window, cx),
             Cmd::WriteCited(what) => self.cite_do(what, window, cx),
             Cmd::Revise(what) => self.run_revise(what, cx),

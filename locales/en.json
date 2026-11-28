@@ -2387,5 +2387,6 @@
   "再提个要求，回车重写：例如 用被动语态；niche 译作 微环境": "One more requirement, Enter to ask again: e.g. use the passive voice; translate niche as 微环境",
   "贴近原文": "Close to the original",
   "学术惯用": "Academic idiom",
-  "更简洁": "More concise"
+  "更简洁": "More concise",
+  "选两个以上的模型，就同时请它们各写一版来对照；只选一个时，它一次给出三种写法": "Choose two or more models to have each write a version, side by side; with one, it gives three ways of putting it at once"
 }

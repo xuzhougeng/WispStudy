@@ -1944,9 +1944,10 @@ pub fn assist_prompt(assist: &Assist, language: &str, paragraph: &str, examples:
         }
         Assist::Translate => {
             let source = if ask.source.trim().is_empty() { "原文".to_string() } else { language_name(&ask.source) };
-            return Ok((crate::versions::system(), crate::versions::translate_message(&source, &language, paragraph, ask)));
+            let system = if ask.single { crate::versions::single_system() } else { crate::versions::system() };
+            return Ok((system, crate::versions::translate_message(&source, &language, paragraph, ask)));
         }
-        Assist::Reword => return Ok((crate::versions::system(), crate::versions::reword_message(&language, paragraph, ask))),
+        Assist::Reword => return Ok((if ask.single { crate::versions::single_system() } else { crate::versions::system() }, crate::versions::reword_message(&language, paragraph, ask))),
         Assist::Polish => format!(
             "润色下面这段{language}文字：改得越少越好，只改语法错误、不准确或不地道的用词、冗余和不通顺的地方。\n\
              不改变意思，不增删论断，不调整段落的结构；本来就好的句子原样保留。\n\n{paragraph}"

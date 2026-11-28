@@ -72,15 +72,19 @@ pub struct Card {
     pub terms: Vec<(String, String)>,
     /// The requirement for this once the answer was asked with.
     pub once: String,
+    /// 译成… and 换个说法 asked of several models: their versions, one a model, in place of `result`.
+    pub compare: Option<crate::compare::Comparison>,
 }
 
 impl Card {
     pub fn new(assist: Assist, language: String, section: String, original: String, range: Range<usize>, model: String) -> Card {
-        Card { assist, language, section, original, range, result: String::new(), busy: true, error: String::new(), note: String::new(), model, keys: vec![], cite: None, source: String::new(), target: String::new(), context: String::new(), terms: vec![], once: String::new() }
+        Card { assist, language, section, original, range, result: String::new(), busy: true, error: String::new(), note: String::new(), model, keys: vec![], cite: None, source: String::new(), target: String::new(), context: String::new(), terms: vec![], once: String::new(), compare: None }
     }
 
     /// The versions of the answer as far as it has come; one for an action that gives one.
     pub fn versions(&self) -> Vec<Version> {
+        // A comparison has a version a model, in the models' order: one that gave none is empty there.
+        if let Some(compare) = &self.compare { return (0..compare.rows.len()).map(|n| Version { kind: Kind::Other, text: compare.version(n).unwrap_or_default() }).collect() }
         if self.assist.versions() { return versions::parse(&self.result) }
         let text = self.result.trim();
         if text.is_empty() { vec![] } else { vec![Version { kind: Kind::Other, text: text.to_string() }] }
@@ -199,6 +203,26 @@ impl Workspace {
         glossary::default_target(glossary::text_language(text, written), written)
     }
 
+    /// The models that can be compared, each ticked while chosen; one that cannot be asked says why.
+    pub(crate) fn compare_menu(&self) -> Vec<MenuItem> {
+        let chosen = &self.settings.compare_models;
+        self.settings.profiles().iter().map(|profile| MenuItem { label: model_name(profile).into(), checked: chosen.contains(&profile.id), note: profile.missing().map(|missing| t(missing).into()), cmd: Cmd::CompareModel(profile.id.clone()) }).collect()
+    }
+
+    /// A model chosen for comparisons, or no longer: at most `settings::COMPARE_MOST`.
+    pub(crate) fn compare_toggle(&mut self, id: String, cx: &mut Context<Self>) {
+        let chosen = &mut self.settings.compare_models;
+        if let Some(at) = chosen.iter().position(|known| *known == id) {
+            chosen.remove(at);
+        } else if chosen.len() >= wisp_core::settings::COMPARE_MOST {
+            return self.say(tf!("最多同时对照 {} 个模型", "At most {} models are compared at once", wisp_core::settings::COMPARE_MOST), cx);
+        } else {
+            chosen.push(id);
+        }
+        self.save_settings(cx);
+        cx.notify();
+    }
+
     /// The languages the card's text can be translated into: every one but its own.
     pub(crate) fn assist_target_menu(&self) -> Vec<MenuItem> {
         let Some(card) = self.lib.as_ref().and_then(|lib| lib.writing.assist.card.as_ref()) else { return vec![] };
@@ -211,6 +235,7 @@ impl Workspace {
         if assist == Assist::Cite { return self.cite_start(cx) }
         let profile = self.settings.profile_for_or_default(Task::Chat);
         let own = self.settings.commands.clone();
+        let compared = self.settings.compare_profiles();
         let (written, target_default) = {
             let lib = self.lib.as_ref().unwrap();
             let (_, original) = target(&lib.writing, cx);
@@ -267,7 +292,33 @@ impl Workspace {
             .collect();
         if assist == Assist::Rewrite { card.keys = sentences.iter().filter_map(|sentence| sentence["paperId"].as_str()).filter_map(|paper| Some((paper.to_string(), index.key(paper)?.to_string()))).collect() }
         // What the request carries besides the text: the terms it holds, the manuscript's requirement, and for versions the paragraph around it and the requirement for this once.
-        let ask = versions::Ask { source: source.clone(), context: card.context.clone(), terms: card.terms.clone(), requirement, once: card.once.clone() };
+        let mut ask = versions::Ask { source: source.clone(), context: card.context.clone(), terms: card.terms.clone(), requirement, once: card.once.clone(), single: false };
+        // Two or more models chosen for a comparison: each is asked for one version, in the same words (compare.rs).
+        if assist.versions() && compared.len() >= 2 {
+            ask.single = true;
+            let prompt = ai::assist_prompt(&assist, &language, &card.original, &examples, &own, &ask);
+            let (system, message) = match prompt {
+                Ok(prompt) => prompt,
+                Err(error) => {
+                    (card.busy, card.error) = (false, error);
+                    writing.assist.card = Some(card);
+                    writing.side_open = true;
+                    return cx.notify();
+                }
+            };
+            let requests: Vec<_> = compared.iter().map(|profile| (ai::plain_request(profile, &system, &message), profile.protocol)).collect();
+            card.model = tf!("{} 个模型对照", "{} models compared", compared.len());
+            card.compare = Some(crate::compare::Comparison::new(&compared, generation));
+            let library = lib.info.id.clone();
+            writing.assist.card = Some(card);
+            writing.side_open = true;
+            let locate: crate::compare::Locate = |this| this.lib.as_mut()?.writing.assist.card.as_mut()?.compare.as_mut();
+            // The card is busy while any of its models is.
+            let settled = |this: &mut Workspace| {
+                if let Some(card) = this.lib.as_mut().and_then(|lib| lib.writing.assist.card.as_mut()) && let Some(compare) = card.compare.as_ref() { card.busy = compare.busy() }
+            };
+            return self.compare_ask(library, generation, requests, locate, settled, cx);
+        }
         let request = match ai::assist_request(&profile, &assist, &language, &card.original, &examples, &own, &ask) {
             Ok(request) => request,
             Err(error) => {
@@ -340,8 +391,9 @@ impl Workspace {
         assist.awaiting = None;
         if let Some(card) = assist.card.as_mut().filter(|card| card.busy) {
             card.busy = false;
+            if let Some(compare) = card.compare.as_mut() { compare.stop() }
             // What 配引用 had found by then stays, for the person to tick.
-            let partial = card.cite.as_ref().map_or(!card.result.trim().is_empty(), |found| !found.rows.is_empty());
+            let partial = card.cite.as_ref().map_or(!card.result.trim().is_empty() || card.compare.as_ref().is_some_and(|compare| compare.rows.iter().any(|row| !row.result.trim().is_empty())), |found| !found.rows.is_empty());
             if let Some(found) = card.cite.as_mut() { found.stage = crate::write_cite::Stage::Done }
             card.note = if partial { t("已停止，下面是停止前收到的部分。").into() } else { t("已停止。").into() };
         }
@@ -358,7 +410,12 @@ impl Workspace {
             writing.assist.card = None;
             return cx.notify();
         }
-        let Some(card) = writing.assist.card.as_ref().filter(|card| !card.busy && card.cite.is_none()) else { return };
+        // A model of a comparison that has answered can be taken while the others still write.
+        let ready = |card: &Card| match (&card.compare, how) {
+            (Some(compare), Use::Take(n) | Use::CopyOne(n)) => compare.rows.get(n).is_some_and(|row| !row.busy),
+            _ => !card.busy,
+        };
+        let Some(card) = writing.assist.card.as_ref().filter(|card| ready(card) && card.cite.is_none()) else { return };
         // A card of versions has its first taken by 替换原文 and 复制; a version chosen is that one.
         let pick = match how { Use::Take(n) | Use::CopyOne(n) => n, _ => 0 };
         let result = card.versions().get(pick).map(|version| version.text.clone()).unwrap_or_default();
@@ -482,8 +539,9 @@ impl Workspace {
             Some(found) => ((card.busy || !found.rows.is_empty()).then(|| self.render_cite_body(card, found, cx)), (!card.busy && found.offering()).then(|| self.render_cite_actions(found, cx)), false),
             // Several versions: each one a click to take; under them the line that asks again.
             None if card.assist.versions() => {
-                let done = !card.busy && !card.result.trim().is_empty();
-                ((card.busy || !card.result.is_empty()).then(|| self.render_versions(card, done, cx)), (!card.busy).then(|| self.render_versions_actions(done, width - 44., window, cx)), card.busy && !card.result.is_empty())
+                let compared = card.compare.is_some();
+                let done = !card.busy && (!card.result.trim().is_empty() || card.versions().iter().any(|version| !version.text.trim().is_empty()));
+                ((compared || card.busy || !card.result.is_empty()).then(|| self.render_versions(card, done, cx)), (!card.busy).then(|| self.render_versions_actions(done, width - 44., window, cx)), card.busy && !compared && !card.result.is_empty())
             }
             None => {
                 let done = !card.busy && !card.result.trim().is_empty();
@@ -518,7 +576,13 @@ impl Workspace {
                     .child(ui::icon(if card.cite.is_some() { "library" } else { "sparkle" }, 13., Theme::accent()))
                     .child(title)
                     .when(working, |d| d.child(ui::spinner("write-assist-busy", 11., Theme::accent())))
-                    .child(div().flex_1().min_w_0().truncate().text_right().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(card.model.clone()))
+                    .child(div().flex_1())
+                    // Who answers versions is chosen where they are read: one model, or several compared (compare.rs).
+                    .child(if card.assist.versions() {
+                        ui::ghost_button("write-assist-models", None, None).flex_none().min_w_0().max_w(px(width * 0.45)).h(text_px(22.)).px(px(4.)).gap(px(3.)).text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(div().min_w_0().truncate().child(card.model.clone())).child(ui::icon("chevron-down", 10., Theme::text_tertiary())).tooltip(ui::tip(t("选两个以上的模型，就同时请它们各写一版来对照；只选一个时，它一次给出三种写法"))).on_click(self.on_menu(crate::menus::MenuKind::CompareModels, cx)).into_any_element()
+                    } else {
+                        div().flex_none().min_w_0().max_w(px(width * 0.45)).truncate().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(card.model.clone()).into_any_element()
+                    })
                     .when(card.busy, |d| d.child(small("write-assist-stop", t("停止")).on_click(self.on(Cmd::WriteAssistStop, cx))))
                     .when(!card.busy, |d| d.child(ui::ghost_button("write-assist-close", Some("x"), None).size(px(22.)).min_w(px(22.)).on_click(self.on(Cmd::WriteAssistUse(Use::Drop), cx)))),
             )
@@ -566,15 +630,21 @@ impl Workspace {
             .iter()
             .enumerate()
             .map(|(n, version)| {
+                // A model of a comparison is its own: its name heads its version, and it is ready, waiting or failed by itself.
+                let row = card.compare.as_ref().and_then(|compare| compare.rows.get(n));
+                let done = row.map_or(done, |row| !row.busy && !version.text.trim().is_empty());
                 let marks = if done && card.assist == Assist::Reword { ai::word_diff(&card.original, &version.text) } else { None };
                 let words = match &marks {
                     Some((_, after)) => marked(after),
                     None => plain(&version.text),
                 };
-                let name = match version.kind {
-                    Kind::Other => if card.assist == Assist::Translate { t("译文") } else { t("改后") },
-                    kind => t(kind.label()),
+                let name = match (row, version.kind) {
+                    (Some(row), _) => row.model.as_str(),
+                    (None, Kind::Other) => if card.assist == Assist::Translate { t("译文") } else { t("改后") },
+                    (None, kind) => t(kind.label()),
                 };
+                let waiting = row.filter(|row| row.busy).map(|_| ui::spinner(SharedString::from(format!("write-version-busy-{n}")), 10., Theme::text_tertiary()));
+                let said = row.map(|row| (row.error.clone(), row.note.clone()));
                 let group: SharedString = format!("write-version-{n}").into();
                 let copy = self.on(Cmd::WriteAssistUse(Use::CopyOne(n)), cx);
                 div()
@@ -598,6 +668,7 @@ impl Workspace {
                             .gap(px(6.))
                             .h(text_px(18.))
                             .child(label(name))
+                            .children(waiting)
                             .children(done.then(|| lack_mark(SharedString::from(format!("write-version-lack-{n}")), card, &version.text)).flatten())
                             .child(div().flex_1())
                             .when(done, |d| {
@@ -608,11 +679,12 @@ impl Workspace {
                                 })))
                             }),
                     )
-                    .child(div().text_size(text_px(13.)).line_height(text_px(21.)).text_color(Theme::text()).child(words))
+                    .when(!version.text.is_empty(), |d| d.child(div().text_size(text_px(13.)).line_height(text_px(21.)).text_color(Theme::text()).child(words)))
+                    .when_some(said, |d, (error, note)| d.when(!error.is_empty(), |d| d.child(ui::error_line(&error))).when(!note.is_empty(), |d| d.child(div().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(note))))
                     .into_any_element()
             })
             .collect();
-        let waiting = (card.busy && shown.is_empty()).then(|| div().flex().items_center().gap(px(6.)).text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(crate::mascot::inline("write-assist-wait", crate::mascot::Activity::Writing)).child(if card.note.is_empty() { t("正在写…") } else { "" }));
+        let waiting = (card.busy && shown.is_empty() && card.compare.is_none()).then(|| div().flex().items_center().gap(px(6.)).text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(crate::mascot::inline("write-assist-wait", crate::mascot::Activity::Writing)).child(if card.note.is_empty() { t("正在写…") } else { "" }));
         div()
             .id("write-assist-body")
             .flex()

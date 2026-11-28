@@ -29,6 +29,7 @@ mod chat;
 mod cite;
 mod cite_styles;
 mod comments;
+mod compare;
 mod context;
 mod custom;
 mod detail;

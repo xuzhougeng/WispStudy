@@ -55,6 +55,8 @@ pub struct Ask {
     pub terms: Vec<(String, String)>,
     pub requirement: String,
     pub once: String,
+    /// One version, not three: what each model of a comparison is asked (`compare`), the same words for each.
+    pub single: bool,
 }
 
 /// The most of each paragraph around a text a request carries for its sense, in bytes.
@@ -77,6 +79,14 @@ pub fn context(text: &str, range: std::ops::Range<usize>) -> String {
     before.into_iter().chain(after).collect::<Vec<_>>().join("\n\n")
 }
 
+/// The instructions of a request for one version (each model of a comparison): only the words.
+pub fn single_system() -> String {
+    "你是学术写作助手，帮用户处理他正在写的论文稿件里的文字。\n\
+     只输出处理后的文字本身：不加解释、标题、引号或 Markdown，不给几个备选。\n\
+     文字里已有的引用（如 [@Smith2020]、(Smith et al., 2020)、[3]）保持原样，不删除、不改写；不要编造文献或数据。"
+        .to_string()
+}
+
 /// The instructions of a request for versions: how the answer is laid out.
 pub fn system() -> String {
     let headings: Vec<String> = KINDS.iter().map(|(_, label, ..)| format!("【{label}】\n……")).collect();
@@ -92,11 +102,11 @@ pub fn system() -> String {
 /// kinds' descriptions), then the terms, the requirements, the context and the text.
 fn message(task: &str, translating: bool, text: &str, ask: &Ask) -> String {
     let kinds: Vec<String> = KINDS.iter().map(|(_, label, translated, reworded)| format!("【{label}】{}", if translating { translated } else { reworded })).collect();
-    let mut out = format!("{task}给出三个版本，每个都是完整的一份，彼此要有明显的差别：\n{}", kinds.join("\n"));
+    let mut out = if ask.single { task.to_string() } else { format!("{task}给出三个版本，每个都是完整的一份，彼此要有明显的差别：\n{}", kinds.join("\n")) };
     let terms = crate::glossary::terms_said(&ask.terms);
     if !terms.is_empty() { out.push_str(&format!("\n\n{terms}")) }
     if !ask.requirement.trim().is_empty() { out.push_str(&format!("\n\n这份稿件的要求：{}", ask.requirement.trim())) }
-    if !ask.once.trim().is_empty() { out.push_str(&format!("\n\n这一次的要求（三个版本都照这个来）：{}", ask.once.trim())) }
+    if !ask.once.trim().is_empty() { out.push_str(&format!("\n\n这一次的要求{}：{}", if ask.single { "" } else { "（三个版本都照这个来）" }, ask.once.trim())) }
     if !ask.context.trim().is_empty() && ask.context.trim() != text.trim() { out.push_str(&format!("\n\n上下文（只用来理解意思，不要处理它）：\n{}", ask.context.trim())) }
     out.push_str(&format!("\n\n要处理的文字：\n{}", text.trim()));
     out
@@ -209,7 +219,7 @@ mod tests {
 
     #[test]
     fn a_request_carries_what_it_is_to_follow() {
-        let ask = Ask { source: "中文".into(), context: "根毛在紧实土壤中变短。这说明微环境很重要。".into(), terms: vec![("微环境".into(), "niche".into())], requirement: "American spelling".into(), once: "用被动语态".into() };
+        let ask = Ask { source: "中文".into(), context: "根毛在紧实土壤中变短。这说明微环境很重要。".into(), terms: vec![("微环境".into(), "niche".into())], requirement: "American spelling".into(), once: "用被动语态".into(), single: false };
         let message = translate_message("中文", "英文", "这说明微环境很重要。", &ask);
         for part in ["译成英文", "【贴近原文】紧跟", "【更简洁】", "- 微环境 → niche", "这份稿件的要求：American spelling", "这一次的要求（三个版本都照这个来）：用被动语态", "上下文（只用来理解意思，不要处理它）：\n根毛在紧实土壤中变短。", "要处理的文字：\n这说明微环境很重要。"] {
             assert!(message.contains(part), "{part}\n{message}");
@@ -217,6 +227,11 @@ mod tests {
         let bare = reword_message("英文", "Roots grow.", &Ask { context: "Roots grow.".into(), ..Default::default() });
         assert!(bare.contains("仍用英文") && bare.contains("【贴近原文】只换") && !bare.contains("上下文") && !bare.contains("要求"));
         assert!(system().contains("【学术惯用】\n……"));
+        // A model of a comparison is asked for one version, with all the rest the same.
+        let single = Ask { single: true, ..ask.clone() };
+        let one = translate_message("中文", "英文", "这说明微环境很重要。", &single);
+        assert!(!one.contains("三个版本") && !one.contains("【") && one.contains("- 微环境 → niche") && one.contains("用被动语态") && one.ends_with("这说明微环境很重要。"));
+        assert!(single_system().contains("不给几个备选"));
         // The paragraph around a sentence; around a whole paragraph, the ones beside it.
         let text = "第一段。\n\n根毛变短。这说明微环境很重要。\n\n第三段。";
         let at = text.find("这说明").unwrap();

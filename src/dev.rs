@@ -591,6 +591,12 @@ impl Workspace {
                     None
                 }
                 "assistrecord" => Some(Cmd::WriteAssistRecord),
+                // `compare:<id>;<id>` chooses the models 译成… and 换个说法 compare (their ids in settings.json); `compare:` none.
+                "compare" => {
+                    self.settings.compare_models = arg.split(';').map(str::trim).filter(|id| !id.is_empty()).map(str::to_string).collect();
+                    self.save_settings(cx);
+                    None
+                }
                 "assiststop" => Some(Cmd::WriteAssistStop),
                 // `cited:tick;<sentence>;<paper>` ticks a paper 配引用 found (by their places from 0), `cited:more;<sentence>` shows its other papers,
                 // `cited:rest` the sentences nothing was chosen for, `cited:insert` writes the ticked citations.
