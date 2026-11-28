@@ -102,6 +102,7 @@ pub mod retrieval;
 pub mod review;
 pub mod revise;
 pub mod screening;
+pub mod screening_record;
 pub mod playback;
 pub mod podcast;
 pub mod speech;

@@ -606,8 +606,11 @@ pub enum Cmd {
     ScreenMode(ScreenMode),
     /// 逐篇: show the paper at this place of the round; one past the last is the round's summary.
     ScreenGo(usize),
-    /// 逐篇: take the round's last decision back.
+    /// Take the last step of this visit to 筛选 back: a decision, or a confirmation whole (Z, ⌘Z / Ctrl+Z).
     ScreenUndo,
+    /// Take a write of 筛选记录 back, after asking; and without.
+    AskUndoScreening(i64),
+    UndoScreening(i64),
     /// Ask the assistant about this one paper.
     ScreenAskOne(String),
     /// The paper being screened beside the page: its PDF when it has one, else its record.
@@ -1206,8 +1209,8 @@ impl Workspace {
                 if self.lib.as_ref().is_some_and(|l| l.page == Page::Write && page != Page::Write) { self.write_snapshot("leave") }
                 // What 提取 last wrote is on show, with the way back, until the page is left.
                 if let Some(lib) = self.lib.as_mut().filter(|l| l.page == Page::Extract && page != Page::Extract) { lib.extract.last = None }
-                // The same for what 确认 last wrote: taken back later, it would undo decisions made since.
-                if let Some(lib) = self.lib.as_mut().filter(|l| l.page == Page::Screen && page != Page::Screen) { lib.screen.confirmed = None }
+                // The same for what 确认 last wrote, and for what Z and ⌘Z take back: an earlier screening is taken back from 筛选记录.
+                if let Some(lib) = self.lib.as_mut().filter(|l| l.page == Page::Screen && page != Page::Screen) { (lib.screen.confirmed, lib.screen.open, lib.screen.steps) = (None, None, vec![]) }
                 if page == Page::Write {
                     self.write_ensure(cx);
                     self.agent_attend(cx);
@@ -2330,6 +2333,11 @@ impl Workspace {
                 if let Some(lib) = self.lib.as_mut() { lib.screen.filter = filter }
             }
             Cmd::ScreenDecide(..) | Cmd::ScreenMode(_) | Cmd::ScreenGo(_) | Cmd::ScreenUndo | Cmd::ScreenAskOne(_) | Cmd::ScreenBeside => self.run_screen(cmd, window, cx),
+            Cmd::AskUndoScreening(id) => self.ask_undo_screening(id, cx),
+            Cmd::UndoScreening(id) => {
+                self.modal = None;
+                self.undo_screening(id, cx);
+            }
             Cmd::ConfirmTick(_) | Cmd::ConfirmChoose(..) | Cmd::ConfirmPart(_) | Cmd::ConfirmTickAll(_) | Cmd::ConfirmSort | Cmd::ConfirmCursor(_) | Cmd::ConfirmClose | Cmd::ConfirmApply | Cmd::ConfirmUndo => self.run_confirm(cmd, window, cx),
 
             Cmd::OpenGuide(choosing) => {

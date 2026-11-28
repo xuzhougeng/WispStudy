@@ -63,6 +63,7 @@ mod reader;
 mod revise;
 mod screen;
 mod screen_confirm;
+mod screen_record;
 mod screen_single;
 mod searches;
 mod scrollbar;

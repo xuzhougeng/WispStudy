@@ -2,13 +2,13 @@
 //! (`screen_start`, `screen_next`): a few papers at a time, each answer a suggestion the person decides on.
 //! The three faces of the page are `screen.rs`, `screen_single.rs` and `screen_confirm.rs`.
 
-use crate::app::{Library, Workspace};
+use crate::app::{Library, Step, Workspace};
 use crate::i18n::t;
 use crate::input::TextInput;
 use gpui::*;
 use wisp_core::ai;
 use wisp_core::model::*;
-use wisp_core::screening::{Before, Confirming, Round};
+use wisp_core::screening::{Confirming, Round};
 use wisp_core::settings::Task;
 use wisp_core::store::Suggestion;
 
@@ -41,6 +41,10 @@ pub struct Screen {
     pub confirm: Confirming,
     /// What the last confirmation wrote, until the page is left: shown in place of the list, and how it is taken back.
     pub confirmed: Option<Confirmed>,
+    /// The write of 筛选记录 that decisions go into: this round's of 逐篇, or this visit's to the queue (`screen_record.rs`).
+    pub open: Option<i64>,
+    /// What this visit to the page wrote, the last last: what Z and ⌘Z take back.
+    pub steps: Vec<Step>,
     pub rail_scroll: UniformListScrollHandle,
     pub confirm_scroll: UniformListScrollHandle,
     pub paper_scroll: ScrollHandle,
@@ -60,8 +64,9 @@ pub enum ScreenMode {
 
 /// What a confirmation wrote.
 pub struct Confirmed {
-    /// The papers as they were, to take it back.
-    pub before: Vec<Before>,
+    /// Its write in 筛选记录, which is how it is taken back.
+    pub write: i64,
+    pub papers: usize,
     /// How many papers got each status, in the order of `SCREENINGS`.
     pub counts: [usize; 5],
 }
@@ -69,7 +74,7 @@ pub struct Confirmed {
 impl Screen {
     pub(crate) fn new(criteria: &str, cx: &mut App) -> Screen {
         let criteria = cx.new(|cx| TextInput::new("例如：只收以人类样本做单细胞测序的原始研究；综述、方法学文章不收。留空则按文献库的主题判断。", cx).multiline(3).with_text(criteria));
-        Screen { criteria, todo: vec![], reading: vec![], total: 0, done: 0, failed: 0, streak: 0, model: String::new(), filter: String::new(), error: String::new(), run: 0, mode: ScreenMode::Batch, round: Round::default(), confirm: Confirming::default(), confirmed: None, rail_scroll: UniformListScrollHandle::new(), confirm_scroll: UniformListScrollHandle::new(), paper_scroll: ScrollHandle::new() }
+        Screen { criteria, todo: vec![], reading: vec![], total: 0, done: 0, failed: 0, streak: 0, model: String::new(), filter: String::new(), error: String::new(), run: 0, mode: ScreenMode::Batch, round: Round::default(), confirm: Confirming::default(), confirmed: None, open: None, steps: vec![], rail_scroll: UniformListScrollHandle::new(), confirm_scroll: UniformListScrollHandle::new(), paper_scroll: ScrollHandle::new() }
     }
 
     /// Whether the assistant is working through the papers right now.

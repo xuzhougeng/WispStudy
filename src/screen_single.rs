@@ -17,7 +17,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use wisp_core::ai;
 use wisp_core::model::{FULLTEXTS, Paper, SCREENINGS};
-use wisp_core::screening::{self, Before, Confirming, DECISIONS, Round};
+use wisp_core::screening::{self, Confirming, DECISIONS, Round};
 use wisp_core::settings::Task;
 use wisp_core::store::translation_key;
 
@@ -55,6 +55,8 @@ impl Workspace {
                 let Some(lib) = self.lib.as_mut() else { return };
                 if mode == ScreenMode::Confirm && lib.screen.running() { return self.say(t("助手还在判断，等这一轮结束再确认。"), cx) }
                 (lib.page, lib.reading) = (Page::Screen, false);
+                // Another face, or a new round: the decisions from here on are another write of 筛选记录.
+                lib.screen.open = None;
                 // The paper beside the page stays beside it, on the paper the round opens with.
                 let beside = lib.selected.is_some();
                 match mode {
@@ -96,25 +98,20 @@ impl Workspace {
             Cmd::ScreenDecide(id, status) => {
                 let Some(lib) = self.lib.as_ref() else { return };
                 let Some(paper) = lib.paper(&id) else { return };
-                let before = Before::of(paper);
-                let reason = screening::reason_for(paper, lib.current_suggestion(&id), &status);
+                let decision = crate::screen_record::decision(paper, &status, &screening::reason_for(paper, lib.current_suggestion(&id), &status));
                 let single = lib.screen.mode == ScreenMode::Single;
                 // In the queue, the paper after this one comes up next; the one before when it was the last.
                 let queue: Vec<&str> = lib.screen_view().0.iter().map(|p| p.id.as_str()).collect();
                 let next = queue.iter().position(|p| *p == id).and_then(|at| queue.get(at + 1).or(at.checked_sub(1).and_then(|before| queue.get(before)))).map(|p| p.to_string());
-                if !self.edit_paper(&id, cx, |p| p.decide(&status, &reason)) { return }
+                if !self.record_decision(decision, cx) { return }
                 if single {
-                    if let Some(lib) = self.lib.as_mut() { lib.screen.round.decided(before) }
+                    if let Some(lib) = self.lib.as_mut() { lib.screen.round.decided(&id) }
                     self.round_moved(window, cx);
                 } else {
                     self.select(next, window, cx);
                 }
             }
-            Cmd::ScreenUndo => {
-                let Some(before) = self.lib.as_mut().and_then(|lib| lib.screen.round.undo()) else { return };
-                if self.edit_paper(&before.paper_id, cx, |p| before.restore(p)) { self.say(tf!("已撤销：回到「{}」。", "Undone: back to “{}”.", label(&SCREENINGS, &before.screening)), cx) }
-                self.round_moved(window, cx);
-            }
+            Cmd::ScreenUndo => self.screen_undo(window, cx),
             Cmd::ScreenAskOne(id) => {
                 if self.lib.as_ref().is_some_and(|lib| lib.screen.running()) { return self.say(t("助手正在判断别的文献，等这一轮结束。"), cx) }
                 self.screen_start("pending", Some(vec![id]), cx);
@@ -151,7 +148,7 @@ impl Workspace {
     }
 
     /// The round shows another paper: from its top, in view in the rail, and beside the page when a paper was open there.
-    fn round_moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn round_moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
         lib.screen.paper_scroll = ScrollHandle::new();
         lib.screen.rail_scroll.scroll_to_item(lib.screen.round.at.min(lib.screen.round.ids.len().saturating_sub(1)), ScrollStrategy::Center);
@@ -171,9 +168,10 @@ impl Workspace {
         // 提取 hears the same keys for its own rows.
         if self.lib.as_ref().is_some_and(|lib| lib.page == Page::Extract) { return self.extract_key(key, window, cx) }
         let Some(lib) = self.lib.as_ref().filter(|lib| lib.page == Page::Screen) else { return };
+        // Z takes back the last step of this visit to the page, on any of its faces (`screen_record.rs`).
+        if key == "z" { return self.run(Cmd::ScreenUndo, window, cx) }
         if lib.screen.mode == ScreenMode::Confirm { return self.confirm_key(key, window, cx) }
         let single = lib.screen.mode == ScreenMode::Single;
-        if single && key == "z" { return self.run(Cmd::ScreenUndo, window, cx) }
         let paper = if single { lib.round_paper() } else { lib.selected_paper().filter(|paper| lib.screen_view().0.iter().any(|queued| queued.id == paper.id)) };
         let Some(id) = paper.map(|paper| paper.id.clone()) else { return };
         let cmd = match key {
@@ -412,7 +410,7 @@ impl Workspace {
                 .when(mine, |d| d.child(ui::icon("check", 13., color)))
                 .when(advised && !mine, |d| d.child(div().text_size(text_px(11.)).text_color(Theme::accent()).child(t("建议"))))
         }).collect();
-        let undo = lib.screen.round.can_undo().then(|| ui::ghost_button("round-undo", None, Some(t("撤销上一个判断").into())).h(text_px(26.)).text_size(text_px(12.)).on_click(self.on(Cmd::ScreenUndo, cx)));
+        let undo = self.screen_can_undo().then(|| ui::ghost_button("round-undo", None, Some(t("撤销上一个判断").into())).h(text_px(26.)).text_size(text_px(12.)).on_click(self.on(Cmd::ScreenUndo, cx)));
         div()
             .flex()
             .flex_col()
@@ -486,7 +484,7 @@ impl Workspace {
                     .child(ui::secondary_button("round-review", t("从头回看")).on_click(self.on(Cmd::ScreenGo(0), cx)))
                     .child(ui::secondary_button("round-leave", t("回到队列")).on_click(self.on(Cmd::ScreenMode(ScreenMode::Batch), cx))),
             )
-            .when(round.can_undo(), |d| d.child(ui::ghost_button("round-end-undo", None, Some(t("撤销上一个判断").into())).h(text_px(26.)).text_size(text_px(12.)).on_click(self.on(Cmd::ScreenUndo, cx))))
+            .when(self.screen_can_undo(), |d| d.child(ui::ghost_button("round-end-undo", None, Some(t("撤销上一个判断").into())).h(text_px(26.)).text_size(text_px(12.)).on_click(self.on(Cmd::ScreenUndo, cx))))
             .into_any_element()
     }
 
