@@ -1132,20 +1132,27 @@ impl Workspace {
         if block.len() < 2 { return None }
         // The open section is the page's first level: its subsections are drawn a level under it.
         let top = manuscript.sections[at].level;
+        // Centred by a row that the editor's column stretches, as 预览 is. A width in percent does not reach this
+        // far down the column: with `w_full().mx_auto()` the block was as wide as its longest line and stood in the
+        // middle, so under 铺满 the subsections began right of the section's own text and had a short rule.
         Some(
             div()
                 .flex()
-                .flex_col()
-                .gap(px(14.))
-                .w_full()
-                .max_w(theme::manuscript_width())
-                .mx_auto()
-                .px(px(18.))
-                .pt(px(14.))
-                .pb(px(24.))
-                .border_t_1()
-                .border_color(Theme::line())
-                .children((block.start + 1..block.end).map(|n| self.render_section_read(n, top, true, window, cx)))
+                .justify_center()
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(14.))
+                        .w_full()
+                        .max_w(theme::manuscript_width())
+                        .px(px(18.))
+                        .pt(px(14.))
+                        .pb(px(24.))
+                        .border_t_1()
+                        .border_color(Theme::line())
+                        .children((block.start + 1..block.end).map(|n| self.render_section_read(n, top, true, window, cx))),
+                )
                 .into_any_element(),
         )
     }
