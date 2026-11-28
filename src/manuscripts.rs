@@ -113,7 +113,7 @@ fn latest_section(manuscript: &Manuscript) -> &str {
     manuscript.sections.iter().map(|s| s.updated_at.as_str()).max().unwrap_or("")
 }
 
-fn file_name(title: &str) -> String {
+pub(crate) fn file_name(title: &str) -> String {
     let name: String = title.replace(['/', '\\', ':', '*', '?', '"', '<', '>', '|'], "-").trim().chars().take(80).collect();
     if name.is_empty() { manuscript::UNTITLED.to_string() } else { name }
 }
@@ -142,7 +142,7 @@ fn answer_source_labels(answer: &str, sources: &[wisp_core::ai::Source], papers:
 }
 
 /// Copy the pictures a Markdown file written at `path` names to the same places beside it, and say so in words.
-fn pictures_beside(path: &std::path::Path, pictures: &[(String, std::path::PathBuf)]) -> String {
+pub(crate) fn pictures_beside(path: &std::path::Path, pictures: &[(String, std::path::PathBuf)]) -> String {
     let beside = path.parent().map(std::path::Path::to_path_buf).unwrap_or_default();
     let copied = pictures
         .iter()
@@ -256,8 +256,9 @@ impl Workspace {
 
     /// Make sure the library has a manuscript to write in.
     pub(crate) fn write_ensure(&mut self, cx: &mut Context<Self>) {
+        let default_lang = self.settings.default_write_language();
         let Some(lib) = self.lib.as_mut().filter(|l| l.writing.manuscripts.is_empty()) else { return };
-        match lib.store.create_manuscript("", manuscript::DEFAULT_LANGUAGE) {
+        match lib.store.create_manuscript("", default_lang) {
             Ok(made) => {
                 let (id, section) = (made.id.clone(), made.sections.get(1).map(|s| s.id.clone()).unwrap_or_default());
                 lib.writing.manuscripts.push(made);
@@ -425,8 +426,9 @@ impl Workspace {
                 self.write_show(id, section, cx);
             }
             Cmd::NewManuscript => {
+                let configured = (!self.settings.write_language.is_empty()).then(|| self.settings.default_write_language().to_string());
                 let Some(lib) = self.lib.as_mut() else { return };
-                let language = lib.writing.language().to_string();
+                let language = configured.unwrap_or_else(|| lib.writing.language().to_string());
                 match lib.store.create_manuscript("", &language) {
                     Ok(made) => {
                         let (id, section) = (made.id.clone(), made.sections.get(1).map(|s| s.id.clone()).unwrap_or_default());
@@ -460,7 +462,8 @@ impl Workspace {
                 let Some(lib) = self.lib.as_mut() else { return };
                 let id = lib.writing.manuscript.clone();
                 if let Err(err) = lib.store.set_manuscript_language(&id, &code) { return self.fail(format!("{err:#}"), cx) }
-                if let Some(m) = lib.writing.manuscripts.iter_mut().find(|m| m.id == id) { m.language = code }
+                self.write_reload(None, cx);
+                if self.write_facing_shown() { self.translate_entered(cx) }
             }
             Cmd::EditSection(editing) => {
                 let Some(lib) = self.lib.as_ref() else { return };
@@ -690,7 +693,7 @@ impl Workspace {
     }
 
     /// The manuscript as a Word file with its comments, and what was done in words: one that came from a Word file is that file written again.
-    fn manuscript_word(&self, manuscript: &Manuscript, track: bool) -> Result<(Vec<u8>, String), String> {
+    pub(crate) fn manuscript_word(&self, manuscript: &Manuscript, track: bool) -> Result<(Vec<u8>, String), String> {
         let Some(lib) = self.lib.as_ref() else { return Err(String::new()) };
         let mut comments = lib.store.comments(&manuscript.id).map_err(|err| format!("{err:#}"))?;
         // The assistant's comments are known by where they are from, not by its name: the file names it in the interface's language.
@@ -719,7 +722,7 @@ impl Workspace {
     /// The pictures a manuscript's Markdown names, with where each is kept. The file names them by their place in
     /// the library (`figures/…`): copied to the same place beside it (`pictures_beside`), it reads the same there
     /// and Pandoc finds them.
-    fn markdown_pictures(&self, manuscript: &Manuscript) -> Vec<(String, std::path::PathBuf)> {
+    pub(crate) fn markdown_pictures(&self, manuscript: &Manuscript) -> Vec<(String, std::path::PathBuf)> {
         let Some(lib) = self.lib.as_ref() else { return vec![] };
         manuscript::pictures_used(manuscript).into_iter().map(|address| (address.clone(), lib.store.root().join(address.replace('/', std::path::MAIN_SEPARATOR_STR)))).collect()
     }
@@ -1036,30 +1039,61 @@ impl Workspace {
             .on_click(self.on(Cmd::WriteReading(!reading), cx))
             .tooltip(move |_, cx| cx.new(|_| crate::write_assist::Tip(preview_tip.to_string())).into())
             .child(ui::icon("eye", 14., if reading { Theme::accent() } else { Theme::text_secondary() }));
-        // 译文对照: what is on show with each paragraph's translation beside it (write_facing.rs). Another way of looking at
-        // the manuscript, so it stands right of the eye; lit while on. From a section being written it is that section,
-        // in its place; from 预览 the whole manuscript.
+        // 语言配置（主稿写作语言 → 目标译文语言）+ 一键译稿开关: paired side-by-side so the writer sees what language
+        // they are drafting in, what language it translates into, and can configure both in one popover.
         let facing = writing.reading && writing.facing;
+        let target_code = self.write_facing_language();
+        let target_name = label(&LANGUAGES, target_code);
+        let has_version = writing.translate.versions.get(&manuscript.id).is_some_and(|list| !list.is_empty());
+        let lang_open = self.menu.as_ref().is_some_and(|m| m.kind == MenuKind::WriteLanguage);
+        let lang_tip = tf!(
+            "写作语言（主稿）：{language} → 目标译文：{target_name}\n点击同时设置主稿写作语言与目标译文语言",
+            "Writing language (primary): {language} → Target translation: {target_name}\nClick to configure primary and translation languages"
+        );
+        let language_button = div()
+            .id("write-language")
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(4.))
+            .h(text_px(26.))
+            .px(px(8.))
+            .rounded(px(6.))
+            .cursor_pointer()
+            .text_size(text_px(12.))
+            .when(lang_open, |d| d.bg(Theme::accent_soft()).text_color(Theme::accent()))
+            .when(!lang_open, |d| d.text_color(Theme::text()).hover(|s| s.bg(Theme::hover())))
+            .on_click(self.on_menu(MenuKind::WriteLanguage, cx))
+            .tooltip(move |_, cx| cx.new(|_| crate::write_assist::Tip(lang_tip.clone())).into())
+            .when(roomy, |d| d.child(div().text_color(if lang_open { Theme::accent() } else { Theme::text_tertiary() }).child(t("写作："))))
+            .child(format!("{language} → {target_name}"))
+            .child(ui::icon("chevron-down", 11., if lang_open { Theme::accent() } else { Theme::text_tertiary() }));
         let facing_tip = match (facing, writing.facing_section() || !writing.reading) {
-            (true, true) => t("译文对照：开。再点一下收起译文，回到这一节写"),
-            (true, false) => t("译文对照：开。再点一下收起译文，只看原文"),
-            (false, true) => t("译文对照与翻译：这一节每一段的译文排在它旁边，就在这一节里看；保留成译稿后可以修改，并跟着原文变"),
-            (false, false) => t("译文对照与翻译：预览全文，每一段的译文排在它旁边；保留成译稿后可以修改，并跟着原文变"),
+            (true, true) => t("译稿模式：开。再点一下收起译稿，回到这一节继续写").to_string(),
+            (true, false) => t("译稿模式：开。再点一下收起译稿，回到原文预览").to_string(),
+            (false, true) => tf!("打开{target_name}译稿：自动逐段翻译，支持逐段或逐句修改并导出投稿；原文改动自动同步", "Open {target_name} version: translate automatically, edit by paragraph or sentence, and export"),
+            (false, false) => tf!("打开全文{target_name}译稿：自动逐段翻译，支持逐段或逐句修改并导出投稿", "Open full {target_name} version: translate automatically, edit by paragraph or sentence, and export"),
         };
+        let facing_cmd = if facing { Cmd::WriteFacing(false) } else { Cmd::Translate(crate::write_translate::Do::Open) };
         let facing_button = div()
             .id("write-facing")
             .flex()
             .flex_none()
             .items_center()
             .justify_center()
-            .size(text_px(26.))
+            .gap(px(5.))
+            .h(text_px(26.))
+            .px(px(if roomy { 8. } else { 6. }))
             .rounded(px(6.))
             .cursor_pointer()
-            .when(facing, |d| d.bg(Theme::accent_soft()))
-            .when(!facing, |d| d.hover(|s| s.bg(Theme::hover())))
-            .on_click(self.on(Cmd::WriteFacing(!facing), cx))
-            .tooltip(move |_, cx| cx.new(|_| crate::write_assist::Tip(facing_tip.to_string())).into())
-            .child(ui::icon("languages", 14., if facing { Theme::accent() } else { Theme::text_secondary() }));
+            .text_size(text_px(12.))
+            .border_1()
+            .when(facing, |d| d.bg(Theme::accent_soft()).text_color(Theme::accent()).border_color(Theme::accent().opacity(0.35)).font_weight(FontWeight::MEDIUM))
+            .when(!facing, |d| d.border_color(if has_version { Theme::accent().opacity(0.28) } else { Theme::line() }).text_color(if has_version { Theme::accent() } else { Theme::text_secondary() }).hover(|s| s.bg(Theme::hover())))
+            .on_click(self.on(facing_cmd, cx))
+            .tooltip(move |_, cx| cx.new(|_| crate::write_assist::Tip(facing_tip.clone())).into())
+            .child(ui::icon("languages", 14., if facing || has_version { Theme::accent() } else { Theme::text_secondary() }))
+            .when(roomy, |d| d.child(t("译稿")));
         // 引用卡片: whether a citation the pointer is on shows its card. A way of looking at the manuscript, so it stands here, in either
         // mode of 写作, and not among the tools for a paragraph. Lit while on; following a citation with a click works either way.
         let cards = !self.settings.citation_cards_hidden;
@@ -1130,10 +1164,10 @@ impl Workspace {
                     .child(cards_button)
                     // 预览 shows the whole manuscript as it reads, Markdown drawn; lit while it does, a click goes back to writing.
                     .child(preview)
-                    .child(facing_button)
                     .child(fill_button)
-                    // The language is said even in a narrow column: there is no icon that says it. A menu button reads 文字 ⌄, as 版面 does.
-                    .child(ui::ghost_button("write-language", None, None).h(text_px(26.)).px(px(7.)).gap(px(4.)).text_size(text_px(12.)).child(language.to_string()).child(ui::icon("chevron-down", 11., Theme::text_tertiary())).on_click(self.on_menu(MenuKind::WriteLanguage, cx)))
+                    // Primary + target language configuration popover, paired with the 1-click 译稿 toggle.
+                    .child(language_button)
+                    .child(facing_button)
                     .children(if self.settings.agent_writing && !self.in_draft() { self.render_version_stepper(cx) } else { None })
                     .child(tool("write-history", "history", None).on_click(self.on(Cmd::WriteHistory, cx)))
                     .child(tool("write-export", "export", Some(t("导出").into())).on_click(self.on_menu(MenuKind::ManuscriptExport, cx)))
@@ -1141,6 +1175,200 @@ impl Workspace {
                     .when(self.in_draft(), |d| d.child(ui::ghost_button("draft-manuscript-close", Some("x"), None).h(text_px(26.)).px(px(7.)).tooltip(ui::tip(t("关闭稿件：对话占满页面，稿件留在对话里，点对话上方的「稿件」再打开"))).on_click(self.on(Cmd::Draft(crate::draft::Do::Manuscript(false)), cx)))),
             )
             .when(!outlined, |d| d.child(div().flex().items_center().flex_wrap().gap(px(6.)).px(px(16.)).pt(px(12.)).children(pills).child(add)))
+    }
+
+    /// Unified popover opened from `write-language`: explains and configures BOTH the primary writing language
+    /// and the target translation language in one place, with an option to save as default and open the version.
+    pub(crate) fn render_write_language_layer(
+        &self,
+        from: Option<(Bounds<Pixels>, crate::menus::MenuSide)>,
+        at: Point<Pixels>,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let lib = self.lib.as_ref()?;
+        let writing = &lib.writing;
+        let manuscript = writing.current()?;
+        let primary = manuscript.language.clone();
+        let target = self.write_facing_language().to_string();
+        let target_name = label(&LANGUAGES, &target).to_string();
+        let facing = writing.reading && writing.facing;
+        let versions = writing.translate.versions.get(&manuscript.id).cloned().unwrap_or_default();
+
+        let chip = |id: ElementId, text: String, chosen: bool| {
+            div()
+                .id(id)
+                .flex()
+                .flex_none()
+                .items_center()
+                .h(text_px(26.))
+                .px(px(10.))
+                .rounded(px(6.))
+                .border_1()
+                .cursor_pointer()
+                .text_size(text_px(12.))
+                .when(chosen, |d| d.bg(Theme::accent_soft()).border_color(Theme::accent().opacity(0.45)).text_color(Theme::accent()).font_weight(FontWeight::MEDIUM))
+                .when(!chosen, |d| d.border_color(Theme::line()).text_color(Theme::text_secondary()).hover(|s| s.bg(Theme::hover())))
+                .child(text)
+        };
+
+        let primary_chips: Vec<AnyElement> = LANGUAGES
+            .iter()
+            .map(|&(code, name)| {
+                let chosen = primary == code;
+                let code_owned = code.to_string();
+                chip(SharedString::from(format!("wlang-primary-{code}")).into(), t(name).to_string(), chosen)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let Some(lib) = this.lib.as_mut() else { return };
+                        let id = lib.writing.manuscript.clone();
+                        if let Err(err) = lib.store.set_manuscript_language(&id, &code_owned) {
+                            return this.fail(format!("{err:#}"), cx);
+                        }
+                        this.write_reload(None, cx);
+                        if this.settings.write_facing_language == code_owned {
+                            let fallback = wisp_core::bilingual::language("", &code_owned, if crate::i18n::is_english() { "en" } else { "zh" });
+                            this.settings.write_facing_language = fallback.to_string();
+                            this.save_settings(cx);
+                        }
+                        if this.write_facing_shown() {
+                            let next_target = this.write_facing_language().to_string();
+                            this.translate_language(next_target, cx);
+                        }
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            })
+            .collect();
+
+        let target_chips: Vec<AnyElement> = LANGUAGES
+            .iter()
+            .filter(|&&(code, _)| code != primary)
+            .map(|&(code, name)| {
+                let chosen = target == code;
+                let kept = versions.iter().any(|v| v == code);
+                let text = if kept { format!("{} · {}", t(name), t("译稿")) } else { t(name).to_string() };
+                let code_owned = code.to_string();
+                chip(SharedString::from(format!("wlang-target-{code}")).into(), text, chosen)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.settings.write_facing_language = code_owned.clone();
+                        this.save_settings(cx);
+                        if this.write_facing_shown() {
+                            this.translate_language(code_owned.clone(), cx);
+                        }
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            })
+            .collect();
+
+        let is_default = self.settings.default_write_language() == primary && self.write_facing_language() == target && !self.settings.write_language.is_empty() && !self.settings.write_facing_language.is_empty();
+        let (save_primary, save_target) = (primary.clone(), target.clone());
+        let default_control = if is_default {
+            div().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(t("✓ 已是新建稿件默认")).into_any_element()
+        } else {
+            div()
+                .id("wlang-save-default")
+                .px(px(6.))
+                .py(px(3.))
+                .mx(px(-6.))
+                .rounded(px(5.))
+                .cursor_pointer()
+                .text_size(text_px(11.5))
+                .text_color(Theme::accent())
+                .hover(|s| s.bg(Theme::hover()))
+                .tooltip(ui::tip(t("以后新建的稿件也默认使用这套写作语言与译文语言")))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.settings.write_language = save_primary.clone();
+                    this.settings.write_facing_language = save_target.clone();
+                    this.save_settings(cx);
+                    cx.notify();
+                }))
+                .child(t("设为新建默认"))
+                .into_any_element()
+        };
+
+        let open_target = target.clone();
+        let right_actions = if facing {
+            div()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .child(ui::secondary_button("wlang-fold", t("收起译稿")).h(text_px(26.)).px(px(10.)).text_size(text_px(12.)).on_click(self.on(Cmd::WriteFacing(false), cx)))
+                .child(
+                    ui::primary_button("wlang-close", t("完成"))
+                        .h(text_px(26.))
+                        .px(px(10.))
+                        .text_size(text_px(12.))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.menu = None;
+                            cx.notify();
+                        })),
+                )
+        } else {
+            div().flex().items_center().child(
+                ui::primary_button("wlang-open-translate", tf!("开启{target_name}译稿", "Open {target_name} version"))
+                    .h(text_px(26.))
+                    .px(px(11.))
+                    .text_size(text_px(12.))
+                    .on_click(self.on(Cmd::Translate(crate::write_translate::Do::Language(open_target)), cx)),
+            )
+        };
+
+        let section_head = |title: &'static str, desc: &'static str| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .child(div().text_size(text_px(12.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text()).child(t(title)))
+                .child(div().text_size(text_px(11.)).line_height(text_px(16.)).text_color(Theme::text_tertiary()).child(t(desc)))
+        };
+
+        let card = ui::popover()
+            .id("write-language-popover")
+            .w(px(356.))
+            .max_w(px(356.))
+            .p(px(14.))
+            .gap(px(12.))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(section_head("写作语言（主稿）", "你动笔起草所用的语言；文献候选句检索、润色与改写均以此为准。"))
+                    .child(div().flex().flex_wrap().gap(px(6.)).children(primary_chips)),
+            )
+            .child(div().h(px(1.)).bg(Theme::line()))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(section_head("译文语言（目标语）", "主稿自动翻译成的目标语言；支持逐段或逐句修改，改完即可导出投稿。"))
+                    .child(div().flex().flex_wrap().gap(px(6.)).children(target_chips)),
+            )
+            .child(div().h(px(1.)).bg(Theme::line()))
+            .child(div().flex().items_center().justify_between().gap(px(8.)).child(default_control).child(right_actions));
+
+        let (corner, pos) = from.map_or((Corner::TopLeft, at), |(bounds, side)| crate::app::menu_place(bounds, side, px(280.), window.viewport_size().height));
+        let close = |this: &mut Self, _: &MouseDownEvent, _: &mut Window, cx: &mut Context<Self>| {
+            this.menu = None;
+            cx.notify();
+        };
+        Some(
+            div()
+                .id("menu-layer")
+                .absolute()
+                .top_0()
+                .left_0()
+                .size_full()
+                .occlude()
+                .on_mouse_down(MouseButton::Left, cx.listener(close))
+                .on_mouse_down(MouseButton::Right, cx.listener(close))
+                .child(anchored().anchor(corner).position(pos).snap_to_window_with_margin(px(8.)).child(card))
+                .into_any_element(),
+        )
     }
 
     /// The whole manuscript, to be read through; a heading opens its section. Its words can be selected, copied and

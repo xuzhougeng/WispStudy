@@ -1595,9 +1595,30 @@ impl Store {
         Ok(())
     }
 
+    /// Change the language a manuscript is written in, and rename any section whose name is still the untouched
+    /// default of the previous language (`Abstract` ↔ `摘要`, `Text` ↔ `正文`).
     pub fn set_manuscript_language(&mut self, id: &str, language: &str) -> Result<()> {
         if !is_language(language) { bail!("不认识这种语言：{language}") }
-        self.db.execute("UPDATE manuscripts SET language = ?2, updated_at = ?3 WHERE id = ?1", params![id, language, now_iso()])?;
+        let old: Option<String> = self.db.query_row("SELECT language FROM manuscripts WHERE id = ?1", [id], |r| r.get(0)).optional()?;
+        let sections = self.sections_of(id)?;
+        let now = now_iso();
+        let tx = self.db.transaction()?;
+        tx.execute("UPDATE manuscripts SET language = ?2, updated_at = ?3 WHERE id = ?1", params![id, language, now])?;
+        if let Some(old) = old.filter(|old| old != language) {
+            for section in sections {
+                let renamed = if section.bare && matches!(section.name.as_str(), "正文" | "Text") {
+                    Some(if language == "zh" { "正文".to_string() } else { "Text".to_string() })
+                } else if !section.bare && section.kind != "other" && section.name == default_name(&section.kind, &old) {
+                    Some(default_name(&section.kind, language))
+                } else {
+                    None
+                };
+                if let Some(name) = renamed {
+                    tx.execute("UPDATE manuscript_sections SET name = ?2 WHERE id = ?1", params![section.id, name])?;
+                }
+            }
+        }
+        tx.commit()?;
         Ok(())
     }
 
@@ -2084,6 +2105,14 @@ mod tests {
         assert_eq!(zh.sections[1].name, "导言");
         assert!(store.create_manuscript("x", "klingon").is_err());
         assert_eq!(store.manuscripts().unwrap().len(), 2);
+        // Switching language updates untouched default IMRaD section names while keeping custom ones.
+        store.edit_section(&en.sections[2].id, "Custom Methods", "methods").unwrap();
+        store.set_manuscript_language(&en.id, "zh").unwrap();
+        let switched = store.manuscript(&en.id).unwrap().unwrap();
+        assert_eq!(switched.language, "zh");
+        assert_eq!(switched.sections[0].name, "摘要");
+        assert_eq!(switched.sections[1].name, "导言");
+        assert_eq!(switched.sections[2].name, "Custom Methods");
         store.remove_manuscript(&en.id).unwrap();
         assert_eq!(store.manuscripts().unwrap().iter().map(|m| m.title.as_str()).collect::<Vec<_>>(), ["根系"]);
     }

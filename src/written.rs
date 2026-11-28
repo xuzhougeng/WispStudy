@@ -132,7 +132,13 @@ impl Workspace {
     /// A manuscript in no library, begun now: its conversation is made, and its window opens on the manuscript, the
     /// title first. `asked` is what the home page's box held: it waits in the conversation's box, not sent.
     pub(crate) fn write_unbound(&mut self, asked: String, window: &mut Window, cx: &mut Context<Self>) {
-        let language = if crate::i18n::is_english() { "en" } else { "zh" };
+        let language = if !self.settings.write_language.is_empty() {
+            self.settings.default_write_language()
+        } else if crate::i18n::is_english() {
+            "en"
+        } else {
+            "zh"
+        };
         let (info, manuscript) = match libraries::create_writing(&self.root, t(wisp_core::manuscript::UNTITLED), language) {
             Ok(made) => made,
             Err(err) => return self.fail(format!("{err:#}"), cx),

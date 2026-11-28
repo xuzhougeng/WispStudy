@@ -738,19 +738,69 @@ impl Workspace {
         )
     }
 
-    /// 设置 › 写作: whose name a Word file's comments carry, and the style manuscripts cite in.
+    /// 设置 › 写作: default writing & translation languages, whose name a Word file's comments carry, and citation styles.
     pub(crate) fn writing_page(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
+        use crate::i18n::label;
+        use crate::menus::MenuKind;
         use crate::settings::{button, group, note, row};
+        use wisp_core::manuscript::LANGUAGES;
         let Some(view) = &self.settings_view else { return div().into_any_element() };
         let column = self.column_width(window);
         // The list scrolls in its card, which is as tall as the window leaves it: the page itself stays put.
-        let height = (f32::from(window.viewport_size().height) - 300.).clamp(300., 720.);
+        let height = (f32::from(window.viewport_size().height) - 360.).clamp(280., 680.);
+        let write_code = self.settings.default_write_language();
+        let write_label = format!("{} ({write_code})", label(&LANGUAGES, write_code));
+        let facing_label = match LANGUAGES.iter().find(|(code, _)| *code == self.settings.write_facing_language) {
+            Some((code, name)) => format!("{} ({code})", t(name)),
+            None => t("自动（中英互译）").to_string(),
+        };
+        let picker = |id: &'static str, text: String, menu: MenuKind, cx: &mut Context<Self>| {
+            div()
+                .id(id)
+                .flex()
+                .flex_none()
+                .items_center()
+                .gap(px(6.))
+                .h(text_px(28.))
+                .px(px(10.))
+                .rounded(px(7.))
+                .cursor_pointer()
+                .text_size(text_px(12.))
+                .text_color(Theme::text())
+                .bg(Theme::hover())
+                .hover(|s| s.bg(Theme::pressed()))
+                .on_click(self.on_menu(menu, cx))
+                .child(text)
+                .child(ui::icon("chevron-down", 12., Theme::text_tertiary()))
+        };
         div()
             .flex()
             .flex_col()
             .w(px(column))
             .gap(px(24.))
-            .child(group(None, vec![row(t("署名"), Some(t("导出到 Word 的批注和修订用这个名字；留空用这台电脑的用户名。").into()), div().w(px(320.)).child(ui::field(&view.author, window, cx))).into_any_element()]))
+            .child(group(
+                None,
+                vec![
+                    row(
+                        t("默认写作语言"),
+                        Some(t("新建稿件默认使用的语言（如设为中文即可用母语起草）；在写作页顶栏也可按份切换。").into()),
+                        picker("settings-write-language", write_label, MenuKind::DefaultWriteLanguage, cx),
+                    )
+                    .into_any_element(),
+                    row(
+                        t("默认译稿语言"),
+                        Some(t("点开「译稿」时默认翻译成的目标语言，支持逐段或逐句修改并导出投稿。").into()),
+                        picker("settings-facing-language", facing_label, MenuKind::DefaultFacingLanguage, cx),
+                    )
+                    .into_any_element(),
+                    row(
+                        t("署名"),
+                        Some(t("导出到 Word 的批注和修订用这个名字；留空用这台电脑的用户名。").into()),
+                        div().w(px(320.)).child(ui::field(&view.author, window, cx)),
+                    )
+                    .into_any_element(),
+                ],
+            ))
             .child(
                 div()
                     .flex()

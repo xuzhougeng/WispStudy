@@ -10,7 +10,7 @@ use std::sync::Arc;
 use wisp_core::selection::{self, Unit};
 use unicode_segmentation::UnicodeSegmentation;
 
-actions!(text_input, [Backspace, Delete, Left, Right, SelectLeft, SelectRight, Home, End, SelectHome, SelectEnd, SelectAll, Copy, Cut, Paste, Enter, ShiftEnter, Escape, Up, Down, Complete, Undo, Redo, Bold, Italic]);
+actions!(text_input, [Backspace, Delete, Left, Right, SelectLeft, SelectRight, Home, End, SelectHome, SelectEnd, SelectAll, Copy, Cut, Paste, Enter, ShiftEnter, SubmitNow, Escape, Up, Down, Complete, Undo, Redo, Bold, Italic]);
 
 pub fn bind_keys(cx: &mut App) {
     let c = Some("TextInput");
@@ -31,6 +31,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-v", Paste, c),
         KeyBinding::new("enter", Enter, c),
         KeyBinding::new("shift-enter", ShiftEnter, c),
+        KeyBinding::new("secondary-enter", SubmitNow, c),
         KeyBinding::new("escape", Escape, c),
         KeyBinding::new("up", Up, c),
         KeyBinding::new("down", Down, c),
@@ -1011,6 +1012,7 @@ impl Render for TextInput {
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::enter))
             .on_action(cx.listener(Self::shift_enter))
+            .on_action(cx.listener(|_, _: &SubmitNow, _, cx| cx.emit(InputEvent::Submit)))
             .on_action(cx.listener(Self::escape))
             .on_action(cx.listener(Self::up))
             .on_action(cx.listener(Self::down))
