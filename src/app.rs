@@ -214,6 +214,9 @@ pub struct Writing {
     pub facing_whole: bool,
     /// The paragraph of the section read beside its translation to keep in view: the caret's when it was turned on.
     pub facing_reveal: Option<crate::write_facing::Reveal>,
+    /// Whether the column 译文对照 or 翻译 was last drawn in had room for two halves side by side, whichever was drawn
+    /// (`write_facing::halves_fit`, set by `render_manuscript_column`): the menu of where the translation stands says so when it had not.
+    pub facing_room: std::cell::Cell<bool>,
     /// 翻译: the versions of the manuscripts in other languages, and the work on the one on show (`write_translate.rs`).
     pub translate: crate::write_translate::Translating,
     /// The manuscript's title, edited in place.
@@ -1153,7 +1156,7 @@ impl Workspace {
         subscriptions.extend(heard);
         let seek = crate::write_seek::Seek::new(&mut subscriptions, cx);
         let translate = crate::write_translate::Translating::new(&mut subscriptions, cx);
-        let writing = Writing { manuscripts, manuscript, section_id, reading: false, facing: false, facing_whole: false, facing_reveal: None, translate, title, typed: 0, editor, find, search: Default::default(), structures: BTreeMap::new(), sorting: Sorting::default(), scroll: ScrollHandle::new(), assist: crate::write_assist::Assisting::new(&mut subscriptions, window, cx), revise: Default::default(), comments, editor_scroll: ScrollHandle::new(), side: Side::default(), side_open: false, agent: Default::default(), seek, read: Default::default(), away: false };
+        let writing = Writing { manuscripts, manuscript, section_id, reading: false, facing: false, facing_whole: false, facing_reveal: None, facing_room: std::cell::Cell::new(true), translate, title, typed: 0, editor, find, search: Default::default(), structures: BTreeMap::new(), sorting: Sorting::default(), scroll: ScrollHandle::new(), assist: crate::write_assist::Assisting::new(&mut subscriptions, window, cx), revise: Default::default(), comments, editor_scroll: ScrollHandle::new(), side: Side::default(), side_open: false, agent: Default::default(), seek, read: Default::default(), away: false };
         let citing = crate::cite::Citing::new(&store, &writing.manuscript, &mut subscriptions, cx);
         let glossary = crate::glossary::Glossary::new(&mut subscriptions, window, cx);
         let gallery = crate::figures::Gallery::new(&mut subscriptions, cx);

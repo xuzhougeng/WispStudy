@@ -188,6 +188,9 @@ pub struct Settings {
     /// 译文对照: the language a manuscript is read beside, a code of `manuscript::LANGUAGES`; empty leaves it to
     /// `bilingual::language` (the interface's, or the other of Chinese and English).
     pub write_facing_language: String,
+    /// 译文对照 and 翻译: each translation under its paragraph, the page one reading width (逐段交替), instead of
+    /// beside it in a half of its own (左右对照). A column too narrow for two halves has it under its paragraph either way.
+    pub write_facing_interleaved: bool,
     /// 译成… and 换个说法 asked of several models at once, by their ids (`Model::id`), in the order chosen: with two or
     /// more that can be asked, each gives one version and the card compares them (`compare_profiles`); with fewer,
     /// the one model gives three versions of a stated difference. Nothing else is asked of them.
@@ -212,7 +215,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let providers = provider::DEFAULT_PRESETS.iter().filter_map(|key| provider::preset(key)).map(Provider::from_preset).collect();
-        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), chat_effort: String::new(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), play_speed: 1., commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, work_animation: true, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), proxy_off: false, contact_email: String::new(), ncbi_api_key: String::new(), contact_hint_dismissed: false, web_search: Default::default(), ocr: Default::default(), asr: Default::default(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, pdf_split_free: false, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, write_facing_language: String::new(), compare_models: vec![], library_order: vec![], days_used: 0, last_used_day: String::new(), star_answered: false, home_list: false, tour_step: 0, tour_done: false };
+        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), chat_effort: String::new(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), play_speed: 1., commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, work_animation: true, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), proxy_off: false, contact_email: String::new(), ncbi_api_key: String::new(), contact_hint_dismissed: false, web_search: Default::default(), ocr: Default::default(), asr: Default::default(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, pdf_split_free: false, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, write_facing_language: String::new(), write_facing_interleaved: false, compare_models: vec![], library_order: vec![], days_used: 0, last_used_day: String::new(), star_answered: false, home_list: false, tour_step: 0, tour_done: false };
         settings.tidy();
         settings
     }
@@ -889,6 +892,10 @@ mod tests {
         assert!(!loaded.facing_in_place);
         let in_place: Settings = serde_json::from_str(&serde_json::to_string(&Settings { facing_in_place: true, ..loaded.clone() }).unwrap()).unwrap();
         assert!(in_place.facing_in_place);
+        // 写作's translation beside its paragraph is what old settings mean; under it is kept once chosen.
+        assert!(!loaded.write_facing_interleaved);
+        let interleaved: Settings = serde_json::from_str(&serde_json::to_string(&Settings { write_facing_interleaved: true, ..loaded.clone() }).unwrap()).unwrap();
+        assert!(interleaved.write_facing_interleaved);
         assert_eq!(loaded.pdf_tools_at, Some((40., 200.)));
         assert_eq!(old.pdf_tools_at, None);
         assert_eq!(loaded.chat_width, 420.);

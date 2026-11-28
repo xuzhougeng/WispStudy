@@ -166,9 +166,13 @@ impl Workspace {
         };
         // Under the bar everything is as wide as a sheet of the reading width, centred: in a wide window the
         // room is left beside the sheet, not inside its frame, and the boxes under it keep its edges.
-        // Beside its translation the sheet is two of them: each half is read at the reading width.
-        let sheet = f32::from(theme::manuscript_width()) * if facing { 2. } else { 1. } + 2. * SHEET_MARGIN + 2. + 32.;
+        // Beside its translation the sheet is two of them: each half is read at the reading width. With each
+        // translation under its paragraph, or 翻译's version alone, it is one.
+        let sheet_of = |widths: f32| f32::from(theme::manuscript_width()) * widths + 2. * SHEET_MARGIN + 2. + 32.;
+        let sheet = sheet_of(if self.write_facing_halves() { 2. } else { 1. });
         let inner = width.min(sheet);
+        // Whether two halves would fit here, whichever is drawn: the menu of where the translation stands says so (write_facing.rs).
+        if facing && let Some(lib) = self.lib.as_ref() { lib.writing.facing_room.set(crate::write_facing::halves_fit(width.min(sheet_of(2.)) - 32.)) }
         let foot = self.render_write_foot(!agent && editing, status);
         let seek = self.render_seek(window, cx);
         let lib = self.lib.as_ref().unwrap();

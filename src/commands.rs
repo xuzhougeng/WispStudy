@@ -667,6 +667,8 @@ pub enum Cmd {
     WriteFacing(bool),
     /// The language that translation is in: a code of `manuscript::LANGUAGES` (`Settings::write_facing_language`).
     WriteFacingLanguage(String),
+    /// Each translation under its paragraph (true, 逐段交替) or beside it (左右对照): `Settings::write_facing_interleaved`.
+    WriteFacingInterleave(bool),
     /// Ask again for the paragraphs whose translation failed.
     WriteFacingRetry,
     /// 翻译: a version of the manuscript in another language, kept and following it (`write_translate.rs`).
@@ -1314,7 +1316,7 @@ impl Workspace {
                 // Put away over a section: it is written again, the caret where it was.
                 else if let Some(lib) = self.lib.as_ref() && !lib.writing.reading { lib.writing.editor.read(cx).focus(window) }
             }
-            Cmd::WriteFacingLanguage(_) | Cmd::WriteFacingRetry => self.run_write_facing(cmd, cx),
+            Cmd::WriteFacingLanguage(_) | Cmd::WriteFacingInterleave(_) | Cmd::WriteFacingRetry => self.run_write_facing(cmd, cx),
             Cmd::Translate(what) => self.run_translate(what, window, cx),
             Cmd::CitationCards(on) => {
                 self.settings.citation_cards_hidden = !on;
