@@ -2473,5 +2473,13 @@
   "✓ 已是新建稿件默认": "✓ Saved as default for new drafts",
   "设为新建默认": "Save as default",
   "以后新建的稿件也默认使用这套写作语言与译文语言": "Use this primary and translation language pair by default for future manuscripts",
-  "收起译稿": "Hide translation"
+  "收起译稿": "Hide translation",
+  "不是网址": "Not an address",
+  "写邮件": "Write email",
+  "仍要打开": "Open anyway",
+  "这个链接指向这台电脑或局域网里的设备。": "This link points to this computer or a device on the local network.",
+  "网站用一串数字（IP 地址）代替名字。": "The site is a bare number (an IP address), not a name.",
+  "网址以 http 开头，不加密，途中可能被看到或改动。": "The address starts with http: unencrypted, it can be read or changed on the way.",
+  "这个链接没有写明要去的网址，不从这里打开。": "This link names no address to go to, so it is not opened from here.",
+  "链接来自这份 PDF，不一定可信。看清要去的网站再打开。": "This link comes from the PDF and may not be safe. Check the site before opening it."
 }

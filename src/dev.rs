@@ -731,6 +731,17 @@ impl Workspace {
                     }
                     return;
                 }
+                // `pdflink:<page>;<n>` shows where the n-th link (from 0) of a 1-based page of the PDF on show leads, as a click
+                // on it does (after a `shot:` has drawn the page); `pdflink:copy` copies the card's address. It never opens one.
+                "pdflink" => {
+                    let Some(pdf) = self.lib.as_ref().and_then(|l| l.pdf.clone()) else { return };
+                    if arg == "copy" { return pdf.update(cx, |pdf, cx| pdf.copy_link(cx)) }
+                    let numbers: Vec<usize> = arg.split(';').filter_map(|n| n.parse().ok()).collect();
+                    if let [page, n] = numbers.as_slice() && !pdf.update(cx, |pdf, cx| pdf.open_link_card(page.saturating_sub(1), *n, cx)) {
+                        eprintln!("pdflink: page {page} has no such link, or it is not read yet");
+                    }
+                    return;
+                }
                 // `pdfview:<n>;pages|theirs|before|after|close|menu`: the label of the n-th view (from 0) of the PDF on show:
                 // it shows the pages / their translation, changes places with the view before / after it, is closed, or opens its menu.
                 // `pdfmap`: 导图 on the PDF's bar. `pdfmap:add` makes what is selected a node (after `pdfpick:`), `pdfmap:draft`

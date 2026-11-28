@@ -15,7 +15,11 @@ use gpui::{prelude::FluentBuilder, *};
 use wisp_core::annotation::{Annotation, COLORS, Kind, TextPart, TextStyle};
 use wisp_core::figref;
 use wisp_core::handles::{self, Grab};
+use wisp_core::pdflink::{self, Goes, Link, Verdict, Warning};
 use wisp_core::pdftext::{self, Mark};
+
+mod links;
+use links::LinkCard;
 
 actions!(pdf, [CopySelection, FindInPdf, RemoveChosen, UndoMark, RedoMark]);
 
@@ -935,7 +939,8 @@ enum Reply {
     Hits(u64, Vec<(usize, Vec<[f32; 4]>)>),
     /// Where the sentence read aloud is: its page and one box per line, none when it was not found.
     Spoken(u64, usize, Vec<[f32; 4]>),
-    Marks(usize, Vec<Mark>),
+    /// A page's glyphs, and its links to addresses (`pdflink::page_links`).
+    Marks(usize, Vec<Mark>, Vec<Link>),
     /// What some pages show of figures (`figref::shown`, and `figref::unclaimed`), each with its 0-based page;
     /// and the page to read on from, none when the file is read through.
     /// With them, where those pages' text speaks of figures, each with its paragraph (`figref::spoken`).
@@ -1138,7 +1143,9 @@ fn worker(path: PathBuf, requests: mpsc::Receiver<Request>, replies: async_chann
         }
         for index in marked {
             let Some(page) = pages.get(index) else { continue };
-            if replies.send_blocking(Reply::Marks(index, pdftext::page_marks(page, &text_cache))).is_err() { return }
+            let marks = pdftext::page_marks(page, &text_cache);
+            let links = pdflink::page_links(page, &marks);
+            if replies.send_blocking(Reply::Marks(index, marks, links)).is_err() { return }
         }
 
         // Last, where the file shows its figures, a few pages at a time: pages asked for meanwhile are drawn in between.
@@ -1314,6 +1321,12 @@ pub struct PdfView {
     pressed_figure: Option<(FigureCard, Point<Pixels>)>,
     /// The figure whose number was clicked, shown by the number.
     figure_card: Option<FigureCard>,
+    /// Each page's links to addresses, with what a reader is told of each: kept as `marks` is.
+    links: HashMap<usize, Arc<Vec<(Link, Verdict)>>>,
+    /// The link the pointer went down on, and where in the window: a release close by is a click on it.
+    pressed_link: Option<(LinkCard, Point<Pixels>)>,
+    /// The link clicked: where it truly leads, asked before it is opened.
+    link_card: Option<LinkCard>,
     /// The places left by 前往原位置, the latest last.
     returns: Vec<Return>,
     /// What the reader calls this file among the paper's PDFs (正文, 附件 S1), and whether it is the main
@@ -1470,6 +1483,9 @@ impl PdfView {
             mentions: HashMap::new(),
             pressed_figure: None,
             figure_card: None,
+            links: HashMap::new(),
+            pressed_link: None,
+            link_card: None,
             returns: vec![],
             label: String::new(),
             main: true,
@@ -2654,14 +2670,20 @@ impl PdfView {
                 let first = self.finder.as_ref().and_then(|finder| finder.hits.iter().position(|(page, _)| *page >= top).or((!finder.hits.is_empty()).then_some(0)));
                 if let Some(n) = first { self.finder_go(n, cx) }
             }
-            Reply::Marks(index, marks) => {
+            Reply::Marks(index, marks, links) => {
                 self.marks_pending.remove(&index);
                 // Of a long paper, the glyphs of the pages read last are enough.
                 if self.marks.len() > 40 {
                     let keep = self.selection.map(|selection| selection.page);
                     self.marks.retain(|page, _| Some(*page) == keep || page.abs_diff(index) <= 4);
                     self.mentions.retain(|page, _| self.marks.contains_key(page));
+                    self.links.retain(|page, _| self.marks.contains_key(page));
                 }
+                let links = links.into_iter().map(|link| {
+                    let verdict = pdflink::check(&link.target, &link.shown);
+                    (link, verdict)
+                }).collect();
+                self.links.insert(index, Arc::new(links));
                 let mentions = figref::mentions(&marks).into_iter().filter_map(|mention| Some((mention, pdftext::mark_boxes(marks.get(mention.from..=mention.to)?)))).collect();
                 self.mentions.insert(index, Arc::new(mentions));
                 self.marks.insert(index, Arc::new(marks));
@@ -2909,6 +2931,8 @@ impl PdfView {
         // The numbers of figures in the text that lead to a figure of this file: the pointer says they can be
         // clicked, and a line shows under the one it is over. Nothing is drawn on them otherwise.
         let refs: Vec<Div> = if free { self.figure_mentions(index).into_iter().flat_map(|(_, boxes)| boxes.iter().copied()).map(|line| div().absolute().left(px(line[0] * scale)).top(px(line[1] * scale)).w(px((line[2] - line[0]) * scale)).h(px((line[3] - line[1]) * scale + 1.)).cursor_pointer().border_b_1().border_color(gpui::transparent_black()).hover(|s| s.border_color(Theme::accent()))).collect() } else { vec![] };
+        // The page's links, the same way; where one leads is said on hover and asked by a click (`links.rs`).
+        let links = if free { self.link_boxes(pane, index, scale) } else { vec![] };
         // What the find bar found on this page: the place gone to stronger.
         let found: Vec<Div> = self
             .finder
@@ -2943,7 +2967,7 @@ impl PdfView {
             return div().w_full().flex().pb(px(PAGE_GAP)).child(sheet).into_any_element();
         }
         let sheet = match image {
-            Some((image, _)) => sheet.when(cutting || !free, |d| d.cursor_crosshair()).when(free, |d| d.cursor_text()).child(img(image).w(px(width)).h(px(height))).children(refs).children(annotations).children(spoken).children(selected).children(marks).children(found).children(kept).children(collecting).children(cut).children(shapes).children(texts).children(drawing).children(notes).children(grips).children(writing),
+            Some((image, _)) => sheet.when(cutting || !free, |d| d.cursor_crosshair()).when(free, |d| d.cursor_text()).child(img(image).w(px(width)).h(px(height))).children(refs).children(links).children(annotations).children(spoken).children(selected).children(marks).children(found).children(kept).children(collecting).children(cut).children(shapes).children(texts).children(drawing).children(notes).children(grips).children(writing),
             None => sheet.flex().items_center().justify_center().text_size(text_px(12.)).text_color(Theme::text_placeholder()).child(if self.broken.contains(&index) { tf!("第 {} 页无法渲染", "Cannot render page {}", index + 1) } else { tf!("第 {} 页", "Page {}", index + 1) }),
         };
         // Draw over the image without changing its size or covering the text.
@@ -3000,7 +3024,7 @@ impl PdfView {
         cx.emit(PdfEvent::Worked);
         cx.emit(PdfEvent::Pressed);
         (self.selection, self.selecting, self.translation, self.pressed_mark, self.shape_drag, self.frame_drag, self.mark_menu) = (None, false, None, None, None, None, None);
-        (self.figure_card, self.pressed_figure) = (None, None);
+        (self.figure_card, self.pressed_figure, self.link_card, self.pressed_link) = (None, None, None, None);
         // The half pressed in is the one worked in; a drag stays in it. The line between the two is neither.
         let Some(pane) = self.pane_under(event.position) else {
             if self.cutting { self.cut = None }
@@ -3062,6 +3086,8 @@ impl PdfView {
         self.pressed_mark = self.highlight_at(page, x, y).map(|(id, line)| MarkMenu { id, page, x, line }).or_else(|| self.cut_mark_at(page, x, y)).map(|menu| (menu, event.position));
         // A figure's number in the text: a click on it shows the figure. A highlight over it has the click.
         if self.pressed_mark.is_none() && event.click_count == 1 { self.pressed_figure = self.figure_at(page, x, y).map(|card| (card, event.position)) }
+        // A link: a click on it shows where it leads, and opens nothing yet. A highlight or a figure's number has the click.
+        if self.pressed_mark.is_none() && self.pressed_figure.is_none() && event.click_count == 1 { self.pressed_link = self.link_at(page, x, y).map(|card| (card, event.position)) }
         if let Some((marks, at)) = self.marks.get(&page).and_then(|marks| Some((marks, pdftext::mark_at(marks, x, y)?))) {
             self.selection = Some(Selection { page, anchor: at, focus: at });
             self.selecting = true;
@@ -3137,8 +3163,8 @@ impl PdfView {
     /// The button came up, at `at` in the window when it is known: a pointer that never left its glyph
     /// selected nothing, and one that went down on a highlight and came up close by clicked it.
     fn release(&mut self, at: Option<Point<Pixels>>, window: &mut Window, cx: &mut Context<Self>) {
-        let (pressed, figure) = (self.pressed_mark.take(), self.pressed_figure.take());
-        if !std::mem::take(&mut self.selecting) && pressed.is_none() && figure.is_none() { return }
+        let (pressed, figure, link) = (self.pressed_mark.take(), self.pressed_figure.take(), self.pressed_link.take());
+        if !std::mem::take(&mut self.selecting) && pressed.is_none() && figure.is_none() && link.is_none() { return }
         // The dialog's frame let go of: the piece it frames now goes to the dialog.
         if let Some(held) = self.frame_drag.take() {
             // Sized down to nothing, it was a slip of the hand: the frame is as it was.
@@ -3192,6 +3218,10 @@ impl PdfView {
         // A figure's number clicked, not dragged across: its figure is shown by it.
         if let (Some((card, from)), Some(at)) = (figure, at) && self.selection.is_none() && self.cut.is_none() && f32::from((at.x - from.x).abs()).max(f32::from((at.y - from.y).abs())) <= 4. {
             self.figure_card = Some(card);
+        }
+        // A link clicked, not dragged across: where it leads is shown by it, to be opened from there.
+        if let (Some((card, from)), Some(at)) = (link, at) && self.selection.is_none() && self.cut.is_none() && f32::from((at.x - from.x).abs()).max(f32::from((at.y - from.y).abs())) <= 4. {
+            self.link_card = Some(card);
         }
         cx.notify();
     }
@@ -4635,6 +4665,7 @@ impl Render for PdfView {
         let bar = self.selection_bar(cx);
         let card = self.translation_card(cx);
         let figure_card = self.figure_card(cx);
+        let link_card = self.link_card(cx);
         let return_chip = self.return_chip(cx);
         let mark_menu = self.mark_menu(cx);
         let note_card = self.note_card(window, cx);
@@ -4675,7 +4706,7 @@ impl Render for PdfView {
                     this.overview = false;
                 } else if this.text_edit.is_some() {
                     this.finish_text(true, cx);
-                } else if this.figure_card.take().is_some() || this.view_menu.take().is_some() || this.mark_menu.take().is_some() || this.text_palette.take().is_some() || this.chosen.take().is_some() {
+                } else if this.figure_card.take().is_some() || this.link_card.take().is_some() || this.view_menu.take().is_some() || this.mark_menu.take().is_some() || this.text_palette.take().is_some() || this.chosen.take().is_some() {
                 } else if this.note_open.is_some() || this.note_draft.is_some() {
                     this.close_note();
                 } else if this.finder.is_some() {
@@ -4742,6 +4773,7 @@ impl Render for PdfView {
             .child(self.annotation_panel(window, cx))
             // Over the notice and 标注's button: it is looked at and put away again.
             .children(figure_card)
+            .children(link_card)
             .children(self.drag_layer(window, cx))
             // Over all of it: the pages are not read while one of them is looked for.
             .children(self.overview_layer(cx))
