@@ -665,6 +665,8 @@ pub enum Cmd {
     WriteFacingLanguage(String),
     /// Ask again for the paragraphs whose translation failed.
     WriteFacingRetry,
+    /// 翻译: a version of the manuscript in another language, kept and following it (`write_translate.rs`).
+    Translate(crate::write_translate::Do),
     /// The top-left arrow of a manuscript: out of 写作, back to the page it was opened from.
     LeaveWrite,
     ExportManuscript(ManuscriptExport),
@@ -1301,7 +1303,13 @@ impl Workspace {
             Cmd::WriteRun(reading) => self.write_run_start(reading, None, cx),
             Cmd::WriteFind => self.write_find(false, cx),
             Cmd::StepHistory(forward) => self.step_history(forward, window, cx),
-            Cmd::WriteFacing(_) | Cmd::WriteFacingLanguage(_) | Cmd::WriteFacingRetry => self.run_write_facing(cmd, cx),
+            Cmd::WriteFacing(on) => {
+                self.run_write_facing(cmd, cx);
+                // A manuscript that keeps versions is read beside one of them.
+                if on { self.translate_entered(cx) }
+            }
+            Cmd::WriteFacingLanguage(_) | Cmd::WriteFacingRetry => self.run_write_facing(cmd, cx),
+            Cmd::Translate(what) => self.run_translate(what, window, cx),
             Cmd::CitationCards(on) => {
                 self.settings.citation_cards_hidden = !on;
                 self.save_settings(cx);

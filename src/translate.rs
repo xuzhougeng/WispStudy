@@ -169,6 +169,8 @@ impl Workspace {
                 this.translation_next(Run::Papers, cx);
                 this.translation_next(Run::Facing, cx);
                 this.sync_facing(cx);
+                // A manuscript's version in another language takes what came back (write_translate.rs).
+                this.translate_follow_next(cx);
                 cx.notify();
             })).ok();
         }).detach();

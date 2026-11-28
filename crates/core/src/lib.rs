@@ -69,6 +69,7 @@ pub mod export;
 pub mod excerpt;
 pub mod extract;
 pub mod figref;
+pub mod follow;
 pub mod figure;
 pub mod filter;
 pub mod find;

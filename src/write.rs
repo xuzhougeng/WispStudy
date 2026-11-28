@@ -82,7 +82,10 @@ impl Workspace {
         self.read_tend(window, cx);
         // 译文对照: the translations still missing are asked for before the page is drawn (write_facing.rs).
         let facing = self.write_facing_shown();
-        if facing { self.write_facing_tend(cx) }
+        // 翻译: while the language beside is one the manuscript keeps a version in, that version is the right half (write_translate.rs).
+        if facing { self.translate_tend(cx) }
+        let translating = facing && self.translate_shown().is_some();
+        if facing && !translating { self.write_facing_tend(cx) }
         let lib = self.lib.as_ref().unwrap();
         let writing = &lib.writing;
         let text = writing.editor.read(cx).text().to_string();
@@ -137,7 +140,7 @@ impl Workspace {
         // The line under it all: what there is to say of the text. The tools are beside what is selected, nowhere else.
         let status = if writing.reading {
             let whole: String = writing.current().map_or(String::new(), |m| m.sections.iter().map(|s| s.body.as_str()).collect::<Vec<_>>().join("\n"));
-            if facing { tf!("全文 {} · 译文只是对照，不写进稿件 · 点一节的名称，回到那一节写", "Manuscript: {} · The translation is only for reading, it is not written into the manuscript · Click a section name to edit it", length_label(&whole)) } else { tf!("全文 {} · 选中文字可以批注、复制 · 点一节的名称，回到那一节写", "Manuscript: {} · Select text to comment on or copy it · Click a section name to edit it", length_label(&whole)) }
+            if let Some(said) = self.translate_status().filter(|_| translating) { said } else if facing { tf!("全文 {} · 译文只是对照 · 要改译文、让它跟着原文变，在「译文」的语言菜单里保留成译稿", "Manuscript: {} · The translation is only for reading · To edit it and keep it in step with the manuscript, keep it as a version from the language menu over it", length_label(&whole)) } else { tf!("全文 {} · 选中文字可以批注、复制 · 点一节的名称，回到那一节写", "Manuscript: {} · Select text to comment on or copy it · Click a section name to edit it", length_label(&whole)) }
         } else if proposal.is_some() {
             t("助手提议的改写还没有写进稿件：允许，或不允许").to_string()
         } else if version.is_some() {
@@ -175,7 +178,7 @@ impl Workspace {
             .mx_auto()
             .children(seek)
             .child(
-                div().flex().flex_col().flex_1().min_h_0().px(px(16.)).pb(px(8.)).when(version.is_some() || proposal.is_some(), |d| d.pt(px(12.))).child(if facing { self.render_manuscript_facing(inner - 32., window, cx) } else if writing.reading { self.render_manuscript_reading(window, cx) } else if let Some(proposal) = proposal { self.render_proposal(proposal, cx) } else if let Some(version) = version { self.render_version(version, cx) } else {
+                div().flex().flex_col().flex_1().min_h_0().px(px(16.)).pb(px(8.)).when(version.is_some() || proposal.is_some(), |d| d.pt(px(12.))).child(if translating { self.render_translating(inner - 32., window, cx) } else if facing { self.render_manuscript_facing(inner - 32., window, cx) } else if writing.reading { self.render_manuscript_reading(window, cx) } else if let Some(proposal) = proposal { self.render_proposal(proposal, cx) } else if let Some(version) = version { self.render_version(version, cx) } else {
                     let page = div().relative().w_full().max_w(theme::manuscript_width()).mx_auto().pl(px(18.)).pr(px(if markers.is_empty() { 18. } else { MARGIN })).py(px(14.)).text_size(text_px(15.)).line_height(theme::body_line(26.)).text_color(Theme::text());
                     // What is under the section, after its own text in the same scroll: the results of 结果, each opened alone with a click.
                     let under = self.render_under_section(window, cx);

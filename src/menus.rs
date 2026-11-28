@@ -69,6 +69,9 @@ pub enum MenuKind {
     WriteAssistTarget,
     /// 译成… and 换个说法: the models compared (`Settings::compare_models`).
     CompareModels,
+    /// 翻译: the manuscript's versions to work on and the languages to make one in; ⋯ in the version's head.
+    TranslateLanguage,
+    TranslateMore,
     /// 写作: which papers the candidates come from.
     WriteNarrow,
     /// The menus a right click opens (`src/context.rs`): on a paper of a list, a paper in the trash, a file
@@ -307,7 +310,9 @@ impl Workspace {
                 items.push(item(t("手动录入…"), Cmd::AddManual));
             }
             MenuKind::Manuscripts | MenuKind::Section(_) | MenuKind::ManuscriptExport | MenuKind::WriteLanguage => (items, breaks) = self.manuscript_menu(&kind, cx),
-            MenuKind::WriteFacingLanguage => items = self.facing_language_menu(),
+            MenuKind::WriteFacingLanguage => (items, breaks) = self.translate_facing_menu(),
+            MenuKind::TranslateLanguage => (items, breaks) = self.translate_language_menu(),
+            MenuKind::TranslateMore => (items, breaks) = self.translate_more_menu(),
             MenuKind::WriteNarrow => items = self.narrowing_menu(),
             MenuKind::GlossaryLanguage => items = self.glossary_language_menu(),
             MenuKind::WriteAssistTarget => items = self.assist_target_menu(),

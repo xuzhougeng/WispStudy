@@ -642,6 +642,7 @@ impl Store {
         check_schema_version(version, SCHEMA_VERSION)?;
         db.execute_batch(SCHEMA)?;
         db.execute_batch(crate::manuscript::SCHEMA)?;
+        db.execute_batch(crate::follow::SCHEMA)?;
         db.execute_batch(crate::comment::SCHEMA)?;
         db.execute_batch(crate::passage::SCHEMA)?;
         db.execute_batch(crate::review::SCHEMA)?;
