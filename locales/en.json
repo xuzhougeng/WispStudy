@@ -2418,5 +2418,9 @@
   "译稿": "Version",
   "采用": "Take",
   "重译": "Retranslate",
-  "，": ", "
+  "，": ", ",
+  "保留成译稿": "Keep as version",
+  "让对照的几个模型各译一版，挑一版用（设置 › AI 里选对照的模型；只有一个时，给三种译法）": "Have the compared models each translate it and pick one (choose them in Settings › AI; with one model, three kinds of translation)",
+  "几个模型各译一版": "A version from each model",
+  "三种译法": "Three kinds of translation"
 }

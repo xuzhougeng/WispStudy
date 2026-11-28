@@ -199,7 +199,7 @@ impl Workspace {
                 "wfacing" => Some(match arg { "" => Cmd::WriteFacing(true), "off" => Cmd::WriteFacing(false), "retry" => Cmd::WriteFacingRetry, code => Cmd::WriteFacingLanguage(code.to_string()) }),
                 // 翻译 (write_translate.rs): `wtranslate:<code>` works on the version in that language, made when there is none;
                 // by a unit's place among the manuscript's units from 0 (the title, each section's name and blocks): `edit;<n>`, `redo;<n>`,
-                // `carry;<n>`, `take;<n>`, `leave;<n>`, `check;<n>`; `type;<text>` writes the unit edited, `done`, `next`, `retry`, `stop`,
+                // `carry;<n>`, `take;<n>`, `leave;<n>`, `check;<n>`, `compare;<n>` (the models compared, each a version) and `pick;<n>` (the n-th taken); `type;<text>` writes the unit edited, `done`, `next`, `retry`, `stop`,
                 // `primary`, `remove`, `alone` / `together`; `body;<section from 0>;<text>` sets a section's text (¶ between paragraphs);
                 // `dump;<file>` writes each unit's state and translation as JSON.
                 "wtranslate" => {

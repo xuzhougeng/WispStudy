@@ -31,7 +31,9 @@ use wisp_core::manuscript::{self, LANGUAGES, Manuscript};
 use wisp_core::settings::Task;
 use wisp_core::store::translation_key;
 use wisp_core::structure::SECTIONS;
-use wisp_core::translation::Batch;
+use wisp_core::glossary;
+use wisp_core::versions;
+use wisp_core::translation::{Batch, Job};
 
 /// The page's measures, as 译文对照 has them: the room between the halves, the narrowest half, the page's sides.
 const GUTTER: f32 = 48.;
@@ -69,6 +71,12 @@ pub enum Do {
     CopyAside(i64),
     /// The version on show written out, in its language.
     Export(crate::manuscripts::ManuscriptExport),
+    /// The unit edited asked of the models compared (设置's 对照的模型), each giving its version; with fewer than
+    /// two chosen, the translation model's three kinds.
+    Compare(usize),
+    /// One of those versions taken into the unit.
+    CompareTake(usize),
+    CompareClose,
 }
 
 /// A version as the window holds it: what it keeps, found against the primary's units.
@@ -118,10 +126,21 @@ pub enum Carry {
     Failed(String),
 }
 
+/// The versions of one unit from several models (or of one model's three kinds), while it is edited.
+pub struct Compared {
+    pub unit: usize,
+    pub sent: String,
+    /// A version a model (`versions::Ask::single`); else the three kinds of one model's answer.
+    pub single: bool,
+    pub comparison: crate::compare::Comparison,
+}
+
 /// A run of translations for one version: its first pass, and what follows by itself after.
 pub struct Run {
     pub manuscript: String,
     pub language: String,
+    /// Each job's instructions, by its key: a block's carry the glossary's terms it holds.
+    pub prompts: HashMap<String, String>,
     pub run: TranslationRun,
 }
 
@@ -141,6 +160,10 @@ pub struct Translating {
     pub alone: bool,
     /// Where each block with something to do was drawn, in the scrolled page: by unit.
     pub tops: Rc<RefCell<BTreeMap<usize, f32>>>,
+    /// Several versions of the unit edited, to take one.
+    pub compare: Option<Compared>,
+    /// Counts the comparisons asked for: an answer to an earlier one is dropped.
+    generation: u64,
     loaded: bool,
 }
 
@@ -152,7 +175,7 @@ impl Translating {
             InputEvent::Cancel => this.translate_letgo(cx),
             _ => {}
         }));
-        Translating { versions: HashMap::new(), kept: HashMap::new(), editing: None, editor, carry: HashMap::new(), run: None, paused: false, alone: false, tops: Rc::default(), loaded: false }
+        Translating { versions: HashMap::new(), kept: HashMap::new(), editing: None, editor, carry: HashMap::new(), run: None, paused: false, alone: false, tops: Rc::default(), compare: None, generation: 0, loaded: false }
     }
 
     /// The run as `works` counts it.
@@ -212,10 +235,23 @@ impl Workspace {
         Some(out)
     }
 
-    /// The instructions a block is translated with. The seam for the glossary and the manuscript's standing
-    /// requirement (步骤一): once they land, they go into these instructions, here and nowhere else.
-    pub(crate) fn translate_prompt(&self, code: &str) -> String {
-        bilingual::prompt(code)
+    /// The glossary's pairs from a manuscript's language into `code`, and the manuscript's standing requirement:
+    /// what a block's instructions are made with.
+    pub(crate) fn translate_rules(&self, id: &str, code: &str) -> (Vec<(String, String)>, String) {
+        let Some(lib) = self.lib.as_ref() else { return (vec![], String::new()) };
+        let Some(manuscript) = lib.writing.manuscripts.iter().find(|m| m.id == id) else { return (vec![], String::new()) };
+        (glossary::pairs(&lib.glossary.terms, &manuscript.language, code), manuscript.requirement.trim().to_string())
+    }
+
+    /// The instructions a block is translated with: 译文对照's (`bilingual::prompt_for`), the glossary's terms the
+    /// block holds and the manuscript's requirement after them, so a block 译文对照 has read is kept under the same key.
+    fn translate_prompt(code: &str, sent: &str, rules: &(Vec<(String, String)>, String)) -> String {
+        bilingual::prompt_for(code, sent.trim(), &rules.0, &rules.1)
+    }
+
+    /// The key a block's translation is kept under in the library's translations.
+    fn translate_key(code: &str, sent: &str, rules: &(Vec<(String, String)>, String)) -> String {
+        translation_key(sent.trim(), ai::translation_prompt(&Self::translate_prompt(code, sent, rules)))
     }
 
     /// The versions read from the library once it is open, and again after a change to them.
@@ -267,12 +303,12 @@ impl Workspace {
     /// The units of a version a model translates by itself (`follow::wanted`), asked for unless a run for it is
     /// going, the person stopped it, or they failed and wait for 重试.
     fn translate_follow(&mut self, id: &str, language: &str, cx: &mut Context<Self>) {
-        let prompt = self.translate_prompt(language);
+        let rules = self.translate_rules(id, language);
         let Some(lib) = self.lib.as_ref() else { return };
         let translate = &lib.writing.translate;
         if translate.paused || translate.run.as_ref().is_some_and(|run| run.run.batch.running()) { return }
         let Some(version) = translate.kept.get(&(id.to_string(), language.to_string())) else { return };
-        let failed = |sent: &str| matches!(lib.translations.get(&translation_key(sent.trim(), ai::translation_prompt(&prompt))), Some(Translated::Failed(_)));
+        let failed = |sent: &str| matches!(lib.translations.get(&Self::translate_key(language, sent, &rules)), Some(Translated::Failed(_)));
         let texts: Vec<String> = follow::wanted(&version.kept, &version.pairs).into_iter().map(|u| version.units[u].sent.clone()).filter(|sent| !failed(sent)).collect();
         if texts.is_empty() { return }
         self.translate_start(id, language, texts, cx);
@@ -281,11 +317,21 @@ impl Workspace {
     /// A run over these texts of a version, as many in flight as 设置 › AI › 任务 says.
     fn translate_start(&mut self, id: &str, language: &str, texts: Vec<String>, cx: &mut Context<Self>) {
         let profile = self.settings.profile_for_or_default(Task::Translate);
-        let prompt = self.translate_prompt(language);
+        let rules = self.translate_rules(id, language);
         let workers = self.settings.translate_workers.max(1);
         let Some(lib) = self.lib.as_mut() else { return };
-        let batch = Batch::texts(texts.iter().map(String::as_str), &prompt);
-        lib.writing.translate.run = Some(Run { manuscript: id.to_string(), language: language.to_string(), run: TranslationRun { batch, model: profile.labelled(), profile, prompt, workers } });
+        // Each block with its own instructions (the terms it holds): a job a text, those said twice one job.
+        let mut batch = Batch::texts(std::iter::empty::<&str>(), "");
+        let mut prompts: HashMap<String, String> = HashMap::new();
+        for text in texts.iter().map(|text| text.trim()).filter(|text| !text.is_empty()) {
+            let prompt = Self::translate_prompt(language, text, &rules);
+            let key = translation_key(text, ai::translation_prompt(&prompt));
+            if prompts.insert(key.clone(), prompt).is_some() { continue }
+            batch.total += 1;
+            batch.jobs.push_back(Job { key, text: text.to_string(), papers: 1 });
+        }
+        let prompt = bilingual::prompt(language);
+        lib.writing.translate.run = Some(Run { manuscript: id.to_string(), language: language.to_string(), prompts, run: TranslationRun { batch, model: profile.labelled(), profile, prompt, workers } });
         self.translate_follow_next(cx);
     }
 
@@ -309,7 +355,7 @@ impl Workspace {
             let Some(run) = self.lib.as_mut().and_then(|lib| lib.writing.translate.run.as_mut()) else { return };
             if run.run.batch.working.len() >= run.run.workers { break }
             let Some(job) = run.run.batch.take() else { break };
-            let (profile, prompt) = (run.run.profile.clone(), run.run.prompt.clone());
+            let (profile, prompt) = (run.run.profile.clone(), run.prompts.get(&job.key).cloned().unwrap_or_else(|| run.run.prompt.clone()));
             self.translate_text(&job.text, &profile, &prompt, true, false, cx);
             let Some(lib) = self.lib.as_mut() else { return };
             let done = match lib.translations.get(&job.key) {
@@ -393,7 +439,10 @@ impl Workspace {
 
     /// Editing put away: Esc, a click elsewhere on the page.
     pub(crate) fn translate_letgo(&mut self, cx: &mut Context<Self>) {
-        if let Some(lib) = self.lib.as_mut() && lib.writing.translate.editing.take().is_some() { cx.notify() }
+        if let Some(lib) = self.lib.as_mut() && lib.writing.translate.editing.take().is_some() {
+            lib.writing.translate.compare = None;
+            cx.notify()
+        }
     }
 
     /// When 译文对照 is turned on for a manuscript that keeps versions, the language beside it is one of them.
@@ -442,11 +491,11 @@ impl Workspace {
             Do::Next => self.translate_next(),
             Do::Retry => {
                 let Some((id, language)) = self.translate_shown() else { return };
-                let prompt = self.translate_prompt(&language);
+                let rules = self.translate_rules(&id, &language);
                 let Some(lib) = self.lib.as_mut() else { return };
                 lib.writing.translate.paused = false;
-                if let Some(version) = lib.writing.translate.kept.get(&(id, language)) {
-                    let keys: Vec<String> = version.units.iter().map(|unit| translation_key(unit.sent.trim(), ai::translation_prompt(&prompt))).collect();
+                if let Some(version) = lib.writing.translate.kept.get(&(id, language.clone())) {
+                    let keys: Vec<String> = version.units.iter().map(|unit| Self::translate_key(&language, &unit.sent, &rules)).collect();
                     lib.translations.retain(|key, state| !(matches!(state, Translated::Failed(_)) && keys.contains(key)));
                 }
             }
@@ -468,6 +517,9 @@ impl Workspace {
                 self.say(tf!("不再跟随{name}译稿；它保留的译文还在，再选「保留成译稿」就回来", "The {name} version is no longer kept in step; what it kept is still there for when you keep it again"), cx);
             }
             Do::Alone(on) => if let Some(lib) = self.lib.as_mut() { lib.writing.translate.alone = on },
+            Do::Compare(at) => self.translate_compare(at, cx),
+            Do::CompareTake(n) => self.translate_compare_take(n, cx),
+            Do::CompareClose => if let Some(lib) = self.lib.as_mut() { lib.writing.translate.compare = None },
             Do::Export(kind) => if let Some(manuscript) = self.translated_manuscript() { self.export_this(manuscript, kind, cx) },
             Do::CopyAside(kept) => {
                 let Some((id, language)) = self.translate_shown() else { return };
@@ -532,9 +584,12 @@ impl Workspace {
     /// 只带改动: the model is given the source then and now and the person's translation, and gives that
     /// translation with the change carried over, for the person to take or leave.
     fn translate_carry(&mut self, at: usize, cx: &mut Context<Self>) {
-        let Some((_, language, unit, Some(kept))) = self.translate_unit(at) else { return };
+        let Some((id, language, unit, Some(kept))) = self.translate_unit(at) else { return };
         let profile = self.settings.profile_for_or_default(Task::Translate);
-        let request = ai::plain_request(&profile, &follow::carry_prompt(&language), &follow::carry_question(&kept.source, &unit.sent, &kept.text));
+        // The glossary's terms the new source holds and the manuscript's requirement, as in every request of the version.
+        let (pairs, requirement) = self.translate_rules(&id, &language);
+        let system = glossary::instructions(&follow::carry_prompt(&language), &glossary::occurring(&unit.sent, &pairs), &requirement);
+        let request = ai::plain_request(&profile, &system, &follow::carry_question(&kept.source, &unit.sent, &kept.text));
         let Some(lib) = self.lib.as_mut() else { return };
         let request = match request {
             Ok(request) => request,
@@ -562,6 +617,68 @@ impl Workspace {
             })).ok();
         }).detach();
         cx.notify();
+    }
+
+    /// The unit asked of the models compared, the same request for each, so the versions differ only by the model:
+    /// the block's words with its citations as written, the paragraphs around it for sense, the glossary's terms it
+    /// holds and the manuscript's requirement. With fewer than two models chosen, one request for three kinds.
+    fn translate_compare(&mut self, at: usize, cx: &mut Context<Self>) {
+        let Some((id, language, unit, _)) = self.translate_unit(at) else { return };
+        let Some(lib) = self.lib.as_ref() else { return };
+        let Some(manuscript) = lib.writing.manuscripts.iter().find(|m| m.id == id) else { return };
+        let context = manuscript.sections.iter().find(|s| s.id == unit.section).filter(|_| unit.part == Part::Text).and_then(|s| bilingual::blocks(&s.body).get(unit.block).map(|block| versions::context(&s.body, block.range.clone()))).unwrap_or_default();
+        let primary = manuscript.language.clone();
+        let chosen = self.settings.compare_profiles();
+        let (single, profiles) = if chosen.len() >= 2 { (true, chosen) } else { (false, vec![self.settings.profile_for_or_default(Task::Translate)]) };
+        let (pairs, requirement) = self.translate_rules(&id, &language);
+        let ask = versions::Ask { source: ai::language_name(&primary), context, terms: glossary::occurring(&unit.sent, &pairs), requirement, once: String::new(), single };
+        let (system, message) = match ai::assist_prompt(&ai::Assist::Translate, &ai::language_name(&language), &follow::as_written(&unit.sent, &unit.cites), &[], &[], &ask) {
+            Ok(asked) => asked,
+            Err(error) => return self.fail(error, cx),
+        };
+        let requests = profiles.iter().map(|profile| (ai::plain_request(profile, &system, &message), profile.protocol)).collect();
+        let Some(lib) = self.lib.as_mut() else { return };
+        let translate = &mut lib.writing.translate;
+        translate.generation += 1;
+        let generation = translate.generation;
+        translate.compare = Some(Compared { unit: at, sent: unit.sent.clone(), single, comparison: crate::compare::Comparison::new(&profiles, generation) });
+        let library = lib.info.id.clone();
+        self.compare_ask(library, generation, requests, |this| this.lib.as_mut()?.writing.translate.compare.as_mut().map(|compared| &mut compared.comparison), |_| {}, cx);
+    }
+
+    /// The versions a comparison has so far: what each says it is (a model, a kind), its words, and whether it is still coming.
+    fn translate_compared(compared: &Compared) -> Vec<(String, String, bool, String)> {
+        let rows = &compared.comparison.rows;
+        if compared.single {
+            return rows.iter().enumerate().map(|(n, row)| (row.model.clone(), compared.comparison.version(n).unwrap_or_else(|| row.result.trim().to_string()), row.busy, row.error.clone())).collect();
+        }
+        let Some(row) = rows.first() else { return vec![] };
+        let parsed = versions::parse(&row.result);
+        if parsed.is_empty() { return vec![(row.model.clone(), String::new(), row.busy, row.error.clone())] }
+        parsed.into_iter().map(|version| (t(version.kind.label()).to_string(), version.text, row.busy, row.error.clone())).collect()
+    }
+
+    /// A version taken: the unit's words now, the person's choice (a model does not translate over it).
+    fn translate_compare_take(&mut self, n: usize, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        let Some(compared) = lib.writing.translate.compare.take() else { return };
+        let Some((_, text, _, _)) = Self::translate_compared(&compared).into_iter().nth(n).filter(|(_, text, busy, _)| !*busy && !text.trim().is_empty()) else {
+            lib.writing.translate.compare = Some(compared);
+            return;
+        };
+        let at = compared.unit;
+        let Some((_, _, unit, _)) = self.translate_unit(at).filter(|(_, _, unit, _)| unit.sent == compared.sent) else { return };
+        let written = follow::placeheld(&text, &unit.cites);
+        self.translate_keep(at, |unit, one| {
+            one.text = written;
+            one.source = unit.sent.clone();
+            one.edited = true;
+        }, cx);
+        // The field shows what was taken, still being edited.
+        if let Some(lib) = self.lib.as_ref() && lib.writing.translate.editing.as_ref().is_some_and(|editing| editing.unit == at) {
+            let editor = lib.writing.translate.editor.clone();
+            editor.update(cx, |input, cx| input.set_text(text.trim(), cx));
+        }
     }
 
     /// 设为主稿: the version's words become the manuscript's, the primary's a version of them. Refused while a
@@ -609,18 +726,14 @@ impl Workspace {
 
     // ---- menus
 
-    /// 译文对照's languages, each marked when the manuscript keeps a version in it, and the one read kept as a version.
+    /// 译文对照's languages, each marked when the manuscript keeps a version in it (保留成译稿 is a button in its head).
     pub(crate) fn translate_facing_menu(&self) -> (Vec<MenuItem>, Vec<usize>) {
         let mut items = self.facing_language_menu();
         let versions = self.lib.as_ref().and_then(|lib| lib.writing.current().and_then(|m| lib.writing.translate.versions.get(&m.id))).cloned().unwrap_or_default();
         for item in &mut items {
             if let Cmd::WriteFacingLanguage(code) = &item.cmd && versions.contains(code) { item.note = Some(t("译稿").into()) }
         }
-        let on = self.write_facing_language();
-        let name = label(&LANGUAGES, on);
-        let breaks = vec![items.len()];
-        items.push(MenuItem { label: tf!("保留成{name}译稿：可以改，跟随原文", "Keep as a {name} version: editable, follows the primary").into(), checked: false, note: None, cmd: Cmd::Translate(Do::Language(on.to_string())) });
-        (items, breaks)
+        (items, vec![])
     }
 
     /// The versions of the manuscript to work on, and the languages to make one in.
@@ -693,7 +806,7 @@ impl Workspace {
         let Some(manuscript) = lib.writing.current() else { return div().into_any_element() };
         let translate = &lib.writing.translate;
         let Some(version) = translate.kept.get(&(id.clone(), code.clone())) else { return div().into_any_element() };
-        let prompt = self.translate_prompt(&code);
+        let rules = self.translate_rules(&id, &code);
         let alone = translate.alone;
         let (measure, room) = (f32::from(theme::manuscript_width()), (width - 2. * PAD).max(1.));
         let both = room.min(2. * measure + GUTTER);
@@ -703,7 +816,7 @@ impl Workspace {
         let editing = translate.editing.as_ref().filter(|editing| editing.manuscript == id && editing.language == code).map(|editing| editing.unit);
         translate.tops.borrow_mut().clear();
         let at: HashMap<(&str, Part, usize), usize> = version.units.iter().enumerate().map(|(u, unit)| ((unit.section.as_str(), unit.part, unit.block), u)).collect();
-        let busy = |sent: &str| lib.translations.get(&translation_key(sent.trim(), ai::translation_prompt(&prompt))).cloned();
+        let busy = |sent: &str| lib.translations.get(&Self::translate_key(&code, sent, &rules)).cloned();
         let named = |size: f32, line: f32, text: String| div().text_size(text_px(size)).line_height(text_px(line)).font_weight(FontWeight::SEMIBOLD).child(text);
 
         // A block of the primary and what stands beside it. The counterpart of the block edited has a line at its side.
@@ -725,8 +838,11 @@ impl Workspace {
             let state = follow::state(kept);
             let key = format!("wt-{}-{}", u, hashed(&unit.sent));
             if editing == Some(u) {
-                let field = div().w(px(half)).ml(px(-9.)).px(px(8.)).py(px(2.)).rounded(px(6.)).border_1().border_color(Theme::accent().opacity(0.55)).bg(Theme::bg_body()).text_size(text_px(size.map_or(READ_SIZE, |s| s.0))).line_height(size.map_or(theme::body_line(26.), |s| text_px(s.1))).child(translate.editor.clone());
-                return field.into_any_element();
+                let field = div().relative().w(px(half)).ml(px(-9.)).px(px(8.)).py(px(2.)).rounded(px(6.)).border_1().border_color(Theme::accent().opacity(0.55)).bg(Theme::bg_body()).text_size(text_px(size.map_or(READ_SIZE, |s| s.0))).line_height(size.map_or(theme::body_line(26.), |s| text_px(s.1))).child(translate.editor.clone())
+                    // A field a model can fill: a bare sparkle at its side asks the models compared for their versions.
+                    .child(div().absolute().top(px(4.)).right(px(-26.)).child(ui::icon_action(SharedString::from(format!("{key}-compare")), "sparkle", Theme::text_tertiary(), t("让对照的几个模型各译一版，挑一版用（设置 › AI 里选对照的模型；只有一个时，给三种译法）")).on_click(self.on(Cmd::Translate(Do::Compare(u)), cx))));
+                let compared = translate.compare.as_ref().filter(|compared| compared.unit == u && compared.sent == unit.sent).map(|compared| self.render_translate_compared(compared, &key, half, cx));
+                return div().flex().flex_col().gap(px(6.)).child(field).children(compared).into_any_element();
             }
             let wants = matches!(state, State::Untranslated) || (state == State::Changed && kept.is_some_and(|k| k.edited)) || kept.is_some_and(|k| !follow::cites_kept(&unit.sent, &k.text));
             let shown: Option<AnyElement> = kept.filter(|k| !k.text.trim().is_empty()).map(|k| drawn(&k.text));
@@ -739,7 +855,12 @@ impl Workspace {
                 (shown, State::Untranslated | State::Changed, Some(Translated::Busy)) if !kept.is_some_and(|k| k.edited) => column.children(shown.map(|shown| div().opacity(0.5).child(shown).into_any_element())).child(spinner(format!("{key}-busy"))),
                 (None, State::Untranslated, Some(Translated::Failed(error))) => column.child(div().flex().child(div().id(SharedString::from(format!("{key}-failed"))).text_size(text_px(12.)).line_height(theme::body_line(24.)).text_color(Theme::danger()).tooltip(ui::tip(ui::one_line(error))).child(t("没有译成")))),
                 (None, _, _) => column.child(body.child(div().text_size(text_px(13.)).line_height(theme::body_line(24.)).text_color(Theme::text_tertiary()).child(t("未译 · 点这里自己写")))),
-                (Some(shown), _, _) => column.child(body.child(shown)),
+                (Some(shown), _, _) => {
+                    // Looked over with no model, as 译文对照 does: a term of the glossary not used, a number lost, is a mark at its right.
+                    let lacks = kept.map(|k| glossary::check(&unit.sent, &k.text, &glossary::occurring(&unit.sent, &rules.0))).unwrap_or_default();
+                    let mark = (!lacks.is_empty()).then(|| div().id(SharedString::from(format!("{key}-lacks"))).absolute().top(px(5.)).right(px(-20.)).child(ui::icon("triangle-alert", 12., Theme::warning())).tooltip(ui::tip(crate::write_assist::lacks_said(&lacks))));
+                    column.child(body.relative().child(shown).children(mark))
+                }
             };
             // The citations of the source missing from the translation, or others in it.
             if let Some(k) = kept.filter(|k| !k.text.trim().is_empty() && !follow::cites_kept(&unit.sent, &k.text)) {
@@ -841,6 +962,22 @@ impl Workspace {
         div().flex().flex_col().flex_1().min_h_0().child(head).child(sheet).into_any_element()
     }
 
+    /// The versions asked of several models for the unit edited, each with 采用; × puts them away.
+    fn render_translate_compared(&self, compared: &Compared, key: &str, half: f32, cx: &mut Context<Self>) -> AnyElement {
+        let rows = Self::translate_compared(compared);
+        let mut card = div().flex().flex_col().gap(px(8.)).w(px(half)).ml(px(-9.)).px(px(10.)).py(px(8.)).rounded(px(6.)).border_1().border_color(Theme::line()).bg(Theme::bg_sunken());
+        card = card.child(div().flex().items_center().child(div().flex_1().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(t(if compared.single { "几个模型各译一版" } else { "三种译法" }))).child(ui::icon_action(SharedString::from(format!("{key}-compare-close")), "x", Theme::text_tertiary(), t("收起")).on_click(self.on(Cmd::Translate(Do::CompareClose), cx))));
+        for (n, (said, text, busy, error)) in rows.into_iter().enumerate() {
+            let id = compared.comparison.rows.get(if compared.single { n } else { 0 }).map_or(String::new(), |row| row.profile.clone());
+            let head = div().flex().items_center().gap(px(6.)).child(div().flex_1().min_w_0().truncate().text_size(text_px(11.)).text_color(Theme::text_secondary()).child(said))
+                .when(busy, |d| d.child(ui::spinner(SharedString::from(format!("{key}-compare-{n}-{id}")), 11., Theme::text_tertiary())))
+                .when(!busy && !text.trim().is_empty(), |d| d.child(ui::ghost_button(SharedString::from(format!("{key}-take-{n}-{id}")), None, Some(t("采用").into())).h(text_px(22.)).px(px(6.)).text_size(text_px(12.)).on_click(self.on(Cmd::Translate(Do::CompareTake(n)), cx))));
+            let words = if !error.is_empty() && text.trim().is_empty() { div().text_size(text_px(12.)).text_color(Theme::danger()).child(ui::one_line(&error)) } else { div().text_size(text_px(13.)).line_height(text_px(20.)).text_color(Theme::text()).child(text) };
+            card = card.child(div().flex().flex_col().gap(px(2.)).child(head).child(words));
+        }
+        card.into_any_element()
+    }
+
     /// 原文已改 under a translation the person made their own: the words of the source that changed, and 重译,
     /// 只带改动 and 已核对; while 只带改动 is asked, a spinner; once it came, the comparison to take or leave.
     fn render_translate_changed(&self, u: usize, kept: &Kept, unit: &Unit, key: &str, cx: &mut Context<Self>) -> AnyElement {
@@ -922,6 +1059,8 @@ impl Workspace {
             "take" => Do::TakeCarry(at()),
             "leave" => Do::LeaveCarry(at()),
             "check" => Do::Checked(at()),
+            "compare" => Do::Compare(at()),
+            "pick" => Do::CompareTake(at()),
             "done" => Do::Done,
             "next" => Do::Next,
             "retry" => Do::Retry,
