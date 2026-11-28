@@ -1028,8 +1028,12 @@ impl Store {
         self.read_files("WHERE paper_id = ?1", [paper_id])
     }
 
+    /// A paper's files in their places: by kind, then by `added_at`, which no two files taken in by a paper share
+    /// (`import_file`). Files handed in from other papers keep their own times (`hand_file`), and those, like the
+    /// files an earlier build gave one time, come in the order they came to the library (`rowid`; an id's own
+    /// millisecond is followed by a hash, no order).
     fn read_files<P: rusqlite::Params>(&self, filter: &str, args: P) -> Result<Vec<PaperFile>> {
-        let mut stmt = self.db.prepare(&format!("SELECT id, paper_id, resource_type, title, format, local_path, size_bytes, added_at, note FROM resources {filter} ORDER BY resource_type, added_at"))?;
+        let mut stmt = self.db.prepare(&format!("SELECT id, paper_id, resource_type, title, format, local_path, size_bytes, added_at, note FROM resources {filter} ORDER BY resource_type, added_at, rowid"))?;
         let files = stmt
             .query_map(args, |r| {
                 Ok(PaperFile { id: r.get(0)?, paper_id: r.get(1)?, kind: r.get(2)?, title: r.get(3)?, format: r.get(4)?, local_path: r.get(5)?, size_bytes: r.get::<_, i64>(6)? as u64, added_at: r.get(7)?, note: r.get(8)? })
@@ -1765,7 +1769,7 @@ impl Store {
     pub fn each_text(&self, mut each: impl FnMut(PaperFile, Vec<String>) -> bool) -> Result<()> {
         let mut stmt = self.db.prepare(
             "SELECT r.id, r.paper_id, r.resource_type, r.title, r.format, r.local_path, r.size_bytes, r.added_at, t.pages, r.note FROM resources r JOIN fulltext_text t ON t.resource_id = r.id \
-             WHERE t.error = '' AND r.paper_id NOT IN (SELECT paper_id FROM trashed_papers) ORDER BY r.paper_id, r.resource_type, r.added_at",
+             WHERE t.error = '' AND r.paper_id NOT IN (SELECT paper_id FROM trashed_papers) ORDER BY r.paper_id, r.resource_type, r.added_at, r.rowid",
         )?;
         let mut rows = stmt.query([])?;
         while let Some(r) = rows.next()? {
@@ -2445,6 +2449,8 @@ mod tests {
         let main = store.import_file(&article.id, &write("roots.pdf", b"%PDF-1.4 main"), "fulltext").unwrap();
         let s1 = store.import_file(&figures.id, &write("Supplementary Figures.pdf", b"%PDF-1.4 figures"), "fulltext").unwrap();
         let s2 = store.import_file(&methods.id, &write("Supplementary Methods.pdf", b"%PDF-1.4 methods"), "fulltext").unwrap();
+        // Two records taken in within one millisecond: their files keep that time when handed over, and still come in the order they came.
+        store.db.execute("UPDATE resources SET added_at = ?1 WHERE id = ?2", params![s1.added_at, s2.id]).unwrap();
         store.save_fulltext_pages(&s1.id, &Ok(vec!["Figure S2".into()])).unwrap();
         store.save_reading_places(&[(s1.id.clone(), (3, 40.))]).unwrap();
         let mark = store.add_pdf_annotation(&figures.id, &s1.id, 1, Kind::Highlight, "Figure S2", &[[1., 2., 3., 4.]]).unwrap();
@@ -2501,6 +2507,8 @@ mod tests {
         let (wrong, s1, s2) = (file("wrong.pdf", b"%PDF-1.4 another paper"), file("s1.pdf", b"%PDF-1.4 figures"), file("s2.pdf", b"%PDF-1.4 tables"));
         let main = store.import_file(&p.id, &wrong, "fulltext").unwrap();
         let (first, second) = (store.import_file(&p.id, &s1, "supplement").unwrap(), store.import_file(&p.id, &s2, "supplement").unwrap());
+        // Taken in within one millisecond or not, each file has a time of its own, which is its place: S1 before S2.
+        assert!(main.added_at < first.added_at && first.added_at < second.added_at);
         store.save_fulltext_pages(&main.id, &Ok(vec!["Another paper's page".into()])).unwrap();
         store.add_pdf_annotation(&p.id, &main.id, 1, crate::annotation::Kind::Highlight, "Another", &[[0., 0., 1., 1.]]).unwrap();
         store.set_file_note(&main.id, "  the version sent by the author ").unwrap();
