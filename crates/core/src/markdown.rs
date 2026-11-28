@@ -84,6 +84,44 @@ pub fn parse(text: &str) -> Vec<Block> {
     blocks(&lines)
 }
 
+/// A place in a text drawn from its Markdown: which of its pieces (in the order `texts` gives them), and the byte in it.
+pub type Place = (usize, usize);
+
+/// The pieces of a text as they are drawn from its Markdown, in order: what a `Place` counts. One for a paragraph,
+/// a heading, an item's own line, a table cell, a block of code.
+pub fn texts(text: &str) -> Vec<String> {
+    fn walk(blocks: &[Block], out: &mut Vec<String>) {
+        for block in blocks {
+            match block {
+                Block::Paragraph(text) | Block::Heading(_, text) => out.push(text.text.clone()),
+                Block::Item { text, children, .. } => {
+                    out.push(text.text.clone());
+                    walk(children, out);
+                }
+                Block::Code { text, .. } => out.push(text.clone()),
+                Block::Quote(inner) => walk(inner, out),
+                Block::Rule => {}
+                Block::Table { rows, .. } => out.extend(rows.iter().flatten().map(|cell| cell.text.clone())),
+            }
+        }
+    }
+    let mut out = vec![];
+    walk(&parse(text), &mut out);
+    out
+}
+
+/// The words drawn between two places of a text: the pieces a line apart.
+pub fn text_between(text: &str, from: Place, to: Place) -> String {
+    let pieces = texts(text);
+    let mut out = vec![];
+    for (at, piece) in pieces.iter().enumerate().take(to.0 + 1).skip(from.0) {
+        let cut = |byte: usize| (0..=byte.min(piece.len())).rev().find(|byte| piece.is_char_boundary(*byte)).unwrap_or(0);
+        let (start, end) = (if at == from.0 { cut(from.1) } else { 0 }, if at == to.0 { cut(to.1) } else { piece.len() });
+        if start < end { out.push(piece[start..end].to_string()) }
+    }
+    out.join("\n")
+}
+
 fn indent_of(line: &str) -> usize {
     let mut n = 0;
     for c in line.chars() {

@@ -26,6 +26,7 @@
 //! - `comment`  批注: remarks on words of a manuscript, the person's, the assistant's and those a Word file came with
 //! - `revise`   an assistant's changes to a section of a manuscript: where each goes, and the words to light up
 //! - `markdown` the Markdown of an answer → blocks to draw
+//! - `preview`  a manuscript's 预览 tied to its text: words selected there found where they are written, a comment's words where they are drawn
 //! - `panes`    分栏: the reading area as columns on an eight-unit grid, and what a window of a given width shows of a layout
 //! - `table`    副表: a table kept as a file (`.xlsx`, `.csv`, `.tsv`) read row by row, for the tool `read_table`
 //! - `ai`       context building, request bodies and stream parsing for 文献库提问
@@ -95,6 +96,7 @@ pub mod panes;
 pub mod organise;
 pub mod passage;
 pub mod pptx;
+pub mod preview;
 pub mod pdftext;
 pub mod provider;
 pub mod restyle;

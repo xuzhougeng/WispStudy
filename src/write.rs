@@ -78,6 +78,7 @@ impl Workspace {
     pub(crate) fn render_manuscript_column(&mut self, width: f32, agent: bool, stacked: bool, window: &mut Window, cx: &mut Context<Self>) -> Div {
         self.comment_reveal(window, cx);
         self.seek_reveal(window, cx);
+        self.read_tend(window, cx);
         // 译文对照: the translations still missing are asked for before the page is drawn (write_facing.rs).
         let facing = self.write_facing_shown();
         if facing { self.write_facing_tend(cx) }
@@ -135,7 +136,7 @@ impl Workspace {
         // The line under it all: what there is to say of the text. The tools are beside what is selected, nowhere else.
         let status = if writing.reading {
             let whole: String = writing.current().map_or(String::new(), |m| m.sections.iter().map(|s| s.body.as_str()).collect::<Vec<_>>().join("\n"));
-            if facing { tf!("全文 {} · 译文只是对照，不写进稿件 · 点一节的名称，回到那一节写", "Manuscript: {} · The translation is only for reading, it is not written into the manuscript · Click a section name to edit it", length_label(&whole)) } else { tf!("全文 {} · 点一节的名称，回到那一节写", "Manuscript: {} · Click a section name to edit it", length_label(&whole)) }
+            if facing { tf!("全文 {} · 译文只是对照，不写进稿件 · 点一节的名称，回到那一节写", "Manuscript: {} · The translation is only for reading, it is not written into the manuscript · Click a section name to edit it", length_label(&whole)) } else { tf!("全文 {} · 选中文字可以批注、复制 · 点一节的名称，回到那一节写", "Manuscript: {} · Select text to comment on or copy it · Click a section name to edit it", length_label(&whole)) }
         } else if proposal.is_some() {
             t("助手提议的改写还没有写进稿件：允许，或不允许").to_string()
         } else if version.is_some() {

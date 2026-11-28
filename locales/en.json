@@ -2350,5 +2350,11 @@
   "它已经不在文献库的文件夹里，也许在应用之外被删掉或移走了。换一个文件放在这里，或者移除这条附件。": "It is no longer in the library’s folder; it may have been deleted or moved outside the app. Put another file in its place, or remove this attachment.",
   "文件备注": "File note",
   "例如：作者寄来的修订版；补充表 S3 是引物序列": "For example: the revised version from the author; Table S3 lists the primers",
-  "选的就是现在这个文件。": "That is the file already in this place."
+  "选的就是现在这个文件。": "That is the file already in this place.",
+  "编辑这里": "Edit here",
+  "回到这一节写，这些字已经选中：润色、找句子这些工具就在它旁边": "Back to writing this section with these words selected: polishing, finding sentences and the other tools are beside them",
+  "点别处也会保存": "Clicking elsewhere saves it too",
+  "选中的文字在稿件里找不到原文，回到这一节选中它再写批注。": "The selected words could not be found in the manuscript's text. Select them in the section itself to comment on them.",
+  "选中的文字在稿件里找不到原文。": "The selected words could not be found in the manuscript's text.",
+  "编辑这一节": "Edit this section"
 }

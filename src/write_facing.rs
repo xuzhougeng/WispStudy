@@ -84,6 +84,8 @@ impl Workspace {
     pub(crate) fn run_write_facing(&mut self, cmd: Cmd, cx: &mut Context<Self>) {
         match cmd {
             Cmd::WriteFacing(on) => {
+                // The pieces of the page change: what stands beside the words read goes, a comment written there kept first.
+                self.read_letgo(cx);
                 let Some(lib) = self.lib.as_mut() else { return };
                 // Asked for while a section is written, it is the preview too; put away, the preview stays.
                 let entering = on && !lib.writing.reading;
@@ -243,7 +245,9 @@ impl Workspace {
                             (_, Beside::Done(text)) => Some(page(format!("{id}-t"), &bilingual::restored(text, &section.body, block, labels))),
                             (_, other) => standing(format!("{id}-w"), other),
                         };
-                        rows.push(pair(side, half, false, page(format!("{id}-o"), &read(block.range.clone())), right));
+                        // The original is the preview's: selected, copied and commented on as it is (write_read.rs).
+                        let original = self.render_read_piece(section, n, b, block.range.clone(), &manuscript::section_markdown(&read(block.range.clone()), 1), true, window, cx);
+                        rows.push(pair(side, half, false, original, right));
                     }
                 }
             }

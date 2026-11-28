@@ -50,8 +50,10 @@ impl Render for Workspace {
             // Only while 设置 › 快捷键 waits for a new key.
             .on_key_down(cx.listener(Self::record_key))
             // A press anywhere else ends the selection in an answer, and the bar beside it goes with it (one in an answer is begun before this hears of it).
+            // A comment being written beside the manuscript read through is kept, or let go when it says nothing (write_read.rs).
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| {
-                if this.lib.as_mut().is_some_and(crate::app::Library::unpick) { cx.notify() }
+                let wrote = this.read_writing() && this.read_letgo(cx);
+                if wrote || this.lib.as_mut().is_some_and(crate::app::Library::unpick) { cx.notify() }
             }))
             .on_action(cx.listener(Self::dismiss))
             .on_action(cx.listener(|this, _: &ShowPalette, window, cx| this.shortcut("palette", window, cx)))
