@@ -556,6 +556,11 @@ impl Workspace {
 
     fn export_manuscript(&mut self, kind: ManuscriptExport, cx: &mut Context<Self>) {
         let Some(manuscript) = self.lib.as_ref().and_then(|l| l.writing.current()).cloned() else { return };
+        self.export_this(manuscript, kind, cx)
+    }
+
+    /// A manuscript written out: the one being written, or a version of it in another language (`write_translate.rs`).
+    pub(crate) fn export_this(&mut self, manuscript: Manuscript, kind: ManuscriptExport, cx: &mut Context<Self>) {
         if manuscript.sections.iter().all(|s| s.body.trim().is_empty()) { return self.fail(t("这份稿件还没有写什么。"), cx) }
         // What a Word file was made of: said once it is written.
         let mut note = String::new();
@@ -609,7 +614,7 @@ impl Workspace {
             // A table written in the manuscript is put into the file: its text is not among the paragraphs counted.
             if done.tables > 0 { said.push(tn!("新增表格 {n} 张", "{n} added", done.tables, "table")) }
             if track && done.changed + done.added + done.removed + done.tables > 0 { said.push(t("都记为修订").to_string()) }
-        } else if lib.writing.comments.source.as_ref().is_some_and(|source| source.kind == "docx") {
+        } else if lib.writing.comments.source.as_ref().is_some_and(|source| source.kind == "docx") && lib.writing.current().is_some_and(|m| m.id == manuscript.id) {
             said.push(t("原来的 Word 文件不在了，按新文档导出").to_string());
         }
         if done.comments > 0 { said.push(tf!("批注 {} 条", "{} comments", done.comments)) }
@@ -713,6 +718,12 @@ impl Workspace {
                     items.push(item(if writing.comments.list.is_empty() { "Word（.docx）".into() } else { t("Word（.docx），带批注").into() }, false, Cmd::ExportManuscript(ManuscriptExport::Docx)));
                 }
                 items.push(item(t("复制全文").into(), false, Cmd::ExportManuscript(ManuscriptExport::Copy)));
+                // The version read beside it, in its language.
+                let version = self.translate_export_items();
+                if !version.is_empty() {
+                    breaks.push(items.len());
+                    items.extend(version);
+                }
                 // How it cites is the manuscript's own, chosen in a dialog of its own: the menu says which style it is.
                 breaks.push(items.len());
                 items.push(MenuItem { label: t("引用样式…").into(), checked: false, note: Some(self.cite_style_name(&self.cite_style_key()).into()), cmd: Cmd::OpenCiteStyles });
@@ -935,7 +946,7 @@ impl Workspace {
         // 译文对照: the preview with each paragraph's translation beside it (write_facing.rs). Another way of looking at the
         // manuscript, so it stands right of the eye; lit while on, a click from a section being written goes straight to it.
         let facing = reading && writing.facing;
-        let facing_tip = if facing { t("译文对照：开。再点一下收起译文，只看原文") } else { t("译文对照：预览全文，每一段的译文排在它旁边") };
+        let facing_tip = if facing { t("译文对照：开。再点一下收起译文，只看原文") } else { t("译文对照与翻译：预览全文，每一段的译文排在它旁边；保留成译稿后可以修改，并跟着原文变") };
         let facing_button = div()
             .id("write-facing")
             .flex()

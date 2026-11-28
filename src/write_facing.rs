@@ -305,7 +305,10 @@ impl Workspace {
         };
         let language = ui::ghost_button("write-facing-language", None, None).flex_none().h(text_px(22.)).px(px(6.)).gap(px(4.)).text_size(text_px(12.)).child(label(&LANGUAGES, code).to_string()).child(ui::icon("chevron-down", 11., Theme::text_tertiary())).on_click(self.on_menu(MenuKind::WriteFacingLanguage, cx));
         let failed = tally.failed > 0 && tally.done + tally.failed >= tally.asked;
-        let translation = div().flex().flex_none().items_center().gap(px(4.)).w(px(half)).child(small(t("译文"))).child(language).when(!failed, |d| d.child(div().flex_1())).children(status);
+        // 翻译 grows out of here (write_translate.rs): what is read beside the manuscript kept as a version of it, editable and following it.
+        let name = label(&LANGUAGES, code);
+        let keep = ui::ghost_button("write-facing-keep", None, Some(t("保留成译稿").into())).flex_none().h(text_px(22.)).px(px(6.)).text_size(text_px(12.)).tooltip(ui::tip(tf!("保留成{name}译稿：每段可以改，原文改了它跟着变", "Keep as a {name} version: every paragraph editable, following the manuscript as it changes"))).on_click(self.on(Cmd::Translate(crate::write_translate::Do::Language(code.to_string())), cx));
+        let translation = div().flex().flex_none().items_center().gap(px(4.)).w(px(half)).child(small(t("译文"))).child(language).child(keep).when(!failed, |d| d.child(div().flex_1())).children(status);
         let head = div().flex().flex_none().justify_center().px(px(PAD)).child(
             div()
                 .relative()

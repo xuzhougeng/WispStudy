@@ -209,6 +209,8 @@ pub struct Writing {
     pub reading: bool,
     /// 译文对照: while it is read so, each paragraph has its translation beside it (`write_facing.rs`).
     pub facing: bool,
+    /// 翻译: the versions of the manuscripts in other languages, and the work on the one on show (`write_translate.rs`).
+    pub translate: crate::write_translate::Translating,
     /// The manuscript's title, edited in place.
     pub title: Entity<TextInput>,
     /// Counts the changes typed, so a pause is the timer of the last one still being the last.
@@ -1145,7 +1147,8 @@ impl Workspace {
         let (comments, heard) = crate::comments::Commenting::new(store.comments(&manuscript).unwrap_or_default(), store.manuscript_source(&manuscript).ok().flatten(), cx);
         subscriptions.extend(heard);
         let seek = crate::write_seek::Seek::new(&mut subscriptions, cx);
-        let writing = Writing { manuscripts, manuscript, section_id, reading: false, facing: false, title, typed: 0, editor, find, search: Default::default(), structures: BTreeMap::new(), sorting: Sorting::default(), scroll: ScrollHandle::new(), assist: crate::write_assist::Assisting::new(&mut subscriptions, window, cx), revise: Default::default(), comments, editor_scroll: ScrollHandle::new(), side: Side::default(), side_open: false, agent: Default::default(), seek, read: Default::default(), away: false };
+        let translate = crate::write_translate::Translating::new(&mut subscriptions, cx);
+        let writing = Writing { manuscripts, manuscript, section_id, reading: false, facing: false, translate, title, typed: 0, editor, find, search: Default::default(), structures: BTreeMap::new(), sorting: Sorting::default(), scroll: ScrollHandle::new(), assist: crate::write_assist::Assisting::new(&mut subscriptions, window, cx), revise: Default::default(), comments, editor_scroll: ScrollHandle::new(), side: Side::default(), side_open: false, agent: Default::default(), seek, read: Default::default(), away: false };
         let citing = crate::cite::Citing::new(&store, &writing.manuscript, &mut subscriptions, cx);
         let glossary = crate::glossary::Glossary::new(&mut subscriptions, window, cx);
         let gallery = crate::figures::Gallery::new(&mut subscriptions, cx);

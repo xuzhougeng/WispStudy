@@ -30,11 +30,13 @@ pub(crate) enum Kind {
     Facing,
     /// Saved searches run and imported (检索与导入), counted in records.
     Search,
+    /// A manuscript's version in another language: its first pass, and the blocks that follow the primary (`write_translate.rs`).
+    Version,
 }
 
 impl Kind {
     #[cfg(test)]
-    pub(crate) const ALL: [Kind; 6] = [Kind::Screen, Kind::Extract, Kind::Fetch, Kind::Translate, Kind::Facing, Kind::Search];
+    pub(crate) const ALL: [Kind; 7] = [Kind::Screen, Kind::Extract, Kind::Fetch, Kind::Translate, Kind::Facing, Kind::Search, Kind::Version];
 
     /// The run's name, a key of `locales/en.json`.
     pub(crate) fn label(self) -> &'static str {
@@ -45,6 +47,7 @@ impl Kind {
             Kind::Translate => "翻译",
             Kind::Facing => "翻译全文",
             Kind::Search => "运行检索",
+            Kind::Version => "翻译稿件",
         }
     }
 
@@ -53,7 +56,7 @@ impl Kind {
         match self {
             Kind::Screen | Kind::Extract | Kind::Fetch | Kind::Search => "篇",
             Kind::Translate => "条",
-            Kind::Facing => "段",
+            Kind::Facing | Kind::Version => "段",
         }
     }
 }
@@ -113,6 +116,7 @@ impl Library {
         for (kind, run) in [(Kind::Translate, &self.translation_run), (Kind::Facing, &self.facing_run)] {
             if let Some(run) = run { works.push(Work { kind, done: run.batch.done(), total: run.batch.total, failed: run.batch.failed, running: run.batch.running(), error: run.batch.error.clone() }) }
         }
+        if let Some(batch) = self.writing.translate.run_batch() { works.push(Work { kind: Kind::Version, done: batch.done(), total: batch.total, failed: batch.failed, running: batch.running(), error: batch.error.clone() }) }
         // The searches going and those over since none was: one run.
         let searching = &self.searching;
         if !searching.going.is_empty() || searching.total > 0 {

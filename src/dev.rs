@@ -197,6 +197,15 @@ impl Workspace {
                 // 译文对照: `wfacing` reads the manuscript beside its translation, `wfacing:off` without, `wfacing:retry` asks again
                 // for what failed, `wfacing:<code>` chooses the language (a code of `manuscript::LANGUAGES`).
                 "wfacing" => Some(match arg { "" => Cmd::WriteFacing(true), "off" => Cmd::WriteFacing(false), "retry" => Cmd::WriteFacingRetry, code => Cmd::WriteFacingLanguage(code.to_string()) }),
+                // 翻译 (write_translate.rs): `wtranslate:<code>` works on the version in that language, made when there is none;
+                // by a unit's place among the manuscript's units from 0 (the title, each section's name and blocks): `edit;<n>`, `redo;<n>`,
+                // `carry;<n>`, `take;<n>`, `leave;<n>`, `check;<n>`, `compare;<n>` (the models compared, each a version) and `pick;<n>` (the n-th taken); `type;<text>` writes the unit edited, `done`, `next`, `retry`, `stop`,
+                // `primary`, `remove`, `alone` / `together`; `body;<section from 0>;<text>` sets a section's text (¶ between paragraphs);
+                // `dump;<file>` writes each unit's state and translation as JSON.
+                "wtranslate" => {
+                    self.dev_translate(arg, window, cx);
+                    return;
+                }
                 "versions" => Some(Cmd::WriteHistory),
                 // `importdoc:<path>` starts a manuscript from a Word or Markdown file; `comments` shows the comments beside the manuscript (`comments:off` the candidates);
                 // `comment:<step>` is `review`, `stop`, `write`, `save`, `cancel`, `takeall`, `import`, `fromreview` (a manuscript of the newest review the assistant wrote sections for), and by a comment's place among those of the section from 0: `take;<n>`, `back;<n>`, `drop;<n>`, `done;<n>`, `show;<n>`;

@@ -242,6 +242,8 @@ impl Workspace {
             }
             Spot::Run { kind: Kind::Translate, .. } => self.run(Cmd::SetPage(Page::Papers), window, cx),
             Spot::Run { kind: Kind::Search, .. } => self.run(Cmd::SetPage(Page::Sources), window, cx),
+            // A manuscript's version: 写作, where it is read beside its manuscript.
+            Spot::Run { kind: Kind::Version, .. } => self.run(Cmd::SetPage(Page::Write), window, cx),
             Spot::Run { kind: Kind::Facing, paper } => {
                 let shown = lib.facing;
                 if !known(&paper) { return }
