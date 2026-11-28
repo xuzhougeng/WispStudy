@@ -332,7 +332,7 @@ impl Workspace {
         writing.assist.generation += 1;
         let generation = writing.assist.generation;
         let model = judging.as_ref().or(wording.as_ref()).map(crate::write_assist::model_name).unwrap_or_default();
-        let mut card = Card { assist: Assist::Cite, language, section: writing.section_id.clone(), original, range, result: String::new(), busy: true, error: String::new(), note: String::new(), model, keys: vec![], cite: Some(Found::default()) };
+        let mut card = Card { cite: Some(Found::default()), ..Card::new(Assist::Cite, language, writing.section_id.clone(), original, range, model) };
         let refused = if card.original.trim().is_empty() { t("没有要处理的文字：先选中一段，或把光标放在要处理的段落里。") } else if card.original.len() > ai::ASSIST_LIMIT { t("选中的文字太长，一次处理一两段就好。") } else { "" };
         if !refused.is_empty() {
             (card.busy, card.error) = (false, refused.to_string());

@@ -23,6 +23,8 @@
 //! - `pptx`     slides written as a PowerPoint file: what is on a slide is said, where it stands is decided here
 //! - `docx`     Word files for 写作: read into paragraphs and comments, written again with the text as it stands and its comments
 //! - `bilingual` 译文对照: a manuscript's blocks set beside their translation, citations kept out of what is sent
+//! - `glossary` 术语表: the library's terms and how each is translated, the ones a text holds put into its request, a translation looked over with no model
+//! - `versions` 换个说法 and 译成…: three versions of the words in one answer, read back whatever shape the model gives them
 //! - `comment`  批注: remarks on words of a manuscript, the person's, the assistant's and those a Word file came with
 //! - `revise`   an assistant's changes to a section of a manuscript: where each goes, and the words to light up
 //! - `markdown` the Markdown of an answer → blocks to draw
@@ -72,6 +74,7 @@ pub mod filter;
 pub mod find;
 pub mod floating;
 pub mod fulltext;
+pub mod glossary;
 pub mod handles;
 pub mod headings;
 pub mod imagegen;
@@ -126,6 +129,7 @@ pub mod tour;
 pub mod tutorial;
 pub mod translation;
 pub mod update;
+pub mod versions;
 pub mod usage;
 pub mod webpage;
 pub mod websearch;

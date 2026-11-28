@@ -65,6 +65,9 @@ pub struct ReadingAppearance {
     pub width: TextWidth,
 }
 
+/// The most models a comparison of versions asks at once: past a few, the versions are a page to read, not a choice.
+pub const COMPARE_MOST: usize = 4;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
@@ -185,6 +188,10 @@ pub struct Settings {
     /// 译文对照: the language a manuscript is read beside, a code of `manuscript::LANGUAGES`; empty leaves it to
     /// `bilingual::language` (the interface's, or the other of Chinese and English).
     pub write_facing_language: String,
+    /// 译成… and 换个说法 asked of several models at once, by their ids (`Model::id`), in the order chosen: with two or
+    /// more that can be asked, each gives one version and the card compares them (`compare_profiles`); with fewer,
+    /// the one model gives three versions of a stated difference. Nothing else is asked of them.
+    pub compare_models: Vec<String>,
     /// The libraries of the home page in the order the person dragged them to, by id (`libraries::shelf`); one not
     /// here comes after them in the order it was made.
     pub library_order: Vec<String>,
@@ -205,7 +212,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         let providers = provider::DEFAULT_PRESETS.iter().filter_map(|key| provider::preset(key)).map(Provider::from_preset).collect();
-        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), chat_effort: String::new(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), play_speed: 1., commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, work_animation: true, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), proxy_off: false, contact_email: String::new(), ncbi_api_key: String::new(), contact_hint_dismissed: false, web_search: Default::default(), ocr: Default::default(), asr: Default::default(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, pdf_split_free: false, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, write_facing_language: String::new(), library_order: vec![], days_used: 0, last_used_day: String::new(), star_answered: false, home_list: false, tour_step: 0, tour_done: false };
+        let mut settings = Settings { data_dir: String::new(), providers, legacy_profiles: vec![], tasks: Tasks::default(), chat_effort: String::new(), screen_workers: 3, translate_workers: 4, translation_prompt: String::new(), speech_voice: String::new(), play_speed: 1., commands: vec![], connectors: vec![], skills_off: vec![], auto_update: true, auto_download: true, restore_session: true, appearance: String::new(), high_contrast: false, work_animation: true, language: Language::default(), density: String::new(), font_family: String::new(), cjk_font_family: String::new(), font_size: DEFAULT_FONT_SIZE, reading_appearance: ReadingAppearance::default(), proxy: String::new(), proxy_off: false, contact_email: String::new(), ncbi_api_key: String::new(), contact_hint_dismissed: false, web_search: Default::default(), ocr: Default::default(), asr: Default::default(), shortcuts: BTreeMap::new(), detail_width: 0., sidebar_width: 0., sidebar_hidden: false, chat_width: 0., ask_list_width: 0., pdf_first: false, pdf_tools_floating: false, pdf_tools_at: None, pdf_split_free: false, facing_in_place: false, column_widths: BTreeMap::new(), columns_hidden: vec![], journal_zone: String::new(), floating: Default::default(), keep_running: true, agent_writing: false, agent_manuscript_width: 0., author: String::new(), cite_style: String::new(), citation_cards_hidden: false, write_facing_language: String::new(), compare_models: vec![], library_order: vec![], days_used: 0, last_used_day: String::new(), star_answered: false, home_list: false, tour_step: 0, tour_done: false };
         settings.tidy();
         settings
     }
@@ -591,6 +598,11 @@ impl Settings {
         for task in Task::ALL {
             if !self.model(self.tasks.get(task)).is_some_and(|(_, model)| task.takes(model)) { self.tasks.set(task, "") }
         }
+        // A comparison, likewise: a model gone is not compared, and its id handed out again does not bring another in.
+        let compared = std::mem::take(&mut self.compare_models);
+        for id in compared {
+            if self.model(&id).is_some_and(|(_, model)| Task::Translate.takes(model)) && !self.compare_models.contains(&id) { self.compare_models.push(id) }
+        }
         self.screen_workers = self.screen_workers.clamp(1, MAX_SCREEN_WORKERS);
         self.translate_workers = self.translate_workers.clamp(1, MAX_SCREEN_WORKERS);
         if !self.detail_width.is_finite() || self.detail_width < 0. { self.detail_width = 0. }
@@ -649,6 +661,13 @@ impl Settings {
     /// one for questions. 提取 shares screening's model, and cannot be done by one that only judges.
     pub fn speaking_profile_for(&self, task: Task) -> Profile {
         self.profile_for(task).filter(|profile| !profile.judges()).or_else(|| self.profile_for(Task::Chat)).unwrap_or_default()
+    }
+
+    /// The models a comparison of versions asks (`compare_models`): those chosen that answer in words and can be
+    /// asked (a key and a model name), at most `COMPARE_MOST`. Fewer than two is no comparison.
+    pub fn compare_profiles(&self) -> Vec<Profile> {
+        let all = self.profiles();
+        self.compare_models.iter().filter_map(|id| all.iter().find(|profile| profile.id == *id && profile.missing().is_none())).take(COMPARE_MOST).cloned().collect()
     }
 
     /// The model a task uses; without any model at all, the built-in
@@ -1006,8 +1025,15 @@ mod tests {
         assert_eq!((s.tasks.chat.as_str(), s.tasks.translate.as_str(), uses(&s, Task::Chat).as_str()), ("", "m2", "deepseek-flash"));
         assert_eq!(s.add_model(1, " kimi-k3 "), Some("m4".into()));
         assert_eq!(s.profile("m4").map(|p| (p.model, p.provider)), Some(("kimi-k3".into(), "Kimi".into())));
+        // A comparison asks the models chosen that can be asked, none twice and none removed.
+        s.compare_models = vec!["m1".into(), "m2".into(), "m2".into(), "m9".into()];
+        assert!(s.compare_profiles().is_empty());
+        s.providers[0].api_key = "k".into();
+        assert_eq!(s.compare_profiles().iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["m1", "m2", "m2"]);
         s.remove_model(0, 1);
         assert_eq!((s.tasks.translate.as_str(), uses(&s, Task::Translate).as_str()), ("", "deepseek-flash"));
+        assert_eq!(s.compare_models, ["m1"]);
+        s.providers[0].api_key.clear();
         // A provider added from a preset gets ids of its own, whatever it came with.
         let claude = s.add_provider(Provider::from_preset(provider::preset("claude").unwrap()));
         assert_eq!(s.providers[claude].models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["m2", "m5", "m6"]);

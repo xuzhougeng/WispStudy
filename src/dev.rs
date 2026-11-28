@@ -240,6 +240,16 @@ impl Workspace {
                 "comments" => Some(Cmd::WriteSide(if arg == "off" { Side::Candidates } else { Side::Comments })),
                 // `references` shows the reference list beside the manuscript (`references:off` the candidates), `references:whole` the whole manuscript's, as the outline's row does.
                 "references" => Some(match arg { "off" => Cmd::WriteSide(Side::Candidates), "whole" => Cmd::WriteReferences, _ => Cmd::WriteSide(Side::References) }),
+                // `glossary` shows 术语 beside the manuscript; `glossary:add;<中文>;<译名>`, `glossary:edit;<n>` (the n-th row shown, from 0),
+                // `glossary:save`, `glossary:remove;<n>`, `glossary:propose`, `glossary:tick;<n>`, `glossary:take`, `glossary:lang;<code>`;
+                // `requirement:<text>` types the manuscript's standing requirement.
+                "glossary" => return self.glossary_dev(arg, window, cx),
+                "requirement" => {
+                    // Setting a field's text is not typing into it: it is kept as typing would keep it.
+                    if let Some(lib) = self.lib.as_ref() { lib.glossary.requirement.update(cx, |input, cx| input.set_text(arg, cx)) }
+                    self.requirement_typed(arg.to_string(), cx);
+                    None
+                }
                 "wish" | "commenttext" => {
                     if let Some(comments) = self.lib.as_ref().map(|lib| &lib.writing.comments) { (if name == "wish" { &comments.wish } else { &comments.draft }).update(cx, |input, cx| input.set_text(arg, cx)) }
                     None
@@ -571,7 +581,22 @@ impl Workspace {
                 "sort" => Some(Cmd::WriteRun(false)),
                 // `assist:rewrite|translate|polish|<own command>` asks the model about the caret's paragraph;
                 // `assisted:replace|below|copy|drop` uses the result, `assiststop` stops it; `caret:<byte>` / `pick:<from>;<to>` place the caret / select.
-                "assist" => Some(Cmd::WriteAssist(match arg { "rewrite" => ai::Assist::Rewrite, "translate" => ai::Assist::Translate, "polish" => ai::Assist::Polish, "cite" => ai::Assist::Cite, own => ai::Assist::Own(own.to_string()) })),
+                // `assist:reword` is 换个说法; `assistto:<code>` asks 译成… again into that language; `once:<text>` types a requirement
+                // for this once under the card and asks again with it; `assistrecord` is 记入术语表 beside it.
+                "assist" => Some(Cmd::WriteAssist(match arg { "rewrite" => ai::Assist::Rewrite, "translate" => ai::Assist::Translate, "reword" => ai::Assist::Reword, "polish" => ai::Assist::Polish, "cite" => ai::Assist::Cite, own => ai::Assist::Own(own.to_string()) })),
+                "assistto" => Some(Cmd::WriteAssistTarget(arg.to_string())),
+                "once" => {
+                    if let Some(lib) = self.lib.as_ref() { lib.writing.assist.once.update(cx, |input, cx| input.set_text(arg, cx)) }
+                    if !arg.is_empty() { self.assist_again(cx) }
+                    None
+                }
+                "assistrecord" => Some(Cmd::WriteAssistRecord),
+                // `compare:<id>;<id>` chooses the models 译成… and 换个说法 compare (their ids in settings.json); `compare:` none.
+                "compare" => {
+                    self.settings.compare_models = arg.split(';').map(str::trim).filter(|id| !id.is_empty()).map(str::to_string).collect();
+                    self.save_settings(cx);
+                    None
+                }
                 "assiststop" => Some(Cmd::WriteAssistStop),
                 // `cited:tick;<sentence>;<paper>` ticks a paper 配引用 found (by their places from 0), `cited:more;<sentence>` shows its other papers,
                 // `cited:rest` the sentences nothing was chosen for, `cited:insert` writes the ticked citations.
@@ -622,7 +647,12 @@ impl Workspace {
                         _ => return,
                     }))
                 }
-                "assisted" => Some(Cmd::WriteAssistUse(match arg { "replace" => crate::write_assist::Use::Replace, "below" => crate::write_assist::Use::Below, "copy" => crate::write_assist::Use::Copy, _ => crate::write_assist::Use::Drop })),
+                // `assisted:take;<n>` takes the n-th version (from 0), `assisted:copy;<n>` copies it.
+                "assisted" => {
+                    use crate::write_assist::Use;
+                    let (what, n) = arg.split_once(';').map_or((arg, None), |(what, n)| (what, n.parse::<usize>().ok()));
+                    Some(Cmd::WriteAssistUse(match (what, n) { ("take", Some(n)) => Use::Take(n), ("copy", Some(n)) => Use::CopyOne(n), ("replace", _) => Use::Replace, ("below", _) => Use::Below, ("copy", _) => Use::Copy, _ => Use::Drop }))
+                }
                 "undo" => {
                     if let Some(lib) = self.lib.as_ref() { lib.writing.editor.update(cx, |input, cx| input.undo_last(cx)) }
                     return;

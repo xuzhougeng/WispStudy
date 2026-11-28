@@ -765,10 +765,11 @@ impl Workspace {
                 .bg(Theme::groove())
                 .child(tab("write-side-candidates", t("候选句").into(), Side::Candidates, false, self, cx))
                 .child(tab("write-side-comments", if waiting > 0 { tf!("批注 {waiting}", "Comments {waiting}") } else { t("批注").into() }, Side::Comments, false, self, cx))
-                .child(tab("write-side-references", if cited > 0 { tf!("参考文献 {cited}", "References {cited}") } else { t("参考文献").into() }, Side::References, unresolved, self, cx)),
+                .child(tab("write-side-references", if cited > 0 { tf!("参考文献 {cited}", "References {cited}") } else { t("参考文献").into() }, Side::References, unresolved, self, cx))
+                .child(tab("write-side-glossary", t("术语").into(), Side::Glossary, false, self, cx)),
         )
         // Asking for the page on show again folds the drawer, or opens it.
-        .when_some(drawer, |d, open| d.when(!open, |d| d.border_b_0()).child(ui::icon_action("write-side-fold", if open { "chevron-down" } else { "chevron-up" }, Theme::text_tertiary(), if open { t("收起，把地方让给稿件") } else { t("展开候选句、批注和参考文献") }).on_click(self.on(Cmd::WriteSide(shown), cx))))
+        .when_some(drawer, |d, open| d.when(!open, |d| d.border_b_0()).child(ui::icon_action("write-side-fold", if open { "chevron-down" } else { "chevron-up" }, Theme::text_tertiary(), if open { t("收起，把地方让给稿件") } else { t("展开候选句、批注、参考文献和术语") }).on_click(self.on(Cmd::WriteSide(shown), cx))))
     }
 
     /// The comments on the section being written, beside the manuscript.

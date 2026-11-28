@@ -545,6 +545,8 @@ const ADDED_COLUMNS: &[(&str, &str, &str)] = &[
     ("manuscript_sections", "level", "INTEGER NOT NULL DEFAULT 1"),
     // The style a manuscript cites in; empty follows the settings (`Manuscript::cite_style`).
     ("manuscripts", "cite_style", "TEXT NOT NULL DEFAULT ''"),
+    // What every translation and new version of a manuscript's words is to follow (`Manuscript::requirement`).
+    ("manuscripts", "requirement", "TEXT NOT NULL DEFAULT ''"),
     ("import_batches", "depth", "INTEGER NOT NULL DEFAULT 0"),
     ("pdf_annotations", "color", "TEXT NOT NULL DEFAULT ''"),
     ("papers", "volume", "TEXT NOT NULL DEFAULT ''"),
@@ -649,6 +651,7 @@ impl Store {
         db.execute_batch(crate::extract::SCHEMA)?;
         db.execute_batch(crate::excerpt::SCHEMA)?;
         db.execute_batch(crate::screening_record::SCHEMA)?;
+        db.execute_batch(crate::glossary::SCHEMA)?;
         add_columns(&db)?;
         crate::manuscript::migrate_drafts(&mut db)?;
         db.pragma_update(None, "user_version", SCHEMA_VERSION)?;

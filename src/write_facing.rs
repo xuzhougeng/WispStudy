@@ -21,6 +21,7 @@ use crate::translate::Translated;
 use crate::ui;
 use gpui::{prelude::FluentBuilder, *};
 use wisp_core::bilingual::{self, Kind};
+use wisp_core::glossary;
 use wisp_core::manuscript::{self, LANGUAGES};
 use wisp_core::settings::Task;
 use wisp_core::store::translation_key;
@@ -75,6 +76,14 @@ fn pair(side: bool, half: f32, foot: bool, left: AnyElement, right: Option<AnyEl
     }
 }
 
+/// A block's translation with a quiet mark in the margin at its right where it lacks what its source has
+/// (`glossary::check`), the reasons in the mark's tooltip.
+fn checked(id: String, translation: AnyElement, lacks: &[glossary::Lack]) -> AnyElement {
+    if lacks.is_empty() { return translation }
+    let mark = div().id(SharedString::from(id)).absolute().top(px(5.)).right(px(-20.)).child(ui::icon("triangle-alert", 12., Theme::warning())).tooltip(ui::tip(crate::write_assist::lacks_said(lacks)));
+    div().relative().child(translation).child(mark).into_any_element()
+}
+
 /// A block's Markdown drawn as the preview draws it.
 fn page(id: String, text: &str) -> AnyElement {
     crate::markdown::render_page(&id, &manuscript::section_markdown(text, 1), READ_SIZE).into_any_element()
@@ -98,7 +107,7 @@ impl Workspace {
                 self.save_settings(cx);
             }
             Cmd::WriteFacingRetry => {
-                let failed: Vec<String> = self.facing_wanted().into_iter().map(|(_, key)| key).collect();
+                let failed: Vec<String> = self.facing_wanted().into_iter().map(|(_, _, key)| key).collect();
                 if let Some(lib) = self.lib.as_mut() { lib.translations.retain(|key, state| !(matches!(state, Translated::Failed(_)) && failed.contains(key))) }
             }
             _ => {}
@@ -125,18 +134,34 @@ impl Workspace {
         LANGUAGES.iter().filter(|(code, _)| *code != written).map(|(code, name)| MenuItem { label: format!("{} ({code})", t(name)).into(), checked: *code == on, note: None, cmd: Cmd::WriteFacingLanguage(code.to_string()) }).collect()
     }
 
-    /// What of the manuscript on show is translated, each text with the key its translation is kept under: the
-    /// title, each section's name, and each block that says something (`bilingual::blocks`), in the order read.
-    fn facing_wanted(&self) -> Vec<(String, String)> {
+    /// The glossary's pairs from the manuscript's language into the translation's, and the manuscript's requirement:
+    /// what a text's instructions are made with (`bilingual::prompt_for`).
+    fn facing_rules(&self) -> (Vec<(String, String)>, String) {
+        let Some(lib) = self.lib.as_ref() else { return (vec![], String::new()) };
+        (glossary::pairs(&lib.glossary.terms, lib.writing.language(), self.write_facing_language()), lib.requirement())
+    }
+
+    /// What of the manuscript on show is translated, each text with its instructions and the key its translation is
+    /// kept under: the title, each section's name, and each block that says something (`bilingual::blocks`), in the
+    /// order read. A text's instructions carry the glossary's terms it holds (`bilingual::prompt_for`).
+    fn facing_wanted(&self) -> Vec<(String, String, String)> {
         let Some(manuscript) = self.lib.as_ref().and_then(|lib| lib.writing.current()) else { return vec![] };
-        let prompt = bilingual::prompt(self.write_facing_language());
+        let code = self.write_facing_language();
+        let (pairs, requirement) = self.facing_rules();
         let mut wanted: Vec<String> = vec![];
         if !manuscript.title.trim().is_empty() { wanted.push(manuscript.title.trim().to_string()) }
         for section in &manuscript.sections {
             if !section.name.trim().is_empty() { wanted.push(section.name.trim().to_string()) }
             wanted.extend(bilingual::blocks(&section.body).into_iter().map(|block| block.sent).filter(|sent| !sent.is_empty()));
         }
-        wanted.into_iter().map(|text| { let key = translation_key(&text, &prompt); (text, key) }).collect()
+        wanted
+            .into_iter()
+            .map(|text| {
+                let prompt = bilingual::prompt_for(code, &text, &pairs, &requirement);
+                let key = translation_key(&text, &prompt);
+                (text, prompt, key)
+            })
+            .collect()
     }
 
     /// Ask for the translations still missing, as many at a time as a batch of translations has in flight
@@ -144,16 +169,15 @@ impl Workspace {
     /// and that frame asks for the next ones. What failed is asked again only by 重试.
     pub(crate) fn write_facing_tend(&mut self, cx: &mut Context<Self>) {
         let wanted = self.facing_wanted();
-        let prompt = bilingual::prompt(self.write_facing_language());
         let profile = self.settings.profile_for_or_default(Task::Translate);
         let workers = self.settings.translate_workers.max(1);
         let state = |this: &Self, key: &str| this.lib.as_ref().and_then(|lib| lib.translations.get(key)).map(|state| matches!(state, Translated::Busy));
-        let mut busy = wanted.iter().filter(|(_, key)| state(self, key) == Some(true)).count();
-        for (text, key) in &wanted {
+        let mut busy = wanted.iter().filter(|(_, _, key)| state(self, key) == Some(true)).count();
+        for (text, prompt, key) in &wanted {
             if busy >= workers { break }
             if state(self, key).is_some() { continue }
             // Kept by an earlier look at this manuscript: read, not asked for.
-            self.translate_text(text, &profile, &prompt, false, false, cx);
+            self.translate_text(text, &profile, prompt, false, false, cx);
             if state(self, key) == Some(true) { busy += 1 }
         }
     }
@@ -164,7 +188,7 @@ impl Workspace {
         let lib = self.lib.as_ref().unwrap();
         let Some(manuscript) = lib.writing.current() else { return div().into_any_element() };
         let code = self.write_facing_language();
-        let prompt = bilingual::prompt(code);
+        let (pairs, requirement) = self.facing_rules();
         // The widths are given in pixels: wrapped text under widths that are shares is measured at the wrong one.
         let (measure, room) = (f32::from(theme::manuscript_width()), (width - 2. * PAD).max(1.));
         let both = room.min(2. * measure + GUTTER);
@@ -175,7 +199,7 @@ impl Workspace {
         let mut look = |sent: &str| -> Beside {
             if sent.trim().is_empty() { return Beside::Nothing }
             tally.asked += 1;
-            match lib.translations.get(&translation_key(sent, &prompt)) {
+            match lib.translations.get(&translation_key(sent, &bilingual::prompt_for(code, sent, &pairs, &requirement))) {
                 None => Beside::Waiting,
                 Some(Translated::Busy) => Beside::Busy,
                 Some(Translated::Done(text)) => {
@@ -242,7 +266,8 @@ impl Workspace {
                         let right = match (block.kind, &beside) {
                             // Code and rules read the same in any language: beside themselves, and not said twice in one column.
                             (Kind::Kept, _) => side.then(|| page(format!("{id}-t"), &section.body[block.range.clone()])),
-                            (_, Beside::Done(text)) => Some(page(format!("{id}-t"), &bilingual::restored(text, &section.body, block, labels))),
+                            // Looked over with no model: a term of the glossary not used, a number lost, is a mark at its right.
+                            (_, Beside::Done(text)) => Some(checked(format!("{id}-c"), page(format!("{id}-t"), &bilingual::restored(text, &section.body, block, labels)), &glossary::check(&block.sent, text, &glossary::occurring(&block.sent, &pairs)))),
                             (_, other) => standing(format!("{id}-w"), other),
                         };
                         // The original is the preview's: selected, copied and commented on as it is (write_read.rs).

@@ -76,6 +76,7 @@ impl Workspace {
     /// (`agent`) the tools for a paragraph are left out: what is to change is said there, and where the person
     /// writes nothing is said to an assistant at all (the tools give back something to take or leave).
     pub(crate) fn render_manuscript_column(&mut self, width: f32, agent: bool, stacked: bool, window: &mut Window, cx: &mut Context<Self>) -> Div {
+        self.glossary_attend(cx);
         self.comment_reveal(window, cx);
         self.seek_reveal(window, cx);
         self.read_tend(window, cx);
@@ -280,9 +281,13 @@ impl Workspace {
         };
         // What an action on the text came to stands over any page of the panel.
         if writing.side != Side::Candidates {
-            let card = self.render_assist_card(width, cx);
+            let card = self.render_assist_card(width, window, cx);
             let side = side.when(card.is_some(), |d| d.child(div().flex_none().h(px(10.)))).children(card);
-            return if writing.side == Side::Comments { side.child(self.render_comments(width, window, cx)) } else { side.child(self.render_references(width, window, cx)) };
+            return match writing.side {
+                Side::Comments => side.child(self.render_comments(width, window, cx)),
+                Side::Glossary => side.child(self.render_glossary(width, window, cx)),
+                _ => side.child(self.render_references(width, window, cx)),
+            };
         }
         side
             .child(
@@ -321,7 +326,7 @@ impl Workspace {
                     .child(self.render_narrowing(cx))
                     .child(self.render_groundwork(width, cx)),
             )
-            .children(self.render_assist_card(width, cx))
+            .children(self.render_assist_card(width, window, cx))
             .when(!heading.is_empty(), |d| d.child(div().flex_none().px(px(14.)).pb(px(6.)).text_size(text_px(11.)).text_color(Theme::text_tertiary()).truncate().child(heading)))
             .child(match empty {
                 Some(empty) => div().flex().flex_col().flex_1().min_h_0().px(px(14.)).child(empty).into_any_element(),

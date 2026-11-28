@@ -63,6 +63,12 @@ pub enum MenuKind {
     WriteLanguage,
     /// 译文对照: the language the manuscript is read beside.
     WriteFacingLanguage,
+    /// 术语: the language of the glossary's other side.
+    GlossaryLanguage,
+    /// 译成…: the language the card's text is translated into.
+    WriteAssistTarget,
+    /// 译成… and 换个说法: the models compared (`Settings::compare_models`).
+    CompareModels,
     /// 写作: which papers the candidates come from.
     WriteNarrow,
     /// The menus a right click opens (`src/context.rs`): on a paper of a list, a paper in the trash, a file
@@ -303,6 +309,9 @@ impl Workspace {
             MenuKind::Manuscripts | MenuKind::Section(_) | MenuKind::ManuscriptExport | MenuKind::WriteLanguage => (items, breaks) = self.manuscript_menu(&kind, cx),
             MenuKind::WriteFacingLanguage => items = self.facing_language_menu(),
             MenuKind::WriteNarrow => items = self.narrowing_menu(),
+            MenuKind::GlossaryLanguage => items = self.glossary_language_menu(),
+            MenuKind::WriteAssistTarget => items = self.assist_target_menu(),
+            MenuKind::CompareModels => items = self.compare_menu(),
             MenuKind::Export => {
                 items.push(item("BibTeX（.bib）", Cmd::Export(ExportKind::Bibtex)));
                 items.push(item(t("表格（.csv）"), Cmd::Export(ExportKind::Csv)));

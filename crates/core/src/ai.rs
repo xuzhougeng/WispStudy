@@ -1847,8 +1847,10 @@ pub fn translate_request(profile: &Profile, prompt: &str, text: &str) -> Result<
 pub enum Assist {
     /// Rewrite it after the candidate sentences beside it, citing where they are drawn on.
     Rewrite,
-    /// Put it into the manuscript's language.
+    /// Put it into another language (the request's): three versions (`versions`).
     Translate,
+    /// Say it another way in its own language: three versions (`versions`).
+    Reword,
     /// Tighten it, changing as little as needed.
     Polish,
     /// Find the papers of the library each sentence can cite (`citefind`): the answer is a list of papers, not a version of the paragraph.
@@ -1863,6 +1865,7 @@ impl Assist {
         match self {
             Assist::Rewrite => "仿写".into(),
             Assist::Translate => format!("译成{}", language_name(language)),
+            Assist::Reword => "换个说法".into(),
             Assist::Polish => "润色".into(),
             Assist::Cite => "配引用".into(),
             Assist::Own(name) => format!("/{name}"),
@@ -1875,7 +1878,7 @@ pub fn language_name(language: &str) -> String {
     match language.trim().to_lowercase().as_str() {
         "" | "en" | "english" | "英文" | "英语" => "英文".into(),
         "zh" | "chinese" | "中文" | "汉语" | "简体中文" => "中文".into(),
-        other => other.to_string(),
+        code => crate::manuscript::LANGUAGES.iter().find(|(known, _)| *known == code).map_or(code.to_string(), |(_, name)| name.to_string()),
     }
 }
 
@@ -1897,8 +1900,18 @@ pub const ASSIST_EXAMPLES: usize = 12;
 /// The longest paragraph an action takes, in bytes: the selection may be a whole section, not a book.
 pub const ASSIST_LIMIT: usize = 20_000;
 
-/// What a writing request is made of: the instructions and the message.
-pub fn assist_prompt(assist: &Assist, language: &str, paragraph: &str, examples: &[Example], own: &[Command]) -> Result<(String, String), String> {
+impl Assist {
+    /// Whether its answer is several versions of the words (`versions::parse`), not one.
+    pub fn versions(&self) -> bool {
+        matches!(self, Assist::Translate | Assist::Reword)
+    }
+}
+
+/// What a writing request is made of: the instructions and the message. `language` is what the result is written
+/// in: the manuscript's, or for a translation the one asked for. `ask` is what the request carries besides the
+/// text: the terms of the glossary that occur in it, the manuscript's standing requirement, and for the actions
+/// that give versions the paragraph around it and a requirement for this once (`versions::Ask`).
+pub fn assist_prompt(assist: &Assist, language: &str, paragraph: &str, examples: &[Example], own: &[Command], ask: &crate::versions::Ask) -> Result<(String, String), String> {
     let paragraph = paragraph.trim();
     if paragraph.is_empty() { return Err("没有要处理的文字：先选中一段，或把光标放在要处理的段落里。".into()) }
     if paragraph.len() > ASSIST_LIMIT { return Err("选中的文字太长，一次处理一两段就好。".into()) }
@@ -1929,10 +1942,12 @@ pub fn assist_prompt(assist: &Assist, language: &str, paragraph: &str, examples:
                 listed.join("\n")
             )
         }
-        Assist::Translate => format!(
-            "把下面这段译成{language}的学术论文文字：意思准确，用这个领域的论文惯用的说法，而不是逐字直译。\n\
-             术语、基因名、物种学名、数字和单位保持原样；已经是{language}的部分照原样保留。\n\n{paragraph}"
-        ),
+        Assist::Translate => {
+            let source = if ask.source.trim().is_empty() { "原文".to_string() } else { language_name(&ask.source) };
+            let system = if ask.single { crate::versions::single_system() } else { crate::versions::system() };
+            return Ok((system, crate::versions::translate_message(&source, &language, paragraph, ask)));
+        }
+        Assist::Reword => return Ok((if ask.single { crate::versions::single_system() } else { crate::versions::system() }, crate::versions::reword_message(&language, paragraph, ask))),
         Assist::Polish => format!(
             "润色下面这段{language}文字：改得越少越好，只改语法错误、不准确或不地道的用词、冗余和不通顺的地方。\n\
              不改变意思，不增删论断，不调整段落的结构；本来就好的句子原样保留。\n\n{paragraph}"
@@ -1940,6 +1955,7 @@ pub fn assist_prompt(assist: &Assist, language: &str, paragraph: &str, examples:
         // Its answer is a list of papers found in the library, not a version of the paragraph.
         Assist::Cite => return Err("配引用不改写文字：它在文献库里查找，见 citefind。".into()),
         Assist::Own(name) => {
+            // The person's own command is said as they wrote it: the glossary and the requirement are not put into it.
             let Some(command) = own.iter().find(|command| command.name == *name) else { return Err(format!("没有 /{name} 这个命令了，可能已在「设置 › 命令」里删掉。")) };
             return Ok((
                 format!(
@@ -1951,12 +1967,14 @@ pub fn assist_prompt(assist: &Assist, language: &str, paragraph: &str, examples:
             ));
         }
     };
+    // 润色 and 仿写 keep the glossary's terms the paragraph has, and follow the manuscript's requirement.
+    let message = crate::glossary::instructions(&message, &ask.terms, &ask.requirement);
     Ok((system, message))
 }
 
 /// The request for one action on a paragraph.
-pub fn assist_request(profile: &Profile, assist: &Assist, language: &str, paragraph: &str, examples: &[Example], own: &[Command]) -> Result<HttpRequest, String> {
-    let (system, message) = assist_prompt(assist, language, paragraph, examples, own)?;
+pub fn assist_request(profile: &Profile, assist: &Assist, language: &str, paragraph: &str, examples: &[Example], own: &[Command], ask: &crate::versions::Ask) -> Result<HttpRequest, String> {
+    let (system, message) = assist_prompt(assist, language, paragraph, examples, own, ask)?;
     plain_request(profile, &system, &message)
 }
 
@@ -2623,12 +2641,13 @@ mod tests {
     #[test]
     fn writing_requests() {
         let profile = Profile { api_key: "k".into(), model: "claude-opus-5-5".into(), ..Default::default() };
+        let none = crate::versions::Ask::default();
         let examples = vec![
             Example { text: "Root growth is limited by soil strength.".into(), cite: "Smith et al., 2020".into(), key: "Smith2020".into(), page: Some(3), heading: "Introduction".into() },
             Example { text: "Ethylene mediates the response.".into(), cite: "Lee, 2019".into(), key: String::new(), page: None, heading: String::new() },
         ];
         let paragraph = "  Compacted soil slows roots (Smith et al., 2020).  ";
-        let r = assist_request(&profile, &Assist::Rewrite, "English", paragraph, &examples, &[]).unwrap();
+        let r = assist_request(&profile, &Assist::Rewrite, "English", paragraph, &examples, &[], &none).unwrap();
         let (system, message) = (r.body["system"].as_str().unwrap(), r.body["messages"][0]["content"].as_str().unwrap());
         // The language, the rule that citations stay, and every candidate with where it is from.
         assert!(system.contains("稿件语言是英文") && system.contains("保持原样"));
@@ -2636,28 +2655,35 @@ mod tests {
         assert!(message.contains("[2] (Lee, 2019) Ethylene mediates the response."));
         assert!(message.contains("已有的引用一个都不能删") && message.contains("候选句正文里引用的其他文献") && message.contains("不要照抄") && message.ends_with("要改写的段落：\nCompacted soil slows roots (Smith et al., 2020)."));
         // Without candidates there is nothing to rewrite after.
-        assert!(assist_request(&profile, &Assist::Rewrite, "English", paragraph, &[], &[]).is_err());
+        assert!(assist_request(&profile, &Assist::Rewrite, "English", paragraph, &[], &[], &none).is_err());
         let many: Vec<Example> = (0..20).map(|n| Example { text: format!("Sentence {n}."), ..Default::default() }).collect();
-        let message = assist_prompt(&Assist::Rewrite, "en", "x", &many, &[]).unwrap().1;
+        let message = assist_prompt(&Assist::Rewrite, "en", "x", &many, &[], &none).unwrap().1;
         assert!(message.contains("Sentence 11.") && !message.contains("Sentence 12."));
 
-        let (system, message) = assist_prompt(&Assist::Translate, "English", "根系在紧实土壤中生长变慢。", &[], &[]).unwrap();
-        assert!(system.contains("英文") && message.contains("译成英文的学术论文文字") && message.ends_with("根系在紧实土壤中生长变慢。"));
+        // A translation and a rewording ask for three versions under headings.
+        let ask = crate::versions::Ask { source: "zh".into(), terms: vec![("根系".into(), "root system".into())], requirement: "American spelling".into(), ..Default::default() };
+        let (system, message) = assist_prompt(&Assist::Translate, "English", "根系在紧实土壤中生长变慢。", &[], &[], &ask).unwrap();
+        assert!(system.contains("【贴近原文】") && message.contains("把下面的中文文字译成英文的学术论文文字") && message.contains("- 根系 → root system") && message.contains("American spelling") && message.ends_with("根系在紧实土壤中生长变慢。"));
+        assert!(assist_prompt(&Assist::Reword, "zh", "根系变慢。", &[], &[], &none).unwrap().1.contains("仍用中文"));
+        assert!(Assist::Reword.versions() && !Assist::Polish.versions());
+        // 润色 keeps the glossary's terms and follows the requirement; without either it is asked as before.
+        let kept = crate::versions::Ask { terms: vec![("niche".into(), "niche".into())], requirement: "American spelling".into(), ..Default::default() };
+        assert!(assist_prompt(&Assist::Polish, "", "The niche grows slow.", &[], &[], &kept).unwrap().1.ends_with("不换成别的说法：\n- niche\n\n这份稿件的要求：American spelling"));
         assert_eq!(Assist::Translate.title("German"), "译成german");
-        let message = assist_prompt(&Assist::Polish, "", "Roots grows slow.", &[], &[]).unwrap().1;
+        let message = assist_prompt(&Assist::Polish, "", "Roots grows slow.", &[], &[], &none).unwrap().1;
         assert!(message.contains("改得越少越好") && message.ends_with("Roots grows slow."));
 
         // The person's own command: the paragraph where {} stands, else at the end.
         let own = vec![Command { name: "style".into(), about: String::new(), template: "按本刊格式检查：{}。".into() }, Command { name: "short".into(), about: String::new(), template: "缩短到两句。".into() }];
-        assert_eq!(assist_prompt(&Assist::Own("style".into()), "English", "Roots.", &[], &own).unwrap().1, "按本刊格式检查：Roots.。");
-        assert_eq!(assist_prompt(&Assist::Own("short".into()), "English", "Roots.", &[], &own).unwrap().1, "缩短到两句。\n\nRoots.");
-        assert!(assist_prompt(&Assist::Own("gone".into()), "English", "Roots.", &[], &own).is_err());
+        assert_eq!(assist_prompt(&Assist::Own("style".into()), "English", "Roots.", &[], &own, &none).unwrap().1, "按本刊格式检查：Roots.。");
+        assert_eq!(assist_prompt(&Assist::Own("short".into()), "English", "Roots.", &[], &own, &none).unwrap().1, "缩短到两句。\n\nRoots.");
+        assert!(assist_prompt(&Assist::Own("gone".into()), "English", "Roots.", &[], &own, &none).is_err());
         // Nothing to work on, and too much, are refused before anything is sent.
-        assert!(assist_prompt(&Assist::Polish, "English", " \n ", &[], &[]).is_err());
+        assert!(assist_prompt(&Assist::Polish, "English", " \n ", &[], &[], &none).is_err());
 
         // 配引用 is not a version of the paragraph: it is `citefind`'s.
-        assert!(assist_prompt(&Assist::Cite, "en", "x", &[], &[]).is_err());
-        assert!(assist_prompt(&Assist::Polish, "English", &"a".repeat(ASSIST_LIMIT + 1), &[], &[]).is_err());
+        assert!(assist_prompt(&Assist::Cite, "en", "x", &[], &[], &none).is_err());
+        assert!(assist_prompt(&Assist::Polish, "English", &"a".repeat(ASSIST_LIMIT + 1), &[], &[], &none).is_err());
     }
 
     #[test]
