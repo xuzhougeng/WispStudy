@@ -498,6 +498,227 @@ pub struct Swap {
     pub kept: Vec<Kept>,
 }
 
+/// Repair a translation's citation placeholders (`[@1]`, `[@2]`, …) to match `sent`: removes any placeholder
+/// `sent` does not have, and appends any missing ones before the trailing punctuation.
+pub fn fix_cites(sent: &str, text: &str) -> String {
+    let mut wanted = placeholders(sent);
+    wanted.sort_unstable();
+    wanted.dedup();
+    let mut cleaned = String::new();
+    let mut rest = text;
+    while let Some(at) = rest.find("[@") {
+        let after = &rest[at + 2..];
+        let digits = after.bytes().take_while(u8::is_ascii_digit).count();
+        if digits > 0 && after[digits..].starts_with(']') && let Ok(n) = after[..digits].parse::<usize>() {
+            cleaned.push_str(&rest[..at]);
+            if wanted.contains(&n) {
+                cleaned.push_str(&format!("[@{n}]"));
+            } else if cleaned.ends_with(' ') && after[digits + 1..].starts_with(['.', ',', ';', ':', '!', '?', '。', '，', '；', '：', '！', '？']) {
+                cleaned.pop();
+            }
+            rest = &after[digits + 1..];
+        } else {
+            cleaned.push_str(&rest[..at + 2]);
+            rest = after;
+        }
+    }
+    cleaned.push_str(rest);
+    let have = placeholders(&cleaned);
+    let missing: Vec<usize> = wanted.into_iter().filter(|n| !have.contains(n)).collect();
+    if missing.is_empty() {
+        return cleaned.trim().to_string();
+    }
+    let added = missing.into_iter().map(|n| format!("[@{n}]")).collect::<Vec<_>>().join(" ");
+    let trimmed = cleaned.trim();
+    let endings = ['。', '．', '.', '!', '?', '！', '？', ';', '；', '…'];
+    let (head, tail) = trimmed.split_at(trimmed.trim_end_matches(endings).len());
+    let words = head.trim_end();
+    let gap = &head[words.len()..];
+    let space = if words.chars().last().is_some_and(|c| c.is_ascii() && !c.is_whitespace() && !"([".contains(c)) { " " } else { "" };
+    format!("{words}{space}{added}{gap}{tail}")
+}
+
+/// How ready a version is for export: counts units that are untranslated, whose source changed since translation,
+/// or whose citation placeholders do not match the primary.
+pub fn export_unready(kept: &[Kept], units: &[Unit], pairs: &[Option<usize>]) -> Unready {
+    let mut unready = Unready::default();
+    for (u, unit) in units.iter().enumerate() {
+        let one = pairs.get(u).copied().flatten().and_then(|k| kept.get(k));
+        match state(one) {
+            State::Untranslated => unready.untranslated += 1,
+            State::Changed => unready.changed += 1,
+            _ if one.is_none_or(|k| k.text.trim().is_empty()) => unready.untranslated += 1,
+            _ if !cites_kept(&unit.sent, &one.unwrap().text) => unready.cites += 1,
+            _ => {}
+        }
+    }
+    unready
+}
+
+/// A bilingual manuscript interleaving each primary block with its translation underneath (set as a quote block so
+/// both Markdown and Word distinguish the two languages cleanly while formatting all citations and references).
+pub fn bilingual_manuscript(manuscript: &Manuscript, language: &str, kept: &[Kept], units: &[Unit], pairs: &[Option<usize>]) -> Manuscript {
+    let text = |u: usize| pairs.get(u).copied().flatten().and_then(|k| kept.get(k)).map(|k| k.text.trim()).filter(|t| !t.is_empty());
+    let mut out = manuscript.clone();
+    for (u, unit) in units.iter().enumerate() {
+        let Some(tr) = text(u) else { continue };
+        match unit.part {
+            Part::Title if !out.title.trim().is_empty() && tr != out.title.trim() => {
+                out.title = format!("{} / {tr}", out.title.trim());
+            }
+            Part::Name => {
+                if let Some(section) = out.sections.iter_mut().find(|s| s.id == unit.section) && !section.name.trim().is_empty() && tr != section.name.trim() {
+                    section.name = format!("{} / {tr}", section.name.trim());
+                }
+            }
+            _ => {}
+        }
+    }
+    for section in &mut out.sections {
+        let translated: HashMap<usize, &str> = units
+            .iter()
+            .enumerate()
+            .filter(|(_, unit)| unit.part == Part::Text && unit.section == section.id)
+            .filter_map(|(u, unit)| Some((unit.block, text(u)?)))
+            .collect();
+        if translated.is_empty() { continue }
+        let blocks = bilingual::blocks(&section.body);
+        let mut pieces: Vec<String> = Vec::with_capacity(blocks.len() * 2);
+        for (b, block) in blocks.iter().enumerate() {
+            let original = section.body[block.range.clone()].trim_end().to_string();
+            pieces.push(original);
+            let Some(&tr) = translated.get(&b) else { continue };
+            if block.kind == Kind::Kept { continue }
+            let restored = bilingual::restored(tr, &section.body, block, &[]);
+            if restored.trim_start().starts_with('|') {
+                pieces.push(restored);
+            } else {
+                let quoted = restored.lines().map(|line| if line.trim().is_empty() { ">".to_string() } else { format!("> {}", line.trim_start_matches('#').trim_start()) }).collect::<Vec<_>>().join("\n");
+                pieces.push(quoted);
+            }
+        }
+        section.body = pieces.join("\n\n");
+    }
+    let _ = language;
+    out
+}
+
+/// Mapping between an active sentence (or span of sentences) in a translated block and its counterpart in the primary block.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SentenceLink {
+    /// 0-based index of the first active sentence in `target`, and total sentences in `target`.
+    pub index: usize,
+    pub total: usize,
+    /// Byte range of the active sentence(s) in `target`.
+    pub target: Range<usize>,
+    /// Byte range of the mapped counterpart sentence(s) in `source`.
+    pub source: Range<usize>,
+}
+
+/// Pair the sentence(s) covering `sel` in `target` with their corresponding sentence(s) in `source`.
+/// Equal sentence counts map 1-to-1; differing counts map proportionally by visual character width.
+pub fn sentence_pair(source: &str, target: &str, sel: Range<usize>) -> Option<SentenceLink> {
+    let t_sents = crate::citefind::whole_sentences(target);
+    let s_sents = crate::citefind::whole_sentences(source);
+    if t_sents.is_empty() || s_sents.is_empty() { return None }
+    let (t0, t1) = if !sel.is_empty() {
+        let mut hits = (0..t_sents.len()).filter(|&j| t_sents[j].start < sel.end && sel.start < t_sents[j].end);
+        if let Some(first) = hits.next() {
+            (first, hits.next_back().unwrap_or(first))
+        } else {
+            let j = t_sents.iter().position(|r| sel.start <= r.end).unwrap_or(t_sents.len() - 1);
+            (j, j)
+        }
+    } else {
+        let j = t_sents.iter().position(|r| sel.start <= r.end).unwrap_or(t_sents.len() - 1);
+        (j, j)
+    };
+    let (s0, s1) = if t_sents.len() == s_sents.len() {
+        (t0, t1)
+    } else if s_sents.len() == 1 {
+        (0, 0)
+    } else if t_sents.len() == 1 {
+        (0, s_sents.len() - 1)
+    } else {
+        let spans = |text: &str, ranges: &[Range<usize>]| -> Vec<(f32, f32)> {
+            let weights: Vec<f32> = ranges.iter().map(|r| crate::structure::width(&text[r.clone()]).max(1) as f32).collect();
+            let sum: f32 = weights.iter().sum::<f32>().max(1.);
+            let mut acc = 0.;
+            weights.into_iter().map(|w| { let a = acc / sum; acc += w; (a, acc / sum) }).collect()
+        };
+        let t_spans = spans(target, &t_sents);
+        let s_spans = spans(source, &s_sents);
+        let (ta, tb) = (t_spans[t0].0, t_spans[t1].1);
+        let matched: Vec<usize> = (0..s_spans.len())
+            .filter(|&i| {
+                let (sa, sb) = s_spans[i];
+                let overlap = tb.min(sb) - ta.max(sa);
+                overlap > 0.22 * (sb - sa).min(tb - ta).max(0.001)
+            })
+            .collect();
+        if let (Some(&first), Some(&last)) = (matched.first(), matched.last()) {
+            (first, last)
+        } else {
+            let mid = 0.5 * (ta + tb);
+            let best = (0..s_spans.len()).min_by(|&a, &b| ((0.5 * (s_spans[a].0 + s_spans[a].1) - mid).abs()).total_cmp(&(0.5 * (s_spans[b].0 + s_spans[b].1) - mid).abs())).unwrap_or(0);
+            (best, best)
+        }
+    };
+    Some(SentenceLink { index: t0, total: t_sents.len(), target: t_sents[t0].start..t_sents[t1].end, source: s_sents[s0].start..s_sents[s1].end })
+}
+
+/// What can be asked for a single sentence (or selected span) inside a translated block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SentenceAction {
+    /// Re-translate from its mapped source sentence.
+    Retranslate,
+    /// Reword in the target language with three academic alternatives.
+    Reword,
+    /// Polish grammar and academic conciseness.
+    Polish,
+}
+
+/// Prompt (`(system, message)`) for refining a single sentence inside a translated paragraph.
+/// When `single` is false, asks one model for three labeled versions (`[贴近原文]`, `[学术惯用]`, `[更简洁]`) parsed by `versions::parse`;
+/// when `single` is true, asks each compared model for its single best version.
+pub fn sentence_prompt(
+    action: SentenceAction,
+    target_code: &str,
+    source_sent: &str,
+    target_sent: &str,
+    source_block: &str,
+    target_block: &str,
+    terms: &[(String, String)],
+    requirement: &str,
+    single: bool,
+) -> (String, String) {
+    let language = if target_code == "zh" { "简体中文" } else { crate::model::label(&manuscript::LANGUAGES, target_code) };
+    let task = match action {
+        SentenceAction::Retranslate => format!("结合整段上下文，把指定的原句重新译成地道、准确的学术{language}。"),
+        SentenceAction::Reword => format!("结合整段上下文，把这句{language}译文换几种更地道、自然的学术论文写法，原意不变。"),
+        SentenceAction::Polish => format!("结合整段上下文，润色并精简这句{language}译文，修正语法与生硬表达，使其紧凑流畅。"),
+    };
+    let format_rule = if single {
+        "只输出改写后的这一句译文，不要输出整段，不加解释、不加引号。"
+    } else {
+        "给出三个不同取向的版本，严格按下面三行标记分段输出（每段只写这一句的译文，不要输出整段，不加多余解释）：\n[贴近原文]\n…\n[学术惯用]\n…\n[更简洁]\n…"
+    };
+    let base = format!(
+        "你是学术论文翻译与润色助手。{task}\n\
+         保留句中原有的 Markdown 记号、公式、数字、基因名、物种学名，以及形如 [@Key] 的引用标记原样留在对应位置。\n\
+         {format_rule}"
+    );
+    let system = crate::glossary::instructions(&base, terms, requirement);
+    let message = format!(
+        "所在段落原文：\n{}\n\n所在段落当前译文：\n{}\n\n对应原句：\n{}\n\n要处理的当前译句：\n{}",
+        source_block.trim(),
+        target_block.trim(),
+        source_sent.trim(),
+        target_sent.trim()
+    );
+    (system, message)
+}
+
 /// What 设为主稿 would write: the version's words become the manuscript's and the primary's words a version
 /// of them, paired as before. Refused while a unit is 未译 or 原文已改, or its translation lost a citation.
 pub fn swap(manuscript: &Manuscript, kept: &[Kept], units: &[Unit], pairs: &[Option<usize>]) -> std::result::Result<Swap, Unready> {
@@ -1032,5 +1253,52 @@ mod tests {
         assert!(store.version_blocks(&m.id, "en").unwrap().is_empty());
         assert_eq!(store.version_blocks(&m.id, "zh").unwrap().len(), kept.len());
         assert_eq!(store.snapshots(&section).unwrap()[0].body, P2);
+    }
+
+    #[test]
+    fn sentences_pair_between_primary_and_translation() {
+        let zh = "根在紧实的土壤里长得很慢 [@Li2019]。我们比较了三种土壤里主根的长度。突变体的根毛更短。";
+        let en = "Roots grow slowly in compacted soil [@Li2019]. We compared primary root length across three soils. Mutant root hairs were shorter.";
+        // Caret inside the second English sentence pairs with the second Chinese sentence.
+        let at_second = en.find("compared").unwrap();
+        let link = sentence_pair(zh, en, at_second..at_second).unwrap();
+        assert_eq!((link.index, link.total), (1, 3));
+        assert_eq!(&en[link.target], "We compared primary root length across three soils.");
+        assert_eq!(&zh[link.source], "我们比较了三种土壤里主根的长度。");
+
+        // Differing sentence counts (2 Chinese sentences -> 3 English sentences) still map proportionally.
+        let zh2 = "根在紧实的土壤里长得很慢，我们比较了三种土壤里主根的长度。突变体的根毛显著更短而且稀疏。";
+        let at_last = en.find("Mutant").unwrap();
+        let link_last = sentence_pair(zh2, en, at_last..at_last).unwrap();
+        assert_eq!(link_last.index, 2);
+        assert_eq!(&zh2[link_last.source], "突变体的根毛显著更短而且稀疏。");
+    }
+
+    #[test]
+    fn fix_cites_restores_missing_and_removes_stray_placeholders() {
+        let sent = "甲 [@1]，乙 [@2]。";
+        assert_eq!(fix_cites(sent, "Alpha, Beta."), "Alpha, Beta [@1] [@2].");
+        assert_eq!(fix_cites(sent, "Alpha [@1], Beta [@9]."), "Alpha [@1], Beta [@2].");
+        assert!(cites_kept(sent, &fix_cites(sent, "Alpha, Beta.")));
+        assert!(cites_kept(sent, &fix_cites(sent, "Alpha [@1], Beta [@9].")));
+    }
+
+    #[test]
+    fn export_readiness_and_bilingual_manuscript_work() {
+        let m = manuscript(vec![section("S1", "引言", &format!("{P1}\n\n{P2}"))]);
+        let (units, mut kept) = translated(&m);
+        kept[0].text = "Root Growth".into();
+        kept[1].text = "Introduction".into();
+        kept[2].text = "Roots grow slowly [@1].".into();
+        let mut pairs: Vec<Option<usize>> = vec![Some(0), Some(1), Some(2), None];
+        assert_eq!(export_unready(&kept, &units, &pairs), Unready { untranslated: 1, changed: 0, cites: 0 });
+        pairs[3] = Some(3);
+        kept[3].text = "We compared primary root lengths.".into();
+        assert_eq!(export_unready(&kept, &units, &pairs), Unready::default());
+        let bi = bilingual_manuscript(&m, "en", &kept, &units, &pairs);
+        assert_eq!(bi.title, "根的生长 / Root Growth");
+        assert_eq!(bi.sections[0].name, "引言 / Introduction");
+        assert!(bi.sections[0].body.contains("> Roots grow slowly [@Li2019]."));
+        assert!(bi.sections[0].body.contains("> We compared primary root lengths."));
     }
 }

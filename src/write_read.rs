@@ -338,7 +338,14 @@ impl Workspace {
     /// drawn so that it can be selected, the words of its comments tinted, and whatever stands beside a stretch of it.
     pub(crate) fn render_read_piece(&self, section: &Section, n: usize, piece: usize, within: Range<usize>, shown: &str, facing: bool, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let lib = self.lib.as_ref().unwrap();
-        let marks = self.read_marks(&section.id, &section.body, n, within, shown);
+        let marks = self.read_marks(&section.id, &section.body, n, within.clone(), shown);
+        let mut draw_marks: Vec<(Place, Place, Hsla)> = marks.iter().map(|(from, to, tint, _)| (*from, *to, *tint)).collect();
+        if facing && let Some(linked) = self.translate_linked_source(&section.id, piece, within.clone(), cx) {
+            let labels = lib.citing.read.whole.get(n).map(Vec::as_slice).unwrap_or(&[]);
+            if let Some((from, to)) = Reading::new(&section.body, labels, within, shown).drawn(linked) {
+                draw_marks.push((from, to, Theme::accent().opacity(0.14)));
+            }
+        }
         let read = &lib.writing.read;
         let pick = read.pick.as_ref().filter(|pick| pick.is(&section.id, piece, facing));
         let selected = pick.filter(|pick| !matches!(pick.beside, Beside::Comment(_))).map(Pick::range).filter(|(from, to)| from != to);
@@ -348,7 +355,7 @@ impl Workspace {
         let scroll = lib.citing.read_scroll.clone();
         let selecting = Selecting {
             selected,
-            marks: marks.iter().map(|(from, to, tint, _)| (*from, *to, *tint)).collect(),
+            marks: draw_marks,
             spot: card,
             pointer: Rc::new(move |pointer, place, window, cx| {
                 told.update(cx, |this, cx| this.run(Cmd::Read(Do::Pointer(said.clone(), piece, facing, pointer, place)), window, cx)).ok();

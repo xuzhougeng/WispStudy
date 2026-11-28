@@ -212,6 +212,10 @@ const ROW_OPENED: f32 = 132.;
 impl Workspace {
     fn render_menu(&mut self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let menu = self.menu.as_ref()?;
+        if menu.kind == crate::menus::MenuKind::WriteLanguage {
+            let (from, at) = (menu.from, menu.at);
+            return self.render_write_language_layer(from, at, window, cx);
+        }
         let mut rows: Vec<AnyElement> = vec![];
         for (i, item) in menu.items.iter().enumerate() {
             // A line between two groups of a longer menu.

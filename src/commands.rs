@@ -678,6 +678,9 @@ pub enum Cmd {
     /// The top-left arrow of a manuscript: out of 写作, back to the page it was opened from.
     LeaveWrite,
     ExportManuscript(ManuscriptExport),
+    /// 设置 › 写作: default writing language and default target translation language (`manuscript::LANGUAGES`).
+    SetDefaultWriteLanguage(String),
+    SetDefaultFacingLanguage(String),
     /// 设置 › 写作: the style manuscripts cite in that chose none of their own, by its key (`csl::style`).
     DefaultCiteStyle(String),
     /// 「导出」 › 引用样式: the dialog of the manuscript's own style; a click in it looks at a style.
@@ -1273,6 +1276,23 @@ impl Workspace {
                 if let Some(lib) = self.lib.as_mut() { lib.citing.whole = whole }
             }
             Cmd::WriteCiteFix(pieces) => self.cite_fix(pieces, cx),
+            Cmd::SetDefaultWriteLanguage(code) => {
+                self.settings.write_language = code;
+                self.save_settings(cx);
+                let target = self.settings.default_write_language().to_string();
+                let blank_id = self.lib.as_ref().and_then(|lib| {
+                    let id = lib.writing.manuscript.clone();
+                    (!id.is_empty() && lib.store.manuscript_blank(&id).unwrap_or(false)).then_some(id)
+                });
+                if let Some(id) = blank_id {
+                    if let Some(lib) = self.lib.as_mut() { let _ = lib.store.set_manuscript_language(&id, &target); }
+                    self.write_reload(None, cx);
+                }
+            }
+            Cmd::SetDefaultFacingLanguage(code) => {
+                self.settings.write_facing_language = code;
+                self.save_settings(cx);
+            }
             Cmd::DefaultCiteStyle(style) => self.set_default_cite_style(style, cx),
             Cmd::OpenCiteStyles => self.open_cite_styles(window, cx),
             Cmd::LookCiteStyle(style) => {

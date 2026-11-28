@@ -80,10 +80,11 @@ impl Workspace {
         self.comment_reveal(window, cx);
         self.seek_reveal(window, cx);
         self.read_tend(window, cx);
+        if !self.lib.as_ref().is_some_and(|lib| lib.writing.translate.loaded) { self.translate_versions() }
         // 译文对照: the translations still missing are asked for before the page is drawn (write_facing.rs).
         let facing = self.write_facing_shown();
         // 翻译: while the language beside is one the manuscript keeps a version in, that version is the right half (write_translate.rs).
-        if facing { self.translate_tend(cx) }
+        if facing { self.translate_tend(window, cx) }
         let translating = facing && self.translate_shown().is_some();
         if facing && !translating { self.write_facing_tend(cx) }
         // Over a section, the paragraph the caret was in stays in view while the rows above it fill in.

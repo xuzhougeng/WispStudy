@@ -69,9 +69,13 @@ pub enum MenuKind {
     WriteAssistTarget,
     /// 译成… and 换个说法: the models compared (`Settings::compare_models`).
     CompareModels,
-    /// 翻译: the manuscript's versions to work on and the languages to make one in; ⋯ in the version's head.
+    /// 翻译: the manuscript's versions to work on and the languages to make one in; 导出译稿 and ⋯ in the version's head.
     TranslateLanguage,
+    TranslateExport,
     TranslateMore,
+    /// 设置 › 写作: default manuscript language and default translation target language.
+    DefaultWriteLanguage,
+    DefaultFacingLanguage,
     /// 写作: which papers the candidates come from.
     WriteNarrow,
     /// The menus a right click opens (`src/context.rs`): on a paper of a list, a paper in the trash, a file
@@ -114,6 +118,7 @@ pub struct MenuItem {
 }
 
 pub struct Menu {
+    pub kind: MenuKind,
     /// Where the pointer was: a right-click's menu opens there.
     pub at: Point<Pixels>,
     /// The button or row that opened it, when one did: the menu stands by it and leaves it in sight (`menu_place`).
@@ -289,6 +294,11 @@ impl Workspace {
     }
 
     pub(crate) fn open_menu(&mut self, kind: MenuKind, at: Point<Pixels>, cx: &mut Context<Self>) {
+        if self.menu.as_ref().is_some_and(|m| m.kind == kind) {
+            self.menu = None;
+            return cx.notify();
+        }
+        let menu_kind = kind.clone();
         let item = |label: &str, cmd: Cmd| MenuItem { label: label.to_string().into(), checked: false, note: None, cmd };
         let mut items = vec![];
         let mut breaks = vec![];
@@ -312,7 +322,22 @@ impl Workspace {
             MenuKind::Manuscripts | MenuKind::Section(_) | MenuKind::ManuscriptExport | MenuKind::WriteLanguage => (items, breaks) = self.manuscript_menu(&kind, cx),
             MenuKind::WriteFacingLanguage => (items, breaks) = self.translate_facing_menu(),
             MenuKind::TranslateLanguage => (items, breaks) = self.translate_language_menu(),
+            MenuKind::TranslateExport => (items, breaks) = self.translate_export_menu(),
             MenuKind::TranslateMore => (items, breaks) = self.translate_more_menu(),
+            MenuKind::DefaultWriteLanguage => {
+                let current = self.settings.default_write_language();
+                for (code, name) in wisp_core::manuscript::LANGUAGES {
+                    items.push(MenuItem { label: format!("{} ({code})", t(name)).into(), checked: current == code, note: None, cmd: Cmd::SetDefaultWriteLanguage(code.to_string()) });
+                }
+            }
+            MenuKind::DefaultFacingLanguage => {
+                let current = self.settings.write_facing_language.as_str();
+                items.push(MenuItem { label: t("自动（中英互译）").into(), checked: current.is_empty(), note: None, cmd: Cmd::SetDefaultFacingLanguage(String::new()) });
+                breaks.push(items.len());
+                for (code, name) in wisp_core::manuscript::LANGUAGES {
+                    items.push(MenuItem { label: format!("{} ({code})", t(name)).into(), checked: current == code, note: None, cmd: Cmd::SetDefaultFacingLanguage(code.to_string()) });
+                }
+            }
             MenuKind::WriteNarrow => items = self.narrowing_menu(),
             MenuKind::GlossaryLanguage => items = self.glossary_language_menu(),
             MenuKind::WriteAssistTarget => items = self.assist_target_menu(),
@@ -598,8 +623,8 @@ impl Workspace {
                 }
             }
         }
-        if items.is_empty() { return }
-        self.menu = Some(Menu { at, from: None, items, breaks, active: None, paper, filter });
+        if items.is_empty() && menu_kind != MenuKind::WriteLanguage { return }
+        self.menu = Some(Menu { kind: menu_kind, at, from: None, items, breaks, active: None, paper, filter });
         cx.notify();
     }
 }

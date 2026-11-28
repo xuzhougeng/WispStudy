@@ -90,6 +90,49 @@ pub fn render_page_selecting(id: &str, text: &str, size: f32, selecting: Option<
     render_lifted(id, text, None, selecting, size - ANSWER_SIZE).text_size(text_px(size))
 }
 
+/// `render_page` for a translated block: draws sentence-level tint `marks`, reports the `Place` under the pointer
+/// on hover (`None` when leaving), and reports the `Place` clicked to open inline editing at that sentence.
+pub fn render_page_interactive(
+    id: &str,
+    text: &str,
+    size: f32,
+    marks: Vec<(Place, Place, Hsla)>,
+    on_hover_place: Rc<dyn Fn(Option<Place>, &mut Window, &mut App)>,
+    on_click_place: Rc<dyn Fn(Option<Place>, &mut Window, &mut App)>,
+) -> AnyElement {
+    let mut draw = Draw { id, links: 0, diagrams: 0, cite: None, selected: None, marks, layouts: vec![], lift: size - ANSWER_SIZE };
+    let drawn = div().flex().flex_col().gap(theme::paragraph_gap(10.)).children(blocks(&parse(text), &mut draw)).text_size(text_px(size));
+    let layouts = Rc::new(draw.layouts);
+    let place = move |position: Point<Pixels>| -> Option<Place> {
+        let mut nearest: Option<((Pixels, Pixels), Place)> = None;
+        for (at, layout) in layouts.iter().enumerate() {
+            let Some(layout) = layout else { continue };
+            let Ok(bounds) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| layout.bounds())) else { continue };
+            let (down, index) = if position.y < bounds.top() {
+                (bounds.top() - position.y, 0)
+            } else if position.y >= bounds.bottom() {
+                (position.y - bounds.bottom(), layout.len())
+            } else {
+                (px(0.), layout.index_for_position(position).unwrap_or_else(|index| index))
+            };
+            let across = (bounds.left() - position.x).max(position.x - bounds.right()).max(px(0.));
+            if nearest.is_none_or(|(best, _)| (down, across) < best) { nearest = Some(((down, across), (at, index))) }
+        }
+        nearest.map(|(_, place)| place)
+    };
+    let (place_move, hover_move) = (place.clone(), on_hover_place.clone());
+    let hover_leave = on_hover_place;
+    drawn
+        .id(SharedString::from(format!("{id}-interactive")))
+        .on_mouse_move(move |event, window, cx| hover_move(place_move(event.position), window, cx))
+        .on_hover(move |hovered, window, cx| if !*hovered { hover_leave(None, window, cx) })
+        .on_mouse_down(MouseButton::Left, move |event, window, cx| {
+            cx.stop_propagation();
+            on_click_place(place(event.position), window, cx);
+        })
+        .into_any_element()
+}
+
 fn render_lifted(id: &str, text: &str, cite: Option<OnCite>, selecting: Option<Selecting>, lift: f32) -> Div {
     let (selected, marks) = selecting.as_ref().map_or((None, vec![]), |selecting| (selecting.selected, selecting.marks.clone()));
     let mut draw = Draw { id, links: 0, diagrams: 0, cite, selected, marks, layouts: vec![], lift };

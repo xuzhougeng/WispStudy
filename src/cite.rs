@@ -545,11 +545,17 @@ impl Workspace {
     /// exported file's (`Read::references`): in the style's order, numbered where the citations in the text are,
     /// with what the style sets in italics. A paper in the trash is not among them; it is said over the list.
     pub(crate) fn render_references_read(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.render_references_for(None, cx)
+    }
+
+    /// `render_references_read` with the heading localized to `language` when given (e.g. `"References"` for an English version).
+    pub(crate) fn render_references_for(&self, language: Option<&str>, cx: &mut Context<Self>) -> Option<AnyElement> {
         let lib = self.lib.as_ref()?;
         let listed = &lib.citing.listed;
         let issues: Vec<AnyElement> = listed.issues(true, "").map(|issue| div().text_size(text_px(12.)).line_height(text_px(18.)).text_color(if issue.trashed { Theme::warning() } else { Theme::danger() }).child(format!("{}：{}", issue.place, issue.said)).into_any_element()).collect();
         if listed.whole.is_empty() && issues.is_empty() { return None }
-        let mut row = |paper: &str| div().id(SharedString::from(format!("cite-read-{paper}"))).px(px(8.)).mx(px(-8.)).py(px(4.)).rounded(px(6.)).cursor_pointer().hover(|s| s.bg(Theme::hover())).text_size(text_px(13.)).line_height(text_px(21.)).on_click(self.on(Cmd::GotoSource(paper.to_string(), None, String::new()), cx));
+        let suffix = language.unwrap_or("primary");
+        let mut row = |paper: &str| div().id(SharedString::from(format!("cite-read-{suffix}-{paper}"))).px(px(8.)).mx(px(-8.)).py(px(4.)).rounded(px(6.)).cursor_pointer().hover(|s| s.bg(Theme::hover())).text_size(text_px(13.)).line_height(text_px(21.)).on_click(self.on(Cmd::GotoSource(paper.to_string(), None, String::new()), cx));
         let styled = lib.citing.read.references();
         let rows: Vec<AnyElement> = if styled.is_empty() {
             listed.whole.iter().map(|entry| row(&entry.reference.paper_id).text_color(if entry.reference.trashed { Theme::text_tertiary() } else { Theme::text() }).child(entry.reference.text.clone()).into_any_element()).collect()
@@ -563,6 +569,11 @@ impl Workspace {
                 .collect()
         };
         let count = if styled.is_empty() { listed.whole.len() } else { styled.len() };
+        let heading = match language {
+            Some("zh") => "参考文献",
+            Some(_) => "References",
+            None => t("参考文献"),
+        };
         Some(
             div()
                 .flex()
@@ -573,7 +584,7 @@ impl Workspace {
                         .flex()
                         .items_baseline()
                         .gap(px(8.))
-                        .child(div().text_size(text_px(20.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text()).child(t("参考文献")))
+                        .child(div().text_size(text_px(20.)).font_weight(FontWeight::SEMIBOLD).text_color(Theme::text()).child(heading))
                         .when(count > 0, |d| d.child(div().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(tn!("{n} 篇", "{n}", count, "paper")))),
                 )
                 .children(issues)
