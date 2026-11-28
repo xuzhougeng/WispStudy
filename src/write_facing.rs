@@ -146,8 +146,8 @@ impl Workspace {
                     if entering {
                         let caret = writing.editor.read(cx).caret();
                         let block = writing.section().map_or(0, |s| bilingual::blocks(&s.body).iter().position(|b| caret <= b.range.end).unwrap_or(0));
-                        writing.facing_reveal = (block > 0).then(|| Reveal { section: writing.section_id.clone(), block, top: Rc::default(), given: None, frames: REVEAL_FRAMES });
-                        lib.citing.read_scroll.set_offset(point(px(0.), px(0.)));
+                        let section = writing.section_id.clone();
+                        self.write_facing_keep(&section, block);
                         self.write_snapshot("leave");
                     }
                 } else {
@@ -174,6 +174,13 @@ impl Workspace {
             _ => {}
         }
         cx.notify();
+    }
+
+    /// The page beside its translation drawn from its top, the block `block` of `section` brought into view.
+    pub(crate) fn write_facing_keep(&mut self, section: &str, block: usize) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        lib.writing.facing_reveal = (block > 0).then(|| Reveal { section: section.to_string(), block, top: Rc::default(), given: None, frames: REVEAL_FRAMES });
+        lib.citing.read_scroll.set_offset(point(px(0.), px(0.)));
     }
 
     /// Before the section beside its translation is drawn: the paragraph to keep in view brought there, again while

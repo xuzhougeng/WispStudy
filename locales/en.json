@@ -2376,7 +2376,7 @@
   "点一下修改": "Click to edit",
   "正在读稿件，找需要统一译法的术语…": "Reading the manuscript for terms that need one translation…",
   "勾选要加入的，点一行可以改；加入前什么都不会写进术语表。": "Tick the ones to add, click a row to edit it; nothing is written into the glossary until you add them.",
-  "给出三种译法：贴近原文、学术惯用、更简洁，按术语表译术语；点一种替换原文。目标语言可以在结果上方换。": "Three translations: close to the original, academic idiom, more concise, with terms as the glossary has them; click one to replace the text. The target language can be changed over the result.",
+  "给出三种译法：贴近原文、学术惯用、更简洁，按术语表译术语；点一种替换选中的文字。目标语言可以在结果上方换。": "Three translations: close to the original, academic idiom, more concise, with terms as the glossary has them; click one to replace the selection. The target language can be changed over the result.",
   "同一种语言换个说法，给出三个版本：贴近原文、学术惯用、更简洁，标出和原文不同的词；点一个替换原文。": "Three other wordings in the same language: close to the original, academic idiom, more concise, with the words that differ marked; click one to replace the text.",
   "换一种目标语言再译": "Translate into another language",
   "复制这一版": "Copy this version",
@@ -2473,5 +2473,12 @@
   "✓ 已是新建稿件默认": "✓ Saved as default for new drafts",
   "设为新建默认": "Save as default",
   "以后新建的稿件也默认使用这套写作语言与译文语言": "Use this primary and translation language pair by default for future manuscripts",
-  "收起译稿": "Hide translation"
+  "收起译稿": "Hide translation",
+  "替换选中的文字": "Replaces the selection",
+  "译成稿件本身的语言：点一个版本替换选中的文字": "Into the manuscript's own language: click a version to replace the selection",
+  "只供复制": "For copying only",
+  "仍然替换主稿里选中的文字": "Replace the selection in the primary anyway",
+  "点一个版本复制 · 主稿不动": "Click a version to copy it · the primary is not changed",
+  "从主稿译来 · 在上面选中它要换掉的地方，再点采用": "From the primary · select what it replaces above, then Take",
+  "去放": "Place it"
 }

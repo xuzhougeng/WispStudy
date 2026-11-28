@@ -667,6 +667,27 @@ pub fn sentence_pair(source: &str, target: &str, sel: Range<usize>) -> Option<Se
     Some(SentenceLink { index: t0, total: t_sents.len(), target: t_sents[t0].start..t_sents[t1].end, source: s_sents[s0].start..s_sents[s1].end })
 }
 
+/// Where a stretch `sel` of a block of the primary (`source`) stands in its translation (`target`), when that is
+/// sure: `sel` is the whole block (the whole translation, empty while there is none), or whole sentences of it in a
+/// translation with as many sentences, which pair one to one. A sentence counts as whole when the selection leaves
+/// out no more than its closing punctuation. `None` when it is not sure: half a sentence, counts that differ,
+/// nothing translated yet. What 译成… puts into a version goes there (`sentence_pair` guesses where it cannot).
+pub fn sentences_in(source: &str, target: &str, sel: Range<usize>) -> Option<Range<usize>> {
+    let s_sents = crate::citefind::whole_sentences(source);
+    let touched: Vec<usize> = (0..s_sents.len()).filter(|&i| s_sents[i].start < sel.end && sel.start < s_sents[i].end).collect();
+    let (&s0, &s1) = (touched.first()?, touched.last()?);
+    // The words of a sentence without what closes it: a selection may stop before its full stop.
+    let core_end = |r: &Range<usize>| r.start + source[r.clone()].trim_end_matches(|c: char| c.is_whitespace() || "。．.!?！？;；\"”’'」』".contains(c)).len();
+    if !touched.iter().all(|&i| sel.start <= s_sents[i].start && sel.end >= core_end(&s_sents[i]).max(s_sents[i].start + 1)) { return None }
+    let trimmed = target.trim();
+    let whole = { let start = target.len() - target.trim_start().len(); start..start + trimmed.len() };
+    if s0 == 0 && s1 == s_sents.len() - 1 { return Some(whole) }
+    if trimmed.is_empty() { return None }
+    let t_sents = crate::citefind::whole_sentences(target);
+    if t_sents.len() != s_sents.len() { return None }
+    Some(t_sents[s0].start..t_sents[s1].end)
+}
+
 /// What can be asked for a single sentence (or selected span) inside a translated block.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SentenceAction {
@@ -1272,6 +1293,26 @@ mod tests {
         let link_last = sentence_pair(zh2, en, at_last..at_last).unwrap();
         assert_eq!(link_last.index, 2);
         assert_eq!(&zh2[link_last.source], "突变体的根毛显著更短而且稀疏。");
+    }
+
+    #[test]
+    fn a_selection_of_the_primary_finds_its_sentences_in_the_translation_only_when_sure() {
+        let zh = "根在紧实的土壤里长得很慢 [@Li2019]。我们比较了三种土壤里主根的长度。突变体的根毛更短。";
+        let en = "Roots grow slowly in compacted soil [@Li2019]. We compared primary root length across three soils. Mutant root hairs were shorter.";
+        let span = |words: &str| { let at = zh.find(words).unwrap(); at..at + words.len() };
+        // One whole sentence, with or without its full stop: the sentence that pairs with it.
+        assert_eq!(sentences_in(zh, en, span("我们比较了三种土壤里主根的长度。")).map(|r| &en[r]), Some("We compared primary root length across three soils."));
+        assert_eq!(sentences_in(zh, en, span("我们比较了三种土壤里主根的长度")).map(|r| &en[r]), Some("We compared primary root length across three soils."));
+        // Two sentences together, and the whole block.
+        assert_eq!(sentences_in(zh, en, span("我们比较了三种土壤里主根的长度。突变体的根毛更短。")).map(|r| &en[r]), Some("We compared primary root length across three soils. Mutant root hairs were shorter."));
+        assert_eq!(sentences_in(zh, en, 0..zh.len()), Some(0..en.len()));
+        // Half a sentence, or counts that differ: not sure.
+        assert_eq!(sentences_in(zh, en, span("三种土壤")), None);
+        assert_eq!(sentences_in(zh, "Roots grow slowly, and we compared three soils. Mutant root hairs were shorter.", span("突变体的根毛更短。")), None);
+        // Nothing translated yet: only the whole block has a place, the whole of the empty translation.
+        assert_eq!(sentences_in(zh, "", span("突变体的根毛更短。")), None);
+        assert_eq!(sentences_in(zh, "  ", 0..zh.len()), Some(2..2));
+        assert_eq!(sentences_in(zh, en, zh.len()..zh.len()), None);
     }
 
     #[test]

@@ -13,6 +13,13 @@
 //!   in one answer (`wisp_core::versions`), each said how it differs; a click
 //!   on one replaces the text, and a line under them asks again with a
 //!   requirement for this once.
+//! - 译成… is told apart by where its versions go, since the primary holds one
+//!   language (`Destination`): into the manuscript's own language a click
+//!   replaces the text; into a language the manuscript keeps a version (译稿)
+//!   in, it goes into that version's sentence that pairs with the text
+//!   (write_translate.rs, `Placing`) and the primary is not touched; into any
+//!   other a click copies it, and a line under the card keeps a version in
+//!   that language. 替换原文 stays a version's corner icon in the last two.
 //!
 //! Every new version of the words carries the glossary's terms the text holds
 //! and the manuscript's standing requirement (glossary.rs), and each version
@@ -133,9 +140,24 @@ pub enum Use {
     Below,
     Copy,
     Drop,
-    /// One of several versions, by its place: put in the text's place, or copied.
+    /// One of several versions, by its place: put where it goes (`Destination`), or copied.
     Take(usize),
     CopyOne(usize),
+    /// A version put in the text's place wherever versions of its language go: an English abstract in a Chinese manuscript.
+    ReplaceOne(usize),
+    /// 保留成…译稿: a version kept in the card's language, which its versions go into from then on.
+    Keep,
+}
+
+/// Where a version of 译成… goes, by the language it is in: the primary holds one language.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Destination {
+    /// The manuscript's own language, and every action but 译成…: in the text's place.
+    Replace,
+    /// A language the manuscript keeps a version in: into that version's sentence that pairs with the text.
+    Version,
+    /// Any other: for reading and copying.
+    Copy,
 }
 
 impl Assisting {
@@ -201,6 +223,14 @@ impl Workspace {
     pub(crate) fn translate_target(&self, text: &str) -> &'static str {
         let written = self.lib.as_ref().map_or(wisp_core::manuscript::DEFAULT_LANGUAGE, |lib| lib.writing.language());
         glossary::default_target(glossary::text_language(text, written), written)
+    }
+
+    /// Where a version of `assist` in `target` goes (`Destination`).
+    pub(crate) fn assist_destination(&self, assist: &Assist, target: &str) -> Destination {
+        let Some(lib) = self.lib.as_ref() else { return Destination::Replace };
+        if *assist != Assist::Translate || target.is_empty() || target == lib.writing.language() { return Destination::Replace }
+        let kept = lib.writing.current().and_then(|m| lib.writing.translate.versions.get(&m.id)).is_some_and(|list| list.iter().any(|code| code == target));
+        if kept { Destination::Version } else { Destination::Copy }
     }
 
     /// The models that can be compared, each ticked while chosen; one that cannot be asked says why.
@@ -402,6 +432,8 @@ impl Workspace {
 
     /// Do what the person chose with the result.
     pub fn assist_use(&mut self, how: Use, window: &mut Window, cx: &mut Context<Self>) {
+        if how == Use::Keep { return self.assist_keep(cx) }
+        let destination = self.lib.as_ref().and_then(|lib| lib.writing.assist.card.as_ref()).map_or(Destination::Replace, |card| self.assist_destination(&card.assist, &card.target));
         let Some(lib) = self.lib.as_mut() else { return };
         let writing = &mut lib.writing;
         if how == Use::Drop {
@@ -417,10 +449,16 @@ impl Workspace {
         };
         let Some(card) = writing.assist.card.as_ref().filter(|card| ready(card) && card.cite.is_none()) else { return };
         // A card of versions has its first taken by 替换原文 and 复制; a version chosen is that one.
-        let pick = match how { Use::Take(n) | Use::CopyOne(n) => n, _ => 0 };
+        let pick = match how { Use::Take(n) | Use::CopyOne(n) | Use::ReplaceOne(n) => n, _ => 0 };
         let result = card.versions().get(pick).map(|version| version.text.clone()).unwrap_or_default();
-        let how = match how { Use::Take(_) => Use::Replace, Use::CopyOne(_) => Use::Copy, other => other };
         if result.is_empty() { return }
+        // A version taken goes where versions of its language go.
+        let how = match (how, destination) {
+            (Use::Take(_), Destination::Version) => return self.assist_into_version(result, cx),
+            (Use::Take(_), Destination::Copy) | (Use::CopyOne(_), _) => Use::Copy,
+            (Use::Take(_) | Use::ReplaceOne(_), _) => Use::Replace,
+            (other, _) => other,
+        };
         if how == Use::Copy {
             cx.write_to_clipboard(ClipboardItem::new_string(result));
             return self.say(t("已复制"), cx);
@@ -432,7 +470,12 @@ impl Workspace {
         let found = if text.get(card.range.clone()) == Some(card.original.as_str()) { Some(card.range.clone()) } else { text.find(&card.original).map(|at| at..at + card.original.len()) };
         let (changed, why) = (how == Use::Replace && found.is_some(), (card.original.clone(), crate::i18n::assist_title(&card.assist, &card.language)));
         match (how, found) {
-            (Use::Replace, Some(range)) => writing.editor.update(cx, |input, cx| input.replace_range(range, &result, cx)),
+            (Use::Replace, Some(range)) => {
+                // A translation into a language that spaces its words, put between words of it: the spaces it needs there.
+                let spacing = card.assist == Assist::Translate && !matches!(card.target.as_str(), "zh" | "ja");
+                let put = if spacing { spaced(&text, range.clone(), &result) } else { result.clone() };
+                writing.editor.update(cx, |input, cx| input.replace_range(range, &put, cx))
+            }
             (Use::Replace, None) => return self.fail(t("原来那段已经改动，找不到了：可以复制结果，自己放进去。"), cx),
             (_, found) => {
                 // Below the paragraph's line; without it, at the end of the draft.
@@ -452,13 +495,55 @@ impl Workspace {
         cx.notify();
     }
 
+    /// 译成… into a language the manuscript keeps a version in: the version taken goes into that version's sentence
+    /// that pairs with the text (`Workspace::translate_place`), never into the primary.
+    fn assist_into_version(&mut self, text: String, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        let writing = &mut lib.writing;
+        let Some(card) = writing.assist.card.as_ref().filter(|card| card.section == writing.section_id) else { return };
+        let Some(manuscript) = writing.current().map(|m| m.id.clone()) else { return };
+        // The draft may have been edited meanwhile: the text is found again by what it says.
+        let body = writing.editor.read(cx).text().to_string();
+        let found = if body.get(card.range.clone()) == Some(card.original.as_str()) { Some(card.range.clone()) } else { body.find(&card.original).map(|at| at..at + card.original.len()) };
+        let blocks = wisp_core::bilingual::blocks(&body);
+        let Some((b, block)) = found.as_ref().and_then(|range| blocks.iter().enumerate().find(|(_, block)| block.range.start <= range.start && range.start < block.range.end)) else { return self.fail(t("原来那段已经改动，找不到了：可以复制结果，自己放进去。"), cx) };
+        let range = found.unwrap();
+        // A selection that runs on past its paragraph has no one place: the paragraph it begins in is opened, for the person to place it.
+        let loose = range.end > block.range.end;
+        let sel = range.start - block.range.start..range.end.min(block.range.end) - block.range.start;
+        let choices: Vec<(String, String)> = card.versions().iter().enumerate().filter(|(_, version)| !version.text.trim().is_empty()).map(|(n, version)| (version_name(card, n, version).to_string(), version.text.clone())).collect();
+        let placing = crate::write_translate::Placing { manuscript, language: card.target.clone(), section: card.section.clone(), block: b, sent: block.sent.clone(), source: body[block.range.clone()].to_string(), sel, text, choices, loose };
+        writing.assist.generation += 1;
+        writing.assist.card = None;
+        self.translate_place(placing, false, cx);
+        cx.notify();
+    }
+
+    /// 保留成…译稿 from a card of 译成… into a language the manuscript keeps no version in: the version made and its
+    /// first pass begun without leaving the editor; the card stays, and its versions go into that version from now on.
+    fn assist_keep(&mut self, cx: &mut Context<Self>) {
+        let Some(code) = self.lib.as_ref().and_then(|lib| lib.writing.assist.card.as_ref()).filter(|card| card.assist == Assist::Translate && !card.busy).map(|card| card.target.clone()) else { return };
+        if self.translate_add_version(&code, cx) {
+            let name = crate::i18n::label(&LANGUAGES, &code).to_string();
+            self.say_with(tf!("{name}译稿已开启，正在逐段翻译：点一个版本放进这一句", "The {name} version is kept and being translated: click a version to put it into this sentence"), t("查看"), Cmd::Translate(crate::write_translate::Do::Language(code)), cx);
+        }
+        cx.notify();
+    }
+
     /// The tools for what is selected in the manuscript, in groups: what looks in the library and changes nothing,
     /// what proposes a new version of the words, and the person's own notes.
     fn assist_tools(&self, cx: &App) -> Vec<Tool> {
         let lib = self.lib.as_ref().unwrap();
         let language = self.manuscript_language();
-        // 译成… names where the selected text would go: the other of 中文 and 英文, or the manuscript's language.
+        // 译成… names the language the selected text would go into: the other of 中文 and 英文, or the manuscript's
+        // language; its tooltip says where the versions go, by that language.
         let into = self.translate_target(&target(&lib.writing, cx).1);
+        let version_name = crate::i18n::label(&LANGUAGES, into).to_string();
+        let translate_tip = match self.assist_destination(&Assist::Translate, into) {
+            Destination::Replace => t("给出三种译法：贴近原文、学术惯用、更简洁，按术语表译术语；点一种替换选中的文字。目标语言可以在结果上方换。").to_string(),
+            Destination::Version => tf!("给出三种译法：贴近原文、学术惯用、更简洁，按术语表译术语；点一种放进{version_name}译稿里对应的句子，主稿不动。目标语言可以在结果上方换。", "Three translations: close to the original, academic idiom, more concise, with terms as the glossary has them; click one to put it into the matching sentence of the {version_name} version, the primary unchanged. The target language can be changed over the result."),
+            Destination::Copy => tf!("给出三种译法：贴近原文、学术惯用、更简洁，按术语表译术语，供阅读和复制，主稿不动；也可以保留成{version_name}译稿再放进去。目标语言可以在结果上方换。", "Three translations: close to the original, academic idiom, more concise, with terms as the glossary has them, to read and copy, the primary unchanged; or keep a {version_name} version and put one into it. The target language can be changed over the result."),
+        };
         let busy = lib.writing.assist.card.as_ref().is_some_and(|card| card.busy);
         let configured = self.settings.profile_for_or_default(Task::Chat).missing().is_none();
         let tool = |id: ElementId, icon: Option<&'static str>, name: String, tip: String, able: bool, cmd: Cmd, group: u8| Tool { id, icon, name, tip, able, cmd, group };
@@ -474,7 +559,7 @@ impl Workspace {
             for (n, assist) in actions.into_iter().enumerate() {
                 let tip = match &assist {
                     Assist::Polish => t("只改语法、用词和不通顺的地方。给出改后的文字并标出改了哪里，由你决定是否替换。").to_string(),
-                    Assist::Translate => t("给出三种译法：贴近原文、学术惯用、更简洁，按术语表译术语；点一种替换原文。目标语言可以在结果上方换。").to_string(),
+                    Assist::Translate => translate_tip.clone(),
                     Assist::Reword => t("同一种语言换个说法，给出三个版本：贴近原文、学术惯用、更简洁，标出和原文不同的词；点一个替换原文。").to_string(),
                     Assist::Rewrite => t("先在文献库里找与这段相近的句子，再参照它们的结构和措辞改写；意思以你写的为准。由你决定是否替换。").to_string(),
                     Assist::Own(name) => self.settings.commands.iter().find(|command| command.name == *name).map(|command| command.about.clone()).unwrap_or_default(),
@@ -554,6 +639,17 @@ impl Workspace {
         } else {
             div().flex_none().text_size(text_px(12.)).font_weight(FontWeight::MEDIUM).child(crate::i18n::assist_title(&card.assist, &card.language)).into_any_element()
         };
+        // 译成… says where its versions go, by their language: the primary holds one.
+        let destination = self.assist_destination(&card.assist, &card.target);
+        let name = crate::i18n::label(&LANGUAGES, &card.target).to_string();
+        let whither = (card.assist == Assist::Translate).then(|| {
+            let (said, tip) = match destination {
+                Destination::Replace => (t("替换选中的文字").to_string(), t("译成稿件本身的语言：点一个版本替换选中的文字").to_string()),
+                Destination::Version => (tf!("放进{name}译稿", "Into the {name} version"), tf!("点一个版本，放进{name}译稿里与选中文字对应的句子；主稿不动", "Click a version to put it into the sentence of the {name} version that matches the selection; the primary is not changed")),
+                Destination::Copy => (t("只供复制").to_string(), tf!("稿件没有{name}译稿：点一个版本复制，主稿不动", "The manuscript keeps no {name} version: click a version to copy it; the primary is not changed")),
+            };
+            div().id("write-assist-where").flex_none().min_w_0().truncate().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(said).tooltip(ui::tip(tip))
+        });
         let card_el = div()
             .flex()
             .flex_col()
@@ -575,6 +671,7 @@ impl Workspace {
                     .gap(px(6.))
                     .child(ui::icon(if card.cite.is_some() { "library" } else { "sparkle" }, 13., Theme::accent()))
                     .child(title)
+                    .children(whither)
                     .when(working, |d| d.child(ui::spinner("write-assist-busy", 11., Theme::accent())))
                     .child(div().flex_1())
                     // Who answers versions is chosen where they are read: one model, or several compared (compare.rs).
@@ -626,6 +723,8 @@ impl Workspace {
     fn render_versions(&self, card: &Card, done: bool, cx: &mut Context<Self>) -> Stateful<Div> {
         let label = |text: &str| div().flex_none().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(text.to_string());
         let shown = card.versions();
+        // Where a click puts a version, and what its corner keeps of the rest: 复制 where a click does not copy, 替换原文 where it does not replace.
+        let destination = self.assist_destination(&card.assist, &card.target);
         let rows: Vec<AnyElement> = shown
             .iter()
             .enumerate()
@@ -638,15 +737,12 @@ impl Workspace {
                     Some((_, after)) => marked(after),
                     None => plain(&version.text),
                 };
-                let name = match (row, version.kind) {
-                    (Some(row), _) => row.model.as_str(),
-                    (None, Kind::Other) => if card.assist == Assist::Translate { t("译文") } else { t("改后") },
-                    (None, kind) => t(kind.label()),
-                };
+                let name = version_name(card, n, version);
                 let waiting = row.filter(|row| row.busy).map(|_| ui::spinner(SharedString::from(format!("write-version-busy-{n}")), 10., Theme::text_tertiary()));
                 let said = row.map(|row| (row.error.clone(), row.note.clone()));
                 let group: SharedString = format!("write-version-{n}").into();
                 let copy = self.on(Cmd::WriteAssistUse(Use::CopyOne(n)), cx);
+                let replace = self.on(Cmd::WriteAssistUse(Use::ReplaceOne(n)), cx);
                 div()
                     .id(("write-version", n))
                     .group(group.clone())
@@ -672,11 +768,26 @@ impl Workspace {
                             .children(done.then(|| lack_mark(SharedString::from(format!("write-version-lack-{n}")), card, &version.text)).flatten())
                             .child(div().flex_1())
                             .when(done, |d| {
-                                d.child(div().invisible().group_hover(group.clone(), |s| s.visible()).child(ui::icon_action(("write-version-copy", n), "copy", Theme::text_tertiary(), t("复制这一版")).on_click(move |event, window, cx| {
-                                    // The version under it is not taken too.
-                                    cx.stop_propagation();
-                                    copy(event, window, cx)
-                                })))
+                                d.child(
+                                    div()
+                                        .flex()
+                                        .gap(px(2.))
+                                        .invisible()
+                                        .group_hover(group.clone(), |s| s.visible())
+                                        .when(destination != Destination::Copy, |d| {
+                                            d.child(ui::icon_action(("write-version-copy", n), "copy", Theme::text_tertiary(), t("复制这一版")).on_click(move |event, window, cx| {
+                                                // The version under it is not taken too.
+                                                cx.stop_propagation();
+                                                copy(event, window, cx)
+                                            }))
+                                        })
+                                        .when(destination != Destination::Replace, |d| {
+                                            d.child(ui::icon_action(("write-version-replace", n), "pen-line", Theme::text_tertiary(), t("仍然替换主稿里选中的文字")).on_click(move |event, window, cx| {
+                                                cx.stop_propagation();
+                                                replace(event, window, cx)
+                                            }))
+                                        }),
+                                )
                             }),
                     )
                     .when(!version.text.is_empty(), |d| d.child(div().text_size(text_px(13.)).line_height(text_px(21.)).text_color(Theme::text()).child(words)))
@@ -714,6 +825,18 @@ impl Workspace {
         let record = named.map(|(zh, other)| ui::secondary_button("write-assist-record", t("记入术语表")).flex_none().h(text_px(28.)).px(px(8.)).text_size(text_px(12.)).tooltip(ui::tip(tf!("把「{zh}」↔ {other} 加进这个文献库的术语表，以后翻译都照它", "Add “{zh}” ↔ {other} to the library's glossary, for every later translation"))).on_click(self.on(Cmd::WriteAssistRecord, cx)));
         let field_width = if record.is_some() { inner - 96. } else { inner };
         let small = |id: &'static str, name: &'static str| ui::ghost_button(id, None, Some(name.into())).h(text_px(24.)).px(px(7.)).text_size(text_px(12.));
+        // What a click on a version does, said where it is done: the destination of its language.
+        let card = self.lib.as_ref().unwrap().writing.assist.card.as_ref();
+        let (destination, name) = card.map_or((Destination::Replace, String::new()), |card| (self.assist_destination(&card.assist, &card.target), crate::i18n::label(&LANGUAGES, &card.target).to_string()));
+        let undo = if cfg!(target_os = "macos") { "⌘Z" } else { "Ctrl+Z" };
+        let hint = match destination {
+            _ if !done => String::new(),
+            Destination::Replace => if cfg!(target_os = "macos") { t("点一个版本替换原文 · ⌘Z 可撤销").to_string() } else { t("点一个版本替换原文 · Ctrl+Z 可撤销").to_string() },
+            Destination::Version => tf!("点一个版本放进{name}译稿的这一句 · 主稿不动，在译稿里 {undo} 可撤销", "Click a version to put it into this sentence of the {name} version · the primary is not changed; {undo} in the version undoes it"),
+            Destination::Copy => t("点一个版本复制 · 主稿不动").to_string(),
+        };
+        // No version in the language yet: the quiet way to keep one, so the versions have somewhere to go.
+        let keep = (done && destination == Destination::Copy).then(|| ui::ghost_button("write-assist-keep", Some("languages"), Some(tf!("保留成{name}译稿，放进这一句", "Keep a {name} version and put it into this sentence").into())).flex_none().h(text_px(24.)).px(px(6.)).text_size(text_px(12.)).text_color(Theme::text_secondary()).tooltip(ui::tip(tf!("按{name}逐段翻译整篇稿件，跟着主稿走；之后点一个版本，放进它对应的句子", "Translate the whole manuscript into {name}, paragraph by paragraph, following the primary; then click a version to put it into its sentence"))).on_click(self.on(Cmd::WriteAssistUse(Use::Keep), cx)));
         div()
             .flex()
             .flex_col()
@@ -724,9 +847,10 @@ impl Workspace {
                     .flex()
                     .items_center()
                     .gap(px(4.))
-                    .child(div().flex_1().min_w_0().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(if !done { String::new() } else if cfg!(target_os = "macos") { t("点一个版本替换原文 · ⌘Z 可撤销").to_string() } else { t("点一个版本替换原文 · Ctrl+Z 可撤销").to_string() }))
+                    .child(div().flex_1().min_w_0().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(hint))
                     .child(small("write-assist-drop", t("放弃")).on_click(self.on(Cmd::WriteAssistUse(Use::Drop), cx))),
             )
+            .children(keep.map(|keep| div().flex().ml(px(-6.)).child(keep)))
     }
 
     /// 记入术语表: the term the requirement typed under the card names, in the language of the translation's other side.
@@ -755,6 +879,15 @@ impl Workspace {
     }
 }
 
+/// What a version is called over its words: its model in a comparison, else its kind.
+fn version_name<'a>(card: &'a Card, n: usize, version: &Version) -> &'a str {
+    match (card.compare.as_ref().and_then(|compare| compare.rows.get(n)), version.kind) {
+        (Some(row), _) => row.model.as_str(),
+        (None, Kind::Other) => if card.assist == Assist::Translate { t("译文") } else { t("改后") },
+        (None, kind) => t(kind.label()),
+    }
+}
+
 /// A quiet mark where a version lacks what the source has (`glossary::check`), the reasons in its tooltip; none when it lacks nothing.
 fn lack_mark(id: SharedString, card: &Card, text: &str) -> Option<AnyElement> {
     let lacks = glossary::check(&card.original, text, &card.terms);
@@ -773,6 +906,15 @@ pub(crate) fn lacks_said(lacks: &[Lack]) -> String {
         })
         .collect();
     said.join(if crate::i18n::is_english() { "; " } else { "；" })
+}
+
+/// `put` as it stands in `range` of `text` in a language that spaces its words: a space before it after a word or a
+/// full stop, and after it before a word (a Chinese sentence between English ones is written without them).
+fn spaced(text: &str, range: Range<usize>, put: &str) -> String {
+    let put = put.trim();
+    let before = text[..range.start].chars().next_back().is_some_and(|c| !c.is_whitespace() && !"([{“‘\"'（【「".contains(c));
+    let after = text[range.end..].chars().next().is_some_and(|c| c.is_alphanumeric() || "([“\"".contains(c));
+    format!("{}{put}{}", if before { " " } else { "" }, if after { " " } else { "" })
 }
 
 /// A selection without the spaces and line breaks around it.
@@ -812,5 +954,20 @@ pub(crate) struct Tip(pub(crate) String);
 impl Render for Tip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         div().max_w(px(280.)).px(px(8.)).py(px(5.)).rounded(px(6.)).border_1().border_color(Theme::line()).bg(Theme::bg_body()).text_size(text_px(12.)).text_color(Theme::text_secondary()).child(self.0.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::spaced;
+
+    #[test]
+    fn a_translation_between_words_gets_the_spaces_it_needs() {
+        let text = "Plants were grown in three soils. 我们每天测量主根的长度。Root hairs were counted.";
+        let at = text.find("我们").unwrap();
+        let range = at..at + "我们每天测量主根的长度。".len();
+        assert_eq!(spaced(text, range, "We measured it daily."), "We measured it daily. ");
+        assert_eq!(spaced("a.我们。b", 2..11, " X. "), " X. ");
+        assert_eq!(spaced("（我们）", 3..9, "we"), "we");
     }
 }
