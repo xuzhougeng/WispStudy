@@ -1,11 +1,14 @@
-//! 译文对照 in 写作: the manuscript read through (预览) with each paragraph's
-//! translation beside it, so someone writing in English sees what it says in
-//! Chinese, and the other way round. It is the languages icon right of 预览's
-//! eye in the manuscript's bar (`Cmd::WriteFacing`, `Writing::facing`): on, the
-//! page is two halves, the manuscript at the left as the preview draws it and
-//! its translation at the right, block by block at the same height (左右对照);
+//! 译文对照 in 写作: what is on show with each paragraph's translation beside
+//! it, so someone writing in English sees what it says in Chinese, and the
+//! other way round. It is the languages icon right of 预览's eye in the
+//! manuscript's bar (`Cmd::WriteFacing`, `Writing::facing`): on, the page is
+//! two halves, the text at the left as the preview draws it and its
+//! translation at the right, block by block at the same height (左右对照);
 //! or, as the person has it (逐段交替, `Settings::write_facing_interleaved`),
-//! and in a column too narrow for two halves, each translation under its paragraph.
+//! and in a column too narrow for two halves, each translation under its
+//! paragraph. Turned on while a section is written, it is that section in its
+//! place, the caret's paragraph in view (`Writing::facing_section`, `Reveal`);
+//! from 预览, the whole manuscript.
 //!
 //! What is translated and how it is asked is `wisp_core::bilingual`: a block of
 //! a section at a time, its citations as placeholders. Each block is kept in
@@ -21,6 +24,8 @@ use crate::theme::{self, Theme, text_px};
 use crate::translate::Translated;
 use crate::ui;
 use gpui::{prelude::FluentBuilder, *};
+use std::cell::Cell;
+use std::rc::Rc;
 use wisp_core::bilingual::{self, Kind};
 use wisp_core::glossary;
 use wisp_core::manuscript::{self, LANGUAGES};
@@ -51,6 +56,24 @@ pub(crate) fn measures(width: f32, beside: bool) -> (bool, f32, f32) {
     let side = beside && halves_fit(width);
     let half = if side { (both - GUTTER) / 2. } else { room.min(measure) };
     (side, half, if side { both } else { half })
+}
+
+/// Frames a paragraph to keep in view may take to be drawn before it is given up.
+const REVEAL_FRAMES: u8 = 4;
+/// Room over the paragraph kept in view.
+const REVEAL_ABOVE: f32 = 80.;
+
+/// The paragraph of the section read beside its translation to keep in view: the one the caret was in when it was
+/// turned on. Translations coming in above it make the rows taller, so it is kept in view as they come, until the
+/// reader scrolls.
+pub struct Reveal {
+    section: String,
+    block: usize,
+    /// Its top in the page, as last drawn.
+    top: Rc<Cell<Option<f32>>>,
+    /// The offset last given the page: a scroll that is not it is the reader's.
+    given: Option<f32>,
+    frames: u8,
 }
 
 /// How the translation of one block stands.
@@ -115,11 +138,24 @@ impl Workspace {
                 // The pieces of the page change: what stands beside the words read goes, a comment written there kept first.
                 self.read_letgo(cx);
                 let Some(lib) = self.lib.as_mut() else { return };
-                // Asked for while a section is written, it is the preview too; put away, the preview stays.
-                let entering = on && !lib.writing.reading;
-                lib.writing.facing = on;
-                lib.writing.reading |= on;
-                if entering { self.write_snapshot("leave") }
+                let writing = &mut lib.writing;
+                if on {
+                    // Asked for while a section is written, it is that section, the caret's paragraph in view; from 预览, the whole manuscript.
+                    let entering = !writing.reading;
+                    writing.face();
+                    if entering {
+                        let caret = writing.editor.read(cx).caret();
+                        let block = writing.section().map_or(0, |s| bilingual::blocks(&s.body).iter().position(|b| caret <= b.range.end).unwrap_or(0));
+                        writing.facing_reveal = (block > 0).then(|| Reveal { section: writing.section_id.clone(), block, top: Rc::default(), given: None, frames: REVEAL_FRAMES });
+                        lib.citing.read_scroll.set_offset(point(px(0.), px(0.)));
+                        self.write_snapshot("leave");
+                    }
+                } else {
+                    // Put away over a section, the section is written again; over the whole manuscript, the preview stays.
+                    if writing.facing_section() { writing.reading = false }
+                    writing.facing = false;
+                    writing.facing_reveal = None;
+                }
             }
             Cmd::WriteFacingLanguage(code) => {
                 self.settings.write_facing_language = code;
@@ -138,6 +174,53 @@ impl Workspace {
             _ => {}
         }
         cx.notify();
+    }
+
+    /// Before the section beside its translation is drawn: the paragraph to keep in view brought there, again while
+    /// the rows above it grow, until the reader scrolls or it is not drawn within a few frames.
+    pub(crate) fn write_facing_reveal(&mut self, window: &mut Window) {
+        let Some(lib) = self.lib.as_mut() else { return };
+        if !lib.writing.facing_section() { lib.writing.facing_reveal = None }
+        let Some(reveal) = lib.writing.facing_reveal.as_mut() else { return };
+        let scroll = &lib.citing.read_scroll;
+        let now = f32::from(scroll.offset().y);
+        if reveal.given.is_some_and(|given| (given - now).abs() > 1.) {
+            lib.writing.facing_reveal = None;
+            return;
+        }
+        let Some(top) = reveal.top.get() else {
+            match reveal.frames.checked_sub(1) {
+                Some(left) => {
+                    reveal.frames = left;
+                    window.request_animation_frame();
+                }
+                None => lib.writing.facing_reveal = None,
+            }
+            return;
+        };
+        let wanted = -(top - REVEAL_ABOVE).max(0.);
+        if reveal.given != Some(wanted) {
+            scroll.set_offset(point(px(0.), px(wanted)));
+            reveal.given = Some(wanted);
+            window.request_animation_frame();
+        }
+    }
+
+    /// A row of the section beside its translation, with what records its top while it is the paragraph to keep in view.
+    pub(crate) fn facing_revealed(&self, section: &str, block: usize, row: AnyElement) -> AnyElement {
+        let Some(lib) = self.lib.as_ref() else { return row };
+        let Some(reveal) = lib.writing.facing_reveal.as_ref().filter(|reveal| reveal.section == section && reveal.block == block) else { return row };
+        let (top, scroll) = (reveal.top.clone(), lib.citing.read_scroll.clone());
+        let mark = canvas(|_, _, _| (), move |bounds, _, window, _| {
+            let (view, offset) = (scroll.bounds(), scroll.offset());
+            let at = f32::from(bounds.origin.y - view.origin.y - offset.y);
+            // Moved since it was last drawn (a translation above it came): brought into view again in the next frame.
+            if top.get().is_none_or(|was| (was - at).abs() > 0.5) {
+                top.set(Some(at));
+                window.request_animation_frame();
+            }
+        });
+        div().relative().child(row).child(mark.absolute().top_0().left_0().size_full()).into_any_element()
     }
 
     /// Whether the manuscript on show is read beside its translation.
@@ -186,14 +269,16 @@ impl Workspace {
 
     /// What of the manuscript on show is translated, each text with its instructions and the key its translation is
     /// kept under: the title, each section's name, and each block that says something (`bilingual::blocks`), in the
-    /// order read. A text's instructions carry the glossary's terms it holds (`bilingual::prompt_for`).
+    /// order read; over a section, only what it holds. A text's instructions carry the glossary's terms it holds
+    /// (`bilingual::prompt_for`).
     fn facing_wanted(&self) -> Vec<(String, String, String)> {
-        let Some(manuscript) = self.lib.as_ref().and_then(|lib| lib.writing.current()) else { return vec![] };
+        let Some(writing) = self.lib.as_ref().map(|lib| &lib.writing) else { return vec![] };
+        let Some(manuscript) = writing.current() else { return vec![] };
         let code = self.write_facing_language();
         let (pairs, requirement) = self.facing_rules();
         let mut wanted: Vec<String> = vec![];
-        if !manuscript.title.trim().is_empty() { wanted.push(manuscript.title.trim().to_string()) }
-        for section in &manuscript.sections {
+        if writing.facing_holds("") && !manuscript.title.trim().is_empty() { wanted.push(manuscript.title.trim().to_string()) }
+        for section in &manuscript.sections[writing.facing_sections()] {
             if !section.name.trim().is_empty() { wanted.push(section.name.trim().to_string()) }
             wanted.extend(bilingual::blocks(&section.body).into_iter().map(|block| block.sent).filter(|sent| !sent.is_empty()));
         }
@@ -225,11 +310,14 @@ impl Workspace {
         }
     }
 
-    /// The whole manuscript read through, each block with its translation: beside it where the column has room
-    /// for two halves, under it where not or where the person has it so. `width` is the room the column has for it.
+    /// The whole manuscript read through, or the section on show, each block with its translation: beside it where
+    /// the column has room for two halves, under it where not or where the person has it so. `width` is the room the
+    /// column has for it.
     pub(crate) fn render_manuscript_facing(&self, width: f32, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let lib = self.lib.as_ref().unwrap();
         let Some(manuscript) = lib.writing.current() else { return div().into_any_element() };
+        // Over a section: it and its subsections, without the title and the reference list, which are the whole manuscript's.
+        let (within, whole_shown) = (lib.writing.facing_sections(), !lib.writing.facing_section());
         let code = self.write_facing_language();
         let (pairs, requirement) = self.facing_rules();
         let (side, half, whole) = measures(width, !self.settings.write_facing_interleaved);
@@ -254,16 +342,16 @@ impl Workspace {
         // A name: the manuscript's title, a section's.
         let named = |size: f32, line: f32, text: String| div().text_size(text_px(size)).line_height(text_px(line)).font_weight(FontWeight::SEMIBOLD).child(text);
 
-        let title = {
+        let title = whole_shown.then(|| {
             let beside = look(&manuscript.title);
             let right = match &beside {
                 Beside::Done(text) => Some(named(24., 32., ui::one_line(text)).into_any_element()),
                 other => standing("write-face-title".into(), other),
             };
             pair(side, half, false, named(24., 32., crate::i18n::manuscript_title(manuscript).to_string()).into_any_element(), right)
-        };
+        });
         let mut sections: Vec<AnyElement> = vec![];
-        for (n, section) in manuscript.sections.iter().enumerate() {
+        for (n, section) in manuscript.sections.iter().enumerate().filter(|(n, _)| within.contains(n)) {
             let labels = lib.citing.read.whole.get(n).map(Vec::as_slice).unwrap_or(&[]);
             let read = |within: std::ops::Range<usize>| wisp_core::cite::read_as(&section.body, labels, within);
             // The section's name leads back to writing it, as in the preview.
@@ -298,7 +386,7 @@ impl Workspace {
                             Beside::Done(text) => Some(div().w_full().text_size(text_px(13.)).text_color(Theme::text_secondary()).child(crate::markdown::render(&format!("{id}-t"), &bilingual::restored(text, &section.body, block, labels), None, None)).into_any_element()),
                             other => standing(format!("{id}-w"), other),
                         };
-                        rows.push(pair(side, half, true, self.render_manuscript_picture(format!("{id}-p"), &shown, half, window), right));
+                        rows.push(self.facing_revealed(&section.id, b, pair(side, half, true, self.render_manuscript_picture(format!("{id}-p"), &shown, half, window), right)));
                     }
                     Kind::Words | Kind::Kept => {
                         let right = match (block.kind, &beside) {
@@ -310,13 +398,13 @@ impl Workspace {
                         };
                         // The original is the preview's: selected, copied and commented on as it is (write_read.rs).
                         let original = self.render_read_piece(section, n, b, block.range.clone(), &manuscript::section_markdown(&read(block.range.clone()), 1), true, window, cx);
-                        rows.push(pair(side, half, false, original, right));
+                        rows.push(self.facing_revealed(&section.id, b, pair(side, half, false, original, right)));
                     }
                 }
             }
             sections.push(div().flex().flex_col().flex_none().gap(theme::paragraph_gap(10.)).text_size(text_px(READ_SIZE)).children(rows).into_any_element());
         }
-        let references = self.render_references_read(cx).map(|list| pair(side, half, false, list, None));
+        let references = whole_shown.then(|| self.render_references_read(cx)).flatten().map(|list| pair(side, half, false, list, None));
 
         // The line between the halves, from the head down the page.
         let divider = || div().absolute().top_0().bottom_0().left(px(half + GUTTER / 2.)).w(px(1.)).bg(Theme::line());
@@ -368,7 +456,7 @@ impl Workspace {
             // No frame, like the preview: one line under it, where the text scrolls away.
             .border_b_1()
             .border_color(Theme::line())
-            .child(div().flex().justify_center().px(px(PAD)).pb(px(24.)).child(div().relative().flex().flex_col().flex_none().gap(px(30.)).w(px(whole)).pt(px(12.)).text_color(Theme::text()).when(side, |d| d.child(divider())).child(title).children(sections).children(references)));
+            .child(div().flex().justify_center().px(px(PAD)).pb(px(24.)).child(div().relative().flex().flex_col().flex_none().gap(px(30.)).w(px(whole)).pt(px(12.)).text_color(Theme::text()).when(side, |d| d.child(divider())).children(title).children(sections).children(references)));
         div().flex().flex_col().flex_1().min_h_0().child(head).child(sheet).into_any_element()
     }
 }

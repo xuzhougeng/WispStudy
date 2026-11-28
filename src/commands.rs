@@ -635,6 +635,9 @@ pub enum Cmd {
     // Writing
     /// Write another section of the manuscript: its id, or a key of `structure::SECTIONS` for the first section of that kind.
     WriteSection(String),
+    /// A section chosen in the manuscript's pills or the outline: written, or while 译文对照 is on, read beside its
+    /// translation there (`Writing::facing_section`).
+    PickSection(String),
     /// Write another of the library's manuscripts.
     WriteManuscript(String),
     NewManuscript,
@@ -659,7 +662,8 @@ pub enum Cmd {
     MergeSection(String),
     /// The whole manuscript to read (true), or one section to write.
     WriteReading(bool),
-    /// 译文对照: the whole manuscript to read with each paragraph's translation beside it (true), or without (the preview stays).
+    /// 译文对照: what is on show read with each paragraph's translation beside it (true): the section being written, or
+    /// from 预览 the whole manuscript; put away (false), the section is written again, the whole manuscript stays in 预览.
     WriteFacing(bool),
     /// The language that translation is in: a code of `manuscript::LANGUAGES` (`Settings::write_facing_language`).
     WriteFacingLanguage(String),
@@ -1252,7 +1256,7 @@ impl Workspace {
                 }
                 if page == Page::Screen { self.round_arrived(window, cx) }
             }
-            Cmd::WriteSection(_) | Cmd::WriteManuscript(_) | Cmd::NewManuscript | Cmd::AskRemoveManuscript(_) | Cmd::RemoveManuscript(_) | Cmd::WriteLanguage(_) | Cmd::EditSection(_) | Cmd::AddSubsection(_) | Cmd::PickSectionKind(_) | Cmd::MoveSection(..) | Cmd::IndentSection(..) | Cmd::AskRemoveSection(_) | Cmd::RemoveSection(_) | Cmd::SplitSection(_) | Cmd::MergeSection(_) | Cmd::WriteReading(_) | Cmd::LeaveWrite | Cmd::ExportManuscript(_) | Cmd::WriteHistory | Cmd::HistoryPick(_) => self.run_manuscript(cmd, window, cx),
+            Cmd::WriteSection(_) | Cmd::PickSection(_) | Cmd::WriteManuscript(_) | Cmd::NewManuscript | Cmd::AskRemoveManuscript(_) | Cmd::RemoveManuscript(_) | Cmd::WriteLanguage(_) | Cmd::EditSection(_) | Cmd::AddSubsection(_) | Cmd::PickSectionKind(_) | Cmd::MoveSection(..) | Cmd::IndentSection(..) | Cmd::AskRemoveSection(_) | Cmd::RemoveSection(_) | Cmd::SplitSection(_) | Cmd::MergeSection(_) | Cmd::WriteReading(_) | Cmd::LeaveWrite | Cmd::ExportManuscript(_) | Cmd::WriteHistory | Cmd::HistoryPick(_) => self.run_manuscript(cmd, window, cx),
             Cmd::FigureTag(_) | Cmd::OpenFigure(_) | Cmd::FigureSource(_) | Cmd::AskFigure(_) | Cmd::CopyFigure(_) | Cmd::SaveFigure(_) | Cmd::AskRemoveFigure(_) | Cmd::RemoveFigure(_) | Cmd::FigureAddTag(_) | Cmd::FigureInfer(_) | Cmd::DrawFigure | Cmd::FigureDraw | Cmd::FigureShape(_) => self.run_figures(cmd, window, cx),
             Cmd::WriteCiteFrom(id, from) => {
                 self.cite_paper(&id, Some(from), cx);
@@ -1309,6 +1313,8 @@ impl Workspace {
                 self.run_write_facing(cmd, cx);
                 // A manuscript that keeps versions is read beside one of them.
                 if on { self.translate_entered(cx) }
+                // Put away over a section: it is written again, the caret where it was.
+                else if let Some(lib) = self.lib.as_ref() && !lib.writing.reading { lib.writing.editor.read(cx).focus(window) }
             }
             Cmd::WriteFacingLanguage(_) | Cmd::WriteFacingInterleave(_) | Cmd::WriteFacingRetry => self.run_write_facing(cmd, cx),
             Cmd::Translate(what) => self.run_translate(what, window, cx),
