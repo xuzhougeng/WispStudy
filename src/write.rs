@@ -86,6 +86,8 @@ impl Workspace {
         if facing { self.translate_tend(cx) }
         let translating = facing && self.translate_shown().is_some();
         if facing && !translating { self.write_facing_tend(cx) }
+        // Over a section, the paragraph the caret was in stays in view while the rows above it fill in.
+        self.write_facing_reveal(window);
         let lib = self.lib.as_ref().unwrap();
         let writing = &lib.writing;
         let text = writing.editor.read(cx).text().to_string();
@@ -139,8 +141,12 @@ impl Workspace {
         let told = writing.revise.run.as_ref().filter(|run| editing && run.section == writing.section_id);
         // The line under it all: what there is to say of the text. The tools are beside what is selected, nowhere else.
         let status = if writing.reading {
-            let whole: String = writing.current().map_or(String::new(), |m| m.sections.iter().map(|s| s.body.as_str()).collect::<Vec<_>>().join("\n"));
-            if let Some(said) = self.translate_status().filter(|_| translating) { said } else if facing { tf!("全文 {} · 译文只是对照 · 要改译文、让它跟着原文变，点译文栏头的「保留成译稿」", "Manuscript: {} · The translation is only for reading · To edit it and keep it in step with the manuscript, click Keep as version over it", length_label(&whole)) } else { tf!("全文 {} · 选中文字可以批注、复制 · 点一节的名称，回到那一节写", "Manuscript: {} · Select text to comment on or copy it · Click a section name to edit it", length_label(&whole)) }
+            // Over a section beside its translation, what is said is of that section.
+            let whole: String = writing.current().map_or(String::new(), |m| m.sections[writing.facing_sections()].iter().map(|s| s.body.as_str()).collect::<Vec<_>>().join("\n"));
+            if let Some(said) = self.translate_status().filter(|_| translating) { said }
+            else if facing && writing.facing_section() { tf!("这一节 {} · 译文只是对照 · 要改译文、让它跟着原文变，点译文栏头的「保留成译稿」 · 再点语言图标回去写", "This section: {} · The translation is only for reading · To edit it and keep it in step with the manuscript, click Keep as version over it · Click the languages icon again to write", length_label(&whole)) }
+            else if facing { tf!("全文 {} · 译文只是对照 · 要改译文、让它跟着原文变，点译文栏头的「保留成译稿」", "Manuscript: {} · The translation is only for reading · To edit it and keep it in step with the manuscript, click Keep as version over it", length_label(&whole)) }
+            else { tf!("全文 {} · 选中文字可以批注、复制 · 点一节的名称，回到那一节写", "Manuscript: {} · Select text to comment on or copy it · Click a section name to edit it", length_label(&whole)) }
         } else if proposal.is_some() {
             t("助手提议的改写还没有写进稿件：允许，或不允许").to_string()
         } else if version.is_some() {

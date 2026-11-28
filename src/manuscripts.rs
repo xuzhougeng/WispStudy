@@ -35,6 +35,39 @@ impl Writing {
         self.current().and_then(|m| m.section(&self.section_id))
     }
 
+    /// 译文对照 over the section on show: turned on while the section was written, it is that section beside its
+    /// translation, and a pill or a row of the outline moves it to another section with the translation still on.
+    pub fn facing_section(&self) -> bool {
+        self.reading && self.facing && !self.facing_whole
+    }
+
+    /// The whole manuscript is read: 预览, or it beside its translation. What the eye says.
+    pub fn reading_whole(&self) -> bool {
+        self.reading && !self.facing_section()
+    }
+
+    /// 译文对照 turned on over what is on show: the section being written, or the whole manuscript read through.
+    pub fn face(&mut self) {
+        if !(self.reading && self.facing) { self.facing_whole = self.reading }
+        (self.reading, self.facing) = (true, true);
+    }
+
+    /// The sections read beside their translation, by their places: every one, or over a section the one on show
+    /// and its subsections (what is under it is part of it, as the outline counts it).
+    pub fn facing_sections(&self) -> std::ops::Range<usize> {
+        let Some(m) = self.current() else { return 0..0 };
+        let whole = 0..m.sections.len();
+        if !self.facing_section() { return whole }
+        m.sections.iter().position(|s| s.id == self.section_id).map_or(whole, |at| manuscript::under(&m.sections, at))
+    }
+
+    /// Whether what is read beside its translation holds this section; "" is the title, which only the whole
+    /// manuscript has.
+    pub fn facing_holds(&self, section: &str) -> bool {
+        if !self.facing_section() { return true }
+        self.current().is_some_and(|m| m.sections[self.facing_sections()].iter().any(|s| s.id == section))
+    }
+
     /// Which part of the library's papers the candidates come from: the
     /// section's kind, a key of `structure::SECTIONS`.
     pub fn kind(&self) -> &str {
@@ -303,6 +336,22 @@ impl Workspace {
         self.write_show(id, section, cx);
     }
 
+    /// A section chosen in the pills or the outline: written, or while 译文对照 is on, read beside its translation
+    /// in its place, from its top (the whole manuscript beside its translation narrows to it).
+    fn pick_section(&mut self, wanted: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_ref().filter(|lib| lib.writing.reading && lib.writing.facing) else { return self.write_section(wanted, window, cx) };
+        let Some(manuscript) = lib.writing.current() else { return };
+        let Some(section) = manuscript.section(&wanted).or_else(|| manuscript.sections.iter().find(|s| s.kind == wanted)).map(|s| s.id.clone()) else { return };
+        let id = manuscript.id.clone();
+        self.read_letgo(cx);
+        let Some(lib) = self.lib.as_mut() else { return };
+        lib.writing.facing_whole = false;
+        lib.writing.facing_reveal = None;
+        lib.writing.translate.editing = None;
+        lib.citing.read_scroll.set_offset(point(px(0.), px(0.)));
+        self.write_show(id, section, cx);
+    }
+
     /// Typing in a section: keep the text now, and a snapshot once typing pauses.
     pub(crate) fn write_typed(&mut self, text: String, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
@@ -338,6 +387,7 @@ impl Workspace {
     pub(crate) fn run_manuscript(&mut self, cmd: Cmd, window: &mut Window, cx: &mut Context<Self>) {
         match cmd {
             Cmd::WriteSection(section) => self.write_section(section, window, cx),
+            Cmd::PickSection(section) => self.pick_section(section, window, cx),
             Cmd::WriteManuscript(id) => {
                 let section = self.lib.as_ref().and_then(|l| l.writing.manuscripts.iter().find(|m| m.id == id)).map(|m| Writing::latest(std::slice::from_ref(m)).1).unwrap_or_default();
                 if let Some(lib) = self.lib.as_mut() { lib.writing.reading = false }
@@ -762,7 +812,7 @@ impl Workspace {
             .iter()
             .enumerate()
             .map(|(n, section)| {
-                let on = section.id == writing.section_id && !writing.reading;
+                let on = section.id == writing.section_id && !writing.reading_whole();
                 // A section with subsections is all that is under it: 结果 is its results, as long as they are together.
                 let block = &sections[manuscript::under(sections, n)];
                 let children = block.iter().filter(|s| s.level == section.level + 1).count();
@@ -780,7 +830,7 @@ impl Workspace {
                     .py(px(if sub { 5. } else { 6. }))
                     // Each level a step in: the numbers stand under the name of the section they are of.
                     .pl(px(8. + 14. * f32::from(section.level.saturating_sub(1))))
-                    .on_click(self.on(Cmd::WriteSection(section.id.clone()), cx))
+                    .on_click(self.on(Cmd::PickSection(section.id.clone()), cx))
                     .when(on, |d| d.on_mouse_down(MouseButton::Right, self.on_context(MenuKind::Section(section.id.clone()), cx)))
                     .child(div().flex_none().min_w(px(16.)).text_size(text_px(11.)).text_color(if on { Theme::accent() } else { Theme::text_tertiary() }).child(numbers[n].clone()))
                     .child(
@@ -896,7 +946,7 @@ impl Workspace {
             .iter()
             .enumerate()
             .map(|(n, section)| {
-                let on = section.id == writing.section_id && !writing.reading;
+                let on = section.id == writing.section_id && !writing.reading_whole();
                 let empty = !manuscript::written_under(&manuscript.sections, n);
                 // A subsection is a smaller pill that says its number: 3.1 is the first under the third.
                 let sub = section.level > 1;
@@ -916,7 +966,7 @@ impl Workspace {
                     .when(on, |d| d.bg(Theme::accent_soft()).text_color(Theme::accent()).border_color(Theme::accent().opacity(0.35)).font_weight(FontWeight::MEDIUM))
                     .when(!on, |d| d.border_color(Theme::line()).text_color(if empty { Theme::text_tertiary() } else { Theme::text_secondary() }).hover(|s| s.bg(Theme::hover())))
                     .when(sub, |d| d.h(text_px(24.)).px(px(9.)).text_size(text_px(12.)))
-                    .on_click(self.on(Cmd::WriteSection(section.id.clone()), cx))
+                    .on_click(self.on(Cmd::PickSection(section.id.clone()), cx))
                     .when(sub, |d| d.child(div().text_color(Theme::text_tertiary()).child(numbers[n].clone())))
                     .child(section.name.clone())
                     // How many comments wait in the section.
@@ -927,7 +977,8 @@ impl Workspace {
             .collect();
         let add = div().id("write-part-add").flex().flex_none().items_center().justify_center().size(px(28.)).rounded(px(14.)).cursor_pointer().border_1().border_color(Theme::line()).hover(|s| s.bg(Theme::hover())).on_click(self.on(Cmd::EditSection(None), cx)).child(ui::icon("plus", 14., Theme::text_secondary()));
         let title_focused = writing.title.focus_handle(cx).is_focused(window);
-        let reading = writing.reading;
+        // Over a section beside its translation the eye is off: it is the whole manuscript, and alone.
+        let reading = writing.reading_whole();
         let preview_tip = if reading { t("预览中：再点一下回到编辑") } else { t("预览：看排好版的全文，Markdown 照它写的样子画出来") };
         let preview = div()
             .id("write-preview")
@@ -943,10 +994,16 @@ impl Workspace {
             .on_click(self.on(Cmd::WriteReading(!reading), cx))
             .tooltip(move |_, cx| cx.new(|_| crate::write_assist::Tip(preview_tip.to_string())).into())
             .child(ui::icon("eye", 14., if reading { Theme::accent() } else { Theme::text_secondary() }));
-        // 译文对照: the preview with each paragraph's translation beside it (write_facing.rs). Another way of looking at the
-        // manuscript, so it stands right of the eye; lit while on, a click from a section being written goes straight to it.
-        let facing = reading && writing.facing;
-        let facing_tip = if facing { t("译文对照：开。再点一下收起译文，只看原文") } else { t("译文对照与翻译：预览全文，每一段的译文排在它旁边；保留成译稿后可以修改，并跟着原文变") };
+        // 译文对照: what is on show with each paragraph's translation beside it (write_facing.rs). Another way of looking at
+        // the manuscript, so it stands right of the eye; lit while on. From a section being written it is that section,
+        // in its place; from 预览 the whole manuscript.
+        let facing = writing.reading && writing.facing;
+        let facing_tip = match (facing, writing.facing_section() || !writing.reading) {
+            (true, true) => t("译文对照：开。再点一下收起译文，回到这一节写"),
+            (true, false) => t("译文对照：开。再点一下收起译文，只看原文"),
+            (false, true) => t("译文对照与翻译：这一节每一段的译文排在它旁边，就在这一节里看；保留成译稿后可以修改，并跟着原文变"),
+            (false, false) => t("译文对照与翻译：预览全文，每一段的译文排在它旁边；保留成译稿后可以修改，并跟着原文变"),
+        };
         let facing_button = div()
             .id("write-facing")
             .flex()

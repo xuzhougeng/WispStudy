@@ -165,6 +165,8 @@ impl Workspace {
                 }
                 // `write:methods` shows another part of the manuscript; `draft:<text>` leaves text in it, as if typed.
                 "write" => Some(Cmd::WriteSection(arg.to_string())),
+                // `part:methods` chooses a section as its pill does: with 译文对照 on, it is read beside its translation there.
+                "part" => Some(Cmd::PickSection(arg.to_string())),
                 // `manuscript:new` makes another manuscript, `manuscript:<title>` gives the current one its title;
                 // `section` / `section:<id>` is the dialog for a new section / one's name and kind;
                 // `reading` shows the whole manuscript, `versions` the section's history.
