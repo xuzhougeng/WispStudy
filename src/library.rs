@@ -611,6 +611,7 @@ impl Workspace {
                 .children(this.tour_spot(id))
         };
         let on_papers = lib.page == Page::Papers;
+        let ask_key = crate::shortcuts::pretty(&crate::shortcuts::key_of("ask", &self.settings.shortcuts));
         // The numbers follow the search and the filters set over the list (`Library::counts`): each view says
         // how many papers it would show, each tag how many of those on show hold it.
         let filtered = lib.filters.active() > 0 || !lib.filters.search.trim().is_empty();
@@ -754,7 +755,8 @@ impl Workspace {
             .child(ui::primary_button("add-paper", t("添加文献")).w_full().on_click(self.on_menu(MenuKind::Add, cx)).children(self.tour_spot("add-paper")))
             .child(div().flex().flex_col().gap(px(1.)).children(view_rows))
             // The assistant, then a review's path in its order: 检索, 筛选, 提取 (the number is how many proposals wait), 写作.
-            .child(div().flex().flex_col().gap(px(1.)).child(nav("page-ask", "sparkle", t("助手"), None, lib.page == Page::Ask, Cmd::SetPage(Page::Ask), self, cx)).child(nav("page-sources", "search", t("检索与导入"), (!lib.searches.is_empty()).then_some(lib.searches.len()), matches!(lib.page, Page::Sources | Page::Guide), Cmd::SetPage(Page::Sources), self, cx)).child(nav("page-screen", "list-todo", t("筛选"), Some(lib.papers.iter().filter(|p| p.screening == "pending").count()).filter(|n| *n > 0), lib.page == Page::Screen, Cmd::SetPage(Page::Screen), self, cx)).child(nav("page-extract", "scan-text", t("提取"), Some(lib.extract_rows().len()).filter(|n| *n > 0), lib.page == Page::Extract, Cmd::SetPage(Page::Extract), self, cx)).child(nav("page-write", "pen-line", t("写作"), None, lib.page == Page::Write, Cmd::SetPage(Page::Write), self, cx)))
+            // 助手 has a key of its own from any page of the library: the row says it, faintly, while the pointer is on it.
+            .child(div().flex().flex_col().gap(px(1.)).child(nav("page-ask", "sparkle", t("助手"), None, lib.page == Page::Ask, Cmd::SetPage(Page::Ask), self, cx).group("page-ask").when(!ask_key.is_empty(), |d| d.child(div().flex_none().text_size(text_px(12.)).text_color(Theme::text_tertiary()).invisible().group_hover("page-ask", |s| s.visible()).child(ask_key)))).child(nav("page-sources", "search", t("检索与导入"), (!lib.searches.is_empty()).then_some(lib.searches.len()), matches!(lib.page, Page::Sources | Page::Guide), Cmd::SetPage(Page::Sources), self, cx)).child(nav("page-screen", "list-todo", t("筛选"), Some(lib.papers.iter().filter(|p| p.screening == "pending").count()).filter(|n| *n > 0), lib.page == Page::Screen, Cmd::SetPage(Page::Screen), self, cx)).child(nav("page-extract", "scan-text", t("提取"), Some(lib.extract_rows().len()).filter(|n| *n > 0), lib.page == Page::Extract, Cmd::SetPage(Page::Extract), self, cx)).child(nav("page-write", "pen-line", t("写作"), None, lib.page == Page::Write, Cmd::SetPage(Page::Write), self, cx)))
             .child(
                 div()
                     .group("tags-area")
