@@ -1121,6 +1121,8 @@ impl Workspace {
                     let waits = self.lib.as_ref().and_then(|lib| [Talk::Write, Talk::Paper, Talk::Library].into_iter().find(|talk| lib.chat(*talk).pending.is_some())).unwrap_or(Talk::Library);
                     Some(Cmd::AnswerTools(waits, match arg { "always" => Consent::Always, "deny" => Consent::Deny, _ => Consent::Once }))
                 }
+                // `stopchat` presses 停止 in the library's conversation, `stopchat:paper` / `stopchat:write` in a paper's / the one that writes.
+                "stopchat" => Some(Cmd::StopChat(match arg { "paper" => Talk::Paper, "write" => Talk::Write, _ => Talk::Library })),
                 // `connector:0` opens the first connector on 设置 › 自定义 (after `settings:customize`).
                 "connector" => Some(Cmd::Custom(crate::custom::Do::SelectConnector(arg.parse().unwrap_or(0)))),
                 // `skill:0` opens the first skill's page on 设置 › 自定义 (after `settings:skills`); `skill:file;<path>` shows a file of it,

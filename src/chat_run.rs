@@ -4,7 +4,7 @@
 //! conversation set aside while it answers goes on through `in_chat`.
 
 use crate::app::{ScopeDo, Talk, Workspace};
-use crate::chat_state::{Chat, ChatImage, ChatItem, MAX_ATTACHMENTS, PendingTools, Picture, PreparedCall, Retracted, Spent, exchange, said, wire_images};
+use crate::chat_state::{Chat, ChatImage, ChatItem, MAX_ATTACHMENTS, PendingTools, Picture, PreparedCall, Retracted, Spent, Unanswered, exchange, said, unanswered, wire_images};
 use crate::i18n::t;
 use crate::input::InputEvent;
 use gpui::*;
@@ -959,6 +959,8 @@ impl Workspace {
     pub(crate) fn place_outputs(&mut self, talk: Talk, mut calls: Vec<PreparedCall>, first: usize, from: usize, cx: &mut Context<Self>) {
         let next = calls.iter().enumerate().skip(from).find(|(_, call)| PLACED.contains(&call.name.as_str()) && call.outside.is_none() && call.args.is_ok()).map(|(n, _)| n);
         let (Some(at), Some(lib)) = (next, self.lib.as_mut()) else { return self.execute_tools(talk, calls, first, true, cx) };
+        // While the dialog is open (on macOS the window stays usable) none of the calls has run: stopped now, each is told so.
+        lib.chat_mut(talk).running = calls.iter().map(|call| (call.id.clone(), Unanswered::NotRun)).collect();
         let (library, generation, key) = (lib.info.id.clone(), lib.chat(talk).generation, lib.chat(talk).key);
         let args = calls[at].args.clone().unwrap_or_default();
         let scripted = wisp_core::settings::env("DEV").is_some();
@@ -1024,7 +1026,7 @@ impl Workspace {
         let (known, read) = (sources.lock().map_or(0, |sources| sources.len()), sources.clone());
         let root = self.root.clone();
         let (generation, key) = (chat.generation, chat.key);
-        chat.running = calls.iter().map(|call| call.id.clone()).collect();
+        chat.running = calls.iter().map(|call| (call.id.clone(), call.unanswered(allowed))).collect();
         let wrote = calls.iter().any(|call| call.writes && (allowed || !call.confirm));
         let composed = calls.iter().any(|call| tools::MANUSCRIPT.contains(&call.name.as_str()) && (allowed || !call.confirm));
         let commented = calls.iter().any(|call| call.name == COMMENT);
@@ -1090,8 +1092,10 @@ impl Workspace {
     }
 
     /// Stop the answer being given. What still arrives for it is dropped;
-    /// the conversation stays one that can go on: the calls in flight are
-    /// answered as stopped, and the text so far stays as the model's turn.
+    /// the conversation stays one that can go on: every call of the turn
+    /// gets a result, whether it never ran (waiting for a yes or a save
+    /// dialog) or runs on without its result (`Unanswered`), and the text
+    /// so far stays as the model's turn.
     pub(crate) fn stop_chat(&mut self, talk: Talk, cx: &mut Context<Self>) {
         let Some(lib) = self.lib.as_mut() else { return };
         let chat = lib.chat_mut(talk);
@@ -1099,13 +1103,10 @@ impl Workspace {
         chat.generation += 1;
         // A summary asked for by the person, with no answer awaited: the conversation is as it was.
         let idle = chat.compacting && chat.started.is_none();
-        let unanswered: Vec<String> = match chat.pending.take() {
-            Some(pending) => pending.calls.into_iter().map(|call| call.id).collect(),
-            None => std::mem::take(&mut chat.running),
-        };
+        let unanswered = unanswered(chat.pending.take(), std::mem::take(&mut chat.running));
         if let Some(protocol) = chat.protocol {
             if !unanswered.is_empty() {
-                let results: Vec<(String, String, bool)> = unanswered.into_iter().map(|id| (id, t("用户中止了这次提问，这个工具的结果没有交回。").to_string(), true)).collect();
+                let results: Vec<(String, String, bool)> = unanswered.into_iter().map(|(id, said)| (id, said.result().to_string(), true)).collect();
                 chat.wire.extend(ai::tool_results(protocol, &results));
             } else if !idle && let Some(ChatItem::Answer(text)) = chat.messages.last() && !text.is_empty() {
                 chat.wire.push(ai::assistant_message(text));

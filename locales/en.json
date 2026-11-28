@@ -792,6 +792,8 @@
   "回答被截断，工具没有执行。": "The response was truncated. The tool was not run.",
   "回答没有正常结束。": "The response did not finish normally.",
   "用户中止了这次提问，这个工具的结果没有交回。": "The user stopped this question. This tool's result was not returned.",
+  "用户中止了这次提问，这个工具没有执行。": "The user stopped this question. This tool was not run.",
+  "用户中止了这次提问，这个工具的结果没有交回；它可能已经生效，重做之前请先核对。": "The user stopped this question. This tool's result was not returned; it may already have taken effect, so check before doing it again.",
   "已中止": "Stopped",
   "这次对话已经不在了。": "This conversation no longer exists.",
   "文献的题目": "Paper title",

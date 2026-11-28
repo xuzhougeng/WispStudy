@@ -75,6 +75,53 @@ pub struct PreparedCall {
     pub outside: Option<crate::custom::Outside>,
 }
 
+impl PreparedCall {
+    /// Running it may change something: a tool that writes the library or a new file (`ToolDef::writes`), or a
+    /// connector's that is not read-only, which is what its `confirm` says (`outside_call`; its `writes` is always false).
+    pub(crate) fn changes(&self) -> bool {
+        self.writes || (self.confirm && matches!(self.outside, Some(crate::custom::Outside::Connector(..))))
+    }
+
+    /// What stopping says to it once it was handed to run (`execute_tools`, with the person's yes or not: `allowed`).
+    /// One that runs nothing, refused or not runnable as written, did not run; the others run on to their end.
+    pub(crate) fn unanswered(&self, allowed: bool) -> Unanswered {
+        if self.args.is_err() || (self.confirm && !allowed) { Unanswered::NotRun } else if self.changes() { Unanswered::Changing } else { Unanswered::Reading }
+    }
+}
+
+/// What stopping a question says to a call of its turn that has no result yet (`stop_chat`): the model reads it as the
+/// call's result. Every call gets one: a conversation that ends on an unanswered call cannot continue.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Unanswered {
+    /// It never ran: it waited for the person's yes or for where its file goes, was refused, or could not run as written.
+    NotRun,
+    /// It runs on and only reads.
+    Reading,
+    /// It runs on and changes something (the library, a file, a connector's service): by now it may have.
+    Changing,
+}
+
+impl Unanswered {
+    pub(crate) fn result(self) -> &'static str {
+        match self {
+            Unanswered::NotRun => t("用户中止了这次提问，这个工具没有执行。"),
+            Unanswered::Reading => t("用户中止了这次提问，这个工具的结果没有交回。"),
+            Unanswered::Changing => t("用户中止了这次提问，这个工具的结果没有交回；它可能已经生效，重做之前请先核对。"),
+        }
+    }
+}
+
+/// The calls of the turn being answered that have no result yet, and what stopping says to each: those waiting for the
+/// person's yes never ran, the others are as `Chat::running` holds them. Each call once, by its id.
+pub(crate) fn unanswered(pending: Option<PendingTools>, running: Vec<(String, Unanswered)>) -> Vec<(String, Unanswered)> {
+    let waiting = pending.into_iter().flat_map(|pending| pending.calls).map(|call| (call.id, Unanswered::NotRun));
+    let mut owed: Vec<(String, Unanswered)> = vec![];
+    for (id, said) in waiting.chain(running) {
+        if !owed.iter().any(|(known, _)| *known == id) { owed.push((id, said)) }
+    }
+    owed
+}
+
 /// The calls of a turn that wait for the person's consent, and where their lines stand in the conversation.
 pub struct PendingTools {
     pub calls: Vec<PreparedCall>,
@@ -152,8 +199,9 @@ pub struct Chat {
     pub pending: Option<PendingTools>,
     /// The person allowed every change for the rest of this conversation.
     pub(crate) allow_changes: bool,
-    /// The calls running now, which get an answer of their own if the person stops.
-    pub(crate) running: Vec<String>,
+    /// The calls of the turn once they left `pending`, waiting for where a file goes (`place_outputs`) or running
+    /// (`execute_tools`), with what each is told if the person stops (`unanswered`).
+    pub(crate) running: Vec<(String, Unanswered)>,
     /// The groups of tool lines (by the place of their first) that are unfolded.
     pub tools_open: HashSet<usize>,
     /// The list of what the model was (or will be) given is unfolded.
@@ -468,5 +516,70 @@ impl Chat {
             input.choosing = false;
             input.set_text("", cx);
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    // Not `super::*`: that would bring in gpui's own `test` attribute.
+    use super::{PendingTools, PreparedCall, Unanswered, unanswered};
+    use crate::custom::Outside;
+    use serde_json::Value;
+    use wisp_core::connector::Connector;
+
+    fn call(id: &str, writes: bool, confirm: bool, outside: Option<Outside>) -> PreparedCall {
+        PreparedCall { id: id.into(), name: String::new(), args: Ok(Value::Null), writes, confirm, line: String::new(), details: vec![], outside }
+    }
+
+    // As `outside_call` makes them: a connector's tool that is not read-only is asked about, a read-only one is not.
+    fn connector(id: &str, read_only: bool) -> PreparedCall {
+        call(id, false, !read_only, Some(Outside::Connector(Connector::default(), "pages.create".into())))
+    }
+
+    #[test]
+    fn a_running_call_that_reads_is_not_said_to_have_changed_anything() {
+        assert_eq!(call("a", false, false, None).unanswered(true), Unanswered::Reading);
+        assert_eq!(connector("b", true).unanswered(true), Unanswered::Reading);
+        // A skill being read.
+        assert_eq!(call("c", false, false, Some(Outside::Said(Ok("说明".into())))).unanswered(true), Unanswered::Reading);
+    }
+
+    #[test]
+    fn a_running_call_that_writes_may_have_taken_effect() {
+        // A library tool that writes, asked about and allowed, or not asked about (the pen handed over, a file placed in its dialog).
+        assert_eq!(call("a", true, true, None).unanswered(true), Unanswered::Changing);
+        assert_eq!(call("b", true, false, None).unanswered(false), Unanswered::Changing);
+        // A connector's that is not read-only: its `writes` is false, its `confirm` says it.
+        assert_eq!(connector("c", false).unanswered(true), Unanswered::Changing);
+    }
+
+    #[test]
+    fn a_call_that_runs_nothing_did_not_run() {
+        // Refused: it is answered with the refusal and does nothing.
+        assert_eq!(call("a", true, true, None).unanswered(false), Unanswered::NotRun);
+        assert_eq!(connector("b", false).unanswered(false), Unanswered::NotRun);
+        // Arguments that did not parse, or a save dialog closed (`place_outputs`): it fails by itself.
+        let broken = PreparedCall { args: Err("用户关掉了保存对话框".into()), ..call("c", true, false, None) };
+        assert_eq!(broken.unanswered(true), Unanswered::NotRun);
+    }
+
+    #[test]
+    fn every_call_waiting_or_running_is_answered_once() {
+        // Waiting for the person's yes: none of them ran, the one that only reads included.
+        let pending = PendingTools { calls: vec![call("a", true, true, None), call("b", false, false, None)], first: 0 };
+        assert_eq!(unanswered(Some(pending), vec![]), vec![("a".into(), Unanswered::NotRun), ("b".into(), Unanswered::NotRun)]);
+        // Waiting for a save dialog (`place_outputs`), then running (`execute_tools`): as `running` holds them.
+        assert_eq!(unanswered(None, vec![("a".into(), Unanswered::NotRun), ("b".into(), Unanswered::NotRun)]), vec![("a".into(), Unanswered::NotRun), ("b".into(), Unanswered::NotRun)]);
+        assert_eq!(unanswered(None, vec![("a".into(), Unanswered::Changing), ("b".into(), Unanswered::Reading)]), vec![("a".into(), Unanswered::Changing), ("b".into(), Unanswered::Reading)]);
+        // A call in both is answered once, as one that did not run: two results for one call are refused as surely as none.
+        let pending = PendingTools { calls: vec![call("a", true, true, None)], first: 0 };
+        assert_eq!(unanswered(Some(pending), vec![("a".into(), Unanswered::Changing), ("c".into(), Unanswered::Reading)]), vec![("a".into(), Unanswered::NotRun), ("c".into(), Unanswered::Reading)]);
+        assert!(unanswered(None, vec![]).is_empty());
+    }
+
+    #[test]
+    fn each_way_of_being_unanswered_says_something_else() {
+        let said = [Unanswered::NotRun, Unanswered::Reading, Unanswered::Changing].map(Unanswered::result);
+        assert!(said[0] != said[1] && said[1] != said[2] && said[0] != said[2]);
     }
 }
