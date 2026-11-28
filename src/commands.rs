@@ -725,6 +725,12 @@ pub enum Cmd {
     WriteAssist(ai::Assist),
     WriteAssistStop,
     WriteAssistUse(crate::write_assist::Use),
+    /// 译成…: ask again into another language, a code of `manuscript::LANGUAGES`.
+    WriteAssistTarget(String),
+    /// Put the term a one-off requirement of the card names into the glossary.
+    WriteAssistRecord,
+    /// 术语: the glossary and the manuscript's requirement (`glossary.rs`).
+    Glossary(crate::glossary::Do),
     /// 配引用's card: tick a paper, show more, write the ticked citations (write_cite.rs).
     WriteCited(crate::write_cite::Do),
     /// The list of what the assistant changed in the section on show (`revise.rs`).
@@ -1307,6 +1313,9 @@ impl Workspace {
             Cmd::WriteAssist(assist) => self.assist_start(assist, cx),
             Cmd::WriteAssistStop => self.assist_stop(cx),
             Cmd::WriteAssistUse(how) => self.assist_use(how, window, cx),
+            Cmd::WriteAssistTarget(code) => self.assist_retarget(code, cx),
+            Cmd::WriteAssistRecord => self.assist_record(cx),
+            Cmd::Glossary(what) => self.run_glossary(what, window, cx),
             Cmd::WriteCited(what) => self.cite_do(what, window, cx),
             Cmd::Revise(what) => self.run_revise(what, cx),
             Cmd::Seek(what) => self.run_seek(what, window, cx),

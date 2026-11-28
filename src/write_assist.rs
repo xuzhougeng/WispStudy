@@ -5,30 +5,43 @@
 //! - looking in the library, which changes nothing: 找句子 (the candidates
 //!   beside the manuscript, write_find.rs) and 配引用 (the papers each
 //!   sentence can cite, write_cite.rs);
-//! - a new version of the words: 润色, 译成…, 仿写 (rewritten after the
-//!   library's sentences closest to it) and the person's own commands. The
-//!   answer streams into a card over the candidates, beside the original
+//! - a new version of the words: 润色, 换个说法, 译成…, 仿写 (rewritten after
+//!   the library's sentences closest to it) and the person's own commands.
+//!   The answer streams into a card over the candidates, beside the original
 //!   with the words that changed marked; only the person puts it into the
-//!   draft, and Undo takes that back.
+//!   draft, and Undo takes that back. 换个说法 and 译成… give three versions
+//!   in one answer (`wisp_core::versions`), each said how it differs; a click
+//!   on one replaces the text, and a line under them asks again with a
+//!   requirement for this once.
+//!
+//! Every new version of the words carries the glossary's terms the text holds
+//! and the manuscript's standing requirement (glossary.rs), and each version
+//! is looked over with no model (`glossary::check`): a term not used as the
+//! table says, a number lost, is a quiet mark with the reason on hover.
 
 use crate::i18n::t;
-use crate::app::{Cmd, Workspace, Writing};
+use crate::app::{Cmd, MenuItem, Workspace, Writing};
+use crate::input::{InputEvent, TextInput};
 use crate::settings::SettingsPage;
 use crate::theme::{Theme, text_px};
 use crate::ui;
 use gpui::{prelude::FluentBuilder, *};
 use std::ops::Range;
 use wisp_core::ai::{self, Assist, Change, ChatEvent, Profile};
+use wisp_core::glossary::{self, Lack};
+use wisp_core::manuscript::LANGUAGES;
 use wisp_core::settings::Task;
+use wisp_core::versions::{self, Kind, Version};
 
 /// The writing page's request to the model, if one was made.
-#[derive(Default)]
 pub struct Assisting {
     pub card: Option<Card>,
     /// Counts the requests: an answer to an earlier one, stopped or dropped, is not shown.
     pub(crate) generation: u64,
     /// 仿写 is waiting for the sentences closest to its paragraph: the request that asked for them.
     pub(crate) awaiting: Option<u64>,
+    /// The line under a card of versions: a requirement for this once; Enter asks again with it.
+    pub(crate) once: Entity<TextInput>,
 }
 
 /// One action's result, with what it was asked about.
@@ -50,6 +63,37 @@ pub struct Card {
     pub keys: Vec<(String, String)>,
     /// 配引用: what was found in the library, in place of a result to compare (write_cite.rs).
     pub cite: Option<crate::write_cite::Found>,
+    /// What the text is in, and for 译成… what it is put into: codes of `manuscript::LANGUAGES`.
+    pub source: String,
+    pub target: String,
+    /// The paragraph around the text, sent for its sense (`versions::context`).
+    pub context: String,
+    /// The glossary's terms the text holds, as the request had them: what each version is looked over by.
+    pub terms: Vec<(String, String)>,
+    /// The requirement for this once the answer was asked with.
+    pub once: String,
+}
+
+impl Card {
+    pub fn new(assist: Assist, language: String, section: String, original: String, range: Range<usize>, model: String) -> Card {
+        Card { assist, language, section, original, range, result: String::new(), busy: true, error: String::new(), note: String::new(), model, keys: vec![], cite: None, source: String::new(), target: String::new(), context: String::new(), terms: vec![], once: String::new() }
+    }
+
+    /// The versions of the answer as far as it has come; one for an action that gives one.
+    pub fn versions(&self) -> Vec<Version> {
+        if self.assist.versions() { return versions::parse(&self.result) }
+        let text = self.result.trim();
+        if text.is_empty() { vec![] } else { vec![Version { kind: Kind::Other, text: text.to_string() }] }
+    }
+}
+
+/// What a request asked again keeps of the card before it: the text, where it stood, and what it was put into.
+struct Again {
+    original: String,
+    range: Range<usize>,
+    context: String,
+    target: String,
+    once: String,
 }
 
 /// One of the manuscript's tools: a button beside what is selected.
@@ -85,9 +129,23 @@ pub enum Use {
     Below,
     Copy,
     Drop,
+    /// One of several versions, by its place: put in the text's place, or copied.
+    Take(usize),
+    CopyOne(usize),
 }
 
 impl Assisting {
+    pub fn new(subscriptions: &mut Vec<Subscription>, window: &mut Window, cx: &mut Context<Workspace>) -> Assisting {
+        let once = cx.new(|cx| TextInput::new("再提个要求，回车重写：例如 用被动语态；niche 译作 微环境", cx));
+        subscriptions.push(cx.subscribe_in(&once, window, |this, _, event: &InputEvent, _, cx| match event {
+            InputEvent::Submit => this.assist_again(cx),
+            // What it says may name a term: 记入术语表 is offered while it does.
+            InputEvent::Changed => cx.notify(),
+            _ => {}
+        }));
+        Assisting { card: None, generation: 0, awaiting: None, once }
+    }
+
     /// The person went on to another part of the manuscript: the card was about this one.
     pub fn leave(&mut self) {
         self.generation += 1;
@@ -108,23 +166,83 @@ impl Workspace {
 
     /// Do `assist` on the selection, or on the paragraph the caret is in.
     pub fn assist_start(&mut self, assist: Assist, cx: &mut Context<Self>) {
-        self.assist_begin(assist, false, cx);
+        // A new request has no requirement for this once yet.
+        if let Some(lib) = self.lib.as_ref() { lib.writing.assist.once.update(cx, |input, cx| input.set_text("", cx)) }
+        self.assist_send(assist, false, None, cx);
     }
 
     /// `searched`: the sentences 仿写 asked for have come, and it goes on with them.
     pub(crate) fn assist_begin(&mut self, assist: Assist, searched: bool, cx: &mut Context<Self>) {
+        self.assist_send(assist, searched, None, cx);
+    }
+
+    /// Ask the card's request again: with the requirement typed under it (Enter there), or into another language.
+    pub(crate) fn assist_again(&mut self, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_ref() else { return };
+        let once = lib.writing.assist.once.read(cx).text().trim().to_string();
+        let Some(card) = lib.writing.assist.card.as_ref().filter(|card| !card.busy && card.assist.versions()) else { return };
+        let again = Again { original: card.original.clone(), range: card.range.clone(), context: card.context.clone(), target: card.target.clone(), once };
+        self.assist_send(card.assist.clone(), false, Some(again), cx);
+    }
+
+    /// 译成… into the language chosen over the card.
+    pub(crate) fn assist_retarget(&mut self, code: String, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_ref() else { return };
+        let Some(card) = lib.writing.assist.card.as_ref().filter(|card| card.assist == Assist::Translate) else { return };
+        let again = Again { original: card.original.clone(), range: card.range.clone(), context: card.context.clone(), target: code, once: card.once.clone() };
+        self.assist_send(Assist::Translate, false, Some(again), cx);
+    }
+
+    /// The language a text goes into by 译成… unless the person chooses another (`glossary::default_target`).
+    pub(crate) fn translate_target(&self, text: &str) -> &'static str {
+        let written = self.lib.as_ref().map_or(wisp_core::manuscript::DEFAULT_LANGUAGE, |lib| lib.writing.language());
+        glossary::default_target(glossary::text_language(text, written), written)
+    }
+
+    /// The languages the card's text can be translated into: every one but its own.
+    pub(crate) fn assist_target_menu(&self) -> Vec<MenuItem> {
+        let Some(card) = self.lib.as_ref().and_then(|lib| lib.writing.assist.card.as_ref()) else { return vec![] };
+        LANGUAGES.iter().filter(|(code, _)| *code != card.source).map(|(code, name)| MenuItem { label: format!("{} ({code})", t(name)).into(), checked: *code == card.target, note: None, cmd: Cmd::WriteAssistTarget(code.to_string()) }).collect()
+    }
+
+    fn assist_send(&mut self, assist: Assist, searched: bool, again: Option<Again>, cx: &mut Context<Self>) {
         if self.lib.as_ref().is_none_or(|lib| !searched && lib.writing.assist.card.as_ref().is_some_and(|card| card.busy)) { return }
         // Its answer is a list of papers, not a version of the paragraph.
         if assist == Assist::Cite { return self.cite_start(cx) }
         let profile = self.settings.profile_for_or_default(Task::Chat);
-        let language = self.manuscript_language();
         let own = self.settings.commands.clone();
+        let (written, target_default) = {
+            let lib = self.lib.as_ref().unwrap();
+            let (_, original) = target(&lib.writing, cx);
+            (lib.writing.language().to_string(), self.translate_target(again.as_ref().map_or(original.as_str(), |again| again.original.as_str())))
+        };
         let Some(lib) = self.lib.as_mut() else { return };
+        let requirement = lib.requirement();
+        let terms_kept = lib.glossary.terms.clone();
         let writing = &mut lib.writing;
-        let (range, original) = target(writing, cx);
+        let chosen = again.as_ref().map(|again| again.target.clone()).filter(|target| !target.is_empty());
+        let (range, original, context, once) = match again {
+            Some(Again { original, range, context, once, .. }) => (range, original, context, once),
+            None => {
+                let (range, original) = target(writing, cx);
+                let context = versions::context(writing.editor.read(cx).text(), range.clone());
+                (range, original, context, String::new())
+            }
+        };
+        let source = glossary::text_language(&original, &written).to_string();
+        // What the result is in: for 译成… the language chosen over the card, else the one sensible for the text;
+        // 换个说法 stays in the text's own; the others write the manuscript's.
+        let target = match &assist {
+            Assist::Translate => chosen.unwrap_or_else(|| target_default.to_string()),
+            Assist::Reword => source.clone(),
+            _ => written.clone(),
+        };
+        let language = ai::language_name(&target);
         writing.assist.generation += 1;
         let generation = writing.assist.generation;
-        let mut card = Card { language: language.clone(), assist: assist.clone(), section: writing.section_id.clone(), original, range, result: String::new(), busy: true, error: String::new(), note: String::new(), model: model_name(&profile), keys: vec![], cite: None };
+        let mut card = Card::new(assist.clone(), language.clone(), writing.section_id.clone(), original, range, model_name(&profile));
+        card.terms = glossary::occurring(&card.original, &glossary::pairs(&terms_kept, &source, &target));
+        (card.source, card.target, card.context, card.once) = (source.clone(), target, context, once);
         // 仿写 goes by the library's sentences closest to this paragraph. Those beside the manuscript may be how the papers open the part, or what was found for another paragraph: then they are looked for first.
         if assist == Assist::Rewrite && !searched && !card.original.trim().is_empty() && profile.missing().is_none() {
             let search = &writing.search;
@@ -148,7 +266,9 @@ impl Workspace {
             })
             .collect();
         if assist == Assist::Rewrite { card.keys = sentences.iter().filter_map(|sentence| sentence["paperId"].as_str()).filter_map(|paper| Some((paper.to_string(), index.key(paper)?.to_string()))).collect() }
-        let request = match ai::assist_request(&profile, &assist, &language, &card.original, &examples, &own) {
+        // What the request carries besides the text: the terms it holds, the manuscript's requirement, and for versions the paragraph around it and the requirement for this once.
+        let ask = versions::Ask { source: source.clone(), context: card.context.clone(), terms: card.terms.clone(), requirement, once: card.once.clone() };
+        let request = match ai::assist_request(&profile, &assist, &language, &card.original, &examples, &own, &ask) {
             Ok(request) => request,
             Err(error) => {
                 (card.busy, card.error) = (false, error);
@@ -239,7 +359,10 @@ impl Workspace {
             return cx.notify();
         }
         let Some(card) = writing.assist.card.as_ref().filter(|card| !card.busy && card.cite.is_none()) else { return };
-        let result = card.result.trim().to_string();
+        // A card of versions has its first taken by 替换原文 and 复制; a version chosen is that one.
+        let pick = match how { Use::Take(n) | Use::CopyOne(n) => n, _ => 0 };
+        let result = card.versions().get(pick).map(|version| version.text.clone()).unwrap_or_default();
+        let how = match how { Use::Take(_) => Use::Replace, Use::CopyOne(_) => Use::Copy, other => other };
         if result.is_empty() { return }
         if how == Use::Copy {
             cx.write_to_clipboard(ClipboardItem::new_string(result));
@@ -274,9 +397,11 @@ impl Workspace {
 
     /// The tools for what is selected in the manuscript, in groups: what looks in the library and changes nothing,
     /// what proposes a new version of the words, and the person's own notes.
-    fn assist_tools(&self) -> Vec<Tool> {
+    fn assist_tools(&self, cx: &App) -> Vec<Tool> {
         let lib = self.lib.as_ref().unwrap();
         let language = self.manuscript_language();
+        // 译成… names where the selected text would go: the other of 中文 and 英文, or the manuscript's language.
+        let into = self.translate_target(&target(&lib.writing, cx).1);
         let busy = lib.writing.assist.card.as_ref().is_some_and(|card| card.busy);
         let configured = self.settings.profile_for_or_default(Task::Chat).missing().is_none();
         let tool = |id: ElementId, icon: Option<&'static str>, name: String, tip: String, able: bool, cmd: Cmd, group: u8| Tool { id, icon, name, tip, able, cmd, group };
@@ -287,18 +412,20 @@ impl Workspace {
         tools.push(tool("write-bar-cite".into(), Some("library"), crate::i18n::assist_title(&Assist::Cite, &language), t("在文献库里逐句找可以引用的文献，列出每篇和它自己的原句。勾选后只把引用加到句末，不改你的文字。").into(), !busy, Cmd::WriteAssist(Assist::Cite), 1));
         // A new version of the words, for the person to take or leave.
         if configured {
-            let mut actions = vec![Assist::Polish, Assist::Translate, Assist::Rewrite];
+            let mut actions = vec![Assist::Polish, Assist::Reword, Assist::Translate, Assist::Rewrite];
             actions.extend(self.settings.commands.iter().filter(|command| !command.template.trim().is_empty()).map(|command| Assist::Own(command.name.clone())));
             for (n, assist) in actions.into_iter().enumerate() {
                 let tip = match &assist {
                     Assist::Polish => t("只改语法、用词和不通顺的地方。给出改后的文字并标出改了哪里，由你决定是否替换。").to_string(),
-                    Assist::Translate => t("把这段译成稿件的语言，用这个领域的论文惯用的说法。由你决定是否替换。").to_string(),
+                    Assist::Translate => t("给出三种译法：贴近原文、学术惯用、更简洁，按术语表译术语；点一种替换原文。目标语言可以在结果上方换。").to_string(),
+                    Assist::Reword => t("同一种语言换个说法，给出三个版本：贴近原文、学术惯用、更简洁，标出和原文不同的词；点一个替换原文。").to_string(),
                     Assist::Rewrite => t("先在文献库里找与这段相近的句子，再参照它们的结构和措辞改写；意思以你写的为准。由你决定是否替换。").to_string(),
                     Assist::Own(name) => self.settings.commands.iter().find(|command| command.name == *name).map(|command| command.about.clone()).unwrap_or_default(),
                     Assist::Cite => String::new(),
                 };
                 // The sparkle leads the group.
-                tools.push(tool(("write-assist", n).into(), (n == 0).then_some("sparkle"), crate::i18n::assist_title(&assist, &language), tip, !busy, Cmd::WriteAssist(assist), 2));
+                let name = if assist == Assist::Translate { crate::i18n::assist_title(&assist, into) } else { crate::i18n::assist_title(&assist, &language) };
+                tools.push(tool(("write-assist", n).into(), (n == 0).then_some("sparkle"), name, tip, !busy, Cmd::WriteAssist(assist), 2));
             }
         } else {
             tools.push(tool("write-assist-settings".into(), Some("settings-gear"), t("配置模型").into(), t("配置模型后可以润色、翻译、仿写这一段").into(), true, Cmd::OpenSettings(SettingsPage::Ai), 2));
@@ -331,7 +458,7 @@ impl Workspace {
 
     /// The actions for what is selected in the manuscript, in a popover beside it: the only place they are.
     pub fn render_assist_bar(&self, cx: &mut Context<Self>) -> Div {
-        let items = self.tool_buttons(self.assist_tools(), cx);
+        let items = self.tool_buttons(self.assist_tools(cx), cx);
         div().flex().flex_none().items_center().flex_wrap().gap(px(2.)).p(px(4.)).text_color(Theme::text()).children(items)
     }
 
@@ -346,17 +473,28 @@ impl Workspace {
 
     /// What the last action came to, over the candidates; `None` without one for this part.
     /// `width` is the panel's: wrapped text is measured by it, not by what a column would give it.
-    pub fn render_assist_card(&self, width: f32, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub fn render_assist_card(&self, width: f32, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let lib = self.lib.as_ref().unwrap();
         let card = lib.writing.assist.card.as_ref().filter(|card| card.section == lib.writing.section_id)?;
         let small = |id: &'static str, name: &'static str| ui::ghost_button(id, None, Some(name.into())).h(text_px(24.)).px(px(7.)).text_size(text_px(12.));
         // 配引用 lists papers; every other action shows a version of the words beside the original.
         let (body, actions, working) = match &card.cite {
             Some(found) => ((card.busy || !found.rows.is_empty()).then(|| self.render_cite_body(card, found, cx)), (!card.busy && found.offering()).then(|| self.render_cite_actions(found, cx)), false),
+            // Several versions: each one a click to take; under them the line that asks again.
+            None if card.assist.versions() => {
+                let done = !card.busy && !card.result.trim().is_empty();
+                ((card.busy || !card.result.is_empty()).then(|| self.render_versions(card, done, cx)), (!card.busy).then(|| self.render_versions_actions(done, width - 44., window, cx)), card.busy && !card.result.is_empty())
+            }
             None => {
                 let done = !card.busy && !card.result.trim().is_empty();
                 ((card.busy || !card.result.is_empty()).then(|| self.render_assist_compared(card, done)), done.then(|| self.render_assist_actions(cx)), card.busy && !card.result.is_empty())
             }
+        };
+        // 译成… says where to, and is the menu of where else it can go.
+        let title: AnyElement = if card.assist == Assist::Translate && !card.busy {
+            ui::ghost_button("write-assist-target", None, None).flex_none().h(text_px(22.)).px(px(4.)).gap(px(4.)).text_size(text_px(12.)).font_weight(FontWeight::MEDIUM).child(crate::i18n::assist_title(&card.assist, &card.language)).child(ui::icon("chevron-down", 11., Theme::text_tertiary())).tooltip(ui::tip(t("换一种目标语言再译"))).on_click(self.on_menu(crate::menus::MenuKind::WriteAssistTarget, cx)).into_any_element()
+        } else {
+            div().flex_none().text_size(text_px(12.)).font_weight(FontWeight::MEDIUM).child(crate::i18n::assist_title(&card.assist, &card.language)).into_any_element()
         };
         let card_el = div()
             .flex()
@@ -378,7 +516,7 @@ impl Workspace {
                     .items_center()
                     .gap(px(6.))
                     .child(ui::icon(if card.cite.is_some() { "library" } else { "sparkle" }, 13., Theme::accent()))
-                    .child(div().flex_none().text_size(text_px(12.)).font_weight(FontWeight::MEDIUM).child(crate::i18n::assist_title(&card.assist, &card.language)))
+                    .child(title)
                     .when(working, |d| d.child(ui::spinner("write-assist-busy", 11., Theme::accent())))
                     .child(div().flex_1().min_w_0().truncate().text_right().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(card.model.clone()))
                     .when(card.busy, |d| d.child(small("write-assist-stop", t("停止")).on_click(self.on(Cmd::WriteAssistStop, cx))))
@@ -411,12 +549,121 @@ impl Workspace {
             .overflow_y_scroll()
             .child(label(t("原文")))
             .child(div().px(px(10.)).py(px(8.)).rounded(px(8.)).bg(Theme::bg_sunken()).text_size(text_px(12.)).line_height(text_px(19.)).text_color(Theme::text_secondary()).child(before))
-            .child(label(match card.assist { Assist::Translate => t("译文"), Assist::Own(_) => t("结果"), _ => t("改后") }))
+            .child(div().flex().items_center().gap(px(6.)).child(label(match card.assist { Assist::Translate => t("译文"), Assist::Own(_) => t("结果"), _ => t("改后") })).children((done && !matches!(card.assist, Assist::Own(_))).then(|| lack_mark("write-assist-lack".into(), card, card.result.trim())).flatten()))
             .child(if card.result.trim().is_empty() && card.busy {
                 div().flex().items_center().gap(px(6.)).text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(crate::mascot::inline("write-assist-wait", crate::mascot::Activity::Writing)).child(if card.note.is_empty() { t("正在写…") } else { "" })
             } else {
                 div().text_size(text_px(13.)).line_height(text_px(21.)).text_color(Theme::text()).child(after)
             })
+    }
+
+    /// The versions of an answer, each with how it differs, what it lacks (a mark), a copy button, and a click that
+    /// puts it in the text's place. A rewording has the words that differ from the original marked.
+    fn render_versions(&self, card: &Card, done: bool, cx: &mut Context<Self>) -> Stateful<Div> {
+        let label = |text: &str| div().flex_none().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(text.to_string());
+        let shown = card.versions();
+        let rows: Vec<AnyElement> = shown
+            .iter()
+            .enumerate()
+            .map(|(n, version)| {
+                let marks = if done && card.assist == Assist::Reword { ai::word_diff(&card.original, &version.text) } else { None };
+                let words = match &marks {
+                    Some((_, after)) => marked(after),
+                    None => plain(&version.text),
+                };
+                let name = match version.kind {
+                    Kind::Other => if card.assist == Assist::Translate { t("译文") } else { t("改后") },
+                    kind => t(kind.label()),
+                };
+                let group: SharedString = format!("write-version-{n}").into();
+                let copy = self.on(Cmd::WriteAssistUse(Use::CopyOne(n)), cx);
+                div()
+                    .id(("write-version", n))
+                    .group(group.clone())
+                    .flex()
+                    .flex_col()
+                    .flex_none()
+                    .gap(px(4.))
+                    .px(px(10.))
+                    .py(px(8.))
+                    .rounded(px(8.))
+                    .border_1()
+                    .border_color(Theme::line())
+                    .bg(Theme::bg_body())
+                    .when(done, |d| d.cursor_pointer().hover(|s| s.border_color(Theme::accent()).bg(Theme::hover())).on_click(self.on(Cmd::WriteAssistUse(Use::Take(n)), cx)))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.))
+                            .h(text_px(18.))
+                            .child(label(name))
+                            .children(done.then(|| lack_mark(SharedString::from(format!("write-version-lack-{n}")), card, &version.text)).flatten())
+                            .child(div().flex_1())
+                            .when(done, |d| {
+                                d.child(div().invisible().group_hover(group.clone(), |s| s.visible()).child(ui::icon_action(("write-version-copy", n), "copy", Theme::text_tertiary(), t("复制这一版")).on_click(move |event, window, cx| {
+                                    // The version under it is not taken too.
+                                    cx.stop_propagation();
+                                    copy(event, window, cx)
+                                })))
+                            }),
+                    )
+                    .child(div().text_size(text_px(13.)).line_height(text_px(21.)).text_color(Theme::text()).child(words))
+                    .into_any_element()
+            })
+            .collect();
+        let waiting = (card.busy && shown.is_empty()).then(|| div().flex().items_center().gap(px(6.)).text_size(text_px(12.)).text_color(Theme::text_tertiary()).child(crate::mascot::inline("write-assist-wait", crate::mascot::Activity::Writing)).child(if card.note.is_empty() { t("正在写…") } else { "" }));
+        div()
+            .id("write-assist-body")
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .max_h(px(460.))
+            .overflow_y_scroll()
+            // What scrolls is one column that keeps its height: the versions are not squeezed into the room.
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_none()
+                    .gap(px(8.))
+                    .child(label(t("原文")))
+                    .child(div().flex_none().px(px(10.)).py(px(8.)).rounded(px(8.)).bg(Theme::bg_sunken()).text_size(text_px(12.)).line_height(text_px(19.)).text_color(Theme::text_secondary()).child(card.original.clone()))
+                    .children(waiting)
+                    .children(rows),
+            )
+    }
+
+    /// Under the versions: the line for a requirement this once (Enter asks again), 记入术语表 while it names a
+    /// term, and 放弃. `inner` is the card's width inside its padding.
+    fn render_versions_actions(&self, done: bool, inner: f32, window: &Window, cx: &mut Context<Self>) -> Div {
+        let once = &self.lib.as_ref().unwrap().writing.assist.once;
+        let named = glossary::named_term(once.read(cx).text());
+        let record = named.map(|(zh, other)| ui::secondary_button("write-assist-record", t("记入术语表")).flex_none().h(text_px(28.)).px(px(8.)).text_size(text_px(12.)).tooltip(ui::tip(tf!("把「{zh}」↔ {other} 加进这个文献库的术语表，以后翻译都照它", "Add “{zh}” ↔ {other} to the library's glossary, for every later translation"))).on_click(self.on(Cmd::WriteAssistRecord, cx)));
+        let field_width = if record.is_some() { inner - 96. } else { inner };
+        let small = |id: &'static str, name: &'static str| ui::ghost_button(id, None, Some(name.into())).h(text_px(24.)).px(px(7.)).text_size(text_px(12.));
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(div().flex().items_center().gap(px(6.)).child(div().flex_none().w(px(field_width)).child(ui::field(once, window, cx))).children(record))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .child(div().flex_1().min_w_0().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(if !done { String::new() } else if cfg!(target_os = "macos") { t("点一个版本替换原文 · ⌘Z 可撤销").to_string() } else { t("点一个版本替换原文 · Ctrl+Z 可撤销").to_string() }))
+                    .child(small("write-assist-drop", t("放弃")).on_click(self.on(Cmd::WriteAssistUse(Use::Drop), cx))),
+            )
+    }
+
+    /// 记入术语表: the term the requirement typed under the card names, in the language of the translation's other side.
+    pub(crate) fn assist_record(&mut self, cx: &mut Context<Self>) {
+        let Some(lib) = self.lib.as_ref() else { return };
+        let Some((zh, other)) = glossary::named_term(lib.writing.assist.once.read(cx).text()) else { return };
+        let card = lib.writing.assist.card.as_ref();
+        let language = card.and_then(|card| [card.source.as_str(), card.target.as_str()].into_iter().find(|code| !code.is_empty() && *code != "zh").map(str::to_string)).unwrap_or_else(|| lib.glossary_language().to_string());
+        self.glossary_record(zh, other, language, cx);
     }
 
     /// What can be done with a new version of the words.
@@ -434,6 +681,26 @@ impl Workspace {
             .child(div().flex_1())
             .child(div().flex_none().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(if cfg!(target_os = "macos") { t("⌘Z 可撤销") } else { t("Ctrl+Z 可撤销") }))
     }
+}
+
+/// A quiet mark where a version lacks what the source has (`glossary::check`), the reasons in its tooltip; none when it lacks nothing.
+fn lack_mark(id: SharedString, card: &Card, text: &str) -> Option<AnyElement> {
+    let lacks = glossary::check(&card.original, text, &card.terms);
+    if lacks.is_empty() { return None }
+    Some(div().id(id).flex().flex_none().child(ui::icon("triangle-alert", 12., Theme::warning())).tooltip(ui::tip(lacks_said(&lacks))).into_any_element())
+}
+
+/// What a version lacks, said in a sentence.
+pub(crate) fn lacks_said(lacks: &[Lack]) -> String {
+    let said: Vec<String> = lacks
+        .iter()
+        .map(|lack| match lack {
+            Lack::Term { source, wanted } if source == wanted => tf!("术语「{source}」没有照原样保留", "The term “{source}” was not kept as written"),
+            Lack::Term { source, wanted } => tf!("术语表里「{source}」译作 {wanted}，这里没有用", "The glossary translates “{source}” as {wanted}; it is not used here"),
+            Lack::Number(number) => tf!("原文里的 {number} 这里没有", "{number} from the original is missing here"),
+        })
+        .collect();
+    said.join(if crate::i18n::is_english() { "; " } else { "；" })
 }
 
 /// A selection without the spaces and line breaks around it.

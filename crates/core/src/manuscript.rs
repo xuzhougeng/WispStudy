@@ -110,6 +110,9 @@ pub struct Manuscript {
     /// The key of the style its citations are written in (`csl::style`); empty, it follows the one the settings
     /// keep for manuscripts that chose none.
     pub cite_style: String,
+    /// What every translation and new version of its words is to follow (American spelling, a journal's habits),
+    /// as the person wrote it; the library's 术语表 is apart from it (`glossary`).
+    pub requirement: String,
     pub created_at: String,
     pub updated_at: String,
     /// In the order they are written.
@@ -1486,14 +1489,14 @@ impl Store {
 
     /// The manuscripts of the library that were not removed, oldest first, with their sections.
     pub fn manuscripts(&self) -> Result<Vec<Manuscript>> {
-        let mut stmt = self.db.prepare("SELECT id, title, language, created_at, updated_at, cite_style FROM manuscripts WHERE removed_at = '' ORDER BY created_at, id")?;
-        let mut list = stmt.query_map([], |r| Ok(Manuscript { id: r.get(0)?, title: r.get(1)?, language: r.get(2)?, created_at: r.get(3)?, updated_at: r.get(4)?, cite_style: r.get(5)?, sections: vec![] }))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut stmt = self.db.prepare("SELECT id, title, language, created_at, updated_at, cite_style, requirement FROM manuscripts WHERE removed_at = '' ORDER BY created_at, id")?;
+        let mut list = stmt.query_map([], |r| Ok(Manuscript { id: r.get(0)?, title: r.get(1)?, language: r.get(2)?, created_at: r.get(3)?, updated_at: r.get(4)?, cite_style: r.get(5)?, requirement: r.get(6)?, sections: vec![] }))?.collect::<rusqlite::Result<Vec<_>>>()?;
         for manuscript in &mut list { manuscript.sections = self.sections_of(&manuscript.id)? }
         Ok(list)
     }
 
     pub fn manuscript(&self, id: &str) -> Result<Option<Manuscript>> {
-        let found = self.db.query_row("SELECT id, title, language, created_at, updated_at, cite_style FROM manuscripts WHERE id = ?1 AND removed_at = ''", [id], |r| Ok(Manuscript { id: r.get(0)?, title: r.get(1)?, language: r.get(2)?, created_at: r.get(3)?, updated_at: r.get(4)?, cite_style: r.get(5)?, sections: vec![] })).optional()?;
+        let found = self.db.query_row("SELECT id, title, language, created_at, updated_at, cite_style, requirement FROM manuscripts WHERE id = ?1 AND removed_at = ''", [id], |r| Ok(Manuscript { id: r.get(0)?, title: r.get(1)?, language: r.get(2)?, created_at: r.get(3)?, updated_at: r.get(4)?, cite_style: r.get(5)?, requirement: r.get(6)?, sections: vec![] })).optional()?;
         let Some(mut manuscript) = found else { return Ok(None) };
         manuscript.sections = self.sections_of(id)?;
         Ok(Some(manuscript))
@@ -1555,6 +1558,13 @@ impl Store {
     /// The words stay as they are: only how they read changes, so it is no change to the manuscript's date.
     pub fn set_manuscript_cite_style(&mut self, id: &str, key: &str) -> Result<()> {
         self.db.execute("UPDATE manuscripts SET cite_style = ?2 WHERE id = ?1", params![id, key.trim()])?;
+        Ok(())
+    }
+
+    /// What a manuscript's translations and new versions of its words are to follow. Kept as it is typed, so a
+    /// space at its end stays until the person goes on; it is no change to the manuscript's words or date.
+    pub fn set_manuscript_requirement(&mut self, id: &str, requirement: &str) -> Result<()> {
+        self.db.execute("UPDATE manuscripts SET requirement = ?2 WHERE id = ?1", params![id, requirement])?;
         Ok(())
     }
 
@@ -1918,6 +1928,10 @@ mod tests {
         let other = store.create_manuscript("Shoots", "en").unwrap();
         assert_eq!(store.manuscript(&other.id).unwrap().unwrap().cite_style, "");
         store.set_manuscript_cite_style(&made.id, "").unwrap();
+        // The standing requirement is kept apart from the words, and leaves the date as it is.
+        store.set_manuscript_requirement(&made.id, "American spelling").unwrap();
+        let kept = store.manuscript(&made.id).unwrap().unwrap();
+        assert_eq!((kept.requirement.as_str(), kept.updated_at == now.updated_at), ("American spelling", true));
         assert_eq!(store.manuscript(&made.id).unwrap().unwrap().cite_style, "");
     }
 

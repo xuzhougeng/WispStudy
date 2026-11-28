@@ -251,6 +251,8 @@ pub enum Side {
     Candidates,
     Comments,
     References,
+    /// 术语: the manuscript's standing requirement and the library's glossary (`glossary.rs`).
+    Glossary,
 }
 
 pub struct Library {
@@ -440,6 +442,8 @@ pub struct Library {
     pub origins: BTreeMap<String, (String, String, String)>,
     pub writing: Writing,
     pub citing: crate::cite::Citing,
+    /// 术语表: how the library's terms are translated, and the fields of the page that edits it with the manuscript's requirement.
+    pub glossary: crate::glossary::Glossary,
     /// 图片库: the figures cut out of the library's PDFs.
     pub gallery: crate::figures::Gallery,
     /// 方法库 and 导言库: the passages kept from the library's papers, and the methods' links to figures.
@@ -771,6 +775,7 @@ impl Library {
         self.suggestions = self.store.list_suggestions()?.into_iter().map(|s| (s.paper_id.clone(), s)).collect();
         self.batches = self.store.list_batches(30)?;
         self.writing.structures = self.store.structures()?;
+        self.glossary.terms = self.store.glossary()?;
         // A paper's record may have changed: how its citations read is worked out again.
         self.citing.read.made_from = 0;
         self.origins = self.store.file_origins()?;
@@ -1140,8 +1145,9 @@ impl Workspace {
         let (comments, heard) = crate::comments::Commenting::new(store.comments(&manuscript).unwrap_or_default(), store.manuscript_source(&manuscript).ok().flatten(), cx);
         subscriptions.extend(heard);
         let seek = crate::write_seek::Seek::new(&mut subscriptions, cx);
-        let writing = Writing { manuscripts, manuscript, section_id, reading: false, facing: false, title, typed: 0, editor, find, search: Default::default(), structures: BTreeMap::new(), sorting: Sorting::default(), scroll: ScrollHandle::new(), assist: Default::default(), revise: Default::default(), comments, editor_scroll: ScrollHandle::new(), side: Side::default(), side_open: false, agent: Default::default(), seek, read: Default::default(), away: false };
+        let writing = Writing { manuscripts, manuscript, section_id, reading: false, facing: false, title, typed: 0, editor, find, search: Default::default(), structures: BTreeMap::new(), sorting: Sorting::default(), scroll: ScrollHandle::new(), assist: crate::write_assist::Assisting::new(&mut subscriptions, window, cx), revise: Default::default(), comments, editor_scroll: ScrollHandle::new(), side: Side::default(), side_open: false, agent: Default::default(), seek, read: Default::default(), away: false };
         let citing = crate::cite::Citing::new(&store, &writing.manuscript, &mut subscriptions, cx);
+        let glossary = crate::glossary::Glossary::new(&mut subscriptions, window, cx);
         let gallery = crate::figures::Gallery::new(&mut subscriptions, cx);
         let excerpts = crate::excerpts::Excerpts::new(&mut subscriptions, cx);
         let write_figures = crate::write_figures::Shelf::new(&mut subscriptions, cx);
@@ -1250,6 +1256,7 @@ impl Workspace {
             note_links: BTreeMap::new(),
             writing,
             citing,
+            glossary,
             gallery,
             excerpts,
             write_figures,

@@ -38,6 +38,7 @@ mod facing;
 mod figures;
 mod filing;
 mod floating;
+mod glossary;
 mod dialogs;
 mod draft;
 mod excerpts;

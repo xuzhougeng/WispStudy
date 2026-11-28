@@ -149,6 +149,14 @@ pub fn prompt(code: &str) -> String {
     )
 }
 
+/// The instructions a block (`sent`) is translated with: `prompt`, and after it the glossary's terms that occur in
+/// the block (`terms`: `glossary::pairs` from the manuscript's language into `code`) and the manuscript's standing
+/// requirement. A block with no term, in a manuscript with no requirement, has the instructions of before the
+/// glossary, so its kept translation still matches; a term changed asks again only for the blocks that hold it.
+pub fn prompt_for(code: &str, sent: &str, terms: &[(String, String)], requirement: &str) -> String {
+    crate::glossary::instructions(&prompt(code), &crate::glossary::occurring(sent, terms), requirement)
+}
+
 /// The language a manuscript written in `written` is set beside, a code of `manuscript::LANGUAGES`: the one
 /// the person chose (`chosen`), else the reader's own (`reader`: the interface's); when that is the language it
 /// is written in, English for a Chinese manuscript and Chinese for any other.
@@ -214,5 +222,11 @@ mod tests {
         assert_eq!(language("en", "en", "zh"), "zh");
         assert_eq!(language("xx", "en", "zh"), "zh");
         assert!(prompt("zh").contains("译成简体中文") && prompt("de").contains("译成德文") && prompt("en").starts_with("你是翻译助手"));
+        // Only the terms a block holds are in its instructions; with none and no requirement, they are the plain ones.
+        let terms = vec![("微环境".to_string(), "niche".to_string()), ("根毛".to_string(), "root hair".to_string())];
+        assert_eq!(prompt_for("en", "叶片变黄。", &terms, ""), prompt("en"));
+        let held = prompt_for("en", "干细胞微环境 [@1]。", &terms, "");
+        assert!(held.starts_with(&prompt("en")) && held.ends_with("- 微环境 → niche") && !held.contains("根毛"));
+        assert!(prompt_for("en", "叶片变黄。", &terms, "American spelling").ends_with("这份稿件的要求：American spelling"));
     }
 }

@@ -328,6 +328,7 @@ pub fn assist_title(assist: &wisp_core::ai::Assist, language: &str) -> String {
         Assist::Rewrite => t("仿写").into(),
         Assist::Polish => t("润色").into(),
         Assist::Cite => t("配引用").into(),
+        Assist::Reword => t("换个说法").into(),
         Assist::Translate if is_english() => format!("Translate to {}", t(&wisp_core::ai::language_name(language))),
         _ => assist.title(language),
     }
