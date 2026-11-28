@@ -5,7 +5,7 @@ use crate::i18n::t;
 use crate::app::{Cmd, Edge, MenuKind, Workspace};
 use crate::context::Nav;
 use crate::settings::{SettingsPage, UpdateState};
-use crate::shortcuts::{AskAssistant, DecideIncluded, DecideIrrelevant, DecidePending, DecideRelated, DecideUncertain, StarScreened, TakeSuggestion, TickSuggestion, TranslateScreened, UndoDecision, UndoScreening, MarkAll, MarkDown, MarkUp, MoveDown, MoveFirst, MoveLast, MoveLeft, MovePageDown, MovePageUp, MoveRight, MoveUp, OpenSelected, TrashSelected, AddPaper, AskLibrary, FocusSearch, ImportPdf, NewLibrary, ShowHome, ShowPalette, ShowSettings, CopyPicked, FindCandidates, ToggleDetail, ToggleReading, ToggleSidebar, ZoomFit, ZoomIn, ZoomOut, PaperBack, PaperForward};
+use crate::shortcuts::{AskAssistant, DecideIncluded, DecideIrrelevant, DecidePending, DecideRelated, DecideUncertain, StarScreened, TakeSuggestion, TickSuggestion, TranslateScreened, UndoDecision, UndoScreening, MarkAll, MarkDown, MarkUp, MoveDown, MoveFirst, MoveLast, MoveLeft, MovePageDown, MovePageUp, MoveRight, MoveUp, OpenSelected, TrashSelected, AddPaper, AskLibrary, FocusSearch, ImportPdf, NewLibrary, ShowHome, ShowPalette, ShowSettings, CopyPicked, FindCandidates, ToggleDetail, ToggleReading, ToggleSidebar, ZoomFit, ZoomIn, ZoomOut, PaperBack, PaperForward, OpenWriteFigures};
 use crate::theme::{self, Theme, text_px};
 use crate::ui;
 use gpui::{prelude::FluentBuilder, *};
@@ -70,6 +70,7 @@ impl Render for Workspace {
             .on_action(cx.listener(|this, _: &ZoomFit, window, cx| this.shortcut("zoom-fit", window, cx)))
             .on_action(cx.listener(|this, _: &CopyPicked, window, cx| this.shortcut("copy-picked", window, cx)))
             .on_action(cx.listener(|this, _: &FindCandidates, window, cx| this.shortcut("write-find", window, cx)))
+            .on_action(cx.listener(|this, _: &OpenWriteFigures, window, cx| this.shortcut("write-figures", window, cx)))
             .on_action(cx.listener(|this, _: &PaperBack, window, cx| this.shortcut("back", window, cx)))
             .on_action(cx.listener(|this, _: &PaperForward, window, cx| this.shortcut("forward", window, cx)))
             // The mouse's side buttons step through the papers read, as in a browser.

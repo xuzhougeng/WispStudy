@@ -2568,7 +2568,7 @@ impl Workspace {
             // a manuscript the manuscript's; a PDF with the keyboard looks in itself in any layout (pdf.rs).
             "search" if self.lib.as_ref().is_some_and(|l| l.selected.is_some() && l.pdf.is_some() && l.pdf_on_show() && (l.reading || !matches!(l.page, Page::Papers | Page::Write))) || (pdf_shown && self.asking(window)) => Cmd::PdfFind(true),
             // A conversation not yet made a library has no list to search or add to, no sidebar and no manuscript to find for.
-            "search" | "add" | "import-pdf" | "ask" | "sidebar" | "write-find" if self.in_draft() => return,
+            "search" | "add" | "import-pdf" | "ask" | "sidebar" | "write-find" | "write-figures" if self.in_draft() => return,
             // On the writing page the words are looked for in the manuscript, not among the papers.
             "search" if self.lib.as_ref().is_some_and(|l| l.page == Page::Write && !l.reading) => return self.seek_open(window, cx),
             "search" => {
@@ -2598,6 +2598,8 @@ impl Workspace {
             "back" if self.lib.is_some() => Cmd::StepHistory(false),
             "forward" if self.lib.is_some() => Cmd::StepHistory(true),
             "write-find" if !self.settings.agent_writing && self.lib.as_ref().is_some_and(|l| l.page == Page::Write) => Cmd::WriteFind,
+            // 资料库, as its row of the outline and its tool on the manuscript's bar open it: what is picked goes in at the caret.
+            "write-figures" if self.lib.as_ref().is_some_and(|l| l.page == Page::Write) => Cmd::WriteFigures(crate::write_figures::Do::Open),
             // What is selected in an answer: the paper's conversation first, when both have something.
             "copy-picked" if self.picked.is_some() => Cmd::CopySelected,
             "copy-picked" => match self.lib.as_ref().and_then(|lib| [Talk::Paper, Talk::Library, Talk::Write].into_iter().find(|talk| lib.chat(*talk).picked.is_some())) {

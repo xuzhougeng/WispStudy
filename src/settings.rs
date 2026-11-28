@@ -1794,7 +1794,11 @@ impl Workspace {
             .flex_col()
             .w_full()
             .gap(px(24.))
-            .children(GROUPS.iter().zip(groups).map(|(title, rows)| group(Some(t(title)), rows)))
+            .children(GROUPS.iter().zip(groups).map(|(title, rows)| {
+                // 写作's bold and italic may share a key with a shortcut of the window (⌘B is the sidebar's): said under them.
+                let said = (*title == "写作").then(|| note(t("加粗和斜体在稿件的正文里起作用，那里它们先于用同一组合键的其他快捷键。")));
+                div().flex().flex_col().gap(px(8.)).child(group(Some(t(title)), rows)).children(said)
+            }))
             .child(note(t("点一个快捷键，再按下新的组合键。文本框里的编辑按键（复制、粘贴、全选等）是固定的。")))
             // The keys of 筛选 are bare letters, and fixed: shown so that they can be found.
             .child(group(Some(t("筛选")), shortcuts::SCREEN_KEYS.iter().map(|(key, what)| div().flex().items_center().w_full().px(px(16.)).py(px(8.)).min_h(px(44.)).child(div().flex_1().min_w_0().child(t(what))).child(div().min_w(px(148.)).text_size(text_px(12.)).text_color(Theme::text_tertiary()).flex().justify_center().child(*key)).into_any_element()).collect()))
