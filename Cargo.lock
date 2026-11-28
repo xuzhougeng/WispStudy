@@ -8686,6 +8686,7 @@ dependencies = [
  "hayagriva",
  "hayro-interpret",
  "icu_segmenter",
+ "idna",
  "image",
  "lopdf",
  "merman",
@@ -8695,6 +8696,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "unicode-normalization",
+ "url",
 ]
 
 [[package]]

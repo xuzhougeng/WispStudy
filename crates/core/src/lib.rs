@@ -16,6 +16,7 @@
 //! - `lookup`   Crossref / Europe PMC records → `Paper`
 //! - `fulltext` page text of a stored PDF
 //! - `pdftext`  that text read off a PDF's glyphs, with the breaks the page shows
+//! - `pdflink`  where a PDF's links lead, and what a reader is told of an address before it is opened
 //! - `handles`  a rectangle chosen on a PDF page (a box, a mark, a frame): its eight handles, sizing and moving it
 //! - `structure` that text sorted into the parts of a paper and cut into sentences, for 写作
 //! - `cite`     citations in a manuscript: keys, finding them, the reference list and BibTeX
@@ -101,6 +102,7 @@ pub mod organise;
 pub mod passage;
 pub mod pptx;
 pub mod preview;
+pub mod pdflink;
 pub mod pdftext;
 pub mod provider;
 pub mod restyle;
