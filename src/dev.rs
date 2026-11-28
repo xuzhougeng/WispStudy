@@ -208,6 +208,17 @@ impl Workspace {
                 // for what failed, `wfacing:interleave` / `wfacing:beside` puts each translation under its paragraph / beside it,
                 // `wfacing:<code>` chooses the language (a code of `manuscript::LANGUAGES`).
                 "wfacing" => Some(match arg { "" => Cmd::WriteFacing(true), "off" => Cmd::WriteFacing(false), "retry" => Cmd::WriteFacingRetry, "interleave" => Cmd::WriteFacingInterleave(true), "beside" => Cmd::WriteFacingInterleave(false), code => Cmd::WriteFacingLanguage(code.to_string()) }),
+                // 写作's search (write_seek.rs): `wseek:<words>` opens the bar over the manuscript with the words typed (an ASCII comma
+                // or colon ends them); `wseek:next` / `wseek:prev` go to the next or previous place, `wseek:close` puts the bar away.
+                "wseek" => match arg {
+                    "next" => Some(Cmd::Seek(crate::write_seek::Do::Step(true))),
+                    "prev" => Some(Cmd::Seek(crate::write_seek::Do::Step(false))),
+                    "close" => Some(Cmd::Seek(crate::write_seek::Do::Close)),
+                    words => {
+                        self.dev_seek(words, window, cx);
+                        return;
+                    }
+                },
                 // 翻译 (write_translate.rs): `wtranslate:<code>` works on the version in that language, made when there is none;
                 // by a unit's place among the manuscript's units from 0 (the title, each section's name and blocks): `edit;<n>`, `redo;<n>`,
                 // `carry;<n>`, `take;<n>`, `leave;<n>`, `check;<n>`, `compare;<n>` (the models compared, each a version) and `pick;<n>` (the n-th taken); `type;<text>` writes the unit edited, `done`, `next`, `retry`, `stop`,
@@ -739,6 +750,17 @@ impl Workspace {
                                 eprintln!("pdffig: page {page} has no such mention of a figure, or it is not read yet");
                             }
                         }
+                    }
+                    return;
+                }
+                // `pdflink:<page>;<n>` shows where the n-th link (from 0) of a 1-based page of the PDF on show leads, as a click
+                // on it does (after a `shot:` has drawn the page); `pdflink:copy` copies the card's address. It never opens one.
+                "pdflink" => {
+                    let Some(pdf) = self.lib.as_ref().and_then(|l| l.pdf.clone()) else { return };
+                    if arg == "copy" { return pdf.update(cx, |pdf, cx| pdf.copy_link(cx)) }
+                    let numbers: Vec<usize> = arg.split(';').filter_map(|n| n.parse().ok()).collect();
+                    if let [page, n] = numbers.as_slice() && !pdf.update(cx, |pdf, cx| pdf.open_link_card(page.saturating_sub(1), *n, cx)) {
+                        eprintln!("pdflink: page {page} has no such link, or it is not read yet");
                     }
                     return;
                 }

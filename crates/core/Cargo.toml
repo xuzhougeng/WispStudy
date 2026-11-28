@@ -29,6 +29,9 @@ hayagriva = { version = "0.10", default-features = false, features = ["archive",
 merman = { version = "0.11", default-features = false, features = ["svg", "layout-cytoscape", "all-diagrams"] }
 # A table saved as text by a spreadsheet program that does not write UTF-8 (`table.rs`); already in the tree through gpui.
 encoding_rs = "0.8"
+# Reading a link's address in a PDF as a browser reads it, and a site's name in its own letters (`pdflink.rs`); already in the tree through hayagriva.
+url = "2"
+idna = "1"
 
 [lints]
 workspace = true

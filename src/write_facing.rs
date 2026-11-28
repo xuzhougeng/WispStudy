@@ -23,6 +23,7 @@ use crate::manuscripts::READ_SIZE;
 use crate::theme::{self, Theme, text_px};
 use crate::translate::Translated;
 use crate::ui;
+use crate::write_seek::Holder;
 use gpui::{prelude::FluentBuilder, *};
 use std::cell::Cell;
 use std::rc::Rc;
@@ -255,16 +256,45 @@ impl Workspace {
         self.write_facing_shown() && !self.settings.write_facing_interleaved && !(self.translate_shown().is_some() && self.lib.as_ref().is_some_and(|lib| lib.writing.translate.alone))
     }
 
-    /// Where the translation stands, the end of the language menu of its half (design rule 21: a habit, kept): beside
-    /// each paragraph, or under it. In a column too narrow for two halves it is under its paragraph whichever is
-    /// chosen, and 左右对照 says so. `alone`: 翻译's version is read alone, so neither is in force.
-    pub(crate) fn facing_arrangement(&self, alone: bool) -> Vec<MenuItem> {
-        let room = self.lib.as_ref().is_none_or(|lib| lib.writing.facing_room.get());
+    /// Where the translation stands (design rule 21): beside the switch of 译稿 in the manuscript's bar while it is
+    /// on, two icons that picture the two ways, the one in force lit, a click on the other changes it (a habit, kept
+    /// from manuscript to manuscript). In a column too narrow for two halves the translation is under its paragraph
+    /// whichever is chosen: 逐段交替 is lit and 左右对照, faded, says why. While 翻译's version is read alone, neither is
+    /// in force, and either brings the manuscript back beside it.
+    pub(crate) fn render_facing_arrangement(&self, cx: &mut Context<Self>) -> Div {
+        let Some(lib) = self.lib.as_ref() else { return div() };
+        let room = lib.writing.facing_room.get();
+        let alone = self.translate_shown().is_some() && lib.writing.translate.alone;
         let under = self.settings.write_facing_interleaved || !room;
-        vec![
-            MenuItem { label: t("译文在右边：左右对照").into(), checked: !alone && !under, note: (!room).then(|| t("这里放不下").into()), cmd: Cmd::WriteFacingInterleave(false) },
-            MenuItem { label: t("译文在每段下面：逐段交替").into(), checked: !alone && under, note: None, cmd: Cmd::WriteFacingInterleave(true) },
-        ]
+        let way = |id: &'static str, icon: &'static str, on: bool, faded: bool, tip: SharedString, interleaved: bool, cx: &mut Context<Self>| {
+            let color = if on { Theme::accent() } else if faded { Theme::text_tertiary() } else { Theme::text_secondary() };
+            div()
+                .id(id)
+                .flex()
+                .flex_none()
+                .items_center()
+                .justify_center()
+                .size(text_px(24.))
+                .rounded(px(5.))
+                .cursor_pointer()
+                .when(on, |d| d.bg(Theme::accent_soft()))
+                .when(!on, |d| d.hover(|s| s.bg(Theme::hover())))
+                .on_click(self.on(Cmd::WriteFacingInterleave(interleaved), cx))
+                .tooltip(ui::tip(tip))
+                .child(ui::icon(icon, 14., color))
+        };
+        let beside: SharedString = if room { t("左右对照：原文在左，译文在右，一段对一段").into() } else { t("左右对照：这里放不下两栏，窗口宽一些才能左右对照").into() };
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(1.))
+            .p(px(1.))
+            .rounded(px(6.))
+            .border_1()
+            .border_color(Theme::line())
+            .child(way("write-facing-beside", "columns-2", !alone && !under, !room, beside, false, cx))
+            .child(way("write-facing-under", "rows-2", !alone && under, false, t("逐段交替：每段原文下面紧跟着它的译文").into(), true, cx))
     }
 
     /// The glossary's pairs from the manuscript's language into the translation's, and the manuscript's requirement:
@@ -393,7 +423,8 @@ impl Workspace {
                             Beside::Done(text) => Some(div().w_full().text_size(text_px(13.)).text_color(Theme::text_secondary()).child(crate::markdown::render(&format!("{id}-t"), &bilingual::restored(text, &section.body, block, labels), None, None)).into_any_element()),
                             other => standing(format!("{id}-w"), other),
                         };
-                        rows.push(self.facing_revealed(&section.id, b, pair(side, half, true, self.render_manuscript_picture(format!("{id}-p"), &shown, half, window), right)));
+                        let drawn = self.seek_hold(Holder::Words(section.id.clone(), picture.line.clone()), self.render_manuscript_picture(format!("{id}-p"), &shown, half, window));
+                        rows.push(self.facing_revealed(&section.id, b, pair(side, half, true, drawn, right)));
                     }
                     Kind::Words | Kind::Kept => {
                         let right = match (block.kind, &beside) {
