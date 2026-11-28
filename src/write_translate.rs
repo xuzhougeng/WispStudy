@@ -19,6 +19,8 @@ use crate::manuscripts::READ_SIZE;
 use crate::theme::{self, Theme, text_px};
 use crate::translate::{Translated, TranslationRun};
 use crate::ui;
+// The page's measures are 译文对照's: the room between the halves, the page's sides (`write_facing::measures`).
+use crate::write_facing::{GUTTER, PAD};
 use gpui::{prelude::FluentBuilder, *};
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap};
@@ -34,11 +36,6 @@ use wisp_core::structure::SECTIONS;
 use wisp_core::glossary;
 use wisp_core::versions;
 use wisp_core::translation::{Batch, Job};
-
-/// The page's measures, as 译文对照 has them: the room between the halves, the narrowest half, the page's sides.
-const GUTTER: f32 = 48.;
-const HALF_MIN: f32 = 300.;
-const PAD: f32 = 28.;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Do {
@@ -97,9 +94,9 @@ impl Version {
         follow::state(self.kept_at(u))
     }
 
-    /// How many units are 未译 and 原文已改.
-    fn left(&self) -> (usize, usize) {
-        let states: Vec<State> = (0..self.units.len()).map(|u| self.state(u)).collect();
+    /// How many units of the sections on show (`within`: a unit's section, "" for the title) are 未译 and 原文已改.
+    fn left(&self, within: impl Fn(&str) -> bool) -> (usize, usize) {
+        let states: Vec<State> = (0..self.units.len()).filter(|u| within(&self.units[*u].section)).map(|u| self.state(u)).collect();
         (states.iter().filter(|s| **s == State::Untranslated).count(), states.iter().filter(|s| **s == State::Changed).count())
     }
 
@@ -548,9 +545,9 @@ impl Workspace {
             self.settings.write_facing_language = code.clone();
             self.save_settings(cx);
         }
+        // Over what was on show: the section being written, or the whole manuscript.
         if let Some(lib) = self.lib.as_mut() {
-            lib.writing.facing = true;
-            lib.writing.reading = true;
+            lib.writing.face();
             lib.writing.translate.editing = None;
         }
         if had { return }
@@ -726,17 +723,20 @@ impl Workspace {
 
     // ---- menus
 
-    /// 译文对照's languages, each marked when the manuscript keeps a version in it (保留成译稿 is a button in its head).
+    /// 译文对照's languages, each marked when the manuscript keeps a version in it (保留成译稿 is a button in its head),
+    /// then where the translation stands.
     pub(crate) fn translate_facing_menu(&self) -> (Vec<MenuItem>, Vec<usize>) {
         let mut items = self.facing_language_menu();
         let versions = self.lib.as_ref().and_then(|lib| lib.writing.current().and_then(|m| lib.writing.translate.versions.get(&m.id))).cloned().unwrap_or_default();
         for item in &mut items {
             if let Cmd::WriteFacingLanguage(code) = &item.cmd && versions.contains(code) { item.note = Some(t("译稿").into()) }
         }
-        (items, vec![])
+        let breaks = vec![items.len()];
+        items.extend(self.facing_arrangement(false));
+        (items, breaks)
     }
 
-    /// The versions of the manuscript to work on, and the languages to make one in.
+    /// The versions of the manuscript to work on, the languages to make one in, and where the version stands.
     pub(crate) fn translate_language_menu(&self) -> (Vec<MenuItem>, Vec<usize>) {
         let Some(lib) = self.lib.as_ref() else { return (vec![], vec![]) };
         let Some(manuscript) = lib.writing.current() else { return (vec![], vec![]) };
@@ -747,6 +747,9 @@ impl Workspace {
         for (code, name) in LANGUAGES.iter().filter(|(code, _)| *code != manuscript.language && !versions.iter().any(|v| v == code)) {
             items.push(MenuItem { label: tf!("新建{}译稿", "New {} version", t(name)).into(), checked: false, note: None, cmd: Cmd::Translate(Do::Language(code.to_string())) });
         }
+        let mut breaks = breaks;
+        breaks.push(items.len());
+        items.extend(self.facing_arrangement(lib.writing.translate.alone));
         (items, breaks)
     }
 
@@ -792,27 +795,26 @@ impl Workspace {
     /// What the version on show has to say in the line under the page.
     pub(crate) fn translate_status(&self) -> Option<String> {
         let (id, language) = self.translate_shown()?;
-        let version = self.lib.as_ref()?.writing.translate.kept.get(&(id, language.clone()))?;
+        let writing = &self.lib.as_ref()?.writing;
+        let version = writing.translate.kept.get(&(id, language.clone()))?;
         let name = label(&LANGUAGES, &language);
-        let (untranslated, changed) = version.left();
+        let (untranslated, changed) = version.left(|section| writing.facing_holds(section));
         Some(if untranslated + changed == 0 { tf!("{name}译稿跟着主稿 · 点一段译文直接改，改过的不会被重译 · 点一节的名称回去写", "The {name} version follows the primary · Click a paragraph's translation to edit it; what you changed is never translated over · Click a section name to write it") } else { tf!("{name}译稿跟着主稿 · 点一段译文直接改 · 标出的段落要你看一下", "The {name} version follows the primary · Click a paragraph's translation to edit it · The marked paragraphs want a look") })
     }
 
     /// The manuscript at the left as the preview draws it, the version at the right, block beside block at the
-    /// same height, each block edited in place; under it in a column too narrow for two halves. `width` is the room.
+    /// same height, each block edited in place; under it in a column too narrow for two halves, or where the person
+    /// has it so (逐段交替). Over a section, that section and its subsections only. `width` is the room.
     pub(crate) fn render_translating(&self, width: f32, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let lib = self.lib.as_ref().unwrap();
         let Some((id, code)) = self.translate_shown() else { return div().into_any_element() };
         let Some(manuscript) = lib.writing.current() else { return div().into_any_element() };
+        let (within, whole_shown) = (lib.writing.facing_sections(), !lib.writing.facing_section());
         let translate = &lib.writing.translate;
         let Some(version) = translate.kept.get(&(id.clone(), code.clone())) else { return div().into_any_element() };
         let rules = self.translate_rules(&id, &code);
         let alone = translate.alone;
-        let (measure, room) = (f32::from(theme::manuscript_width()), (width - 2. * PAD).max(1.));
-        let both = room.min(2. * measure + GUTTER);
-        let side = !alone && both >= 2. * HALF_MIN + GUTTER;
-        let half = if side { (both - GUTTER) / 2. } else { room.min(measure) };
-        let whole = if side { both } else { half };
+        let (side, half, whole) = crate::write_facing::measures(width, !alone && !self.settings.write_facing_interleaved);
         let editing = translate.editing.as_ref().filter(|editing| editing.manuscript == id && editing.language == code).map(|editing| editing.unit);
         translate.tops.borrow_mut().clear();
         let at: HashMap<(&str, Part, usize), usize> = version.units.iter().enumerate().map(|(u, unit)| ((unit.section.as_str(), unit.part, unit.block), u)).collect();
@@ -838,7 +840,8 @@ impl Workspace {
             let state = follow::state(kept);
             let key = format!("wt-{}-{}", u, hashed(&unit.sent));
             if editing == Some(u) {
-                let field = div().relative().w(px(half)).ml(px(-9.)).px(px(8.)).py(px(2.)).rounded(px(6.)).border_1().border_color(Theme::accent().opacity(0.55)).bg(Theme::bg_body()).text_size(text_px(size.map_or(READ_SIZE, |s| s.0))).line_height(size.map_or(theme::body_line(26.), |s| text_px(s.1))).child(translate.editor.clone())
+                // In the colour of text even under its paragraph, where what is read beside is quieter: it is being written.
+                let field = div().relative().w(px(half)).ml(px(-9.)).px(px(8.)).py(px(2.)).rounded(px(6.)).border_1().border_color(Theme::accent().opacity(0.55)).bg(Theme::bg_body()).text_color(Theme::text()).text_size(text_px(size.map_or(READ_SIZE, |s| s.0))).line_height(size.map_or(theme::body_line(26.), |s| text_px(s.1))).child(translate.editor.clone())
                     // A field a model can fill: a bare sparkle at its side asks the models compared for their versions.
                     .child(div().absolute().top(px(4.)).right(px(-26.)).child(ui::icon_action(SharedString::from(format!("{key}-compare")), "sparkle", Theme::text_tertiary(), t("让对照的几个模型各译一版，挑一版用（设置 › AI 里选对照的模型；只有一个时，给三种译法）")).on_click(self.on(Cmd::Translate(Do::Compare(u)), cx))));
                 let compared = translate.compare.as_ref().filter(|compared| compared.unit == u && compared.sent == unit.sent).map(|compared| self.render_translate_compared(compared, &key, half, cx));
@@ -881,12 +884,12 @@ impl Workspace {
             column.into_any_element()
         };
 
-        let title = at.get(&("", Part::Title, 0)).map(|&u| {
+        let title = at.get(&("", Part::Title, 0)).filter(|_| whole_shown).map(|&u| {
             let drawn = |text: &str| named(24., 32., ui::one_line(&plainly(text))).into_any_element();
             pair(Some(named(24., 32., crate::i18n::manuscript_title(manuscript).to_string()).into_any_element()), right(u, Some((24., 32.)), &drawn, cx), false, editing == Some(u))
         });
         let mut sections: Vec<AnyElement> = vec![];
-        for (n, section) in manuscript.sections.iter().enumerate() {
+        for (n, section) in manuscript.sections.iter().enumerate().filter(|(n, _)| within.contains(n)) {
             let labels = lib.citing.read.whole.get(n).map(Vec::as_slice).unwrap_or(&[]);
             let read = |within: std::ops::Range<usize>| wisp_core::cite::read_as(&section.body, labels, within);
             let heading = div()
@@ -920,25 +923,26 @@ impl Workspace {
                         let shown = manuscript::PictureLine { caption: caption.unwrap_or_else(|| picture.caption.clone()), ..picture.clone() };
                         let drawn = |text: &str| div().w_full().text_size(text_px(13.)).text_color(Theme::text_secondary()).child(crate::markdown::render(&format!("{id}-t"), &restored(text), None, None)).into_any_element();
                         let beside = match unit { Some(u) => right(u, Some((13., 20.)), &drawn, cx), None => div().into_any_element() };
-                        rows.push(pair(Some(self.render_manuscript_picture(format!("{id}-p"), &shown, half, window)), beside, true, unit.is_some() && editing == unit));
+                        rows.push(self.facing_revealed(&section.id, b, pair(Some(self.render_manuscript_picture(format!("{id}-p"), &shown, half, window)), beside, true, unit.is_some() && editing == unit)));
                     }
                     Kind::Kept => {
                         // Code and rules read the same in any language: beside themselves, and not said twice in one column.
                         let same = page(format!("{id}-t"), &section.body[block.range.clone()]);
                         let original = self.render_read_piece(section, n, b, block.range.clone(), &manuscript::section_markdown(&read(block.range.clone()), 1), true, window, cx);
-                        if alone { rows.push(pair(None, same, false, false)) } else if side { rows.push(pair(Some(original), same, false, false)) } else { rows.push(pair(Some(original), div().into_any_element(), false, false)) }
+                        let row = if alone { pair(None, same, false, false) } else if side { pair(Some(original), same, false, false) } else { pair(Some(original), div().into_any_element(), false, false) };
+                        rows.push(self.facing_revealed(&section.id, b, row));
                     }
                     Kind::Words => {
                         let drawn = |text: &str| page(format!("{id}-t"), &restored(text));
                         let beside = match unit { Some(u) => right(u, None, &drawn, cx), None => div().into_any_element() };
                         let original = (!alone).then(|| self.render_read_piece(section, n, b, block.range.clone(), &manuscript::section_markdown(&read(block.range.clone()), 1), true, window, cx));
-                        rows.push(pair(original, beside, false, unit.is_some() && editing == unit));
+                        rows.push(self.facing_revealed(&section.id, b, pair(original, beside, false, unit.is_some() && editing == unit)));
                     }
                 }
             }
             sections.push(div().flex().flex_col().flex_none().gap(theme::paragraph_gap(10.)).text_size(text_px(READ_SIZE)).children(rows).into_any_element());
         }
-        let references = if alone { None } else { self.render_references_read(cx).map(|list| pair(Some(list), div().into_any_element(), false, false)) };
+        let references = if alone || !whole_shown { None } else { self.render_references_read(cx).map(|list| pair(Some(list), div().into_any_element(), false, false)) };
 
         let divider = || div().absolute().top_0().bottom_0().left(px(half + GUTTER / 2.)).w(px(1.)).bg(Theme::line());
         let small = |text: &str| div().flex_none().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(text.to_string());
@@ -1027,7 +1031,7 @@ impl Workspace {
         let translate = &lib.writing.translate;
         let small = |text: String| div().flex_none().text_size(text_px(11.)).text_color(Theme::text_tertiary()).child(text);
         let language = ui::ghost_button("write-translate-language", None, None).flex_none().h(text_px(22.)).px(px(6.)).gap(px(4.)).text_size(text_px(12.)).child(label(&LANGUAGES, code).to_string()).child(ui::icon("chevron-down", 11., Theme::text_tertiary())).on_click(self.on_menu(MenuKind::TranslateLanguage, cx));
-        let (untranslated, changed) = version.left();
+        let (untranslated, changed) = version.left(|section| lib.writing.facing_holds(section));
         let run = translate.run.as_ref().filter(|run| run.manuscript == lib.writing.manuscript && run.language == code && run.run.batch.running());
         let mut status = div().flex().flex_1().min_w_0().items_center().justify_end().gap(px(6.));
         if let Some(run) = run {
